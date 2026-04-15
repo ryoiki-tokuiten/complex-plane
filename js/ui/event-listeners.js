@@ -262,10 +262,6 @@ function parseInteger(value) {
     return parseInt(value, 10);
 }
 
-function call(fn, ...args) {
-    return typeof fn === 'function' ? fn(...args) : undefined;
-}
-
 function $(id) {
     return document.getElementById(id);
 }
@@ -433,9 +429,7 @@ function flushPalettePanelRefresh() {
     if (!pendingPalettePanelRefresh) return;
 
     pendingPalettePanelRefresh = false;
-    if (typeof updateDomainPaletteCirclePanel === 'function') {
-        updateDomainPaletteCirclePanel();
-    }
+    updateDomainPaletteCirclePanel();
 }
 
 function scheduleRedraw(markDomainDirty = false, refreshPalettePanel = false) {
@@ -490,7 +484,31 @@ function disableOutputChaining() {
     state.chainingEnabled = false;
     checked('enableChainingCb', false);
     display(controls.chainingControlsContainer, false);
-    call(updateChainingColumns, 1);
+    updateChainingColumns(1);
+}
+
+function restoreRealPlotsLayout() {
+    const dynamicParams = $('dynamic_plotting_params');
+    const algParams = $('algebraic_chaining_params');
+    const chainParams = $('chaining_params');
+    if (dynamicParams && algParams && chainParams) {
+        dynamicParams.parentNode.insertBefore(chainParams, dynamicParams);
+        dynamicParams.parentNode.insertBefore(algParams, dynamicParams);
+    }
+
+    hidden(controls.zPlaneColumn, false);
+    hidden(controls.wPlaneColumn, false);
+}
+
+function refreshPlanesAfterLayoutChange() {
+    const refresh = () => {
+        setupVisualParameters(false, false);
+        requestUiRedraw();
+    };
+    requestAnimationFrame(() => {
+        refresh();
+        setTimeout(refresh, 360);
+    });
 }
 
 function disableRealPlots() {
@@ -500,25 +518,8 @@ function disableRealPlots() {
     hidden(controls.realPlotsControlsContainer, true);
     hidden(controls.realPlotsColumn, true);
     disposeRealPlotsRenderer();
-
-    const dynamicParams = document.getElementById('dynamic_plotting_params');
-    const algParams = document.getElementById('algebraic_chaining_params');
-    const chainParams = document.getElementById('chaining_params');
-    if (dynamicParams && algParams && chainParams) {
-        dynamicParams.parentNode.insertBefore(chainParams, dynamicParams);
-        dynamicParams.parentNode.insertBefore(algParams, dynamicParams);
-    }
-
-    if (controls.zPlaneColumn) controls.zPlaneColumn.classList.remove('hidden');
-    if (controls.wPlaneColumn) controls.wPlaneColumn.classList.remove('hidden');
-    const refreshPlanes = () => {
-        setupVisualParameters(false, false);
-        requestUiRedraw();
-    };
-    requestAnimationFrame(() => {
-        refreshPlanes();
-        setTimeout(refreshPlanes, 360);
-    });
+    restoreRealPlotsLayout();
+    refreshPlanesAfterLayoutChange();
 }
 
 function disableGraphView() {
@@ -541,8 +542,8 @@ function syncChainingControlsFromState() {
     if (controls.chainModeSelector) controls.chainModeSelector.value = state.chainingMode;
     if (controls.chainCountSlider) controls.chainCountSlider.value = state.chainCount;
     if (controls.chainCountValueDisplay) controls.chainCountValueDisplay.textContent = state.chainCount;
-    call(updateChainingColumns, state.chainingEnabled ? state.chainCount : 1);
-    call(updateChainingTitles);
+    updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
+    updateChainingTitles();
 }
 
 function syncAlgebraicControlsFromState() {
@@ -555,7 +556,7 @@ function syncDomainControlsFromState() {
     hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
     hidden(controls.domainColoringKey, !state.domainColoringEnabled);
     syncOrbitColoringModeControl();
-    call(updateDomainColoringKey);
+    updateDomainColoringKey();
 }
 
 function syncInputShapeControlFromState() {
@@ -564,7 +565,7 @@ function syncInputShapeControlFromState() {
 
 function activateFractalPreset(key) {
     const leavingTransform = state.fourierModeEnabled || state.laplaceModeEnabled;
-    if (state.laplaceModeEnabled) call(stopLaplaceAnimation);
+    if (state.laplaceModeEnabled) stopLaplaceAnimation();
 
     const preset = applyFractalPreset(state, key);
     if (!preset) return false;
@@ -693,8 +694,8 @@ function activateFunctionMode(key) {
     const enteringTransform = enteringFourier || enteringLaplace;
     const leavingTransform = (state.fourierModeEnabled || state.laplaceModeEnabled) && !enteringTransform;
 
-    if (state.laplaceModeEnabled && !enteringLaplace) call(stopLaplaceAnimation);
-    if (enteringTransform && state.currentInputShape === 'video') call(pauseUploadedVideoPlayback);
+    if (state.laplaceModeEnabled && !enteringLaplace) stopLaplaceAnimation();
+    if (enteringTransform && state.currentInputShape === 'video') pauseUploadedVideoPlayback();
 
     if (enteringTransform) snapshotNormalViewports();
 
@@ -707,12 +708,12 @@ function activateFunctionMode(key) {
     state.fourierModeEnabled = enteringFourier;
     state.laplaceModeEnabled = enteringLaplace;
 
-    if (enteringTransform && state.navigationModeEnabled) call(setNavigationModeEnabled, false);
-    if (enteringFourier) call(updateFourierTransform);
+    if (enteringTransform && state.navigationModeEnabled) setNavigationModeEnabled(false);
+    if (enteringFourier) updateFourierTransform();
 
     if (enteringLaplace) {
-        call(updateLaplaceTransform);
-        call(showFullLaplaceSpiral);
+        updateLaplaceTransform();
+        showFullLaplaceSpiral();
     }
 
     if (enteringTransform) fitTransformViewports();
@@ -762,14 +763,14 @@ function initializeScalarBindings() {
     BASIC_CHECKBOX_BINDINGS.forEach(({ controlKey, stateKey }) => readCheckboxState(controlKey, stateKey));
     BASIC_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => readSelectorState(controlKey, stateKey));
     initializeMobiusState();
-    call(initializeNavigationStateFromControls);
+    initializeNavigationStateFromControls();
 }
 
 export function initializeStateFromControls() {
     initializeScalarBindings();
     updateModePanels();
     setActiveFunctionButton(state.currentFunction);
-    call(syncVideoPlaybackUI);
+    syncVideoPlaybackUI();
 }
 
 function bindAnimatedSlider(slider, updateState, playButton, speedSelector) {
@@ -865,17 +866,17 @@ function bindDomainColoringControls() {
                 checked('enableRiemannTransformationCb', false);
                 hidden(controls.threeSphereOptionsDiv, true);
                 hidden(controls.riemannSphereOptionsDiv, true);
-                call(syncRiemannTransformationUI);
-                call(updateChainingTitles);
+                syncRiemannTransformationUI();
+                updateChainingTitles();
             }
             if (state.riemannTransformationEnabled) {
                 state.riemannTransformationEnabled = false;
                 checked('enableRiemannTransformationCb', false);
-                call(syncRiemannTransformationUI);
+                syncRiemannTransformationUI();
             }
             if (state.currentInputShape !== 'empty_grid') {
                 if (state.currentInputShape === 'video' && state.videoIsPlaying) {
-                    call(pauseUploadedVideoPlayback);
+                    pauseUploadedVideoPlayback();
                 }
                 state.currentInputShape = 'empty_grid';
                 if (controls.inputShapeSelector) controls.inputShapeSelector.value = 'empty_grid';
@@ -891,7 +892,7 @@ function bindDomainColoringControls() {
     bindElementListener(controls.orbitColoringModeSelect, 'change', event => {
         setOrbitColoringMode(event.target.value);
         state.currentFunctionPreset = null;
-        call(updateDomainColoringKey);
+        updateDomainColoringKey();
         requestDomainRedraw(true);
     });
 
@@ -918,8 +919,8 @@ function bindDerivativeControls() {
     bindElementListener(controls.enableDerivativeCb, 'change', event => {
         state.mapPresentation = event.target.checked ? 'derivative' : 'function';
         context.domainColoringDirty = true;
-        call(syncRiemannTransformationUI);
-        call(updateChainingTitles);
+        syncRiemannTransformationUI();
+        updateChainingTitles();
         requestUiRedraw();
     });
 }
@@ -955,7 +956,7 @@ function bindConformalGridControls() {
     bindCheckbox('enableConformalGridCb', 'conformalGridEnabled', () => {
         if (state.conformalGridEnabled) {
             if (state.currentInputShape === 'video' && state.videoIsPlaying) {
-                call(pauseUploadedVideoPlayback);
+                pauseUploadedVideoPlayback();
             }
             state.currentInputShape = 'empty_grid';
             if (controls.inputShapeSelector) controls.inputShapeSelector.value = 'empty_grid';
@@ -1005,7 +1006,7 @@ function syncGridFoldDensity(useFoldDefault = false) {
 
 function enableFoldSurface3d() {
     disableRiemannSurface();
-    if (state.navigationModeEnabled) call(setNavigationModeEnabled, false);
+    if (state.navigationModeEnabled) setNavigationModeEnabled(false);
     Object.assign(state, {
         riemannSphereViewEnabled: false,
         riemannTransformationEnabled: false,
@@ -1020,8 +1021,8 @@ function enableFoldSurface3d() {
     ].forEach(key => checked(key, false));
     hidden(controls.riemannSphereOptionsDiv, true);
     hidden(controls.threeSphereOptionsDiv, true);
-    call(syncRiemannTransformationUI);
-    call(updateChainingTitles);
+    syncRiemannTransformationUI();
+    updateChainingTitles();
 }
 
 function bindFoldSurfaceControl(controlKey) {
@@ -1051,8 +1052,8 @@ function bindViewControls() {
                 checked('enableRiemannTransformationCb', false);
             }
         }
-        call(syncRiemannTransformationUI);
-        call(updateChainingTitles);
+        syncRiemannTransformationUI();
+        updateChainingTitles();
         requestDomainRedraw(true);
     });
 
@@ -1093,8 +1094,8 @@ function bindViewControls() {
             hidden(controls.threeSphereOptionsDiv, true);
         }
         hidden(controls.riemannSphereOptionsDiv, !state.riemannSphereViewEnabled);
-        call(syncRiemannTransformationUI);
-        call(updateChainingTitles);
+        syncRiemannTransformationUI();
+        updateChainingTitles();
         requestDomainRedraw(true);
     });
 
@@ -1104,11 +1105,11 @@ function bindViewControls() {
             if (state.riemannTransformationEnabled) {
                 state.riemannTransformationEnabled = false;
                 checked('enableRiemannTransformationCb', false);
-                call(syncRiemannTransformationUI);
+                syncRiemannTransformationUI();
             }
         }
         hidden(controls.threeSphereOptionsDiv, !state.threeSphereEnabled);
-        call(updateChainingTitles);
+        updateChainingTitles();
         requestUiRedraw();
     });
 
@@ -1139,8 +1140,8 @@ function bindViewControls() {
                 hidden(controls.threeSphereOptionsDiv, true);
             }
         }
-        call(syncRiemannTransformationUI);
-        call(updateChainingTitles);
+        syncRiemannTransformationUI();
+        updateChainingTitles();
         requestDomainRedraw(true);
     });
 
@@ -1150,12 +1151,12 @@ function bindViewControls() {
             disableRealPlots();
             Object.assign(state, { riemannSphereViewEnabled: false, riemannTransformationEnabled: false, splitViewEnabled: false, threeSphereEnabled: false });
             ['enableRiemannSphereCb', 'enableRiemannTransformationCb', 'enableSplitViewCb', 'enableThreeSphereCb'].forEach(key => checked(key, false));
-            if (state.navigationModeEnabled) call(setNavigationModeEnabled, false);
+            if (state.navigationModeEnabled) setNavigationModeEnabled(false);
         }
 
         hidden(controls.riemannSurfaceOptionsDiv, !state.riemannSurfaceEnabled);
         hidden(controls.riemannSphereOptionsDiv, true);
-        call(updateChainingTitles);
+        updateChainingTitles();
         requestDomainRedraw(true);
     });
 
@@ -1164,7 +1165,7 @@ function bindViewControls() {
         bindElementListener(transSliderZ, 'input', event => {
             state.riemannTransformationPlayingZ = false;
             state.riemannTransformationProgressZ = parseFloat(event.target.value);
-            call(syncRiemannTransformationPlayPauseButton);
+            syncRiemannTransformationPlayPauseButton();
             requestDomainRedraw(true);
         });
     }
@@ -1181,7 +1182,7 @@ function bindViewControls() {
         bindElementListener(transSliderW, 'input', event => {
             state.riemannTransformationPlayingW = false;
             state.riemannTransformationProgressW = parseFloat(event.target.value);
-            call(syncRiemannTransformationPlayPauseButton);
+            syncRiemannTransformationPlayPauseButton();
             requestDomainRedraw(true);
         });
     }
@@ -1205,14 +1206,13 @@ function bindViewControls() {
 
 function bindNavigationControls() {
     bindControlListener('enableNavigationModeCb', 'change', (_event, checkbox) => {
-        if (typeof setNavigationModeEnabled === 'function') setNavigationModeEnabled(checkbox.checked);
-        else state.navigationModeEnabled = checkbox.checked;
+        setNavigationModeEnabled(checkbox.checked);
         if (state.navigationModeEnabled) disableFoldSurface3d();
         requestDomainRedraw(true);
     });
 
     bindSlider('navigationSizeSlider', 'navigationSize', parseFloat, () => {
-        const shifted = typeof followNavigationViewports === 'function' ? followNavigationViewports() : false;
+        const shifted = followNavigationViewports();
         requestDomainRedraw(Boolean(shifted && state.domainColoringEnabled));
     });
     bindSlider('navigationOpacitySlider', 'navigationOpacity', parseFloat, () => requestDomainRedraw(false));
@@ -1224,12 +1224,12 @@ function bindNavigationControls() {
         requestDomainRedraw(false);
     });
 
-    bindControlListener('navigationResetBtn', 'click', () => call(resetNavigationVehicle));
-    bindElementListener(document, 'keydown', event => call(setNavigationKey, event, true));
-    bindElementListener(document, 'keyup', event => call(setNavigationKey, event, false));
+    bindControlListener('navigationResetBtn', 'click', () => resetNavigationVehicle());
+    bindElementListener(document, 'keydown', event => setNavigationKey(event, true));
+    bindElementListener(document, 'keyup', event => setNavigationKey(event, false));
     bindElementListener(window, 'blur', () => {
         runtime.navigation.keys = {};
-        call(stopNavigationLoop);
+        stopNavigationLoop();
     });
 }
 
@@ -1263,7 +1263,7 @@ function bindTaylorControls() {
 
     bindCheckbox('enableTaylorSeriesCustomCenterCb', 'taylorSeriesCustomCenterEnabled', () => {
         hidden(controls.taylorSeriesCustomCenterInputsDiv, !state.taylorSeriesCustomCenterEnabled);
-        call(syncTaylorSeriesCenterStatus);
+        syncTaylorSeriesCenterStatus();
         requestUiRedraw();
     });
 
@@ -1364,7 +1364,7 @@ function bindLaplaceControls() {
         ['laplaceResetBtn', resetLaplaceAnimation],
         ['laplaceShowFullBtn', showFullLaplaceSpiral]
     ].forEach(([controlKey, fn]) => bindControlListener(controlKey, 'click', () => {
-        call(fn);
+        fn();
         frame(syncLaplacePlayPauseButton);
     }));
 
@@ -1750,6 +1750,31 @@ function restoreFullscreenOrigin(element, fallback = null, restoreSize = false) 
     fullscreenOrigins.delete(element);
 }
 
+function toggleFullscreenPanel({ container, column, stateKey, closeButton, onResize }) {
+    const shell = controls.fullscreenContainer;
+    if (!container || !shell) return;
+
+    state[stateKey] = !state[stateKey];
+
+    if (state[stateKey]) {
+        rememberFullscreenOrigin(container);
+        setStyles(shell, fullscreenStyles('#000'));
+        attachCloseButton(shell, () => closeButton.click());
+        setStyles(container, { width: '100%', height: '100%' });
+        shell.appendChild(container);
+        document.body.appendChild(shell);
+        shell.classList.remove('hidden');
+        if (column) column.classList.add('hidden-visually');
+    } else {
+        restoreFullscreenOrigin(container);
+        setStyles(container, { width: '100%', height: '100%' });
+        resetFullscreenShell(shell);
+        if (column) column.classList.remove('hidden-visually');
+    }
+
+    laterFrame(onResize, state[stateKey] ? 150 : 100);
+}
+
 function bindFullscreenControls() {
     bindControlListener('toggleFullscreenZBtn', 'click', () => handleFullScreenToggle('z'));
     bindControlListener('toggleFullscreenWBtn', 'click', () => handleFullScreenToggle('w', 0));
@@ -1780,31 +1805,14 @@ function bindFullscreenControls() {
 }
 
 function toggleLaplace3DFullscreen() {
-    const container3d = controls.laplace3DContainer;
-    const column3d = controls.laplace3DColumn;
-    const shell = controls.fullscreenContainer;
-
-    if (!container3d || !shell) return;
-
-    state.isLaplace3DFullScreen = !state.isLaplace3DFullScreen;
-
-    if (state.isLaplace3DFullScreen) {
-        rememberFullscreenOrigin(container3d);
-        setStyles(shell, fullscreenStyles('#000'));
-        attachCloseButton(shell, () => controls.toggleFullscreenLaplace3DBtn.click());
-        setStyles(container3d, { width: '100%', height: '100%' });
-        shell.appendChild(container3d);
-        document.body.appendChild(shell);
-        shell.classList.remove('hidden');
-        if (column3d) column3d.classList.add('hidden-visually');
-    } else {
-        restoreFullscreenOrigin(container3d);
-        setStyles(container3d, { width: '100%', height: '100%' });
-        resetFullscreenShell(shell);
-        if (column3d) column3d.classList.remove('hidden-visually');
-    }
-
-    laterFrame(() => resizeLaplace3DSurface(container3d), state.isLaplace3DFullScreen ? 150 : 100);
+    const container = controls.laplace3DContainer;
+    toggleFullscreenPanel({
+        container,
+        column: controls.laplace3DColumn,
+        stateKey: 'isLaplace3DFullScreen',
+        closeButton: controls.toggleFullscreenLaplace3DBtn,
+        onResize: () => resizeLaplace3DSurface(container)
+    });
 }
 
 function syncTopControlsCollapseState() {
@@ -1898,9 +1906,9 @@ export function setupEventListeners() {
 function bindChainingControls() {
     bindSelector('inputShapeSelector', 'currentInputShape', (_event, value) => {
         if (value !== 'video' && state.videoIsPlaying) {
-            call(pauseUploadedVideoPlayback);
+            pauseUploadedVideoPlayback();
         } else if (value === 'video' && runtime.media.video && state.videoIsPlaying) {
-            call(startVideoProcessingLoop);
+            startVideoProcessingLoop();
         }
         syncGridFoldDensity(state.foldSurface3dEnabled && isGridInputShape(value));
         requestDomainRedraw(true);
@@ -1911,7 +1919,7 @@ function bindChainingControls() {
     });
 
     bindElementListener(controls.chainCountSlider, 'change', () => {
-        call(updateChainingColumns, state.chainingEnabled ? state.chainCount : 1);
+        updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
         requestUiRedraw();
     });
 
@@ -1920,7 +1928,7 @@ function bindChainingControls() {
         state.currentFunctionPreset = null;
         display(controls.chainingControlsContainer, state.chainingEnabled);
         syncOrbitColoringModeControl();
-        call(updateChainingColumns, state.chainingEnabled ? state.chainCount : 1);
+        updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
         syncParameterControlsPanelVisibility();
         requestUiRedraw();
     });
@@ -1929,7 +1937,7 @@ function bindChainingControls() {
         state.chainingMode = event.target.value === 'zero_seed' ? 'zero_seed' : 'recursion';
         state.currentFunctionPreset = null;
         syncOrbitColoringModeControl();
-        call(updateChainingTitles);
+        updateChainingTitles();
         requestUiRedraw();
     });
 
@@ -2145,6 +2153,46 @@ function bindAlgebraicChainingControls() {
     });
 }
 
+function drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner) {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const borderColor = rootStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)';
+    const textColor = rootStyle.getPropertyValue('--text-color') || '#FAFAFA';
+
+    ctx.save();
+
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+
+    ctx.beginPath();
+    ctx.moveTo(cx - rOuter, cy);
+    ctx.lineTo(cx + rOuter, cy);
+    ctx.moveTo(cx, cy - rOuter);
+    ctx.lineTo(cx, cy + rOuter);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rOuter, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, 2 * Math.PI);
+    ctx.stroke();
+
+    ctx.fillStyle = textColor;
+    ctx.font = '500 13px Outfit, Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('0', cx + rOuter + 16, cy);
+    ctx.fillText('π/2', cx, cy - rOuter - 16);
+    ctx.fillText('π', cx - rOuter - 16, cy);
+    ctx.fillText('3π/2', cx, cy + rOuter + 16);
+
+    ctx.restore();
+}
+
 export function drawDomainPaletteCircle(canvas, paletteId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -2206,54 +2254,7 @@ export function drawDomainPaletteCircle(canvas, paletteId) {
 
     ctx.putImageData(imgData, 0, 0);
 
-    // Draw grid/lines and labels
-    ctx.save();
-
-    // Dashed crosshairs
-    const rootStyle = getComputedStyle(document.documentElement);
-    const borderColor = rootStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)';
-    const textColor = rootStyle.getPropertyValue('--text-color') || '#FAFAFA';
-
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    ctx.beginPath();
-    // Horizontal line
-    ctx.moveTo(cx - rOuter, cy);
-    ctx.lineTo(cx + rOuter, cy);
-    // Vertical line
-    ctx.moveTo(cx, cy - rOuter);
-    ctx.lineTo(cx, cy + rOuter);
-    ctx.stroke();
-
-    // Solid borders for ring
-    ctx.setLineDash([]);
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter, 0, 2 * Math.PI);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, rInner, 0, 2 * Math.PI);
-    ctx.stroke();
-
-    // Labels: 0, π/2, π, 3π/2
-    ctx.fillStyle = textColor;
-    ctx.font = '500 13px Outfit, Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // 0 (on the right)
-    ctx.fillText('0', cx + rOuter + 16, cy);
-    // π/2 (on the top)
-    ctx.fillText('π/2', cx, cy - rOuter - 16);
-    // π (on the left)
-    ctx.fillText('π', cx - rOuter - 16, cy);
-    // 3π/2 (on the bottom)
-    ctx.fillText('3π/2', cx, cy + rOuter + 16);
-
-    ctx.restore();
+    drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner);
 }
 
 export function drawAmplitudeStrip(canvas, paletteId) {
@@ -2323,24 +2324,12 @@ export function updateDomainPaletteCirclePanel() {
 }
 
 function bindDomainPaletteCirclePanelListeners() {
-    const viewBtn = $('view_palette_circle_btn');
-    const closeBtn = $('close_domain_palette_circle_btn');
-    const panel = $('domain_palette_circle_panel');
-
-    if (viewBtn) {
-        bindElementListener(viewBtn, 'click', () => {
-            if (panel) {
-                panel.classList.remove('hidden');
-                updateDomainPaletteCirclePanel();
-            }
-        });
-    }
-
-    if (closeBtn) {
-        bindElementListener(closeBtn, 'click', () => {
-            if (panel) panel.classList.add('hidden');
-        });
-    }
+    bindPalettePanel(
+        'view_palette_circle_btn',
+        'close_domain_palette_circle_btn',
+        'domain_palette_circle_panel',
+        updateDomainPaletteCirclePanel
+    );
 }
 
 export function drawRealPlotsPaletteCircle(canvas, paletteId) {
@@ -2380,45 +2369,7 @@ export function drawRealPlotsPaletteCircle(canvas, paletteId) {
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // Draw grid/lines and labels exactly like domain coloring
-    ctx.save();
-
-    const rootStyle = getComputedStyle(document.documentElement);
-    const borderColor = rootStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)';
-    const textColor = rootStyle.getPropertyValue('--text-color') || '#FAFAFA';
-
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    ctx.beginPath();
-    ctx.moveTo(cx - rOuter, cy);
-    ctx.lineTo(cx + rOuter, cy);
-    ctx.moveTo(cx, cy - rOuter);
-    ctx.lineTo(cx, cy + rOuter);
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter, 0, 2 * Math.PI);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, rInner, 0, 2 * Math.PI);
-    ctx.stroke();
-
-    ctx.fillStyle = textColor;
-    ctx.font = '500 13px Outfit, Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    ctx.fillText('0', cx + rOuter + 16, cy);
-    ctx.fillText('π/2', cx, cy - rOuter - 16);
-    ctx.fillText('π', cx - rOuter - 16, cy);
-    ctx.fillText('3π/2', cx, cy + rOuter + 16);
-
-    ctx.restore();
+    drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner);
 }
 
 export function drawRealPlotsAmplitudeStrip(canvas, paletteId) {
@@ -2456,32 +2407,28 @@ export function updateRealPlotsPaletteCirclePanel() {
 }
 
 function bindRealPlotsPaletteCirclePanelListeners() {
-    const viewBtn = $('view_real_plots_palette_circle_btn');
-    const closeBtn = $('close_real_plots_palette_circle_btn');
-    const panel = $('real_plots_palette_circle_panel');
+    bindPalettePanel(
+        'view_real_plots_palette_circle_btn',
+        'close_real_plots_palette_circle_btn',
+        'real_plots_palette_circle_panel',
+        updateRealPlotsPaletteCirclePanel
+    );
+}
 
-    if (viewBtn) {
-        bindElementListener(viewBtn, 'click', () => {
-            if (panel) {
-                panel.classList.remove('hidden');
-                updateRealPlotsPaletteCirclePanel();
-            }
-        });
-    }
-
-    if (closeBtn) {
-        bindElementListener(closeBtn, 'click', () => {
-            if (panel) panel.classList.add('hidden');
-        });
-    }
+function bindPalettePanel(viewButtonId, closeButtonId, panelId, updatePanel) {
+    const panel = $(panelId);
+    bindElementListener($(viewButtonId), 'click', () => {
+        if (!panel) return;
+        panel.classList.remove('hidden');
+        updatePanel();
+    });
+    bindElementListener($(closeButtonId), 'click', () => hidden(panel, true));
 }
 
 function bindGraphControls() {
     checked('enableGraphTraceCb', state.graphTraceEnabled);
 
     bindCheckbox('enableGraphViewCb', 'graphViewEnabled', (_event, enabled) => {
-        state.graphViewEnabled = enabled;
-
         if (enabled) {
             disableRealPlots();
             state.graphSelectedShape = '';
@@ -2497,34 +2444,16 @@ function bindGraphControls() {
 }
 
 function toggleGraphFullscreen() {
-    const container = controls.graphContainer;
-    const column = controls.graphColumn;
-    const shell = controls.fullscreenContainer;
-
-    if (!container || !shell) return;
-
-    state.isGraphFullScreen = !state.isGraphFullScreen;
-
-    if (state.isGraphFullScreen) {
-        rememberFullscreenOrigin(container);
-        setStyles(shell, fullscreenStyles('#000'));
-        attachCloseButton(shell, () => controls.toggleFullscreenGraphBtn.click());
-        setStyles(container, { width: '100%', height: '100%' });
-        shell.appendChild(container);
-        document.body.appendChild(shell);
-        shell.classList.remove('hidden');
-        if (column) column.classList.add('hidden-visually');
-    } else {
-        restoreFullscreenOrigin(container);
-        setStyles(container, { width: '100%', height: '100%' });
-        resetFullscreenShell(shell);
-        if (column) column.classList.remove('hidden-visually');
-    }
-
-    laterFrame(() => {
-        resizeTransformationGraphRenderer();
-        requestUiRedraw();
-    }, state.isGraphFullScreen ? 150 : 100);
+    toggleFullscreenPanel({
+        container: controls.graphContainer,
+        column: controls.graphColumn,
+        stateKey: 'isGraphFullScreen',
+        closeButton: controls.toggleFullscreenGraphBtn,
+        onResize: () => {
+            resizeTransformationGraphRenderer();
+            requestUiRedraw();
+        }
+    });
 }
 
 function bindRealPlotsExpressionControls({ preset, input, expressionKey, customKey }) {
@@ -2573,8 +2502,7 @@ function bindRealPlotsExpressionControls({ preset, input, expressionKey, customK
 }
 
 function bindRealPlotsControls() {
-    bindCheckbox('enableRealPlotsCb', 'realPlotsEnabled', (event, val) => {
-        state.realPlotsEnabled = val;
+    bindCheckbox('enableRealPlotsCb', 'realPlotsEnabled', (_event, val) => {
         hidden(controls.realPlotsControlsContainer, !val);
         hidden(controls.realPlotsColumn, !val);
 
@@ -2582,37 +2510,20 @@ function bindRealPlotsControls() {
             disableGraphView();
             disableRiemannSurface();
             const rpContainer = controls.realPlotsControlsContainer;
-            const algParams = document.getElementById('algebraic_chaining_params');
-            const chainParams = document.getElementById('chaining_params');
+            const algParams = $('algebraic_chaining_params');
+            const chainParams = $('chaining_params');
             if (rpContainer && algParams && chainParams) {
                 rpContainer.appendChild(algParams);
                 rpContainer.appendChild(chainParams);
             }
 
-            if (controls.zPlaneColumn) controls.zPlaneColumn.classList.add('hidden');
-            if (controls.wPlaneColumn) controls.wPlaneColumn.classList.add('hidden');
+            hidden(controls.zPlaneColumn, true);
+            hidden(controls.wPlaneColumn, true);
         } else {
-            const dynamicParams = document.getElementById('dynamic_plotting_params');
-            const algParams = document.getElementById('algebraic_chaining_params');
-            const chainParams = document.getElementById('chaining_params');
-            if (dynamicParams && algParams && chainParams) {
-                dynamicParams.parentNode.insertBefore(chainParams, dynamicParams);
-                dynamicParams.parentNode.insertBefore(algParams, dynamicParams);
-            }
-
-            if (controls.zPlaneColumn) controls.zPlaneColumn.classList.remove('hidden');
-            if (controls.wPlaneColumn) controls.wPlaneColumn.classList.remove('hidden');
+            restoreRealPlotsLayout();
             disposeRealPlotsRenderer();
         }
-
-        const refreshPlanes = () => {
-            setupVisualParameters(false, false);
-            requestUiRedraw();
-        };
-        requestAnimationFrame(() => {
-            refreshPlanes();
-            setTimeout(refreshPlanes, 360);
-        });
+        refreshPlanesAfterLayoutChange();
     });
 
     bindRealPlotsExpressionControls({
@@ -2628,15 +2539,8 @@ function bindRealPlotsControls() {
         customKey: 'realPlotsImagIsCustom'
     });
 
-    bindSelector('realPlotsOutputComponent', 'realPlotsOutputComponent', (event, val) => {
-        state.realPlotsOutputComponent = val;
-        requestUiRedraw();
-    });
-
-    bindSelector('realPlotsColorMode', 'realPlotsColorMode', (event, val) => {
-        state.realPlotsColorMode = val;
-        requestUiRedraw();
-    });
+    bindSelector('realPlotsOutputComponent', 'realPlotsOutputComponent', requestUiRedraw);
+    bindSelector('realPlotsColorMode', 'realPlotsColorMode', requestUiRedraw);
 
     bindSlider('realPlotsHeightScaleSlider', 'realPlotsHeightScale', parseFloat, (val) => {
         if (controls.realPlotsHeightScaleValueDisplay) {
@@ -2651,99 +2555,40 @@ function bindRealPlotsControls() {
 }
 
 function toggleRealPlotsFullscreen() {
-    const container = controls.realPlotsContainer;
-    const column = controls.realPlotsColumn;
-    const shell = controls.fullscreenContainer;
-
-    if (!container || !shell) return;
-
-    state.isRealPlotsFullScreen = !state.isRealPlotsFullScreen;
-
-    if (state.isRealPlotsFullScreen) {
-        rememberFullscreenOrigin(container);
-        setStyles(shell, fullscreenStyles('#000'));
-        attachCloseButton(shell, () => controls.toggleFullscreenRealPlotsBtn.click());
-        setStyles(container, { width: '100%', height: '100%' });
-        shell.appendChild(container);
-        document.body.appendChild(shell);
-        shell.classList.remove('hidden');
-        if (column) column.classList.add('hidden-visually');
-    } else {
-        restoreFullscreenOrigin(container);
-        setStyles(container, { width: '100%', height: '100%' });
-        resetFullscreenShell(shell);
-        if (column) column.classList.remove('hidden-visually');
-    }
-
-        laterFrame(() => {
-        setupVisualParameters(false, false);
-        requestUiRedraw();
-    }, state.isRealPlotsFullScreen ? 150 : 100);
+    toggleFullscreenPanel({
+        container: controls.realPlotsContainer,
+        column: controls.realPlotsColumn,
+        stateKey: 'isRealPlotsFullScreen',
+        closeButton: controls.toggleFullscreenRealPlotsBtn,
+        onResize: () => {
+            setupVisualParameters(false, false);
+            requestUiRedraw();
+        }
+    });
 }
 
 function toggleContour2DFullscreen() {
-    const container = controls.contour2DCanvas;
-    const column = controls.contour2DColumn;
-    const shell = controls.fullscreenContainer;
-
-    if (!container || !shell) return;
-
-    state.isContour2DFullScreen = !state.isContour2DFullScreen;
-
-    if (state.isContour2DFullScreen) {
-        rememberFullscreenOrigin(container);
-        setStyles(shell, fullscreenStyles('#000'));
-        attachCloseButton(shell, () => controls.toggleFullscreenContour2DBtn.click());
-        setStyles(container, { width: '100%', height: '100%' });
-        shell.appendChild(container);
-        document.body.appendChild(shell);
-        shell.classList.remove('hidden');
-        if (column) column.classList.add('hidden-visually');
-    } else {
-        restoreFullscreenOrigin(container);
-        setStyles(container, { width: '100%', height: '100%' });
-        resetFullscreenShell(shell);
-        if (column) column.classList.remove('hidden-visually');
-    }
-
-    laterFrame(() => {
-        setupVisualParameters(false, false);
-        requestUiRedraw();
-    }, state.isContour2DFullScreen ? 150 : 100);
+    toggleFullscreenPanel({
+        container: controls.contour2DCanvas,
+        column: controls.contour2DColumn,
+        stateKey: 'isContour2DFullScreen',
+        closeButton: controls.toggleFullscreenContour2DBtn,
+        onResize: () => {
+            setupVisualParameters(false, false);
+            requestUiRedraw();
+        }
+    });
 }
 
 function bindContourControls() {
-    bindCheckbox('riemannSurfaceContoursCb', 'contoursEnabled', (event, val) => {
-        state.contoursEnabled = val;
-        requestUiRedraw();
-    });
-    bindSlider('riemannSurfaceContourIntervalSlider', 'contourInterval', parseFloat, (val) => {
-        state.contourInterval = val;
-        requestUiRedraw();
-    });
-    bindSlider('riemannSurfaceContourThicknessSlider', 'contourThickness', parseFloat, (val) => {
-        state.contourThickness = val;
-        requestUiRedraw();
-    });
-    bindCheckbox('realPlotsContoursCb', 'contoursEnabled', (event, val) => {
-        state.contoursEnabled = val;
-        requestUiRedraw();
-    });
-    bindSlider('realPlotsContourIntervalSlider', 'contourInterval', parseFloat, (val) => {
-        state.contourInterval = val;
-        requestUiRedraw();
-    });
-    bindSlider('realPlotsContourThicknessSlider', 'contourThickness', parseFloat, (val) => {
-        state.contourThickness = val;
-        requestUiRedraw();
-    });
-    bindControlListener('riemannSurfaceShow2DContourBtn', 'click', () => {
-        state.show2DContourPlot = !state.show2DContourPlot;
-        requestUiRedraw();
-    });
-    bindControlListener('realPlotsShow2DContourBtn', 'click', () => {
-        state.show2DContourPlot = !state.show2DContourPlot;
-        requestUiRedraw();
+    ['riemannSurface', 'realPlots'].forEach(prefix => {
+        bindCheckbox(`${prefix}ContoursCb`, 'contoursEnabled', requestUiRedraw);
+        bindSlider(`${prefix}ContourIntervalSlider`, 'contourInterval', parseFloat, requestUiRedraw);
+        bindSlider(`${prefix}ContourThicknessSlider`, 'contourThickness', parseFloat, requestUiRedraw);
+        bindControlListener(`${prefix}Show2DContourBtn`, 'click', () => {
+            state.show2DContourPlot = !state.show2DContourPlot;
+            requestUiRedraw();
+        });
     });
     bindControlListener('toggleFullscreenContour2DBtn', 'click', toggleContour2DFullscreen);
 }

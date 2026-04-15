@@ -4,6 +4,7 @@ import { state, zPlaneParams } from '../store/state.js';
 import { buildMappedTransformProfileKey, getChainedTransformFunction } from '../math-utils.js';
 import { compileExpression } from '../math/expression/evaluator.js';
 import { POLE_MAGNITUDE_THRESHOLD } from '../constants/numerical.js';
+import { disposeThreeObject } from './three-utils.js';
 
 const BACKGROUND = 0x070812;
 const CAMERA_HOME = Object.freeze({ x: 6.0, y: 5.0, z: 8.0 });
@@ -141,25 +142,6 @@ function makeAxisLabel(text, color) {
     }));
     sprite.scale.set(1.35, 0.5, 1);
     return sprite;
-}
-
-function disposeObject(object) {
-    if (!object) return;
-    const geometries = new Set();
-    const materials = new Set();
-    object.traverse(child => {
-        if (child.geometry) geometries.add(child.geometry);
-        if (Array.isArray(child.material)) {
-            child.material.forEach(material => materials.add(material));
-        } else if (child.material) {
-            materials.add(child.material);
-        }
-    });
-    geometries.forEach(geometry => geometry.dispose?.());
-    materials.forEach(material => {
-        material.map?.dispose?.();
-        material.dispose?.();
-    });
 }
 
 function canonicalExpression(expression) {
@@ -1395,7 +1377,7 @@ class RealPlots3DRenderer {
         this.resizeObserver?.disconnect();
         this.controls.dispose();
         this.surfaceStore?.dispose();
-        disposeObject(this.scene);
+        disposeThreeObject(this.scene);
         this.renderer.dispose();
         this.renderer.domElement.remove();
     }

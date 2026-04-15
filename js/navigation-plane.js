@@ -356,9 +356,7 @@ export function drawNavigationLayer(ctx, planeParams, planeKey, transformFunc = 
     if (!applyNavigationImageState(pos)) return;
 
     try {
-        if (typeof drawImageWithWebGL === 'function') {
-            drawImageWithWebGL(ctx, planeParams, false, 0);
-        }
+        drawImageWithWebGL(ctx, planeParams, false, 0);
     } finally {
         restoreNavigationImageState();
     }

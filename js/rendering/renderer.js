@@ -238,13 +238,12 @@ function drawPlaneLayer(ctx, planeParams, planeKey, drawCallback, mode = 'captur
 
     // Raster mode is always faster when drawn directly to the canvas 2D context,
     // avoiding texture uploads and copies.
-    if (mode === 'raster' || !state.webglLineRenderingEnabled) {
+    if (mode === 'raster') {
         drawCallback(ctx);
         return true;
     }
 
-    if (state.webglLineRenderingEnabled &&
-        drawWithWebGLCapture(ctx, planeParams, planeKey, drawCallback)) {
+    if (drawWithWebGLCapture(ctx, planeParams, planeKey, drawCallback)) {
         return true;
     }
 

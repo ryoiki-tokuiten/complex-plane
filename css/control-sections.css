@@ -101,30 +101,25 @@
 .control-section.laplace-animation .slider-value { color: rgba(255,200,150,1); }
 
 /* Common internal styles */
-.control-select.fourier-select {
-    margin-top: 3px;
-    background: rgba(20,25,35,0.8);
-    border: 1px solid rgba(100,150,255,0.3);
-    color: rgba(200,220,255,1);
-    padding: 5px 8px;
-    border-radius: 5px;
-    font-size: 11px;
-}
-.control-select.laplace-select {
-    margin-top: 3px;
-    background: rgba(20,25,35,0.8);
-    border: 1px solid rgba(255,100,150,0.3);
-    color: rgba(255,200,220,1);
-    padding: 5px 8px;
-    border-radius: 5px;
-    font-size: 11px;
-}
+.control-select.fourier-select,
+.control-select.laplace-select,
 .control-select.laplace-3d-select {
     margin-top: 3px;
     background: rgba(20,25,35,0.8);
-    border: 1px solid rgba(180,100,255,0.3);
-    color: rgba(220,200,255,1);
     padding: 5px 8px;
     border-radius: 5px;
     font-size: 11px;
+}
+
+.control-select.fourier-select {
+    border: 1px solid rgba(100,150,255,0.3);
+    color: rgba(200,220,255,1);
+}
+.control-select.laplace-select {
+    border: 1px solid rgba(255,100,150,0.3);
+    color: rgba(255,200,220,1);
+}
+.control-select.laplace-3d-select {
+    border: 1px solid rgba(180,100,255,0.3);
+    color: rgba(220,200,255,1);
 }

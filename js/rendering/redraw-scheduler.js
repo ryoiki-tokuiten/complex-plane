@@ -27,10 +27,6 @@ export function requestRedrawAll() {
             context.domainColoringDirty = context.domainColoringDirtyQueued;
             context.redrawRequest = null;
 
-            if (state.webglGpuStressMode && state.domainColoringEnabled) {
-                context.domainColoringDirty = true;
-            }
-
             if (context.redrawQueued || context.domainColoringDirty || state.particleAnimationEnabled) {
                 requestRedrawAll();
             }

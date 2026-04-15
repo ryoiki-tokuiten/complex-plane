@@ -250,13 +250,6 @@ function setValue(key, value) {
     }
 }
 
-function setStyleColor(key, color) {
-    const node = control(key);
-    if (node?.style && color) {
-        node.style.color = color;
-    }
-}
-
 function toFixedText(value, digits) {
     const number = typeof value === 'number' ? value : Number(value);
     return Number.isNaN(number) ? null : number.toFixed(digits);
@@ -335,15 +328,9 @@ function syncDisclosure(checkboxKey, contentKey, enabled) {
 }
 
 function syncDelegates() {
-    for (const delegate of [
-        syncLaplacePlayPauseButton,
-        syncVideoPlaybackUI,
-        syncNavigationControls
-    ]) {
-        if (typeof delegate === 'function') {
-            delegate();
-        }
-    }
+    syncLaplacePlayPauseButton();
+    syncVideoPlaybackUI();
+    syncNavigationControls();
 }
 
 export function syncParameterControlsPanelVisibility() {

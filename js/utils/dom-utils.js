@@ -39,12 +39,8 @@ export function setupDOMReferences() {
     wCtx.imageSmoothingEnabled = true;
     wCtx.imageSmoothingQuality = 'high';
 
-    if (typeof initializeWebGLLineSupport === 'function') {
-        initializeWebGLLineSupport();
-    }
-    if (typeof initializeWebGLDomainColoringSupport === 'function') {
-        initializeWebGLDomainColoringSupport();
-    }
+    initializeWebGLLineSupport();
+    initializeWebGLDomainColoringSupport();
 
     registerControls(document, controls);
     controls.cauchy_integral_results_info = controls.cauchyIntegralResultsInfo;
@@ -132,9 +128,7 @@ export function setupCanvasBaseParams(planeParams, canvasElement, sphereViewObj,
 }
 
 export function setupVisualParameters(updateZFromSlider = true, updateWFromSlider = true) {
-    if (typeof captureBeforeResize === 'function') {
-        captureBeforeResize();
-    }
+    captureBeforeResize();
     const zIsFullscreen = state.isZFullScreen;
     const wIsFullscreen = state.isWFullScreen;
 

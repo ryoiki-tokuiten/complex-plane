@@ -49,10 +49,10 @@ export function PaletteGuide({ type }) {
                     <div class="dynamic-intro-copy">{guide.intro}</div>
                 </div>
             </div>
-            <div class="color-wheel-canvas-container palette-guide-wheel">
+            <div class="palette-guide-wheel">
                 <canvas id={guide.canvasId} width="360" height="360" class="palette-guide-wheel-canvas" />
             </div>
-            <div class="amplitude-strip-container palette-guide-strip">
+            <div class="palette-guide-strip">
                 <div class="dynamic-intro-title palette-guide-strip-title">{guide.stripTitle}</div>
                 <div class="dynamic-intro-copy palette-guide-strip-copy">{guide.stripCopy}</div>
                 <div class="palette-guide-scale">

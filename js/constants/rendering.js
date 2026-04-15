@@ -7,7 +7,6 @@ export const ORIGIN_GLOW_DURATION_MS = 500;
 export const WEBGL_LINE_BATCH_LIMIT = 3500000;
 export const WEBGL_SUPERSAMPLE_FACTOR = 2.25;
 export const WEBGL_DOMAIN_COLOR_SUPERSAMPLE = 2.0;
-export const WEBGL_DOMAIN_COLOR_STRESS_SCALE = 1.0;
 
 export const ORBIT_COLORING_MODES = Object.freeze({
     value: 'value',

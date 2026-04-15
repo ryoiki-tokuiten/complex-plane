@@ -8,6 +8,7 @@ import {
     buildInputShapeGeometryConfig,
     generateInputShapePointSets
 } from './shape-generators.js';
+import { disposeThreeObject } from './three-utils.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -425,27 +426,6 @@ export function buildTransformationGraphData(planeParams = zPlaneParams) {
     return data;
 }
 
-function disposeObject(object) {
-    if (!object) return;
-
-    const geometries = new Set();
-    const materials = new Set();
-    object.traverse(child => {
-        if (child.geometry) geometries.add(child.geometry);
-        if (Array.isArray(child.material)) {
-            child.material.forEach(material => materials.add(material));
-        } else if (child.material) {
-            materials.add(child.material);
-        }
-    });
-
-    geometries.forEach(geometry => geometry.dispose?.());
-    materials.forEach(material => {
-        material.map?.dispose?.();
-        material.dispose?.();
-    });
-}
-
 function makeTube(points, {
     color,
     radius = CURVE_RADIUS,
@@ -706,7 +686,7 @@ class TransformationGraphRenderer {
     }
 
     clearContent() {
-        disposeObject(this.contentGroup);
+        disposeThreeObject(this.contentGroup);
         this.scene.remove(this.contentGroup);
         this.contentGroup = new THREE.Group();
         this.scene.add(this.contentGroup);
@@ -913,7 +893,7 @@ class TransformationGraphRenderer {
     dispose() {
         this.resizeObserver?.disconnect();
         this.controls?.dispose?.();
-        disposeObject(this.scene);
+        disposeThreeObject(this.scene);
         this.renderer.dispose();
         this.renderer.domElement.remove();
     }

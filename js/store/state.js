@@ -146,10 +146,6 @@ const rawState = {
     contoursEnabled: false,
     contourInterval: 0.5,
     contourThickness: 1.5,
-    webglLineRenderingEnabled: true,
-    webglDomainColoringEnabled: true,
-    webglGpuStressMode: false,
-
     fourierModeEnabled: false,
     fourierFunction: 'sine',
     fourierFrequency: 1.0,

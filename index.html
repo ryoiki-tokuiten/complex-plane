@@ -11,12 +11,11 @@
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 
-<body class="pb-5">
+<body>
     <div id="preloader">
         <div class="spinner"></div>
     </div>
     <div class="background-container">
-        <div class="background-gradient"></div>
         <div class="background-noise"></div>
     </div>
     <main>
@@ -185,7 +184,7 @@
                             <div
                                 class="winding-note">
                                 <div class="winding-note-copy">
-                                    Watch the <strong class="winding-note-emphasis">golden center of mass</strong>
+                                    Watch the <strong>golden center of mass</strong>
                                     jump when winding frequency matches signal frequency!
                                 </div>
                             </div>
@@ -319,9 +318,9 @@
                             </div>
 
                             <div class="control-group control-group-flush">
-                                <label for="laplace_show_roc_cb" class="control-label tooltip-label slider-label"
+                                <label for="laplace_show_roc_cb" class="slider-label"
                                     data-tooltip="Show/hide Region of Convergence boundary and shading on the s-plane">
-                                    <input type="checkbox" id="laplace_show_roc_cb" class="control-checkbox" checked>
+                                    <input type="checkbox" id="laplace_show_roc_cb" checked>
                                     <span class="custom-checkbox-visual"></span>
                                     Show ROC (Region of Convergence)
                                 </label>
@@ -358,9 +357,9 @@
 
                             <div class="control-group control-group-flush">
                                 <label for="laplace_show_poles_zeros_cb"
-                                    class="control-label tooltip-label slider-label"
+                                    class="slider-label"
                                     data-tooltip="Show/hide poles (×) and zeros (○) on the 3D surface and winding visualization">
-                                    <input type="checkbox" id="laplace_show_poles_zeros_cb" class="control-checkbox"
+                                    <input type="checkbox" id="laplace_show_poles_zeros_cb"
                                         checked>
                                     <span class="custom-checkbox-visual"></span>
                                     Show Poles & Zeros
@@ -402,9 +401,9 @@
 
                             <!-- Animation loop -->
                             <div class="control-group control-group-tight">
-                                <label for="laplace_animation_loop_cb" class="control-label tooltip-label slider-label"
+                                <label for="laplace_animation_loop_cb" class="slider-label"
                                     data-tooltip="Automatically restart the animation when it completes">
-                                    <input type="checkbox" id="laplace_animation_loop_cb" class="control-checkbox"
+                                    <input type="checkbox" id="laplace_animation_loop_cb"
                                         checked>
                                     <span class="custom-checkbox-visual"></span>
                                     Loop Animation
@@ -422,11 +421,11 @@
                     </div>
 
                     <!-- Real Plots Panel -->
-                    <div id="real_plots_params" class="control-group control-toggle-heading"
+                    <div class="control-group control-toggle-heading"
                        >
-                        <label for="enable_real_plots_cb" class="control-label tooltip-label slider-label"
+                        <label for="enable_real_plots_cb" class="slider-label"
                             data-tooltip="Render a real 3D surface plot using the active complex function pipeline with real inputs.">
-                            <input type="checkbox" id="enable_real_plots_cb" class="control-checkbox">
+                            <input type="checkbox" id="enable_real_plots_cb">
                             <span class="custom-checkbox-visual"></span>
                             Real Plots
                         </label>
@@ -527,13 +526,13 @@
                                         class="accent-value">1.00</output>
                                 </div>
                                 <input type="range" id="real_plots_height_scale_slider" min="0.15" max="10.0"
-                                    step="0.05" value="1.0" class="control-slider">
+                                    step="0.05" value="1.0">
                             </div>
 
                             <div class="control-group spaced-control">
-                                <label for="real_plots_contours_cb" class="control-label tooltip-label"
+                                <label for="real_plots_contours_cb"
                                     data-tooltip="Overlay level contour lines onto the 3D real surface plot">
-                                    <input type="checkbox" id="real_plots_contours_cb" class="control-checkbox">
+                                    <input type="checkbox" id="real_plots_contours_cb">
                                     <span class="custom-checkbox-visual"></span>
                                     Contour Lines
                                 </label>
@@ -545,7 +544,7 @@
                                         <output id="real_plots_contour_interval_value_display">0.50</output>
                                     </div>
                                     <input type="range" id="real_plots_contour_interval_slider" min="0.05" max="3.00"
-                                        step="0.05" value="0.50" class="control-slider">
+                                        step="0.05" value="0.50">
                                 </div>
                                 <div class="control-group contour-slider-field">
                                     <div class="contour-slider-label">
@@ -553,7 +552,7 @@
                                         <output id="real_plots_contour_thickness_value_display">1.5</output>
                                     </div>
                                     <input type="range" id="real_plots_contour_thickness_slider" min="0.5" max="5.0"
-                                        step="0.1" value="1.5" class="control-slider">
+                                        step="0.1" value="1.5">
                                 </div>
                                 <div class="contour-action-row">
                                     <button id="real_plots_show_2d_contour_btn" class="contour-2d-toggle-btn"
@@ -570,11 +569,11 @@
                     </div>
 
                     <!-- Derivative Panel -->
-                    <div id="derivative_params" class="control-group control-toggle-heading"
+                    <div class="control-group control-toggle-heading"
                        >
-                        <label for="enable_derivative_cb" class="control-label tooltip-label slider-label"
+                        <label for="enable_derivative_cb" class="slider-label"
                             data-tooltip="Show the numerical derivative of the active map in map visualizations">
-                            <input type="checkbox" id="enable_derivative_cb" class="control-checkbox">
+                            <input type="checkbox" id="enable_derivative_cb">
                             <span class="custom-checkbox-visual"></span>
                             Show Derivative
                         </label>
@@ -583,23 +582,23 @@
                     <!-- Output Chaining Panel -->
                     <div id="chaining_params" class="control-group control-toggle-heading"
                        >
-                        <label for="enable_chaining_cb" class="control-label tooltip-label slider-label"
+                        <label for="enable_chaining_cb" class="slider-label"
                             data-tooltip="Enable chained sequence of output transformations across multiple panels">
-                            <input type="checkbox" id="enable_chaining_cb" class="control-checkbox">
+                            <input type="checkbox" id="enable_chaining_cb">
                             <span class="custom-checkbox-visual"></span>
                             <span id="enable_chaining_text">Enable Output Chaining</span>
                         </label>
 
                         <div id="chaining_controls_container"
                             class="chaining-controls hidden">
-                            <label for="chain_mode_selector" class="chaining-label">Chain Mode:</label>
+                            <label for="chain_mode_selector">Chain Mode:</label>
                             <select id="chain_mode_selector" class="control-select chaining-mode-select"
                                 data-tooltip="Mathematical operation to chain across outputs">
                                 <option value="recursion">Recursion: f(w)</option>
                                 <option value="zero_seed">Zero Seed: f(w), z₀ = 0</option>
                             </select>
 
-                            <label for="chain_count_slider" class="chaining-label">
+                            <label for="chain_count_slider">
                                 Chain Depth:
                                 <output id="chain_count_value_display">1</output>
                             </label>
@@ -608,9 +607,9 @@
                                     step="1" value="1" data-tooltip="Number of repeated applications">
                             </div>
 
-                            <button id="grid_view_btn" class="sidebar-button chaining-grid-button"
+                            <button id="grid_view_btn" class="chaining-grid-button"
                                >
-                                <span class="icon">⊞</span> Grid View
+                                <span>⊞</span> Grid View
                             </button>
                         </div>
                     </div>
@@ -618,9 +617,9 @@
                     <!-- Algebraic Chaining Panel -->
                     <div id="algebraic_chaining_params" class="control-group control-toggle-heading"
                        >
-                        <label for="enable_algebraic_chaining_cb" class="control-label tooltip-label slider-label"
+                        <label for="enable_algebraic_chaining_cb" class="slider-label"
                             data-tooltip="Sum multiple complex functions together: a*f(z)*g(z) + b*h(z)...">
-                            <input type="checkbox" id="enable_algebraic_chaining_cb" class="control-checkbox">
+                            <input type="checkbox" id="enable_algebraic_chaining_cb">
                             <span class="custom-checkbox-visual"></span>
                             <span id="enable_algebraic_chaining_text">Enable Algebraic Chaining</span>
                         </label>
@@ -640,8 +639,8 @@
                                 <!-- Dynamically populated by JS -->
                             </div>
 
-                            <button id="add_algebraic_term_btn" class="sidebar-button">
-                                <span class="icon">＋</span> Add Summand Term
+                            <button id="add_algebraic_term_btn">
+                                <span>＋</span> Add Summand Term
                             </button>
                         </div>
                     </div>
@@ -649,9 +648,9 @@
                     <!-- Dynamic Plotting Panel -->
                     <div id="dynamic_plotting_params" class="control-group dynamic-plotting-panel control-toggle-heading"
                        >
-                        <label for="enable_dynamic_plotting_cb" class="control-label tooltip-label slider-label"
+                        <label for="enable_dynamic_plotting_cb" class="slider-label"
                             data-tooltip="Plot discrete integer and number-theory domains, or build finite complex sums and products">
-                            <input type="checkbox" id="enable_dynamic_plotting_cb" class="control-checkbox">
+                            <input type="checkbox" id="enable_dynamic_plotting_cb">
                             <span class="custom-checkbox-visual"></span>
                             Dynamic Plotting
                         </label>
@@ -681,13 +680,13 @@
                             </div>
 
                             <!-- Formula Summary Banner -->
-                            <div id="dynamic_formula_banner" class="dynamic-formula-banner">
+                            <div class="dynamic-formula-banner">
                                 <div class="dynamic-formula-banner-heading">
                                     <span class="dynamic-formula-banner-label">What you are building</span>
                                     <span id="dynamic_formula_mode_badge" class="dynamic-formula-mode-badge">Map</span>
                                 </div>
                                 <div id="dynamic_formula_banner_content" class="dynamic-formula-banner-content">
-                                    <span class="dynamic-formula-banner-empty">Select a preset or configure the pipeline
+                                    <span>Select a preset or configure the pipeline
                                         below</span>
                                 </div>
                                 <div id="dynamic_formula_explanation" class="dynamic-formula-explanation"></div>
@@ -838,7 +837,7 @@
                                         </div>
 
                                         <!-- Source preview -->
-                                        <div id="dynamic_source_preview" class="dynamic-source-preview">
+                                        <div class="dynamic-source-preview">
                                             <span class="dynamic-source-preview-label">First terms</span>
                                             <span id="dynamic_source_preview_values">1, 2, 3, 4, 5, …</span>
                                         </div>
@@ -847,7 +846,7 @@
                                 </div>
 
                                 <!-- STEP 2: INPUT MAPPING -->
-                                <div class="dynamic-step" id="dynamic_step_input_mapping">
+                                <div class="dynamic-step">
                                     <div class="dynamic-step-badge">2</div>
                                     <div class="dynamic-step-header">
                                         <div class="dynamic-step-title">Place it on the input plane</div>
@@ -1009,7 +1008,7 @@
                                 </div>
 
                                 <!-- STEP 4: OPERATION -->
-                                <div class="dynamic-step" id="dynamic_step_operation">
+                                <div class="dynamic-step">
                                     <div class="dynamic-step-badge">4</div>
                                     <div class="dynamic-step-header">
                                         <div class="dynamic-step-title">Combine the terms</div>
@@ -1106,7 +1105,7 @@
                             </div>
 
                             <!-- Accumulation Playback -->
-                            <div class="dynamic-options-card dynamic-playback-card">
+                            <div class="dynamic-options-card">
                                 <div class="dynamic-card-title">Accumulation Playback</div>
                                 <div class="dynamic-step-subtitle compact-step-copy">Watch terms accumulate
                                     one by one. The slider controls how many terms are visible.</div>
@@ -1139,9 +1138,9 @@
                     </div>
 
                     <div id="grid_surface_3d_control" class="control-group control-toggle-heading">
-                        <label for="grid_surface_3d_cb" class="control-label tooltip-label slider-label"
+                        <label for="grid_surface_3d_cb" class="slider-label"
                             data-tooltip="Show the transformed grid as an interactive 3D fold view, with overlapping output curves separated by their source real coordinate.">
-                            <input type="checkbox" id="grid_surface_3d_cb" class="control-checkbox">
+                            <input type="checkbox" id="grid_surface_3d_cb">
                             <span class="custom-checkbox-visual"></span>
                             Show folds in 3d
                         </label>
@@ -1163,9 +1162,9 @@
                     <!-- Complex Plane Navigation Panel -->
                     <div id="navigation_params" class="control-group control-toggle-heading"
                        >
-                        <label for="enable_navigation_mode_cb" class="control-label tooltip-label slider-label"
+                        <label for="enable_navigation_mode_cb" class="slider-label"
                             data-tooltip="Drive a vehicle through the z-plane and watch it map through the selected function">
-                            <input type="checkbox" id="enable_navigation_mode_cb" class="control-checkbox">
+                            <input type="checkbox" id="enable_navigation_mode_cb">
                             <span class="custom-checkbox-visual"></span>
                             Navigate through complex plane
                         </label>
@@ -1217,7 +1216,7 @@
                                 </div>
                             </div>
 
-                            <button id="navigation_reset_btn" class="sidebar-button navigation-reset-button"
+                            <button id="navigation_reset_btn" class="navigation-reset-button"
                                 type="button" data-tooltip="Return the vehicle to the origin">
                                 Reset vehicle
                             </button>
@@ -1370,9 +1369,9 @@
                             </div>
                         </div>
                         <div class="control-group control-group-flush">
-                            <label for="image_surface_3d_cb" class="control-label tooltip-label slider-label"
+                            <label for="image_surface_3d_cb" class="slider-label"
                                 data-tooltip="Show the transformed raster as an interactive 3D surface so overlapping folds remain separated by their source real coordinate.">
-                                <input type="checkbox" id="image_surface_3d_cb" class="control-checkbox">
+                                <input type="checkbox" id="image_surface_3d_cb">
                                 <span class="custom-checkbox-visual"></span>
                                 Interactive 3D Fold View
                             </label>
@@ -1444,9 +1443,9 @@
                             </div>
                         </div>
                         <div class="control-group control-group-flush">
-                            <label for="video_surface_3d_cb" class="control-label tooltip-label slider-label"
+                            <label for="video_surface_3d_cb" class="slider-label"
                                 data-tooltip="Show the transformed raster as an interactive 3D surface so overlapping folds remain separated by their source real coordinate.">
-                                <input type="checkbox" id="video_surface_3d_cb" class="control-checkbox">
+                                <input type="checkbox" id="video_surface_3d_cb">
                                 <span class="custom-checkbox-visual"></span>
                                 Interactive 3D Fold View
                             </label>
@@ -1658,7 +1657,7 @@
                                 <input type="range" id="fractionalPowerN_slider" name="fractionalPowerN_slider" min="-5"
                                     max="5" step="0.05" value="0.5" data-tooltip="Fractional power (n)">
                             </div>
-                            <div class="slider-controls">
+                            <div>
                                 <button id="play_fractionalPowerN_btn" data-tooltip="Animate n">Play</button>
                                 <select id="speed_fractionalPowerN_selector" class="animation-speed-selector"
                                     data-tooltip="Animation speed">
@@ -1688,10 +1687,10 @@
                             <button id="toggle_top_controls_btn" class="icon-button top-controls-toggle-btn"
                                 type="button" data-tooltip="Minimize top half panels"
                                 aria-label="Minimize top half panels">
-                                <span class="top-controls-toggle-icon top-controls-minimize-icon" aria-hidden="true">
+                                <span class="top-controls-minimize-icon" aria-hidden="true">
                                     <i data-lucide="minimize-2"></i>
                                 </span>
-                                <span class="top-controls-toggle-icon top-controls-maximize-icon" aria-hidden="true">
+                                <span class="top-controls-maximize-icon" aria-hidden="true">
                                     <i data-lucide="maximize-2"></i>
                                 </span>
                                 <span class="hidden-visually">Toggle top controls</span>
@@ -1751,8 +1750,8 @@
                             <span class="viz-feature-section-title">Analysis</span>
                         </div>
                         <div class="viz-toggle-grid">
-                            <label for="show_zeros_poles_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="show_zeros_poles_cb" class="control-checkbox"
+                            <label for="show_zeros_poles_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="show_zeros_poles_cb"
                                     data-tooltip="Show detected zeros (roots) and poles (singularities) of f(z)">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1760,8 +1759,8 @@
                                     <span class="viz-toggle-card-copy">Mark detected roots and singularities.</span>
                                 </span>
                             </label>
-                            <label for="show_critical_points_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="show_critical_points_cb" class="control-checkbox"
+                            <label for="show_critical_points_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="show_critical_points_cb"
                                     data-tooltip="Show detected critical points (where f'(z) = 0 or is undefined)">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1770,8 +1769,8 @@
                                 </span>
                             </label>
                             <label for="enable_radial_discrete_steps_cb"
-                                class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_radial_discrete_steps_cb" class="control-checkbox"
+                                class="viz-toggle-card">
+                                <input type="checkbox" id="enable_radial_discrete_steps_cb"
                                     data-tooltip="Toggle radial discrete steps visualization">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1781,8 +1780,8 @@
                                 </span>
                             </label>
                             <label for="enable_cauchy_integral_mode_cb"
-                                class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_cauchy_integral_mode_cb" class="control-checkbox"
+                                class="viz-toggle-card">
+                                <input type="checkbox" id="enable_cauchy_integral_mode_cb"
                                     data-tooltip="Enable Cauchy Integral mode: draw a contour on z-plane to visualize its image and related integral values on w-plane">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1791,8 +1790,8 @@
                                         readout.</span>
                                 </span>
                             </label>
-                            <label for="enable_taylor_series_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_taylor_series_cb" class="control-checkbox"
+                            <label for="enable_taylor_series_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="enable_taylor_series_cb"
                                     data-tooltip="Toggle the Taylor series approximation of f(z) in the w-plane. The default expansion center is z0 = 0, and the convergence disk is shown on the z-plane.">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1835,15 +1834,13 @@
                                 <div class="slider-container">
                                     <input type="range" id="taylor_series_order_slider"
                                         name="taylor_series_order_slider" min="1" max="8" step="1" value="3"
-                                        data-tooltip="Number of terms (0 to N) in the Taylor series approximation. Higher order is more accurate but computationally intensive."
-                                        class="taylor-series-slider">
+                                        data-tooltip="Number of terms (0 to N) in the Taylor series approximation. Higher order is more accurate but computationally intensive.">
                                 </div>
                             </div>
                             <div class="control-group taylor-series-card">
                                 <label for="enable_taylor_series_custom_center_cb"
-                                    class="control-label tooltip-label taylor-series-toggle-label">
+                                    class="taylor-series-toggle-label">
                                     <input type="checkbox" id="enable_taylor_series_custom_center_cb"
-                                        class="control-checkbox"
                                         data-tooltip="Pin a custom complex number as the center for the Taylor expansion. When disabled, the expansion stays centered at z0 = 0.">
                                     <span class="custom-checkbox-visual"></span>
                                     Use Custom Expansion Center
@@ -1861,8 +1858,8 @@
                             <span class="viz-feature-section-title">Surface & Projection</span>
                         </div>
                         <div class="viz-toggle-grid">
-                            <label for="enable_conformal_grid_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_conformal_grid_cb" class="control-checkbox"
+                            <label for="enable_conformal_grid_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="enable_conformal_grid_cb"
                                     data-tooltip="Show matching source circles in z and locally mapped circles in w; spokes reveal the derivative rotation">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1871,8 +1868,8 @@
                                         images.</span>
                                 </span>
                             </label>
-                            <label for="enable_domain_coloring_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_domain_coloring_cb" class="control-checkbox"
+                            <label for="enable_domain_coloring_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="enable_domain_coloring_cb"
                                     data-tooltip="Toggle domain coloring visualization (color indicates argument, lightness indicates magnitude)">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1881,8 +1878,8 @@
                                         magnitude.</span>
                                 </span>
                             </label>
-                            <label for="enable_riemann_sphere_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_riemann_sphere_cb" class="control-checkbox"
+                            <label for="enable_riemann_sphere_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="enable_riemann_sphere_cb"
                                     data-tooltip="Toggle Riemann Sphere projection options">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1890,8 +1887,8 @@
                                     <span class="viz-toggle-card-copy">Project the mapped output onto the sphere.</span>
                                 </span>
                             </label>
-                            <label for="enable_riemann_surface_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_riemann_surface_cb" class="control-checkbox"
+                            <label for="enable_riemann_surface_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="enable_riemann_surface_cb"
                                     data-tooltip="Render the branch-aware Riemann surface of the current function on the GPU">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1900,8 +1897,8 @@
                                         surface.</span>
                                 </span>
                             </label>
-                            <label for="enable_graph_view_cb" class="control-label tooltip-label viz-toggle-card">
-                                <input type="checkbox" id="enable_graph_view_cb" class="control-checkbox"
+                            <label for="enable_graph_view_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="enable_graph_view_cb"
                                     data-tooltip="Plot the selected input line as Re and Im output curves">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
@@ -1911,7 +1908,7 @@
                             </label>
                         </div>
                         <div id="riemann_surface_options_div"
-                            class="dependent-settings-block hidden control-group-indent">
+                            class="dependent-settings-block hidden">
                             <div class="viz-settings-grid">
                                 <div class="control-group">
                                     <label for="riemann_surface_component_selector">Surface Height</label>
@@ -1977,18 +1974,18 @@
                                     </div>
                                 </div>
                                 <div class="control-group">
-                                    <label for="riemann_surface_wireframe_cb" class="control-label tooltip-label">
+                                    <label for="riemann_surface_wireframe_cb">
                                         <input type="checkbox" id="riemann_surface_wireframe_cb"
-                                            class="control-checkbox" checked>
+                                            checked>
                                         <span class="custom-checkbox-visual"></span>
                                         Surface Grid
                                     </label>
                                 </div>
                                 <div class="control-group">
-                                    <label for="riemann_surface_contours_cb" class="control-label tooltip-label"
+                                    <label for="riemann_surface_contours_cb"
                                         data-tooltip="Overlay height level contour lines onto the surface">
                                         <input type="checkbox" id="riemann_surface_contours_cb"
-                                            class="control-checkbox">
+                                           >
                                         <span class="custom-checkbox-visual"></span>
                                         Contour Lines
                                     </label>
@@ -2003,7 +2000,7 @@
                                         </div>
                                         <div class="slider-container">
                                             <input type="range" id="riemann_surface_contour_interval_slider" min="0.05"
-                                                max="3.00" step="0.05" value="0.50" class="control-slider">
+                                                max="3.00" step="0.05" value="0.50">
                                         </div>
                                     </div>
                                     <div class="control-group contour-slider-field">
@@ -2014,7 +2011,7 @@
                                         </div>
                                         <div class="slider-container">
                                             <input type="range" id="riemann_surface_contour_thickness_slider" min="0.5"
-                                                max="5.0" step="0.1" value="1.5" class="control-slider">
+                                                max="5.0" step="0.1" value="1.5">
                                         </div>
                                     </div>
                                     <div class="contour-action-row">
@@ -2035,7 +2032,7 @@
                         <div id="domain_coloring_options_div" class="dependent-settings-block hidden">
                             <div class="viz-settings-grid">
                                 <div class="domain-palette-selector-container">
-                                    <div class="domain-palette-header-row domain-palette-header"
+                                    <div class="domain-palette-header"
                                        >
                                         <span class="domain-palette-selector-label domain-palette-label"
                                            >
@@ -2112,11 +2109,11 @@
                             </div>
                         </div>
                         <div id="riemann_sphere_options_div"
-                            class="dependent-settings-block hidden control-group-indent viz-stacked-options">
+                            class="dependent-settings-block hidden viz-stacked-options">
                             <div class="viz-toggle-grid viz-toggle-grid--trio viz-toggle-grid--compact">
                                 <label for="enable_three_sphere_cb"
-                                    class="control-label tooltip-label viz-toggle-card viz-toggle-card--compact">
-                                    <input type="checkbox" id="enable_three_sphere_cb" class="control-checkbox"
+                                    class="viz-toggle-card viz-toggle-card--compact">
+                                    <input type="checkbox" id="enable_three_sphere_cb"
                                         data-tooltip="Toggle interactive 3D Riemann Sphere rendering using Three.js for the w-plane">
                                     <span class="custom-checkbox-visual"></span>
                                     <span class="viz-toggle-card-content">
@@ -2126,8 +2123,8 @@
                                     </span>
                                 </label>
                                 <label for="enable_split_view_cb"
-                                    class="control-label tooltip-label viz-toggle-card viz-toggle-card--compact">
-                                    <input type="checkbox" id="enable_split_view_cb" class="control-checkbox"
+                                    class="viz-toggle-card viz-toggle-card--compact">
+                                    <input type="checkbox" id="enable_split_view_cb"
                                         data-tooltip="Show z-plane as planar and w-plane as Riemann Sphere side-by-side">
                                     <span class="custom-checkbox-visual"></span>
                                     <span class="viz-toggle-card-content">
@@ -2136,9 +2133,8 @@
                                     </span>
                                 </label>
                                 <label for="enable_riemann_transformation_cb"
-                                    class="control-label tooltip-label viz-toggle-card viz-toggle-card--compact">
+                                    class="viz-toggle-card viz-toggle-card--compact">
                                     <input type="checkbox" id="enable_riemann_transformation_cb"
-                                        class="control-checkbox"
                                         data-tooltip="Show animation of the planar grid wrapping into the Riemann Sphere">
                                     <span class="custom-checkbox-visual"></span>
                                     <span class="viz-toggle-card-content">
@@ -2148,7 +2144,7 @@
                                 </label>
                             </div>
                             <div id="three_sphere_options_div"
-                                class="dependent-settings-block hidden control-group-indent viz-subdetail-block">
+                                class="dependent-settings-block hidden viz-subdetail-block">
                                 <div class="viz-settings-grid">
                                     <div class="control-group">
                                         <label for="three_sphere_opacity_slider">
@@ -2184,9 +2180,9 @@
                             <span class="viz-feature-section-title">Vector Field</span>
                         </div>
                         <div id="vector_flow_options_content" class="vector-flow-workspace">
-                            <div class="viz-toggle-grid viz-toggle-grid--duo vector-flow-toggle-grid">
-                                <label for="enable_vector_field_cb" class="control-label tooltip-label viz-toggle-card">
-                                    <input type="checkbox" id="enable_vector_field_cb" class="control-checkbox"
+                            <div class="viz-toggle-grid vector-flow-toggle-grid">
+                                <label for="enable_vector_field_cb" class="viz-toggle-card">
+                                    <input type="checkbox" id="enable_vector_field_cb"
                                         data-tooltip="Overlay a vector field on the z-plane based on selected function">
                                     <span class="custom-checkbox-visual"></span>
                                     <span class="viz-toggle-card-content">
@@ -2196,8 +2192,8 @@
                                     </span>
                                 </label>
                                 <label for="enable_streamline_flow_cb"
-                                    class="control-label tooltip-label viz-toggle-card">
-                                    <input type="checkbox" id="enable_streamline_flow_cb" class="control-checkbox"
+                                    class="viz-toggle-card">
+                                    <input type="checkbox" id="enable_streamline_flow_cb"
                                         data-tooltip="Toggle streamline flow visualization for the vector field">
                                     <span class="custom-checkbox-visual"></span>
                                     <span class="viz-toggle-card-content">
@@ -2207,8 +2203,8 @@
                                     </span>
                                 </label>
                                 <label for="enable_particle_animation_cb"
-                                    class="control-label tooltip-label viz-toggle-card">
-                                    <input type="checkbox" id="enable_particle_animation_cb" class="control-checkbox">
+                                    class="viz-toggle-card">
+                                    <input type="checkbox" id="enable_particle_animation_cb">
                                     <span class="custom-checkbox-visual"></span>
                                     <span class="viz-toggle-card-content">
                                         <span class="viz-toggle-card-title">Particle Motion</span>
@@ -2325,14 +2321,14 @@
                                 <div class="vector-settings-header">
                                     <span class="vector-settings-title">Particle Settings</span>
                                 </div>
-                                <div class="particle-settings-grid">
+                                <div>
                                     <div class="control-group">
                                         <label for="particle_density_slider">
                                             Particle Density:
                                             <output id="particle_density_value_display">150</output>
                                         </label>
                                         <div class="slider-container">
-                                            <input type="range" id="particle_density_slider" class="control-slider"
+                                            <input type="range" id="particle_density_slider"
                                                 min="10" max="1000" step="10" value="150">
                                         </div>
                                     </div>
@@ -2342,7 +2338,7 @@
                                             <output id="particle_speed_value_display">0.04</output>
                                         </label>
                                         <div class="slider-container">
-                                            <input type="range" id="particle_speed_slider" class="control-slider"
+                                            <input type="range" id="particle_speed_slider"
                                                 min="0.005" max="0.2" step="0.005" value="0.04">
                                         </div>
                                     </div>
@@ -2352,7 +2348,7 @@
                                             <output id="particle_max_lifetime_value_display">300</output>
                                         </label>
                                         <div class="slider-container">
-                                            <input type="range" id="particle_max_lifetime_slider" class="control-slider"
+                                            <input type="range" id="particle_max_lifetime_slider"
                                                 min="50" max="1500" step="50" value="300">
                                         </div>
                                     </div>
@@ -2415,7 +2411,7 @@
                         <div id="z_plane_probe_info" class="probe-info-overlay hidden"></div>
 
                         <!-- Three.js Transformation Overlays -->
-                        <div id="z_plane_threejs_container" class="threejs-container hidden canvas-overlay"
+                        <div id="z_plane_threejs_container" class="hidden canvas-overlay"
                            >
                         </div>
 
@@ -2438,7 +2434,7 @@
                             </div>
                         </div>
 
-                        <div id="domain_coloring_key" class="domain-coloring-key hidden"></div>
+                        <div id="domain_coloring_key" class="hidden"></div>
                         <div id="navigation_keyhint_overlay" class="navigation-keyhint-overlay hidden">
                             <div class="navigation-keyhint-grid">
                                 <div class="keyhint-spacer"></div>
@@ -2489,7 +2485,7 @@
                     <div id="w_plane_canvas_wrapper"
                         class="canvas-layer-host">
                         <canvas id="w_plane_canvas"></canvas>
-                        <div id="w_plane_threejs_container" class="threejs-container hidden canvas-overlay"
+                        <div id="w_plane_threejs_container" class="hidden canvas-overlay"
                            >
                         </div>
                         <div id="w_plane_refining_indicator" class="refining-indicator hidden">
@@ -2523,11 +2519,11 @@
                 </div>
                 <div id="graph_column" class="hidden">
                     <div class="canvas-header-line">
-                        <h2 class="section-title"><span id="graph_title_label">Graph</span></h2>
+                        <h2 class="section-title"><span>Graph</span></h2>
                         <div class="canvas-header-controls">
-                            <label for="enable_graph_trace_cb" class="viz-toggle-card graph-trace-toggle tooltip-label"
+                            <label for="enable_graph_trace_cb" class="viz-toggle-card graph-trace-toggle"
                                 data-tooltip="Show the combined 3D Re/Im trace">
-                                <input type="checkbox" id="enable_graph_trace_cb" class="control-checkbox">
+                                <input type="checkbox" id="enable_graph_trace_cb">
                                 <span class="custom-checkbox-visual"></span>
                                 <span>Trace</span>
                             </label>
@@ -2590,7 +2586,7 @@
                 </div>
                 <div id="contour_2d_column" class="plane-column hidden">
                     <div class="canvas-header-line">
-                        <h2 class="section-title"><span id="contour_2d_title_label">2D Contour Plot</span></h2>
+                        <h2 class="section-title"><span>2D Contour Plot</span></h2>
                         <div class="canvas-header-controls">
                             <button id="toggle_fullscreen_contour_2d_btn" class="icon-button canvas-icon-button"
                                 type="button" data-tooltip="Toggle fullscreen view for 2D Contour Plot"

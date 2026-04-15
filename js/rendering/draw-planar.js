@@ -72,27 +72,15 @@ const LINEAR_SOURCE_POINT_SET_ROLES = new Set([
     'line-vertical'
 ]);
 
-
-const CANVAS_PATH_CACHE = new WeakMap();
-const TRANSFORMED_PATH_CACHE = new WeakMap();
-
-const PATH_CACHE_MIN_POINTS = 64;
-const PATH_CACHE_ASSOCIATIVITY = 4;
-const TRANSFORM_SAMPLE_PROBES = 9;
+const PATH2D_MIN_POINTS = 64;
 const STATIC_CURVE_TOLERANCE_PX_SQ = 0.22;
 const INTERACTION_CURVE_TOLERANCE_PX_SQ = 1.45;
 const STATIC_MAX_SEGMENT_PX_SQ = 24 * 24;
 const INTERACTION_MAX_SEGMENT_PX_SQ = 56 * 56;
 const MAX_TRANSFORM_SUBDIVISION_DEPTH = 9;
-const HASH_OFFSET_BASIS = 2166136261 >>> 0;
-const HASH_PRIME = 16777619;
-
-function getPathConstructor() {
-    return typeof Path2D === 'function' ? Path2D : null;
-}
 
 function getPathConstructorForContext(ctx) {
-    const PathCtor = getPathConstructor();
+    const PathCtor = typeof Path2D === 'function' ? Path2D : null;
     if (!PathCtor || !ctx || typeof ctx.stroke !== 'function') {
         return null;
     }
@@ -106,138 +94,6 @@ function getPathConstructorForContext(ctx) {
     }
 
     return null;
-}
-
-function mixHashInt(hash, value) {
-    return Math.imul((hash ^ value) >>> 0, HASH_PRIME) >>> 0;
-}
-
-function mixHashFloat(hash, value) {
-    if (!Number.isFinite(value)) {
-        return mixHashInt(hash, 0x7fc00000);
-    }
-
-    // Quantization avoids pathological cache misses from sub-ulp transform noise while
-    // preserving far more precision than a canvas pixel needs for a path identity guard.
-    return mixHashInt(hash, Math.trunc(value * 1048576) | 0);
-}
-
-function getPointAtOrNull(points, index) {
-    return index >= 0 && index < points.length ? points[index] : null;
-}
-
-function pointSentinelsMatch(entry, points) {
-    const length = points.length;
-    const first = getPointAtOrNull(points, 0);
-    const middle = getPointAtOrNull(points, length >> 1);
-    const last = getPointAtOrNull(points, length - 1);
-
-    return entry.length === length &&
-        entry.first === first &&
-        entry.middle === middle &&
-        entry.last === last &&
-        entry.firstRe === (first && first.re) &&
-        entry.firstIm === (first && first.im) &&
-        entry.middleRe === (middle && middle.re) &&
-        entry.middleIm === (middle && middle.im) &&
-        entry.lastRe === (last && last.re) &&
-        entry.lastIm === (last && last.im);
-}
-
-function writePointSentinels(entry, points) {
-    const length = points.length;
-    const first = getPointAtOrNull(points, 0);
-    const middle = getPointAtOrNull(points, length >> 1);
-    const last = getPointAtOrNull(points, length - 1);
-
-    entry.length = length;
-    entry.first = first;
-    entry.middle = middle;
-    entry.last = last;
-    entry.firstRe = first && first.re;
-    entry.firstIm = first && first.im;
-    entry.middleRe = middle && middle.re;
-    entry.middleIm = middle && middle.im;
-    entry.lastRe = last && last.re;
-    entry.lastIm = last && last.im;
-}
-
-function planeCacheFieldsMatch(entry, planeParams) {
-    return entry.originX === planeParams.origin.x &&
-        entry.originY === planeParams.origin.y &&
-        entry.scaleX === planeParams.scale.x &&
-        entry.scaleY === planeParams.scale.y;
-}
-
-function writePlaneCacheFields(entry, planeParams) {
-    entry.originX = planeParams.origin.x;
-    entry.originY = planeParams.origin.y;
-    entry.scaleX = planeParams.scale.x;
-    entry.scaleY = planeParams.scale.y;
-}
-
-function findReusableCacheEntry(cacheRoot, predicate) {
-    let previous = null;
-    let entry = cacheRoot;
-    let depth = 0;
-
-    while (entry && depth < PATH_CACHE_ASSOCIATIVITY) {
-        if (predicate(entry)) {
-            if (previous) {
-                previous.next = entry.next;
-                entry.next = cacheRoot;
-            }
-            return entry;
-        }
-
-        previous = entry;
-        entry = entry.next;
-        depth++;
-    }
-
-    return null;
-}
-
-function pushPathCacheEntry(cacheMap, points, entry) {
-    const head = cacheMap.get(points) || null;
-    entry.next = head;
-
-    let cursor = entry;
-    for (let depth = 1; cursor && cursor.next && depth < PATH_CACHE_ASSOCIATIVITY; depth++) {
-        cursor = cursor.next;
-    }
-    if (cursor) {
-        cursor.next = null;
-    }
-
-    cacheMap.set(points, entry);
-}
-
-function getTransformScopedPathCache(points, mappedTransform) {
-    if (!mappedTransform || (typeof mappedTransform !== 'object' && typeof mappedTransform !== 'function')) {
-        return null;
-    }
-
-    let byTransform = TRANSFORMED_PATH_CACHE.get(points);
-    if (!byTransform) {
-        byTransform = new WeakMap();
-        TRANSFORMED_PATH_CACHE.set(points, byTransform);
-    }
-
-    return byTransform;
-}
-
-function pushTransformScopedPathCacheEntry(byTransform, mappedTransform, entry) {
-    const head = byTransform.get(mappedTransform) || null;
-    entry.next = head;
-
-    let cursor = entry;
-    for (let depth = 1; cursor && cursor.next && depth < PATH_CACHE_ASSOCIATIVITY; depth++) {
-        cursor = cursor.next;
-    }
-    if (cursor) cursor.next = null;
-
-    byTransform.set(mappedTransform, entry);
 }
 
 const DEFAULT_COLOR_RESOLVER = pointSet => pointSet.color;
@@ -283,9 +139,9 @@ function strokeOpenPath(ctx, pathOpen) {
 }
 
 function strokeComplexArrayOnPlane(ctx, planeParams, points) {
-    const cachedPath = getCachedComplexPath2D(ctx, planeParams, points);
-    if (cachedPath) {
-        ctx.stroke(cachedPath);
+    const path = buildComplexPath2D(ctx, planeParams, points);
+    if (path) {
+        ctx.stroke(path);
         return;
     }
 
@@ -297,45 +153,6 @@ function strokeComplexArrayOnPlane(ctx, planeParams, points) {
     for (let i = 0, length = points.length; i < length; i++) {
         const point = points[i];
 
-        if (!isRenderableComplexPoint(point)) {
-            pathOpen = strokeOpenPath(ctx, pathOpen);
-            continue;
-        }
-
-        if (fastMap) {
-            pathOpen = moveOrLineTo(
-                ctx,
-                pathOpen,
-                canvasXFast(point.re, planeParams),
-                canvasYFast(point.im, planeParams)
-            );
-            continue;
-        }
-
-        const canvasPoint = mapToCanvasCoords(point.re, point.im, planeParams);
-        if (isFiniteCanvasPoint(canvasPoint)) {
-            pathOpen = moveOrLineTo(ctx, pathOpen, canvasPoint.x, canvasPoint.y);
-        } else {
-            pathOpen = strokeOpenPath(ctx, pathOpen);
-        }
-    }
-
-    if (pathOpen) {
-        ctx.stroke();
-    }
-}
-
-function strokeComplexIterableOnPlane(ctx, planeParams, points) {
-    if (!points || typeof points[Symbol.iterator] !== 'function') {
-        return;
-    }
-
-    const fastMap = hasFastCanvasMapping(planeParams);
-    let pathOpen = false;
-
-    ctx.beginPath();
-
-    for (const point of points) {
         if (!isRenderableComplexPoint(point)) {
             pathOpen = strokeOpenPath(ctx, pathOpen);
             continue;
@@ -401,68 +218,12 @@ function buildPath2DFromComplexArray(PathCtor, planeParams, points) {
     return path;
 }
 
-
-function getCachedComplexPath2D(ctx, planeParams, points) {
+function buildComplexPath2D(ctx, planeParams, points) {
     const PathCtor = getPathConstructorForContext(ctx);
-    if (!PathCtor || !Array.isArray(points) || points.length < PATH_CACHE_MIN_POINTS || !hasFastCanvasMapping(planeParams)) {
+    if (!PathCtor || !Array.isArray(points) || points.length < PATH2D_MIN_POINTS || !hasFastCanvasMapping(planeParams)) {
         return null;
     }
-
-    const cacheRoot = CANVAS_PATH_CACHE.get(points);
-    const cachedEntry = cacheRoot && findReusableCacheEntry(cacheRoot, entry =>
-        entry.kind === 'complex' &&
-        planeCacheFieldsMatch(entry, planeParams) &&
-        pointSentinelsMatch(entry, points)
-    );
-
-    if (cachedEntry) {
-        if (cachedEntry !== cacheRoot) {
-            CANVAS_PATH_CACHE.set(points, cachedEntry);
-        }
-        return cachedEntry.path;
-    }
-
-    const path = buildPath2DFromComplexArray(PathCtor, planeParams, points);
-    const entry = { kind: 'complex', path, next: null };
-    writePlaneCacheFields(entry, planeParams);
-    writePointSentinels(entry, points);
-    pushPathCacheEntry(CANVAS_PATH_CACHE, points, entry);
-    return path;
-}
-
-function getTransformSampleHash(mappedTransform, points) {
-    const length = points.length;
-    if (length === 0) {
-        return HASH_OFFSET_BASIS;
-    }
-
-    const evalContext = { re: 0, im: 0 };
-    const sampleCount = Math.min(TRANSFORM_SAMPLE_PROBES, length);
-    let hash = HASH_OFFSET_BASIS;
-    hash = mixHashInt(hash, String(appState.currentFunction).length);
-
-    for (let probe = 0; probe < sampleCount; probe++) {
-        const index = sampleCount === 1
-            ? 0
-            : Math.floor((probe * (length - 1)) / (sampleCount - 1));
-        const point = points[index];
-
-        if (!isRenderableComplexPoint(point)) {
-            hash = mixHashInt(hash, 0x9e3779b9);
-            continue;
-        }
-
-        const mapped = evaluateProfilePoint(mappedTransform, point.re, point.im, evalContext);
-        if (!isRenderableComplexPoint(mapped)) {
-            hash = mixHashInt(hash, 0x85ebca6b);
-            continue;
-        }
-
-        hash = mixHashFloat(hash, mapped.re);
-        hash = mixHashFloat(hash, mapped.im);
-    }
-
-    return hash >>> 0;
+    return buildPath2DFromComplexArray(PathCtor, planeParams, points);
 }
 
 function getAdaptiveTransformRenderTuning() {
@@ -631,62 +392,6 @@ function buildPath2DFromTransformedPolyline(PathCtor, polyline) {
     }
 
     return path;
-}
-
-
-function transformedCacheEntryMatches(entry, planeParams, points, renderLimit, jumpThresholdSq, sampleHash, tuning) {
-    return entry.kind === 'transformed' &&
-        entry.renderLimit === renderLimit &&
-        entry.jumpThresholdSq === jumpThresholdSq &&
-        entry.sampleHash === sampleHash &&
-        entry.toleranceSq === tuning.toleranceSq &&
-        entry.maxSegmentSq === tuning.maxSegmentSq &&
-        entry.functionKey === appState.currentFunction &&
-        planeCacheFieldsMatch(entry, planeParams) &&
-        pointSentinelsMatch(entry, points);
-}
-
-function getCachedTransformedGeometryEntry(planeParams, mappedTransform, points, renderLimit, jumpThresholdSq) {
-    if (!Array.isArray(points) || !hasFastCanvasMapping(planeParams) || !mappedTransform) {
-        return null;
-    }
-
-    const tuning = getAdaptiveTransformRenderTuning();
-    const sampleHash = getTransformSampleHash(mappedTransform, points);
-    const byTransform = points.length >= PATH_CACHE_MIN_POINTS
-        ? getTransformScopedPathCache(points, mappedTransform)
-        : null;
-    const cacheRoot = byTransform && byTransform.get(mappedTransform);
-    const cachedEntry = cacheRoot && findReusableCacheEntry(cacheRoot, entry =>
-        transformedCacheEntryMatches(entry, planeParams, points, renderLimit, jumpThresholdSq, sampleHash, tuning)
-    );
-
-    if (cachedEntry) {
-        if (cachedEntry !== cacheRoot) {
-            byTransform.set(mappedTransform, cachedEntry);
-        }
-        return cachedEntry;
-    }
-
-    const geometry = buildAdaptiveTransformedPolyline(planeParams, mappedTransform, points, renderLimit, jumpThresholdSq, tuning);
-    const entry = {
-        kind: 'transformed',
-        geometry,
-        path: null,
-        next: null,
-        renderLimit,
-        jumpThresholdSq,
-        sampleHash,
-        toleranceSq: tuning.toleranceSq,
-        maxSegmentSq: tuning.maxSegmentSq,
-        functionKey: appState.currentFunction
-    };
-    writePlaneCacheFields(entry, planeParams);
-    writePointSentinels(entry, points);
-    if (byTransform) {
-        pushTransformScopedPathCacheEntry(byTransform, mappedTransform, entry);
-    }
-    return entry;
 }
 
 function hslToRgbCss(h, s, l) {
@@ -1140,12 +845,7 @@ export function isRenderableComplexPoint(point) {
 }
 
 export function drawComplexLineSetOnPlane(ctx, planeParams, points) {
-    if (Array.isArray(points)) {
-        strokeComplexArrayOnPlane(ctx, planeParams, points);
-        return;
-    }
-
-    strokeComplexIterableOnPlane(ctx, planeParams, points);
+    if (Array.isArray(points)) strokeComplexArrayOnPlane(ctx, planeParams, points);
 }
 
 function drawRasterInputOnCanvas(ctx, planeParams) {
@@ -1583,38 +1283,35 @@ export function drawConstantMappedPoint(ctx, planeParams, w, col) {
 }
 
 export function drawPlanarTransformedLine(ctx, planeParams, mappedTransform, z_pts, col) {
-    if (!z_pts || z_pts.length === 0 || !mappedTransform) {
+    if (!Array.isArray(z_pts) || z_pts.length === 0 || !mappedTransform || !hasFastCanvasMapping(planeParams)) {
         return;
     }
 
     const renderLimit = getPlanarTransformRenderLimit(planeParams);
     const jumpThresholdSq = getViewportJumpThresholdSq(planeParams);
-    const geometryEntry = getCachedTransformedGeometryEntry(
+    const geometry = buildAdaptiveTransformedPolyline(
         planeParams,
         mappedTransform,
         z_pts,
         renderLimit,
-        jumpThresholdSq
+        jumpThresholdSq,
+        getAdaptiveTransformRenderTuning()
     );
-    if (!geometryEntry) return;
 
     ctx.strokeStyle = col;
     configureRoundStroke(ctx);
 
     const PathCtor = getPathConstructorForContext(ctx);
     if (PathCtor) {
-        if (!geometryEntry.path) {
-            geometryEntry.path = buildPath2DFromTransformedPolyline(PathCtor, geometryEntry.geometry);
-        }
-        ctx.stroke(geometryEntry.path);
+        ctx.stroke(buildPath2DFromTransformedPolyline(PathCtor, geometry));
         return;
     }
 
     ctx.beginPath();
     let pathOpen = false;
-    for (let index = 0; index < geometryEntry.geometry.length; index += 2) {
-        const x = geometryEntry.geometry[index];
-        const y = geometryEntry.geometry[index + 1];
+    for (let index = 0; index < geometry.length; index += 2) {
+        const x = geometry[index];
+        const y = geometry[index + 1];
         if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
             pathOpen = false;
             continue;

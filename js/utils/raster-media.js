@@ -188,11 +188,7 @@ export function runVideoProcessingLoop(now) {
     if (elapsed >= targetInterval) {
         if (processUploadedVideoFrame()) {
             runtime.media.lastProcessedWallTime = now;
-            if (typeof requestDomainRedraw === 'function') {
-                requestDomainRedraw(false);
-            } else if (typeof requestRedrawAll === 'function') {
-                requestRedrawAll();
-            }
+            requestDomainRedraw(false);
         } else {
             syncVideoPlaybackUI();
         }
@@ -227,9 +223,7 @@ export function pauseUploadedVideoPlayback() {
     stopVideoProcessingLoop();
     syncVideoPlaybackUI();
 
-    if (typeof requestRedrawAll === 'function') {
-        requestRedrawAll();
-    }
+    requestRedrawAll();
 }
 
 export function startUploadedVideoPlayback() {
@@ -252,9 +246,7 @@ export function startUploadedVideoPlayback() {
         }
 
         syncVideoPlaybackUI();
-        if (typeof requestRedrawAll === 'function') {
-            requestRedrawAll();
-        }
+        requestRedrawAll();
         return true;
     }).catch(error => {
         state.videoIsPlaying = false;
@@ -336,9 +328,7 @@ export function loadUploadedVideoFile(file) {
         state.videoStatusMessage = 'Ready to play';
         syncVideoPlaybackUI();
 
-        if (typeof requestRedrawAll === 'function') {
-            requestRedrawAll();
-        }
+        requestRedrawAll();
 
         if (state.currentInputShape === 'video') {
             startUploadedVideoPlayback();
@@ -366,9 +356,7 @@ export function loadUploadedVideoFile(file) {
         stopVideoProcessingLoop();
         processUploadedVideoFrame(true);
         syncVideoPlaybackUI();
-        if (typeof requestRedrawAll === 'function') {
-            requestRedrawAll();
-        }
+        requestRedrawAll();
     });
     video.addEventListener('error', () => {
         if (runtime.media.video !== video) {

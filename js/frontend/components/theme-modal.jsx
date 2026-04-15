@@ -60,13 +60,13 @@ export function ThemeModal() {
                     <h2>Themes</h2>
                     <p>Select application theme, accent colors, and styling.</p>
                 </div>
-                <div class="theme-list-container custom-scroll" id="theme_list_container"><ThemeOptions /></div>
+                <div class="theme-list-container" id="theme_list_container"><ThemeOptions /></div>
                 <div class="theme-modal-section">
                     <h3>Layout Settings</h3>
                     <div class="control-group theme-modal-control-group">
-                        <label for="enable_vertical_layout_cb" class="control-label tooltip-label slider-label"
+                        <label for="enable_vertical_layout_cb" class="slider-label"
                             data-tooltip="Switch to vertical layout: panels on left, planes on right">
-                            <input type="checkbox" id="enable_vertical_layout_cb" class="control-checkbox"
+                            <input type="checkbox" id="enable_vertical_layout_cb"
                                 checked={Boolean(vertical)} onChange={event => {
                                     state.verticalLayoutEnabled = event.currentTarget.checked;
                                 }} />

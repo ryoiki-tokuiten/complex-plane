@@ -99,10 +99,6 @@ body {
     transition: background-color 0.4s ease;
 }
 
-.background-gradient {
-    display: none;
-}
-
 .background-noise {
     position: absolute;
     top: -50%;
@@ -1142,25 +1138,6 @@ canvas {
 
     text-align: center;
 }
-
-.control-group .number-input {
-    width: 70px;
-    padding: 0.5rem;
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
-    border-radius: 8px;
-    font-size: 1.25rem;
-    font-weight: 700;
-    text-align: center;
-    transition: box-shadow var(--transition-speed);
-}
-
-.control-group .number-input:focus {
-    outline: none;
-    box-shadow: 0 0 0 3px var(--glow-color);
-}
-
 
 input[type="range"] {
     -webkit-appearance: none;

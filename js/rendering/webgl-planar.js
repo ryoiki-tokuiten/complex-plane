@@ -987,11 +987,6 @@ export function initializeWebGLLineSupport() {
     clearWebGLSupportRenderers();
     resetWebGLSupport('disabled-or-unavailable');
 
-    if (!state || !state.webglLineRenderingEnabled) {
-        webglSupport.reason = 'disabled';
-        return;
-    }
-
     const rendererZ = createWebGLLineRenderer();
     const rendererW = createWebGLLineRenderer();
 
@@ -1015,7 +1010,6 @@ export function getWebGLRendererForPlane(planeKey) {
 function canUseWebGLLines(ctx, planeParams, planeKey, drawCallback) {
     return !!(
         state &&
-        state.webglLineRenderingEnabled &&
         webglSupport &&
         webglSupport.available &&
         ctx &&

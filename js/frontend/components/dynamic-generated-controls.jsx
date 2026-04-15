@@ -284,7 +284,7 @@ function Parameter({ parameter, index, count }) {
                 <input type="text" class="dynamic-text-input dynamic-parameter-name"
                     value={parameter.name || `p${index + 1}`} aria-label={`Parameter ${index + 1} name`}
                     onChange={event => updateParameter(index, 'name', event.currentTarget.value)} />
-                <button type="button" class="dynamic-small-button dynamic-remove-parameter" disabled={count <= 1}
+                <button type="button" class="dynamic-small-button" disabled={count <= 1}
                     onClick={() => updateDynamicPlotting(dynamic => {
                         if (dynamic.parameters.length > 1) dynamic.parameters.splice(index, 1);
                     })}>Remove</button>
@@ -292,13 +292,13 @@ function Parameter({ parameter, index, count }) {
             <div class="dynamic-parameter-fields">
                 {['value', 'min', 'max', 'step'].map(key => (
                     <label>{key[0].toUpperCase() + key.slice(1)}
-                        <input type="number" class={`dynamic-number-input dynamic-parameter-${key}`}
+                        <input type="number" class="dynamic-number-input"
                             value={parameterValue(parameter[key])} step="any"
                             onChange={event => updateParameter(index, key, event.currentTarget.value)} />
                     </label>
                 ))}
             </div>
-            <input type="range" class="dynamic-parameter-slider" min={parameter.min} max={parameter.max}
+            <input type="range" min={parameter.min} max={parameter.max}
                 step={parameter.step} value={parameter.value}
                 onInput={event => updateParameter(index, 'value', event.currentTarget.value)} />
         </div>

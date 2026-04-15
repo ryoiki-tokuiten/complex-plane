@@ -36,7 +36,7 @@ export function ComplexPointEditor() {
 
     return (
         <>
-            <div class="taylor-series-preset-groups complex-point-presets">
+            <div class="taylor-series-preset-groups">
                 {TAYLOR_CENTER_PRESET_GROUPS.map(group => (
                     <div class="taylor-series-preset-group" key={group.label}>
                         <div class="taylor-series-preset-group-title">{group.label}</div>
@@ -53,7 +53,7 @@ export function ComplexPointEditor() {
                     </div>
                 ))}
             </div>
-            <div class="taylor-series-input-row complex-point-inputs">
+            <div class="taylor-series-input-row">
                 <label class="taylor-series-input-field">
                     <span class="taylor-series-input-caption">Center Re(z0)</span>
                     <input ref={reInput} type="text" class="small-number-input taylor-series-text-input"

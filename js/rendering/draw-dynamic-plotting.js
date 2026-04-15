@@ -225,6 +225,22 @@ function drawReduction(ctx, planeParams, samples, reduction) {
     }
 }
 
+function drawTermSamples(ctx, planeParams, samples) {
+    if (!displayConfig().showTermPoints) return;
+
+    samples.forEach(sample => {
+        if (sample.status !== 'valid') {
+            drawInvalid(ctx, planeParams, sample, sample.termValue);
+            return;
+        }
+        drawMarker(ctx, planeParams, sample.termValue, {
+            color: COLORS.term,
+            selected: selected(sample),
+            label: sampleLabel(sample)
+        });
+    });
+}
+
 export function drawDynamicZPlane(ctx, planeParams) {
     if (!state.dynamicPlotting?.enabled || !displayConfig().showInputPoints) return;
 
@@ -256,20 +272,7 @@ function drawMappedSamples(ctx, planeParams, transform, stageIndex) {
     if (!result) return;
     const samples = result.visibleSamples;
 
-    if (displayConfig().showTermPoints) {
-        samples.forEach(sample => {
-            if (sample.status !== 'valid') {
-                drawInvalid(ctx, planeParams, sample, sample.termValue);
-                return;
-            }
-            drawMarker(ctx, planeParams, sample.termValue, {
-                color: COLORS.term,
-                selected: selected(sample),
-                label: sampleLabel(sample)
-            });
-        });
-    }
-
+    drawTermSamples(ctx, planeParams, samples);
     drawReduction(ctx, planeParams, samples, result.reduction);
 }
 
@@ -278,19 +281,7 @@ function drawAggregateStage(ctx, planeParams, transform, stageIndex) {
     if (!result) return;
 
     if (stageIndex === 0) {
-        if (displayConfig().showTermPoints) {
-            result.visibleSamples.forEach(sample => {
-                if (sample.status !== 'valid') {
-                    drawInvalid(ctx, planeParams, sample, sample.termValue);
-                    return;
-                }
-                drawMarker(ctx, planeParams, sample.termValue, {
-                    color: COLORS.term,
-                    selected: selected(sample),
-                    label: sampleLabel(sample)
-                });
-            });
-        }
+        drawTermSamples(ctx, planeParams, result.visibleSamples);
         drawReduction(ctx, planeParams, result.visibleSamples, result.reduction);
     }
 

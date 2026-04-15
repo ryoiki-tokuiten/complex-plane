@@ -15,7 +15,6 @@ import {
 } from '../math/expression/glsl.js';
 import {
   WEBGL_DOMAIN_COLOR_SUPERSAMPLE,
-  WEBGL_DOMAIN_COLOR_STRESS_SCALE,
   SPHERE_LIGHT_DIRECTION_CAMERA,
   SPHERE_TEXTURE_AMBIENT_INTENSITY,
   SPHERE_TEXTURE_DIFFUSE_INTENSITY,
@@ -36,7 +35,6 @@ const { webglDomainColorSupport } = context;
 
 const CFG = Object.freeze({
   defaultSupersample: 1.75,
-  defaultStressScale: 2.5,
   maxRenderScale: 3,
   maxDprBoost: 1.35,
   dprScaleFactor: 0.92,
@@ -1452,12 +1450,10 @@ function currentFunctionSupported(functionName, isWPlaneColoring) {
 export function getWebGLDomainColorRenderScale() {
 
   const baseScale = finite(WEBGL_DOMAIN_COLOR_SUPERSAMPLE, CFG.defaultSupersample);
-  const stressScale = finite(WEBGL_DOMAIN_COLOR_STRESS_SCALE, CFG.defaultStressScale);
-  const requestedScale = state?.webglGpuStressMode ? Math.max(baseScale, stressScale) : baseScale;
   const dpr = finite(typeof window === 'undefined' ? 1 : window.devicePixelRatio, 1);
   const dprBoost = clamp(dpr * CFG.dprScaleFactor, 1, CFG.maxDprBoost);
 
-  return clamp(requestedScale * dprBoost, 1, CFG.maxRenderScale);
+  return clamp(baseScale * dprBoost, 1, CFG.maxRenderScale);
 }
 
 export function createWebGLDomainColorRenderer() {
@@ -1512,11 +1508,6 @@ export function initializeWebGLDomainColoringSupport() {
 
   resetSupportObject(webglDomainColorSupport);
 
-  if (!state?.webglDomainColoringEnabled) {
-    webglDomainColorSupport.reason = 'disabled';
-    return;
-  }
-
   const renderers = { z: createWebGLDomainColorRenderer(), w: null };
   if (!domainRenderersAvailable(renderers)) {
     webglDomainColorSupport.reason = 'context-or-program-init-failed';
@@ -1558,7 +1549,6 @@ export function warnWebGLDomainFunctionFallback(functionName) {
 
 export function renderDomainColoringWithWebGL(targetCtx, planeParams, options = null) {
     if (!targetCtx || !planeParams || !webglDomainColorSupport?.available) return false;
-    if (!state?.webglDomainColoringEnabled) return false;
     const planeKey = inferDomainColorPlaneKey(targetCtx, options?.planeKey);
     if (!ensureDomainColorRenderer(planeKey)) return false;
     if (!refreshMathRendererIfNeeded()) return false;

@@ -1416,24 +1416,8 @@ function uploadCpuMappedPositions(renderer) {
     return true;
 }
 
-function bindForwardGeometry(renderer, locs, useCpuEval) {
+function configureForwardGeometry(renderer, locs, useCpuEval) {
     const gl = renderer.gl;
-    const vaoKey = useCpuEval ? 'forwardCpuVao' : 'forwardGpuVao';
-
-    const vaoBound = bindOrCreateVao(renderer, vaoKey, () => {
-        if (!configureAttribute(gl, locs.aTexCoord, 2, renderer.forwardVertexBuffer)) return false;
-
-        if (useCpuEval) {
-            if (!configureAttribute(gl, locs.aMappedPos, 2, renderer.forwardMappedBuffer)) return false;
-        } else {
-            disableAttribute(gl, locs.aMappedPos);
-        }
-
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, renderer.forwardIndexBuffer);
-        return true;
-    });
-
-    if (vaoBound) return true;
     if (!configureAttribute(gl, locs.aTexCoord, 2, renderer.forwardVertexBuffer)) return false;
 
     if (useCpuEval) {
@@ -1444,6 +1428,15 @@ function bindForwardGeometry(renderer, locs, useCpuEval) {
 
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, renderer.forwardIndexBuffer);
     return true;
+}
+
+function bindForwardGeometry(renderer, locs, useCpuEval) {
+    const vaoKey = useCpuEval ? 'forwardCpuVao' : 'forwardGpuVao';
+    return bindOrCreateVao(
+        renderer,
+        vaoKey,
+        () => configureForwardGeometry(renderer, locs, useCpuEval)
+    ) || configureForwardGeometry(renderer, locs, useCpuEval);
 }
 
 function prepareForwardGeometry(renderer, locs, useCpuEval) {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
+import { disposeThreeObject } from './three-utils.js';
 
 const BACKGROUND = 0x0b0914;
 const CAMERA_HOME = Object.freeze({ x: 7.8, y: 6.3, z: 8.6 });
@@ -16,20 +17,11 @@ function valueKey(value) {
     return Number(finite(value)).toFixed(9);
 }
 
-function disposeObject(object) {
-    if (!object) return;
-    object.traverse(child => {
-        child.geometry?.dispose();
-        if (Array.isArray(child.material)) child.material.forEach(material => material.dispose());
-        else child.material?.dispose();
-    });
-}
-
 function clearGroup(group) {
     while (group.children.length) {
         const child = group.children[0];
         group.remove(child);
-        disposeObject(child);
+        disposeThreeObject(child);
     }
 }
 
@@ -341,7 +333,7 @@ class LaplaceSurfaceRenderer {
     dispose() {
         this.resizeObserver?.disconnect();
         this.controls.dispose();
-        disposeObject(this.scene);
+        disposeThreeObject(this.scene);
         this.renderer.dispose();
         this.renderer.domElement.remove();
     }

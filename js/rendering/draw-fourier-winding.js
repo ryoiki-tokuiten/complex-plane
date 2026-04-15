@@ -7,6 +7,15 @@ import { drawAxes, drawGrid } from './canvas-primitives.js';
 // 3Blue1Brown-style Fourier "Winding" Visualization
 // This shows the KEY intuition: wrapping the signal around the origin
 
+function drawNoSignalMessage(ctx, planeParams) {
+    ctx.save();
+    ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
+    ctx.font = '16px "SF Pro Text", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No signal data available', planeParams.width / 2, planeParams.height / 2);
+    ctx.restore();
+}
+
 /**
  * Draw "winding" visualization - signal wrapped around origin at winding frequency
  * @param {CanvasRenderingContext2D} ctx - Canvas context
@@ -15,12 +24,7 @@ import { drawAxes, drawGrid } from './canvas-primitives.js';
  */
 export function drawWindingVisualization(ctx, signal, planeParams) {
     if (!signal || signal.length === 0) {
-        ctx.save();
-        ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
-        ctx.font = '16px "SF Pro Text", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No signal data available', planeParams.width / 2, planeParams.height / 2);
-        ctx.restore();
+        drawNoSignalMessage(ctx, planeParams);
         return;
     }
 
@@ -245,12 +249,7 @@ export function drawWindingVisualization(ctx, signal, planeParams) {
  */
 export function drawTimeDomainSignal(ctx, signal, planeParams) {
     if (!signal || signal.length === 0) {
-        ctx.save();
-        ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
-        ctx.font = '16px "SF Pro Text", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No signal data available', planeParams.width / 2, planeParams.height / 2);
-        ctx.restore();
+        drawNoSignalMessage(ctx, planeParams);
         return;
     }
 
