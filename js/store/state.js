@@ -1,6 +1,6 @@
 // js/store/state.js
 
-import { eventBus } from './events.js';
+import { createObservableStore } from './observable-store.js';
 import {
     DEFAULT_CANVAS_WIDTH,
     DEFAULT_CANVAS_HEIGHT,
@@ -112,9 +112,9 @@ const rawState = {
 
     isZFullScreen: false,
     isWFullScreen: false,
+    fullscreenWIndex: 0,
     topControlsCollapsed: false,
-    originalZParent: null,
-    originalWParent: null,
+    verticalLayoutEnabled: undefined,
 
     cauchyIntegralModeEnabled: false,
 
@@ -198,8 +198,9 @@ const rawState = {
     laplacePoles: [],
     laplaceZeros: [],
     laplaceStability: null,
+    laplaceCurrentValue: null,
+    laplaceROC: null,
     isLaplace3DFullScreen: false,
-    originalLaplace3DParent: null,
     realPlotsEnabled: false,
     realPlotsInputExpr: 'x',
     realPlotsInputIsCustom: false,
@@ -210,15 +211,16 @@ const rawState = {
     realPlotsColorMode: 'height',
     realPlotsHeightScale: 1.0,
     isRealPlotsFullScreen: false,
-    originalRealPlotsParent: null,
+    realPlotsCameraTargetMath: null,
+    realPlotsCameraNeedsReset: false,
     graphViewEnabled: false,
     graphSelectedShape: '',
     graphSelectedLineIndex: 0,
     graphSelectionRevision: 0,
     graphTraceEnabled: false,
     isGraphFullScreen: false,
-    originalGraphParent: null,
     show2DContourPlot: false,
+    isContour2DFullScreen: false,
     chainingEnabled: false,
     chainingMode: 'recursion',
     chainCount: 1,
@@ -310,45 +312,24 @@ const rawState = {
     isProcessingWDomainDynamics: false
 };
 
-function createDeepProxy(obj, path = []) {
-    return new Proxy(obj, {
-        get(target, prop, receiver) {
-            const value = Reflect.get(target, prop, receiver);
-            const isElement = typeof Element !== 'undefined' && value instanceof Element;
-            const isImage = typeof Image !== 'undefined' && value instanceof Image;
-            const isVideo = typeof HTMLVideoElement !== 'undefined' && value instanceof HTMLVideoElement;
-            if (value && typeof value === 'object' && !Array.isArray(value) && !isElement && !isImage && !isVideo) {
-                return createDeepProxy(value, [...path, prop]);
-            }
-            return value;
-        },
-        set(target, prop, value, receiver) {
-            if (path.length === 0 && prop === 'probeActive' && value === true && target.chainingEnabled) {
-                value = false;
-            }
+const store = createObservableStore(rawState, {
+    normalize(key, value, values) {
+        return key === 'probeActive' && value === true && values.chainingEnabled
+            ? false
+            : value;
+    }
+});
 
-            const oldValue = target[prop];
-            if (oldValue === value) return true;
-            
-            const success = Reflect.set(target, prop, value, receiver);
-            if (success) {
-                const fullPath = [...path, prop].join('.');
-                eventBus.emit(`state:${fullPath}`, { value, oldValue });
-                eventBus.emit('state:change', { path: fullPath, value, oldValue });
+export const state = store.state;
+export const setState = store.set;
+export const mutateState = store.mutate;
+export const batchStateChanges = store.transaction;
+export const subscribeState = store.subscribe;
 
-                if (path.length === 0 && prop === 'chainingEnabled' && value === true && target.probeActive) {
-                    const oldProbeActive = target.probeActive;
-                    target.probeActive = false;
-                    eventBus.emit('state:probeActive', { value: false, oldValue: oldProbeActive });
-                    eventBus.emit('state:change', { path: 'probeActive', value: false, oldValue: oldProbeActive });
-                }
-            }
-            return success;
-        }
-    });
-}
-
-export const state = createDeepProxy(rawState);
+// Preserve the probe/chaining invariant at the state boundary instead of in UI handlers.
+subscribeState(({ value }) => {
+    if (value && state.probeActive) state.probeActive = false;
+}, 'chainingEnabled');
 
 export const context = {
     zCanvas: null,

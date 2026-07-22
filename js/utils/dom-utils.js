@@ -1,4 +1,4 @@
-import { state, context, zPlaneParams, wPlaneParams, sphereViewParams, sliderParamKeys, wPlaneInitialRanges, zPlaneInitialRanges } from '../store/state.js';
+import { state, context, zPlaneParams, wPlaneParams, sphereViewParams, wPlaneInitialRanges, zPlaneInitialRanges } from '../store/state.js';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT, SPHERE_INITIAL_ROT_X, SPHERE_INITIAL_ROT_Y, SPHERE_VIEW_RADIUS_FACTOR } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS, TAYLOR_CENTER_PRESET_GROUPS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
@@ -7,297 +7,12 @@ import { initializeWebGLDomainColoringSupport } from '../rendering/webgl-domain-
 import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
 import { captureBeforeResize } from '../rendering/domain-dynamics.js';
 import { eventBus } from '../store/events.js';
+import { registerControls } from '../ui/control-registry.js';
 
 const { controls, polynomialCoeffUIElements } = context;
 
 let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas, wDomainColorCanvas, zDomainColorCtx, wDomainColorCtx;
 let wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList, sphereViewWParamsList;
-
-const DOM_BINDINGS = [
-    { key: 'controlsOptionsSection', id: 'controls_options_section' },
-    { key: 'controlsPanelsRow', id: 'controls_panels_row' },
-    { key: 'topControlsCollapsedBar', id: 'top_controls_collapsed_bar' },
-    { key: 'toggleTopControlsBtn', id: 'toggle_top_controls_btn' },
-    { key: 'toggleTopControlsCollapsedBtn', id: 'toggle_top_controls_collapsed_btn' },
-    { key: 'zPlaneCanvas', id: 'z_plane_canvas' },
-    { key: 'wPlaneCanvas', id: 'w_plane_canvas' },
-    { key: 'zCanvasWrapper', id: 'z_plane_canvas_wrapper' },
-    { key: 'wCanvasWrapper', id: 'w_plane_canvas_wrapper' },
-    { key: 'zCanvasCard', id: 'z_plane_column' },
-    { key: 'wCanvasCard', id: 'w_plane_column' },
-    { key: 'toggleFullscreenZBtn', id: 'toggle_fullscreen_z_btn' },
-    { key: 'toggleFullscreenWBtn', id: 'toggle_fullscreen_w_btn' },
-    { key: 'collapseZBtn', id: 'collapse_z_btn' },
-    { key: 'collapseWBtn', id: 'collapse_w_btn' },
-    { key: 'expandZBtn', id: 'expand_z_btn' },
-    { key: 'expandWBtn', id: 'expand_w_btn' },
-    { key: 'fullscreenContainer', id: 'fullscreen_container' },
-    { key: 'closeFullscreenBtn', id: 'close_fullscreen_btn' },
-    { key: 'chainingParamsBlock', id: 'chaining_params' },
-    { key: 'enableChainingCb', id: 'enable_chaining_cb' },
-    { key: 'chainingControlsContainer', id: 'chaining_controls_container' },
-    { key: 'chainModeSelector', id: 'chain_mode_selector' },
-    { key: 'chainCountSlider', id: 'chain_count_slider' },
-    { key: 'chainCountValueDisplay', id: 'chain_count_value_display' },
-    { key: 'algebraicChainingParamsBlock', id: 'algebraic_chaining_params' },
-    { key: 'dynamicPlottingParams', id: 'dynamic_plotting_params' },
-    { key: 'enableAlgebraicChainingCb', id: 'enable_algebraic_chaining_cb' },
-    { key: 'algebraicChainingControlsContainer', id: 'algebraic_chaining_controls_container' },
-    { key: 'algebraicChainingZInput', id: 'algebraic_chaining_z_input' },
-    { key: 'algebraicChainingZMath', id: 'algebraic_chaining_z_math' },
-    { key: 'algebraicTermsList', id: 'algebraic_terms_list' },
-    { key: 'addAlgebraicTermBtn', id: 'add_algebraic_term_btn' },
-    { key: 'commonParamsSliders', id: 'common_params_sliders' },
-    { key: 'shapeParamsSliders', id: 'shape_params_sliders' },
-    { key: 'mobiusParamsSliders', id: 'mobius_params_sliders' },
-    { key: 'polynomialParamsSliders', id: 'polynomial_params_sliders' },
-    { key: 'fractionalPowerParamsSliders', id: 'fractional_power_params_sliders' },
-    { key: 'polynomialNSlider', id: 'polynomialN_slider' },
-    { key: 'polynomialNValueDisplay', id: 'polynomialN_value_display' },
-    { key: 'polynomialCoeffsContainer', id: 'polynomial_coeffs_container' },
-    { key: 'circleRSliderGroup', id: 'circleR_slider_group' },
-    { key: 'ellipseParamsSliderGroup', id: 'ellipse_params_slider_group' },
-    { key: 'inputShapeSelector', id: 'input_shape_selector' },
-    { key: 'fourierSpecificControlsDiv', id: 'fourier_specific_controls' },
-    { key: 'fourierFunctionSelector', id: 'fourier_function_selector' },
-    { key: 'fourierFrequencySlider', id: 'fourier_frequency_slider' },
-    { key: 'fourierFrequencyValueDisplay', id: 'fourier_frequency_value_display' },
-    { key: 'fourierAmplitudeSlider', id: 'fourier_amplitude_slider' },
-    { key: 'fourierAmplitudeValueDisplay', id: 'fourier_amplitude_value_display' },
-    { key: 'fourierTimeWindowSlider', id: 'fourier_time_window_slider' },
-    { key: 'fourierTimeWindowValueDisplay', id: 'fourier_time_window_value_display' },
-    { key: 'fourierSamplesSlider', id: 'fourier_samples_slider' },
-    { key: 'fourierSamplesValueDisplay', id: 'fourier_samples_value_display' },
-    { key: 'fourierWindingFrequencySlider', id: 'fourier_winding_frequency_slider' },
-    { key: 'fourierWindingFrequencyValueDisplay', id: 'fourier_winding_frequency_value_display' },
-    { key: 'fourierWindingTimeSlider', id: 'fourier_winding_time_slider' },
-    { key: 'fourierWindingTimeValueDisplay', id: 'fourier_winding_time_value_display' },
-    { key: 'laplaceSpecificControlsDiv', id: 'laplace_specific_controls' },
-    { key: 'laplaceFunctionSelector', id: 'laplace_function_selector' },
-    { key: 'laplaceFrequencySlider', id: 'laplace_frequency_slider' },
-    { key: 'laplaceFrequencyValueDisplay', id: 'laplace_frequency_value_display' },
-    { key: 'laplaceDampingSlider', id: 'laplace_damping_slider' },
-    { key: 'laplaceDampingValueDisplay', id: 'laplace_damping_value_display' },
-    { key: 'laplaceSigmaSlider', id: 'laplace_sigma_slider' },
-    { key: 'laplaceSigmaValueDisplay', id: 'laplace_sigma_value_display' },
-    { key: 'laplaceOmegaSlider', id: 'laplace_omega_slider' },
-    { key: 'laplaceOmegaValueDisplay', id: 'laplace_omega_value_display' },
-    { key: 'laplaceShowROCCb', id: 'laplace_show_roc_cb' },
-    { key: 'laplaceVizModeSelector', id: 'laplace_viz_mode_selector' },
-    { key: 'laplaceClipHeightSlider', id: 'laplace_clip_height_slider' },
-    { key: 'laplaceClipHeightValueDisplay', id: 'laplace_clip_height_value_display' },
-    { key: 'laplaceShowPolesZerosCb', id: 'laplace_show_poles_zeros_cb' },
-    { key: 'laplaceFindPolesZerosBtn', id: 'laplace_find_poles_zeros_btn' },
-    { key: 'laplaceStabilityAnalysisBtn', id: 'laplace_stability_analysis_btn' },
-    { key: 'laplaceStabilityDisplay', id: 'laplace_stability_display' },
-    { key: 'laplaceShowFourierLineCb', id: 'laplace_show_fourier_line_cb' },
-    { key: 'wPlaneTitleFunc', id: 'w-plane-title-func' },
-    { key: 'zPlaneTitle', id: 'z-plane-title' },
-    { key: 'wPlaneTitle', id: 'w-plane-title' },
-    { key: 'enableDomainColoringCb', id: 'enable_domain_coloring_cb' },
-    { key: 'domainColoringOptionsDiv', id: 'domain_coloring_options_div' },
-    { key: 'domainBrightnessSlider', id: 'domain_brightness_slider' },
-    { key: 'domainBrightnessValueDisplay', id: 'domain_brightness_value_display' },
-    { key: 'domainContrastSlider', id: 'domain_contrast_slider' },
-    { key: 'domainContrastValueDisplay', id: 'domain_contrast_value_display' },
-    { key: 'domainSaturationSlider', id: 'domain_saturation_slider' },
-    { key: 'domainSaturationValueDisplay', id: 'domain_saturation_value_display' },
-    { key: 'domainLightnessCyclesSlider', id: 'domain_lightness_cycles_slider' },
-    { key: 'domainLightnessCyclesValueDisplay', id: 'domain_lightness_cycles_value_display' },
-    { key: 'domainColoringKeyDiv', id: 'domain_coloring_key' },
-    { key: 'domainPaletteSelect', id: 'domain_palette_select' },
-    { key: 'orbitColoringModeGroup', id: 'orbit_coloring_mode_group' },
-    { key: 'orbitColoringModeSelect', id: 'orbit_coloring_mode_select' },
-    { key: 'riemannSurfacePaletteSelect', id: 'riemann_surface_palette_select' },
-
-    { key: 'gridDensitySlider', id: 'grid_density_slider' },
-    { key: 'gridDensityValueDisplay', id: 'grid_density_value_display' },
-    { key: 'riemannSurfaceResolutionSlider', id: 'riemann_surface_resolution_slider' },
-    { key: 'riemannSurfaceResolutionValueDisplay', id: 'riemann_surface_resolution_value_display' },
-    { key: 'showZerosPolesCb', id: 'show_zeros_poles_cb' },
-    { key: 'showCriticalPointsCb', id: 'show_critical_points_cb' },
-    { key: 'neighborhoodSizeSlider', id: 'neighborhood_size_slider' },
-    { key: 'neighborhoodSizeValueDisplay', id: 'neighborhood_size_value_display' },
-    { key: 'enableRiemannSphereCb', id: 'enable_riemann_sphere_cb' },
-    { key: 'enableDerivativeCb', id: 'enable_derivative_cb' },
-    { key: 'enableConformalGridCb', id: 'enable_conformal_grid_cb' },
-    { key: 'enableRiemannSurfaceCb', id: 'enable_riemann_surface_cb' },
-    { key: 'riemannSurfaceOptionsDiv', id: 'riemann_surface_options_div' },
-    { key: 'riemannSurfaceComponentSelector', id: 'riemann_surface_component_selector' },
-    { key: 'riemannSurfaceSheetsSlider', id: 'riemann_surface_sheets_slider' },
-    { key: 'riemannSurfaceSheetsValueDisplay', id: 'riemann_surface_sheets_value_display' },
-    { key: 'riemannSurfaceBranchCenterSlider', id: 'riemann_surface_branch_center_slider' },
-    { key: 'riemannSurfaceBranchCenterValueDisplay', id: 'riemann_surface_branch_center_value_display' },
-    { key: 'riemannSurfaceHeightScaleSlider', id: 'riemann_surface_height_scale_slider' },
-    { key: 'riemannSurfaceHeightScaleValueDisplay', id: 'riemann_surface_height_scale_value_display' },
-    { key: 'riemannSurfaceHeightClipSlider', id: 'riemann_surface_height_clip_slider' },
-    { key: 'riemannSurfaceHeightClipValueDisplay', id: 'riemann_surface_height_clip_value_display' },
-    { key: 'riemannSurfaceWireframeCb', id: 'riemann_surface_wireframe_cb' },
-    { key: 'riemannSurfaceResetViewBtn', id: 'riemann_surface_reset_view_btn' },
-    { key: 'riemannSurfaceStatus', id: 'riemann_surface_status' },
-    { key: 'enableTaylorSeriesCb', id: 'enable_taylor_series_cb' },
-    { key: 'taylorSeriesOptionsDetailDiv', id: 'taylor_series_options_detail_div' },
-    { key: 'taylorSeriesCenterStatus', id: 'taylor_series_center_status' },
-    { key: 'taylorSeriesOrderSlider', id: 'taylor_series_order_slider' },
-    { key: 'taylorSeriesOrderValueDisplay', id: 'taylor_series_order_value_display' },
-    { key: 'enableTaylorSeriesCustomCenterCb', id: 'enable_taylor_series_custom_center_cb' },
-    { key: 'taylorSeriesCustomCenterInputsDiv', id: 'taylor_series_custom_center_inputs_div' },
-    { key: 'taylorSeriesPresetGroups', id: 'taylor_series_preset_groups' },
-    { key: 'taylorSeriesCustomCenterReInput', id: 'taylor_series_custom_center_re_input' },
-    { key: 'taylorSeriesCustomCenterImInput', id: 'taylor_series_custom_center_im_input' },
-    { key: 'taylorComplexPointsUiContainer', id: 'taylor_complex_points_ui_container' },
-    { key: 'zPlaneProbeInfo', id: 'z_plane_probe_info' },
-    { key: 'wPlaneProbeInfo', id: 'w_plane_probe_info' },
-    { key: 'wPlaneAnalysisInfo', id: 'w_plane_analysis_info' },
-    { key: 'zPlaneZoomSlider', id: 'z_plane_zoom_slider' },
-    { key: 'zPlaneZoomValueDisplay', id: 'z_plane_zoom_value_display' },
-    { key: 'wPlaneZoomSlider', id: 'w_plane_zoom_slider' },
-    { key: 'wPlaneZoomValueDisplay', id: 'w_plane_zoom_value_display' },
-    { key: 'toggleZetaContinuationBtn', id: 'toggle_zeta_continuation_btn' },
-    { key: 'zetaSpecificControlsDiv', id: 'zeta_specific_controls' },
-    { key: 'enableVectorFieldCb', id: 'enable_vector_field_cb' },
-    { key: 'vectorFieldOptionsDiv', id: 'vector_field_options_div' },
-    { key: 'vectorFieldFunctionSelector', id: 'vector_field_function_selector' },
-    { key: 'vectorFieldScaleSlider', id: 'vector_field_scale_slider' },
-    { key: 'vectorFieldScaleValueDisplay', id: 'vector_field_scale_value_display' },
-    { key: 'enableCauchyIntegralModeCb', id: 'enable_cauchy_integral_mode_cb' },
-    { key: 'cauchyIntegralResultsInfo', id: 'cauchy_integral_results_info' },
-    { key: 'imageUploadControls', id: 'image_upload_controls' },
-    { key: 'imageUploadInput', id: 'image_upload_input' },
-    { key: 'imageResolutionSlider', id: 'image_resolution_slider' },
-    { key: 'imageResolutionValueDisplay', id: 'image_resolution_value_display' },
-    { key: 'imageSizeSlider', id: 'image_size_slider' },
-    { key: 'imageSizeValueDisplay', id: 'image_size_value_display' },
-    { key: 'imageOpacitySlider', id: 'image_opacity_slider' },
-    { key: 'imageOpacityValueDisplay', id: 'image_opacity_value_display' },
-    { key: 'videoUploadControls', id: 'video_upload_controls' },
-    { key: 'videoUploadInput', id: 'video_upload_input' },
-    { key: 'videoPlayPauseBtn', id: 'video_play_pause_btn' },
-    { key: 'videoStatusDisplay', id: 'video_status_display' },
-    { key: 'videoResolutionSlider', id: 'video_resolution_slider' },
-    { key: 'videoResolutionValueDisplay', id: 'video_resolution_value_display' },
-    { key: 'gridViewBtn', id: 'grid_view_btn' },
-    { key: 'gridViewCloseBtn', id: 'grid_view_close_btn' },
-    { key: 'navigationParamsBlock', id: 'navigation_params' },
-    { key: 'enableNavigationModeCb', id: 'enable_navigation_mode_cb' },
-    { key: 'navigationControlsContainer', id: 'navigation_controls_container' },
-    { key: 'navigationSizeSlider', id: 'navigation_size_slider' },
-    { key: 'navigationSizeValueDisplay', id: 'navigation_size_value_display' },
-    { key: 'navigationOpacitySlider', id: 'navigation_opacity_slider' },
-    { key: 'navigationOpacityValueDisplay', id: 'navigation_opacity_value_display' },
-    { key: 'navigationSpeedSlider', id: 'navigation_speed_slider' },
-    { key: 'navigationSpeedValueDisplay', id: 'navigation_speed_value_display' },
-    { key: 'navigationTrailLengthSlider', id: 'navigation_trail_length_slider' },
-    { key: 'navigationTrailLengthValueDisplay', id: 'navigation_trail_length_value_display' },
-    { key: 'navigationResetBtn', id: 'navigation_reset_btn' },
-    { key: 'videoFpsSlider', id: 'video_fps_slider' },
-    { key: 'videoFpsValueDisplay', id: 'video_fps_value_display' },
-    { key: 'videoSizeSlider', id: 'video_size_slider' },
-    { key: 'videoSizeValueDisplay', id: 'video_size_value_display' },
-    { key: 'videoOpacitySlider', id: 'video_opacity_slider' },
-    { key: 'videoOpacityValueDisplay', id: 'video_opacity_value_display' },
-    { key: 'enableRadialDiscreteStepsCb', id: 'enable_radial_discrete_steps_cb' },
-    { key: 'radialDiscreteStepsOptionsDiv', id: 'radial_discrete_steps_options_div' },
-    { key: 'radialDiscreteStepsCountSlider', id: 'radial_discrete_steps_count_slider' },
-    { key: 'radialDiscreteStepsCountValueDisplay', id: 'radial_discrete_steps_count_value_display' },
-    { key: 'enableSplitViewCb', id: 'enable_split_view_cb' },
-    { key: 'enableThreeSphereCb', id: 'enable_three_sphere_cb' },
-    { key: 'wPlaneThreeContainer', id: 'w_plane_three_container' },
-    { key: 'threeSphereOptionsDiv', id: 'three_sphere_options_div' },
-    { key: 'riemannSphereOptionsDiv', id: 'riemann_sphere_options_div' },
-    { key: 'enableRiemannTransformationCb', id: 'enable_riemann_transformation_cb' },
-    { key: 'zPlaneTransformationOverlay', id: 'z_plane_transformation_overlay' },
-    { key: 'transformationPlayPauseBtn', id: 'transformation_play_pause_btn' },
-    { key: 'transformationProgressSlider', id: 'transformation_progress_slider' },
-    { key: 'threeSphereOpacitySlider', id: 'three_sphere_opacity_slider' },
-    { key: 'threeSphereOpacityValueDisplay', id: 'three_sphere_opacity_value_display' },
-    { key: 'sphereGridOpacitySlider', id: 'sphere_grid_opacity_slider' },
-    { key: 'sphereGridOpacityValueDisplay', id: 'sphere_grid_opacity_value_display' },
-    { key: 'sphereViewControlsDiv', id: 'sphere_view_controls_div' },
-    { key: 'sphereViewNorthBtn', id: 'sphere_view_north_btn' },
-    { key: 'sphereViewSouthBtn', id: 'sphere_view_south_btn' },
-    { key: 'sphereViewEastBtn', id: 'sphere_view_east_btn' },
-    { key: 'sphereViewWestBtn', id: 'sphere_view_west_btn' },
-    { key: 'sphereViewFrontBtn', id: 'sphere_view_front_btn' },
-    { key: 'sphereViewResetBtn', id: 'sphere_view_reset_btn' },
-    { key: 'showVectorFieldPanelCb', id: 'show_vector_field_panel_cb' },
-    { key: 'vectorFlowOptionsContent', id: 'vector_flow_options_content' },
-    { key: 'vectorArrowThicknessSlider', id: 'vector_arrow_thickness_slider' },
-    { key: 'vectorArrowThicknessValueDisplay', id: 'vector_arrow_thickness_value_display' },
-    { key: 'vectorArrowHeadSizeSlider', id: 'vector_arrow_head_size_slider' },
-    { key: 'vectorArrowHeadSizeValueDisplay', id: 'vector_arrow_head_size_value_display' },
-    { key: 'enableStreamlineFlowCb', id: 'enable_streamline_flow_cb' },
-    { key: 'streamlineOptionsDetailsDiv', id: 'streamline_options_details_div' },
-    { key: 'streamlineStepSizeSlider', id: 'streamline_step_size_slider' },
-    { key: 'streamlineStepSizeValueDisplay', id: 'streamline_step_size_value_display' },
-    { key: 'streamlineMaxLengthSlider', id: 'streamline_max_length_slider' },
-    { key: 'streamlineMaxLengthValueDisplay', id: 'streamline_max_length_value_display' },
-    { key: 'streamlineThicknessSlider', id: 'streamline_thickness_slider' },
-    { key: 'streamlineThicknessValueDisplay', id: 'streamline_thickness_value_display' },
-    { key: 'streamlineSeedDensityFactorSlider', id: 'streamline_seed_density_factor_slider' },
-    { key: 'streamlineSeedDensityFactorValueDisplay', id: 'streamline_seed_density_factor_value_display' },
-    { key: 'enableParticleAnimationCb', id: 'enable_particle_animation_cb' },
-    { key: 'particleAnimationDetailsDiv', id: 'particle_animation_details_div' },
-    { key: 'particleDensitySlider', id: 'particle_density_slider' },
-    { key: 'particleDensityValueDisplay', id: 'particle_density_value_display' },
-    { key: 'particleSpeedSlider', id: 'particle_speed_slider' },
-    { key: 'particleSpeedValueDisplay', id: 'particle_speed_value_display' },
-    { key: 'particleMaxLifetimeSlider', id: 'particle_max_lifetime_slider' },
-    { key: 'particleMaxLifetimeValueDisplay', id: 'particle_max_lifetime_value_display' },
-    { key: 'laplaceAnimationSpeedSlider', id: 'laplace_animation_speed_slider' },
-    { key: 'laplaceAnimationSpeedDisplay', id: 'laplace_animation_speed_display' },
-    { key: 'laplaceAnimationLoopCb', id: 'laplace_animation_loop_cb' },
-    { key: 'laplacePlayPauseBtn', id: 'laplace_play_pause_btn' },
-    { key: 'laplaceShowFullBtn', id: 'laplace_show_full_btn' },
-    { key: 'toggleFullscreenLaplace3DBtn', id: 'toggle_fullscreen_laplace_3d_btn' },
-    { key: 'laplaceResetBtn', id: 'laplace_reset_btn' },
-    { key: 'laplace3DColumn', id: 'laplace_3d_column' },
-    { key: 'laplace3DContainer', id: 'laplace_3d_container' },
-    { key: 'realPlotsColumn', id: 'real_plots_column' },
-    { key: 'enableRealPlotsCb', id: 'enable_real_plots_cb' },
-    { key: 'realPlotsControlsContainer', id: 'real_plots_controls_container' },
-    { key: 'realPlotsInputPreset', id: 'real_plots_input_preset' },
-    { key: 'realPlotsCustomInputContainer', id: 'real_plots_custom_input_container' },
-    { key: 'realPlotsCustomInput', id: 'real_plots_custom_input' },
-    { key: 'realPlotsCustomInputMath', id: 'real_plots_custom_input_math' },
-    { key: 'realPlotsImagPreset', id: 'real_plots_imag_preset' },
-    { key: 'realPlotsCustomImagContainer', id: 'real_plots_custom_imag_container' },
-    { key: 'realPlotsCustomImag', id: 'real_plots_custom_imag' },
-    { key: 'realPlotsCustomImagMath', id: 'real_plots_custom_imag_math' },
-    { key: 'realPlotsOutputComponent', id: 'real_plots_output_component' },
-    { key: 'realPlotsColorMode', id: 'real_plots_color_mode' },
-    { key: 'toggleFullscreenRealPlotsBtn', id: 'toggle_fullscreen_real_plots_btn' },
-    { key: 'realPlotsContainer', id: 'real_plots_container' },
-    { key: 'contour2DColumn', id: 'contour_2d_column' },
-    { key: 'contour2DCanvas', id: 'contour_2d_canvas' },
-    { key: 'riemannSurfaceShow2DContourBtn', id: 'riemann_surface_show_2d_contour_btn' },
-    { key: 'realPlotsShow2DContourBtn', id: 'real_plots_show_2d_contour_btn' },
-    { key: 'toggleFullscreenContour2DBtn', id: 'toggle_fullscreen_contour_2d_btn' },
-    { key: 'preloader', id: 'preloader' },
-    { key: 'functionControlsPanel', id: 'function-controls-panel' },
-    { key: 'parameterControlsPanel', id: 'parameter-controls-panel' },
-    { key: 'visualizationOptionsPanel', id: 'visualization-options-panel' },
-    { key: 'realPlotsHeightScaleSlider', id: 'real_plots_height_scale_slider' },
-    { key: 'realPlotsHeightScaleValueDisplay', id: 'real_plots_height_scale_value_display' },
-    { key: 'riemannSurfaceContoursCb', id: 'riemann_surface_contours_cb' },
-    { key: 'riemannSurfaceContoursDetails', id: 'riemann_surface_contours_details' },
-    { key: 'riemannSurfaceContourIntervalSlider', id: 'riemann_surface_contour_interval_slider' },
-    { key: 'riemannSurfaceContourIntervalValueDisplay', id: 'riemann_surface_contour_interval_value_display' },
-    { key: 'riemannSurfaceContourThicknessSlider', id: 'riemann_surface_contour_thickness_slider' },
-    { key: 'riemannSurfaceContourThicknessValueDisplay', id: 'riemann_surface_contour_thickness_value_display' },
-    { key: 'realPlotsContoursCb', id: 'real_plots_contours_cb' },
-    { key: 'realPlotsContoursDetails', id: 'real_plots_contours_details' },
-    { key: 'realPlotsContourIntervalSlider', id: 'real_plots_contour_interval_slider' },
-    { key: 'realPlotsContourIntervalValueDisplay', id: 'real_plots_contour_interval_value_display' },
-    { key: 'realPlotsContourThicknessSlider', id: 'real_plots_contour_thickness_slider' },
-    { key: 'realPlotsContourThicknessValueDisplay', id: 'real_plots_contour_thickness_value_display' },
-    { key: 'enableGraphViewCb', id: 'enable_graph_view_cb' },
-    { key: 'enableGraphTraceCb', id: 'enable_graph_trace_cb' },
-    { key: 'graphColumn', id: 'graph_column' },
-    { key: 'graphContainer', id: 'graph_container' },
-    { key: 'graph3DContainer', id: 'graph_3d_container' },
-    { key: 'toggleFullscreenGraphBtn', id: 'toggle_fullscreen_graph_btn' }
-];
 
 export function formatTaylorNumericValue(value) {
     if (!Number.isFinite(value)) {
@@ -367,9 +82,7 @@ export function setupDOMReferences() {
         initializeWebGLDomainColoringSupport();
     }
 
-    DOM_BINDINGS.forEach(binding => {
-        controls[binding.key] = document.getElementById(binding.id);
-    });
+    registerControls(document, controls);
     renderTaylorPresetGroups();
     controls.cauchy_integral_results_info = controls.cauchyIntegralResultsInfo;
     controls.zPlaneCanvas = zCanvas;
@@ -389,30 +102,13 @@ export function setupDOMReferences() {
     wPlaneThreeContainersList = [controls.wPlaneThreeContainer];
     sphereViewWParamsList = [sphereViewParams.w];
 
-    sliderParamKeys.forEach(key => {
-        controls[`${key}Slider`] = document.getElementById(`${key}_slider`);
-        controls[`${key}ValueDisplay`] = document.getElementById(`${key}_value_display`);
-        controls[`${key}LabelDesc`] = document.getElementById(`${key}_label_desc`); 
-        const playBtn = document.getElementById(`play_${key}_btn`); if (playBtn) controls[`play_${key}Btn`] = playBtn;
-        const speedSel = document.getElementById(`speed_${key}_selector`); if (speedSel) controls[`speed_${key}Selector`] = speedSel;
-    });
-
-    ['A', 'B', 'C', 'D'].forEach(param => {
-        ['re', 'im'].forEach(part => {
-            controls[`mobius${param}_${part}_slider`] = document.getElementById(`mobius${param}_${part}_slider`);
-            controls[`mobius${param}_${part}_value_display`] = document.getElementById(`mobius${param}_${part}_value_display`);
-            controls[`play_mobius${param}_${part}_btn`] = document.getElementById(`play_mobius${param}_${part}_btn`);
-            controls[`speed_mobius${param}_${part}_selector`] = document.getElementById(`speed_mobius${param}_${part}_selector`);
-        });
-    });
-
-    controls.funcButtons = {};
-    ['fourier', 'laplace', 'cos', 'sin', 'tan', 'sec', 'exp', 'ln', 'reciprocal', 'mobius', 'zeta', 'polynomial', 'poincare', 'sinh', 'cosh', 'tanh', 'power', 'mandelbrot', 'newton_fractal'].forEach(f => {
-        controls.funcButtons[f] = document.getElementById(`select_${f}_btn`);
-    });
+    controls.funcButtons = Object.fromEntries(
+        [...document.querySelectorAll('[id^="select_"][id$="_btn"]')]
+            .map(button => [button.id.slice(7, -4), button])
+    );
     
-    const essentialControlIds = [
-        'z_plane_canvas', 'w_plane_canvas', // These are global vars, special check
+    const requiredControls = [
+        'zPlaneCanvas', 'wPlaneCanvas',
         'inputShapeSelector', 'gridDensitySlider',
         'functionControlsPanel', 'visualizationOptionsPanel',
         'commonParamsSliders',
@@ -422,21 +118,10 @@ export function setupDOMReferences() {
         'zPlaneZoomSlider', 'wPlaneZoomSlider'
     ];
 
-    essentialControlIds.forEach(id => {
-        if (id === 'z_plane_canvas') {
-            if (typeof zCanvas === 'undefined' || !zCanvas) console.error("Essential control not found: zCanvas (from id: z_plane_canvas)");
-        } else if (id === 'w_plane_canvas') {
-            if (typeof wCanvas === 'undefined' || !wCanvas) console.error("Essential control not found: wCanvas (from id: w_plane_canvas)");
-        } else if (!controls[id]) {
-            // Attempt to find by original kebab-case if the id in essentialControlIds is camelCase from a kebab-case id
-            const originalKebabID = id.replace(/([A-Z])/g, "-$1").toLowerCase();
-            if (document.getElementById(originalKebabID)) {
-                 console.warn(`Essential control ID '${id}' in essentialControlIds might need to match the exact property in 'controls' object. Element with ID '${originalKebabID}' exists but 'controls.${id}' is missing.`);
-            } else {
-                 console.error(`Essential control not found: controls.${id} (and no corresponding element by likely original ID)`);
-            }
-        }
-    });
+    const missingControls = requiredControls.filter(key => !controls[key]);
+    if (missingControls.length > 0) {
+        console.error(`Essential controls not found: ${missingControls.join(', ')}`);
+    }
     context.zCanvas = zCanvas;
     context.wCanvas = wCanvas;
     context.zCtx = zCtx;

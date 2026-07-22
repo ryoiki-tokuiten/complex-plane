@@ -1,6 +1,6 @@
 import { state } from '../store/state.js';
-import { requestRedrawAll } from '../main.js';
-import { syncLaplacePlayPauseButton } from '../ui/event-listeners.js';
+import { requestRedrawAll } from './redraw-scheduler.js';
+import { syncLaplacePlayPauseButton } from '../ui/ui-updates.js';
 
 // Laplace Transform Animation Controller
 // Smooth progressive animation of winding spiral

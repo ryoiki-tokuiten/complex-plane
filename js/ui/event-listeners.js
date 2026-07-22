@@ -1,9 +1,9 @@
-import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
+import { state, context, mutateState, subscribeState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, processUploadedVideoFrame } from '../utils/raster-media.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords, inverseRotate3D, rotate3D, projectSphereToCanvas2D } from '../utils/canvas-utils.js';
-import { requestRedrawAll } from '../main.js';
+import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
 import { updateLaplaceTransform, updateLaplaceEvaluationPoint, analyzeStability, findPolesZeros } from '../analysis/laplace-transform.js';
 import { ComplexPointsUI } from './complex-points-ui.js';
@@ -15,7 +15,7 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { updateTitlesAndGlobalUI, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, updateCustomFormulaPreview } from './ui-updates.js';
+import { updateTitlesAndGlobalUI, syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, updateCustomFormulaPreview } from './ui-updates.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
 import { toggleRiemannTransformationAnimationZ, toggleRiemannTransformationAnimationW, syncRiemannTransformationPlayPauseButton } from '../rendering/riemann-transformation-animation.js';
 import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
@@ -42,6 +42,7 @@ import {
     getTissotViewportBounds
 } from '../analysis/tissot.js';
 import { drawRealPlot, disposeRealPlotsRenderer } from '../rendering/real-plots-renderer.js';
+import { createElement as h, createSelect as select } from './dom-components.js';
 
 const { controls = {} } = context;
 
@@ -60,6 +61,7 @@ let pendingPalettePanelRefresh = false;
 
 const canvasInteractionContexts = { z: null, w: null };
 const canvasContextByElement = new WeakMap();
+const fullscreenOrigins = new WeakMap();
 const EMPTY_RECT = Object.freeze({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
 
 function createPointerSnapshot() {
@@ -344,40 +346,6 @@ function closest(target, selector) {
     return target && typeof target.closest === 'function' ? target.closest(selector) : null;
 }
 
-function h(tag, props = {}, children = []) {
-    const node = document.createElement(tag);
-    const { className, text, type, attrs, dataset } = props;
-
-    if (className) node.className = className;
-    if (type) node.type = type;
-    if (text !== undefined) node.textContent = text;
-
-    Object.entries(attrs || {}).forEach(([key, value]) => node.setAttribute(key, value));
-    Object.entries(dataset || {}).forEach(([key, value]) => {
-        node.dataset[key] = value;
-    });
-
-    toArray(children).forEach(child => {
-        node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
-    });
-
-    return node;
-}
-
-function select(options, value, onChange) {
-    const node = h('select');
-
-    options.forEach(option => {
-        const item = h('option', { text: option.label });
-        item.value = option.value;
-        item.selected = option.value === value;
-        node.appendChild(item);
-    });
-
-    node.addEventListener('change', onChange);
-    return node;
-}
-
 function parseControlValue(control, parser = parseFloat, fallback = 0) {
     if (!control) return fallback;
     const value = parser(control.value);
@@ -512,12 +480,6 @@ export function requestDomainRedraw(markDomainDirty = false) {
 
 function requestAlgebraicRedraw() {
     requestDomainRedraw(!(state.riemannSurfaceEnabled || state.realPlotsEnabled));
-}
-
-export function syncLaplacePlayPauseButton() {
-    if (controls.laplacePlayPauseBtn) {
-        controls.laplacePlayPauseBtn.innerHTML = state.laplaceAnimationPlaying ? '⏸ Pause' : '▶ Play';
-    }
 }
 
 export function setActiveFunctionButton(activeKey) {
@@ -821,11 +783,13 @@ function complexState(key) {
 
 function initializeMobiusState() {
     MOBIUS_PARAMS.forEach(param => {
-        const value = complexState(`mobius${param}`);
+        const stateKey = `mobius${param}`;
+        const value = { ...complexState(stateKey) };
         COMPLEX_PARTS.forEach(part => {
-            const slider = controls[`mobius${param}_${part}_slider`];
+            const slider = controls[`mobius${param}${part === 're' ? 'Re' : 'Im'}Slider`];
             if (slider) value[part] = parseControlValue(slider, parseFloat, value[part]);
         });
+        state[stateKey] = value;
     });
 }
 
@@ -834,7 +798,7 @@ function syncTaylorCustomCenterInputs() {
 }
 
 function setTaylorCustomCenter(re, im, shouldRedraw = true) {
-    Object.assign(state.taylorSeriesCustomCenter, { re, im });
+    mutateState('taylorSeriesCustomCenter', center => Object.assign(center, { re, im }));
     syncTaylorCustomCenterInputs();
     call(syncTaylorSeriesCenterStatus);
     if (shouldRedraw) requestUiRedraw();
@@ -870,8 +834,8 @@ function bindBaseParameterControls() {
             value => {
                 state[key] = value;
             },
-            controls[`play_${key}Btn`],
-            controls[`speed_${key}Selector`]
+            controls[`play${key[0].toUpperCase()}${key.slice(1)}Btn`],
+            controls[`speed${key[0].toUpperCase()}${key.slice(1)}Selector`]
         );
     });
 }
@@ -879,20 +843,24 @@ function bindBaseParameterControls() {
 function bindMobiusControls() {
     MOBIUS_PARAMS.forEach(param => COMPLEX_PARTS.forEach(part => {
         const stateKey = `mobius${param}`;
-        const sliderKey = `mobius${param}_${part}_slider`;
+        const partKey = part === 're' ? 'Re' : 'Im';
+        const sliderKey = `mobius${param}${partKey}Slider`;
 
         bindControlListener(sliderKey, 'input', (_event, slider) => {
-            complexState(stateKey)[part] = parseControlValue(slider, parseFloat, 0);
+            state[stateKey] = {
+                ...complexState(stateKey),
+                [part]: parseControlValue(slider, parseFloat, 0)
+            };
             requestDomainRedraw(true);
         });
 
         bindAnimatedSlider(
             controls[sliderKey],
             value => {
-                complexState(stateKey)[part] = value;
+                state[stateKey] = { ...complexState(stateKey), [part]: value };
             },
-            controls[`play_mobius${param}_${part}_btn`],
-            controls[`speed_mobius${param}_${part}_selector`]
+            controls[`playMobius${param}${partKey}Btn`],
+            controls[`speedMobius${param}${partKey}Selector`]
         );
     }));
 }
@@ -1809,6 +1777,25 @@ function resetFullscreenShell(container) {
     clearStyles(container, ['position', 'top', 'left', 'width', 'height', 'zIndex', 'backgroundColor']);
 }
 
+function rememberFullscreenOrigin(element) {
+    fullscreenOrigins.set(element, {
+        parent: element.parentElement,
+        width: element.style.width,
+        height: element.style.height
+    });
+}
+
+function restoreFullscreenOrigin(element, fallback = null, restoreSize = false) {
+    const origin = fullscreenOrigins.get(element);
+    const parent = origin?.parent || fallback;
+    if (parent) parent.appendChild(element);
+    if (restoreSize) {
+        element.style.width = origin?.width || '';
+        element.style.height = origin?.height || '';
+    }
+    fullscreenOrigins.delete(element);
+}
+
 function bindFullscreenControls() {
     bindControlListener('toggleFullscreenZBtn', 'click', () => handleFullScreenToggle('z'));
     bindControlListener('toggleFullscreenWBtn', 'click', () => handleFullScreenToggle('w', 0));
@@ -1848,7 +1835,7 @@ function toggleLaplace3DFullscreen() {
     state.isLaplace3DFullScreen = !state.isLaplace3DFullScreen;
 
     if (state.isLaplace3DFullScreen) {
-        state.originalLaplace3DParent = container3d.parentElement;
+        rememberFullscreenOrigin(container3d);
         setStyles(shell, fullscreenStyles('#000'));
         attachCloseButton(shell, () => controls.toggleFullscreenLaplace3DBtn.click());
         setStyles(container3d, { width: '100%', height: '100%' });
@@ -1857,7 +1844,7 @@ function toggleLaplace3DFullscreen() {
         shell.classList.remove('hidden');
         if (column3d) column3d.classList.add('hidden-visually');
     } else {
-        if (state.originalLaplace3DParent) state.originalLaplace3DParent.appendChild(container3d);
+        restoreFullscreenOrigin(container3d);
         setStyles(container3d, { width: '100%', height: '100%' });
         resetFullscreenShell(shell);
         if (column3d) column3d.classList.remove('hidden-visually');
@@ -1945,7 +1932,7 @@ export function setupEventListeners() {
     if (uiEventListenersBound) return;
     uiEventListenersBound = true;
 
-    eventBus.on('state:laplaceAnimationPlaying', () => syncLaplacePlayPauseButton());
+    subscribeState(() => syncLaplacePlayPauseButton(), 'laplaceAnimationPlaying');
     BINDERS.forEach(fn => fn());
 
     syncTopControlsCollapseState();
@@ -2181,28 +2168,6 @@ function fullscreenTarget(planeType, index = 0) {
     };
 }
 
-function saveFullscreenOrigin(isZ, element, index = 0) {
-    const prefix = isZ ? 'Z' : `W_${index}`;
-    state[`original${prefix}Parent`] = element.parentElement;
-    state[`original${prefix}Style`] = { width: element.style.width, height: element.style.height };
-}
-
-function restoreFullscreenOrigin(isZ, element, card, index = 0) {
-    const prefix = isZ ? 'Z' : `W_${index}`;
-    const parent = state[`original${prefix}Parent`];
-    const style = state[`original${prefix}Style`];
-
-    if (parent) {
-        parent.appendChild(element);
-        element.style.width = style?.width || '';
-        element.style.height = style?.height || '';
-        return;
-    }
-
-    const fallback = card && card.querySelector('div');
-    if (fallback) fallback.appendChild(element);
-}
-
 function setPlaneFullscreen(isZ, value, index = 0) {
     if (isZ) {
         state.isZFullScreen = value;
@@ -2229,7 +2194,7 @@ function handleFullScreenToggle(planeType, index = 0) {
     const entering = isPlaneFullscreen(target.isZ);
 
     if (entering) {
-        saveFullscreenOrigin(target.isZ, target.element, index);
+        rememberFullscreenOrigin(target.element);
         setStyles(shell, fullscreenStyles('var(--color-background-dark)'));
         attachCloseButton(shell, () => handleFullScreenToggle(planeType, index));
         shell.appendChild(target.element);
@@ -2240,7 +2205,7 @@ function handleFullScreenToggle(planeType, index = 0) {
 
         if (target.isThree && target.canvas) target.canvas.classList.add('hidden');
     } else {
-        restoreFullscreenOrigin(target.isZ, target.element, target.card, index);
+        restoreFullscreenOrigin(target.element, target.card?.querySelector('div'), true);
         resetFullscreenShell(shell);
         if (target.card) target.card.classList.remove('hidden-visually');
         if (target.isThree && target.canvas) target.canvas.classList.remove('hidden');
@@ -2337,6 +2302,10 @@ function algebraicTerms() {
 
     state.algebraicChainingTerms = state.algebraicChainingTerms.map(normalizeAlgebraicTerm);
     return state.algebraicChainingTerms;
+}
+
+function mutateAlgebraicTerms(mutator, path = 'algebraicChainingTerms') {
+    return mutateState('algebraicChainingTerms', mutator, path);
 }
 
 function nearZero(value) {
@@ -2447,7 +2416,7 @@ function renderAlgebraicHeader(term, termIndex) {
     if (algebraicTerms().length > 1) {
         const remove = h('button', { type: 'button', className: 'algebraic-term-remove-btn', text: '✕ Remove' });
         remove.addEventListener('click', () => {
-            state.algebraicChainingTerms.splice(termIndex, 1);
+            mutateAlgebraicTerms(terms => terms.splice(termIndex, 1));
             renderAlgebraicChainingTerms();
             updateTitlesAndGlobalUI();
             syncParameterControlsPanelVisibility();
@@ -2462,11 +2431,11 @@ function renderAlgebraicHeader(term, termIndex) {
 function renderCoefficientControls(term, preview) {
     return h('div', { className: 'algebraic-coeff-grid' }, [
         algebraicRange('Re coeff ', term.coeff.re, (value, immediate) => {
-            term.coeff.re = value;
+            mutateAlgebraicTerms(() => { term.coeff.re = value; }, 'algebraicChainingTerms.coeff.re');
             refreshAlgebraicFormula(preview, term, immediate);
         }),
         algebraicRange('Im coeff ', term.coeff.im, (value, immediate) => {
-            term.coeff.im = value;
+            mutateAlgebraicTerms(() => { term.coeff.im = value; }, 'algebraicChainingTerms.coeff.im');
             refreshAlgebraicFormula(preview, term, immediate);
         })
     ]);
@@ -2484,7 +2453,7 @@ function modifierCheckbox(factor, key, label, onChange) {
     const checkbox = h('input', { type: 'checkbox' });
     checkbox.checked = Boolean(factor[key]);
     checkbox.addEventListener('change', event => {
-        factor[key] = event.target.checked;
+        mutateAlgebraicTerms(() => { factor[key] = event.target.checked; }, `algebraicChainingTerms.factor.${key}`);
         onChange();
     });
 
@@ -2502,7 +2471,9 @@ function renderFactorDetails(term, factor, preview) {
         rows.push(h('div', { className: 'algebraic-factor-detail-row' }, [
             h('span', { className: 'algebraic-factor-label', text: 'Chain f(g(z))' }),
             select(ALGEBRAIC_FUNCTION_OPTIONS, factor.chainedFunc, event => {
-                factor.chainedFunc = event.target.value;
+                mutateAlgebraicTerms(() => {
+                    factor.chainedFunc = event.target.value;
+                }, 'algebraicChainingTerms.factor.chainedFunc');
                 refreshAlgebraicFormula(preview, term);
                 syncParameterControlsPanelVisibility();
             })
@@ -2511,7 +2482,7 @@ function renderFactorDetails(term, factor, preview) {
 
     rows.push(
         algebraicRange('Power ', factor.power === undefined ? 1.0 : factor.power, (value, immediate) => {
-            factor.power = value;
+            mutateAlgebraicTerms(() => { factor.power = value; }, 'algebraicChainingTerms.factor.power');
             refreshAlgebraicFormula(preview, term, immediate);
         }),
         h('div', { className: 'algebraic-checkbox-row' }, [
@@ -2529,7 +2500,7 @@ function renderFactor(term, factor, index, preview) {
         h('div', { className: 'algebraic-factor-main-row' }, [
             h('span', { className: 'algebraic-factor-label', text: `Factor ${index + 1}` }),
             select(ALGEBRAIC_FUNCTION_OPTIONS, factor.func, event => {
-                setFactorFunction(term, index, event.target.value);
+                mutateAlgebraicTerms(() => setFactorFunction(term, index, event.target.value));
                 renderAlgebraicChainingTerms();
                 updateTitlesAndGlobalUI();
                 syncParameterControlsPanelVisibility();
@@ -2933,7 +2904,7 @@ function toggleGraphFullscreen() {
     state.isGraphFullScreen = !state.isGraphFullScreen;
 
     if (state.isGraphFullScreen) {
-        state.originalGraphParent = container.parentElement;
+        rememberFullscreenOrigin(container);
         setStyles(shell, fullscreenStyles('#000'));
         attachCloseButton(shell, () => controls.toggleFullscreenGraphBtn.click());
         setStyles(container, { width: '100%', height: '100%' });
@@ -2942,7 +2913,7 @@ function toggleGraphFullscreen() {
         shell.classList.remove('hidden');
         if (column) column.classList.add('hidden-visually');
     } else {
-        if (state.originalGraphParent) state.originalGraphParent.appendChild(container);
+        restoreFullscreenOrigin(container);
         setStyles(container, { width: '100%', height: '100%' });
         resetFullscreenShell(shell);
         if (column) column.classList.remove('hidden-visually');
@@ -3093,7 +3064,7 @@ function toggleRealPlotsFullscreen() {
     state.isRealPlotsFullScreen = !state.isRealPlotsFullScreen;
 
     if (state.isRealPlotsFullScreen) {
-        state.originalRealPlotsParent = container.parentElement;
+        rememberFullscreenOrigin(container);
         setStyles(shell, fullscreenStyles('#000'));
         attachCloseButton(shell, () => controls.toggleFullscreenRealPlotsBtn.click());
         setStyles(container, { width: '100%', height: '100%' });
@@ -3102,7 +3073,7 @@ function toggleRealPlotsFullscreen() {
         shell.classList.remove('hidden');
         if (column) column.classList.add('hidden-visually');
     } else {
-        if (state.originalRealPlotsParent) state.originalRealPlotsParent.appendChild(container);
+        restoreFullscreenOrigin(container);
         setStyles(container, { width: '100%', height: '100%' });
         resetFullscreenShell(shell);
         if (column) column.classList.remove('hidden-visually');
@@ -3124,7 +3095,7 @@ function toggleContour2DFullscreen() {
     state.isContour2DFullScreen = !state.isContour2DFullScreen;
 
     if (state.isContour2DFullScreen) {
-        state.originalContour2DParent = container.parentElement;
+        rememberFullscreenOrigin(container);
         setStyles(shell, fullscreenStyles('#000'));
         attachCloseButton(shell, () => controls.toggleFullscreenContour2DBtn.click());
         setStyles(container, { width: '100%', height: '100%' });
@@ -3133,7 +3104,7 @@ function toggleContour2DFullscreen() {
         shell.classList.remove('hidden');
         if (column) column.classList.add('hidden-visually');
     } else {
-        if (state.originalContour2DParent) state.originalContour2DParent.appendChild(container);
+        restoreFullscreenOrigin(container);
         setStyles(container, { width: '100%', height: '100%' });
         resetFullscreenShell(shell);
         if (column) column.classList.remove('hidden-visually');

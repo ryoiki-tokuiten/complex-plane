@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
-import { requestRedrawAll } from '../main.js';
+import { requestRedrawAll } from './redraw-scheduler.js';
 import { getChainedTransformFunction } from '../math-utils.js';
 
 

@@ -1,4 +1,4 @@
-import { state } from '../store/state.js';
+import { state, mutateState } from '../store/state.js';
 import {
     applyDynamicPlottingPreset,
     getDynamicPlotResult,
@@ -24,6 +24,7 @@ import {
     createProductFactor,
     decomposeProductExpression
 } from '../math/expression/index.js';
+import { createElement, createSelect } from './dom-components.js';
 
 const SOURCE_GROUPS = Object.freeze({
     integers: [],
@@ -103,7 +104,9 @@ function synchronizeTermBindingState() {
             term.bindings || []
         );
         if (JSON.stringify(next) !== JSON.stringify(term.bindings || [])) {
-            term.bindings = next;
+            mutateState('dynamicPlotting', dynamic => {
+                dynamic.term.bindings = next;
+            }, 'dynamicPlotting.term.bindings');
         }
     } catch {
         // The formula error is presented by the main validation status.
@@ -125,10 +128,7 @@ function setChecked(id, value) {
 }
 
 function textNode(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    node.textContent = text;
-    return node;
+    return createElement(tag, { className, text });
 }
 
 function finiteNumber(value, fallback) {
@@ -141,8 +141,10 @@ function integer(value, fallback) {
 }
 
 function update(mutator, options = {}) {
-    mutator(config());
-    if (!options.preservePreset) config().preset = 'custom';
+    mutateState('dynamicPlotting', dynamic => {
+        mutator(dynamic);
+        if (!options.preservePreset) dynamic.preset = 'custom';
+    });
     invalidateDynamicPlotting();
     syncDynamicPlottingUI();
     redraw(options.domainDirty !== false);
@@ -606,17 +608,7 @@ function formatParameterValue(value) {
 }
 
 function optionSelect(options, value, onChange, className = 'control-select') {
-    const select = document.createElement('select');
-    select.className = className;
-    for (const option of options) {
-        const node = document.createElement('option');
-        node.value = option.id;
-        node.textContent = option.label;
-        select.appendChild(node);
-    }
-    select.value = value;
-    select.addEventListener('change', onChange);
-    return select;
+    return createSelect(options, value, onChange, className);
 }
 
 function labeledControl(label, control, hint = '') {
@@ -1070,7 +1062,11 @@ function syncPlayback() {
     const slider = element('dynamic_visible_count_slider');
     const number = element('dynamic_visible_count_number');
     const visible = Math.max(0, Math.min(count, integer(config().playback.visibleCount, count)));
-    if (config().playback.visibleCount !== visible) config().playback.visibleCount = visible;
+    if (config().playback.visibleCount !== visible) {
+        mutateState('dynamicPlotting', dynamic => {
+            dynamic.playback.visibleCount = visible;
+        }, 'dynamicPlotting.playback.visibleCount');
+    }
 
     if (slider) {
         slider.max = String(Math.max(1, count));
@@ -1159,14 +1155,16 @@ function animationFrame(timestamp) {
         const count = availableCount();
         let next = config().playback.visibleCount + Math.floor(increment);
         lastAnimationTime = timestamp;
-        if (next > count) {
-            if (config().playback.loop) next = count > 0 ? 1 : 0;
-            else {
-                next = count;
-                config().playback.playing = false;
+        mutateState('dynamicPlotting', dynamic => {
+            if (next > count) {
+                if (dynamic.playback.loop) next = count > 0 ? 1 : 0;
+                else {
+                    next = count;
+                    dynamic.playback.playing = false;
+                }
             }
-        }
-        config().playback.visibleCount = next;
+            dynamic.playback.visibleCount = next;
+        }, 'dynamicPlotting.playback');
         invalidateDynamicPlotting();
         syncPlayback();
         renderStatus();
@@ -1222,7 +1220,9 @@ function bindParameterEvents() {
         const card = event.target.closest('.dynamic-parameter-card');
         const index = integer(card?.dataset.parameterIndex, -1);
         if (!config().parameters[index]) return;
-        config().parameters[index].value = finiteNumber(event.target.value, 0);
+        mutateState('dynamicPlotting', dynamic => {
+            dynamic.parameters[index].value = finiteNumber(event.target.value, 0);
+        }, `dynamicPlotting.parameters.${index}.value`);
         invalidateDynamicPlotting();
         const valueInput = card.querySelector('.dynamic-parameter-value');
         if (valueInput) valueInput.value = event.target.value;
@@ -1376,7 +1376,9 @@ function bindControls() {
     bind('dynamic_step_forward_btn', 'click', () => setVisibleCount(config().playback.visibleCount + 1));
     bind('dynamic_reset_playback_btn', 'click', () => setVisibleCount(0));
     bind('dynamic_play_pause_btn', 'click', () => {
-        config().playback.playing = !config().playback.playing;
+        mutateState('dynamicPlotting', dynamic => {
+            dynamic.playback.playing = !dynamic.playback.playing;
+        }, 'dynamicPlotting.playback.playing');
         syncPlayback();
         startAnimation();
     });

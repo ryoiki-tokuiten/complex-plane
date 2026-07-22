@@ -1,5 +1,4 @@
-import { state, context } from '../store/state.js';
-import { eventBus } from '../store/events.js';
+import { state, context, subscribeState } from '../store/state.js';
 import {
   createWebGLProgramShared,
   getWebGLDomainColorFunctionIdShared,
@@ -1091,11 +1090,14 @@ function serializeProgramMathForCache() {
 let mathRendererHashCached = '';
 let mathRendererHashDirty = true;
 
-if (typeof eventBus !== 'undefined' && eventBus.on) {
-  eventBus.on('state:change', () => {
-    mathRendererHashDirty = true;
-  });
-}
+subscribeState(() => {
+  mathRendererHashDirty = true;
+}, [
+  'currentFunction', 'mapPresentation', 'algebraicChainingEnabled',
+  'algebraicChainingZExpr', 'algebraicChainingTerms', 'dynamicPlotting',
+  'chainingEnabled', 'chainingMode', 'chainCount', 'taylorSeriesEnabled',
+  'taylorSeriesOrder', 'zetaContinuationEnabled', 'fractionalPowerN'
+]);
 
 function refreshMathRendererIfNeeded() {
   if (!webglDomainColorSupport) return false;
@@ -1582,4 +1584,3 @@ export function getGPUBackendStatus() {
 if (typeof window !== 'undefined') {
   window.getGPUBackendStatus = getGPUBackendStatus;
 }
-

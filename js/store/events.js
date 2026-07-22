@@ -2,19 +2,26 @@ class EventBus {
     constructor() {
         this.listeners = new Map();
     }
+
     on(event, callback) {
         if (!this.listeners.has(event)) {
-            this.listeners.set(event, []);
+            this.listeners.set(event, new Set());
         }
-        this.listeners.get(event).push(callback);
+        this.listeners.get(event).add(callback);
+        return () => this.off(event, callback);
     }
+
     off(event, callback) {
-        if (!this.listeners.has(event)) return;
-        this.listeners.set(event, this.listeners.get(event).filter(cb => cb !== callback));
+        const callbacks = this.listeners.get(event);
+        if (!callbacks) return;
+        callbacks.delete(callback);
+        if (callbacks.size === 0) this.listeners.delete(event);
     }
+
     emit(event, data) {
-        if (!this.listeners.has(event)) return;
-        this.listeners.get(event).forEach(callback => {
+        const callbacks = this.listeners.get(event);
+        if (!callbacks) return;
+        [...callbacks].forEach(callback => {
             try {
                 callback(data);
             } catch (err) {
@@ -23,4 +30,5 @@ class EventBus {
         });
     }
 }
+
 export const eventBus = new EventBus();

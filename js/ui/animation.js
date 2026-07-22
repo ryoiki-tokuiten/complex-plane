@@ -1,5 +1,5 @@
-import { state, context } from '../store/state.js';
-import { requestRedrawAll } from '../main.js';
+import { state, context, mutateState } from '../store/state.js';
+import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 
 const { animationStates } = context;
 
@@ -61,7 +61,9 @@ export function toggleAnimation(sliderElement, stateUpdateFn, playButton, speedS
 
             if (isPolyCoeff) {
                 if (state.polynomialCoeffs[polyCoeffIndex]) {
-                    state.polynomialCoeffs[polyCoeffIndex][polyCoeffPart] = newNumericValue;
+                    mutateState('polynomialCoeffs', coefficients => {
+                        coefficients[polyCoeffIndex][polyCoeffPart] = newNumericValue;
+                    }, `polynomialCoeffs.${polyCoeffIndex}.${polyCoeffPart}`);
                 }
             } else {
                 stateUpdateFn(newNumericValue); 

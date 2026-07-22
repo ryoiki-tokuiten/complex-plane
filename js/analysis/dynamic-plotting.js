@@ -1,4 +1,4 @@
-import { context, state } from '../store/state.js';
+import { context, state, mutateState } from '../store/state.js';
 import {
     complexAbs,
     setActiveTransformProvider,
@@ -740,15 +740,17 @@ export function applyDynamicPlottingPreset(presetId) {
     const preset = PRESETS[presetId];
     if (!preset) throw new Error(`Unknown Dynamic Plotting preset "${presetId}"`);
 
-    mergeConfig(state.dynamicPlotting, clonePlain(preset.config));
-    state.dynamicPlotting.preset = presetId;
-    state.dynamicPlotting.playback.visibleCount = Math.min(
-        Number(state.dynamicPlotting.source.count) || 0,
-        Number(state.dynamicPlotting.playback.visibleCount) || Number(state.dynamicPlotting.source.count) || 0
-    );
-    if (presetId !== 'custom') {
-        state.dynamicPlotting.playback.visibleCount = Number(state.dynamicPlotting.source.count) || 0;
-    }
+    mutateState('dynamicPlotting', dynamic => {
+        mergeConfig(dynamic, clonePlain(preset.config));
+        dynamic.preset = presetId;
+        dynamic.playback.visibleCount = Math.min(
+            Number(dynamic.source.count) || 0,
+            Number(dynamic.playback.visibleCount) || Number(dynamic.source.count) || 0
+        );
+        if (presetId !== 'custom') {
+            dynamic.playback.visibleCount = Number(dynamic.source.count) || 0;
+        }
+    });
     invalidateDynamicPlotting();
 }
 

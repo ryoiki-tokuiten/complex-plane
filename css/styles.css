@@ -21,6 +21,11 @@
     padding: 0;
 }
 
+.formula-note {
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
 html {
     scroll-behavior: smooth;
 }

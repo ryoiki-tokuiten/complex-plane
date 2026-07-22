@@ -7,7 +7,6 @@ import {
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
 import { updatePolynomialCoeffDisplays } from './polynomial-ui.js';
-import { syncLaplacePlayPauseButton } from './event-listeners.js';
 import { syncVideoPlaybackUI } from '../utils/raster-media.js';
 import { findTaylorCenterPreset, formatTaylorNumericValue, getChainingTitleHTML } from '../utils/dom-utils.js';
 import { syncNavigationControls } from '../navigation-plane.js';
@@ -20,12 +19,19 @@ import { renderDomainPalettesUI, domainPalettes, renderRealPlotsPalettesUI, real
 import { startRiemannTransformationAnimation, stopRiemannTransformationAnimation, syncRiemannTransformationPlayPauseButton, initThreeJSRenderers, buildThreeJSMeshes, syncRiemannSliders, disposeThreeJSRenderers } from '../rendering/riemann-transformation-animation.js';
 import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
 import { createExpressionMathML } from '../math/expression/index.js';
+import { createFormulaFragment } from './dom-components.js';
 
 const { controls = {} } = context;
 
 const HIDDEN_CLASS = 'hidden';
 const VISUALLY_HIDDEN_CLASS = 'hidden-visually';
 const EPS = 1e-9;
+
+export function syncLaplacePlayPauseButton() {
+    if (controls.laplacePlayPauseBtn) {
+        controls.laplacePlayPauseBtn.textContent = state.laplaceAnimationPlaying ? '⏸ Pause' : '▶ Play';
+    }
+}
 
 const TRANSFORM_MODE_PARAMETER_GROUPS = Object.freeze([
     'commonParamsSliders',
@@ -297,6 +303,13 @@ function syncValueBindings(bindings) {
 
 function safeArray(value) {
     return Array.isArray(value) ? value : [];
+}
+
+function escapeFormulaText(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
 }
 
 function finiteComplex(value) {
@@ -777,7 +790,7 @@ function baseFunctionHtml(funcKey) {
 
 function argumentFunctionHtml(funcKey) {
     const zExpr = state.algebraicChainingZExpr && state.algebraicChainingZExpr !== 'z'
-        ? state.algebraicChainingZExpr
+        ? escapeFormulaText(state.algebraicChainingZExpr)
         : 'z';
 
     if (funcKey === 'c') {
@@ -802,7 +815,7 @@ function formatFuncForFormula(funcKey, termFactor = null) {
     }
 
     const zExpr = state.algebraicChainingZExpr && state.algebraicChainingZExpr !== 'z'
-        ? state.algebraicChainingZExpr
+        ? escapeFormulaText(state.algebraicChainingZExpr)
         : 'z';
 
     const base = baseFunctionHtml(funcKey);
@@ -949,7 +962,7 @@ function recursiveChainFormula(baseFormula, chainCount) {
         repeatedF += '... f(z)';
         for (let i = 0; i < Math.min(chainCount, 3); i++) repeatedF += ')';
         
-        return `${repeatedF} <span style="font-size:0.85em; opacity:0.8;">[${chainCount} times, where f(z) = ${baseFormula}]</span>`;
+        return `${repeatedF} <span class="formula-note">[${chainCount} times, where f(z) = ${baseFormula}]</span>`;
     }
 
     const symbol = compositionSymbol();
@@ -976,7 +989,7 @@ function getChainedFormula(baseFormula, chainingMode, chainCount) {
             repeatedFZero += '... f(0)';
             for (let i = 0; i < Math.min(chainCount, 3); i++) repeatedFZero += ')';
             
-            return `${repeatedFZero} <span style="font-size:0.85em; opacity:0.8;">[${chainCount} times, where f(z, c) = ${baseFormula}]</span>`;
+            return `${repeatedFZero} <span class="formula-note">[${chainCount} times, where f(z, c) = ${baseFormula}]</span>`;
         case 'recursion':
         default:
             return recursiveChainFormula(baseFormula, chainCount);
@@ -1078,27 +1091,20 @@ function syncPrimaryPlaneTitles() {
             if (state.realPlotsOutputComponent === 'imag') compPrefix = 'Im';
             else if (state.realPlotsOutputComponent === 'magnitude') compPrefix = '|';
 
-            let fND = model.fND;
-            let formulaText = '';
-            if (model.hasOutputChain) {
-                formulaText = `w = ${model.fND}`;
-            } else {
-                formulaText = `f(z) = ${model.fND}`;
-            }
-
             let displayFormula = `z = ${compPrefix}( ${model.hasOutputChain ? 'w' : 'f(z)'} )`;
             if (state.realPlotsOutputComponent === 'magnitude') {
                 displayFormula = `z = | ${model.hasOutputChain ? 'w' : 'f(z)'} |`;
             }
 
-            let zinText = '';
-            if (state.realPlotsImagExpr === '0') {
-                zinText = state.realPlotsInputExpr;
-            } else {
-                zinText = `${state.realPlotsInputExpr} + i·${state.realPlotsImagExpr}`;
-            }
+            const zinText = state.realPlotsImagExpr === '0'
+                ? state.realPlotsInputExpr
+                : `${state.realPlotsInputExpr} + i·${state.realPlotsImagExpr}`;
 
-            label.innerHTML = `Real Plot (3D Surface): ${displayFormula}, where ${formulaText}, z = ${zinText}`;
+            label.replaceChildren(
+                document.createTextNode(`Real Plot (3D Surface): ${displayFormula}, where ${model.hasOutputChain ? 'w' : 'f(z)'} = `),
+                createFormulaFragment(model.fND),
+                document.createTextNode(`, z = ${zinText}`)
+            );
         }
         return;
     } else {

@@ -1,6 +1,6 @@
-import { state, context } from '../store/state.js';
+import { state, context, mutateState } from '../store/state.js';
 import { toggleAnimation } from './animation.js';
-import { requestRedrawAll } from '../main.js';
+import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 
 const { controls, polynomialCoeffUIElements, animationStates } = context;
 
@@ -133,14 +133,18 @@ export function generatePolynomialCoeffSliders() {
 
         
         reSlider.addEventListener('input', () => {
-            state.polynomialCoeffs[k].re = parseFloat(reSlider.value);
+            mutateState('polynomialCoeffs', coefficients => {
+                coefficients[k].re = parseFloat(reSlider.value);
+            }, `polynomialCoeffs.${k}.re`);
             context.domainColoringDirty = true;
             requestRedrawAll(); 
         });
         rePlayBtn.addEventListener('click', () => toggleAnimation(reSlider, '', rePlayBtn, reSpeedSel, true, k, 're'));
 
         imSlider.addEventListener('input', () => {
-            state.polynomialCoeffs[k].im = parseFloat(imSlider.value);
+            mutateState('polynomialCoeffs', coefficients => {
+                coefficients[k].im = parseFloat(imSlider.value);
+            }, `polynomialCoeffs.${k}.im`);
             context.domainColoringDirty = true;
             requestRedrawAll(); 
         });

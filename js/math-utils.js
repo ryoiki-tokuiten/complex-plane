@@ -1,17 +1,24 @@
-import { state } from './store/state.js';
+import { state, subscribeState } from './store/state.js';
 import { compileExpression } from './math/expression/evaluator.js';
-import { eventBus } from './store/events.js';
 
 let cachesDirty = true;
 const mappedProfileCache = new Map();
 const chainedFuncCache = new Map();
 
-if (typeof eventBus !== 'undefined' && eventBus.on) {
-    eventBus.on('state:change', () => {
-        cachesDirty = true;
-        invalidateHotPathCaches();
-    });
-}
+const TRANSFORM_STATE_KEYS = new Set([
+    'a0', 'b0', 'currentFunction', 'mapPresentation',
+    'mobiusA', 'mobiusB', 'mobiusC', 'mobiusD',
+    'polynomialN', 'polynomialCoeffs', 'fractionalPowerN',
+    'zetaContinuationEnabled', 'chainingEnabled', 'chainingMode', 'chainCount',
+    'algebraicChainingEnabled', 'algebraicChainingZExpr', 'algebraicChainingTerms',
+    'taylorSeriesEnabled', 'taylorSeriesOrder', 'taylorSeriesCenter',
+    'dynamicPlotting', 'fourierModeEnabled', 'laplaceModeEnabled'
+]);
+
+subscribeState(() => {
+    cachesDirty = true;
+    invalidateHotPathCaches();
+}, TRANSFORM_STATE_KEYS);
 
 import {
     POLE_MAGNITUDE_THRESHOLD,
