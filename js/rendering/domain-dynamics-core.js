@@ -1,7 +1,6 @@
 const ZERO = Object.freeze({ re: 0, im: 0 });
 const ONE = Object.freeze({ re: 1, im: 0 });
 const TWO_PI = 2 * Math.PI;
-const PI = Math.PI;
 const DEFAULT_FRACTIONAL_POWER = 0.5;
 const DOMAIN_LIGHTNESS_MIN = 0.34;
 const DOMAIN_LIGHTNESS_MAX = 0.72;
@@ -463,7 +462,7 @@ function evaluateAlgebraicChaining(z, snapshot, context = null) {
         if (algebraicZExprCacheKey !== snapshot.algebraicChainingZExpr) {
             try {
                 algebraicZExprCompiled = compileExpression(snapshot.algebraicChainingZExpr, { allowedVariables: ['z'] });
-            } catch (e) {
+            } catch {
                 algebraicZExprCompiled = null;
             }
             algebraicZExprCacheKey = snapshot.algebraicChainingZExpr;
@@ -479,7 +478,7 @@ function evaluateAlgebraicChaining(z, snapshot, context = null) {
                 return { re: NaN, im: NaN };
             }
             if (!validComplex(point)) return { re: NaN, im: NaN };
-        } catch (e) {
+        } catch {
             return { re: NaN, im: NaN };
         }
     }
@@ -1292,14 +1291,6 @@ function evaluatePrimitiveExpressionInto(expr, zr, zi, cr, ci, out) {
     return out;
 }
 
-function zetaPowFromLogComponents(logBase, expRe, expIm, out) {
-    const magnitude = expSafe(expRe * logBase);
-    const angle = expIm * logBase;
-    out[0] = magnitude * Math.cos(angle);
-    out[1] = magnitude * Math.sin(angle);
-    return out;
-}
-
 function zetaComponents(re, im, continuationEnabled, out) {
     if (!continuationEnabled) {
         if (re <= ZETA_REFLECTION_POINT_RE) {
@@ -1598,21 +1589,6 @@ function mobiusComponentsCompiled(accelerator, re, im, out) {
     const dr = accelerator.mobiusCRe * re - accelerator.mobiusCIm * im + accelerator.mobiusDRe;
     const di = accelerator.mobiusCRe * im + accelerator.mobiusCIm * re + accelerator.mobiusDIm;
     return divideComponents(nr, ni, dr, di, out);
-}
-
-function evaluateCompiledBuiltinInto(accelerator, functionKey, re, im, cr, ci, out) {
-    return evaluatePrimitiveVmFunctionInto(accelerator, vmFunctionCode(functionKey), re, im, cr, ci, out);
-}
-
-function evaluateCompiledBlockInto(accelerator, block, zr, zi, cr, ci, out) {
-    const ops = [];
-    const args = [];
-    compilePrimitiveAlgebraicBlock(block, ops, args);
-    const transient = {
-        ops: Int16Array.from(ops),
-        opArgs: Float64Array.from(args)
-    };
-    return evaluatePrimitiveFactorInto(transient, 0, ops.length, zr, zi, cr, ci, out);
 }
 
 function evaluatePrimitiveFactorInto(accelerator, start, end, zr, zi, cr, ci, out) {
@@ -2369,20 +2345,6 @@ function writeStyledColorComponents(data, idx, baseR, baseG, baseB, lightness, s
     data[idx + 1] = byteFromUnit(g);
     data[idx + 2] = byteFromUnit(b);
     data[idx + 3] = 255;
-}
-
-function paletteBaseComponents(context, h) {
-    const hue = Math.min(0.999999, Math.max(0, h));
-    const value = hue * context.paletteLast;
-    const idx = Math.min(context.paletteLast - 1, Math.floor(value));
-    const t = value - idx;
-    const a = context.palette[idx];
-    const b = context.palette[idx + 1];
-    return {
-        r: a[0] * (1 - t) + b[0] * t,
-        g: a[1] * (1 - t) + b[1] * t,
-        b: a[2] * (1 - t) + b[2] * t
-    };
 }
 
 function writeDomainColorWithContext(data, idx, re, im, context) {

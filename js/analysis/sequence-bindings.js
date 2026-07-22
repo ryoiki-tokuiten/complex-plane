@@ -223,7 +223,7 @@ function createLazyEnvironments(valueSets, symbols, count) {
             if (row < 0) return Reflect.getOwnPropertyDescriptor(array, property);
             return { value: materialize(row), writable: true, enumerable: true, configurable: true };
         },
-        ownKeys(array) {
+        ownKeys() {
             const keys = new Array(count + 1);
             for (let index = 0; index < count; index++) keys[index] = String(index);
             keys[count] = 'length';

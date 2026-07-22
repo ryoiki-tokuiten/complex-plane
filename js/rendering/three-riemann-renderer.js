@@ -263,7 +263,7 @@ export class ThreeRiemannRenderer {
             if (pointSet.color) {
                 try {
                     colorHex = new THREE.Color(pointSet.color);
-                } catch(e) {}
+                } catch {}
             }
 
             const material = new THREE.LineBasicMaterial({

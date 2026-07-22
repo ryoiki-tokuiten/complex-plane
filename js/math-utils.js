@@ -51,7 +51,6 @@ const realOf = value => value?.re ?? value?.real ?? 0;
 const imagOf = value => value?.im ?? value?.imag ?? 0;
 const argRe = value => isObject(value) ? realOf(value) : (value ?? 0);
 const argIm = (value, fallback = 0) => isObject(value) ? imagOf(value) : (fallback ?? 0);
-const resultComplex = (re, im) => ({ re, im });
 
 function divideRaw(nRe, nIm, dRe, dIm) {
     const absRe = Math.abs(dRe);
@@ -130,10 +129,6 @@ function divideRawInto(nRe, nIm, dRe, dIm, out, offset = 0) {
 function reciprocalRaw(re, im) {
     if (re === 0 && im === 0) return { re: NaN, im: NaN };
     return divideRaw(1, 0, re, im);
-}
-
-function multiplyRaw(aRe, aIm, bRe, bIm) {
-    return { re: aRe * bRe - aIm * bIm, im: aRe * bIm + aIm * bRe };
 }
 
 function expRaw(re, im) {
@@ -319,7 +314,6 @@ function zetaEtaDenominator(a, b) {
     return { re: 1 - magnitude * Math.cos(angle), im: -magnitude * Math.sin(angle) };
 }
 
-const hypotComplex = value => Math.hypot(value.re, value.im);
 const cloneComplex = value => ({ re: value.re, im: value.im });
 const complex = (re = 0, im = 0) => ({ re, im });
 
@@ -331,10 +325,6 @@ function normalizeUnaryComplexArgs(a, b) {
     return isObject(a) ? toComplex(a) : complex(a ?? 0, b ?? 0);
 }
 
-function normalizeBinaryComplexArgs(left, right) {
-    return [toComplex(left), toComplex(right)];
-}
-
 function validComplex(value) {
     return !!value && finite(value.re) && finite(value.im);
 }
@@ -343,22 +333,10 @@ function invalidComplex(value) {
     return !validComplex(value);
 }
 
-function finiteComplexOrNaN(value) {
-    return validComplex(value) ? value : { re: NaN, im: NaN };
-}
-
 function addInto(target, value, scale = 1) {
     target.re += value.re * scale;
     target.im += value.im * scale;
     return target;
-}
-
-function scalarComplex(value, scale) {
-    return { re: value.re * scale, im: value.im * scale };
-}
-
-function zeroLike() {
-    return { re: 0, im: 0 };
 }
 
 
@@ -396,11 +374,11 @@ function invalidateHotPathCaches() {
     algebraicKernel = null;
 }
 
-export function withMaxMag(res, ...inputs) {
+export function withMaxMag(res) {
     return res;
 }
 
-export function isNumericallyStable(w) {
+export function isNumericallyStable() {
     return true;
 }
 
@@ -931,7 +909,7 @@ function createPolynomialEvalKernel(degree) {
     code += `out[offset]=accRe;out[offset+1]=accIm;return out;`;
     try {
         return Function(`return function polynomialEvalKernel(zRe,zIm,out,offset){${code}};`)();
-    } catch (error) {
+    } catch {
         return null;
     }
 }
@@ -1408,7 +1386,7 @@ function createGeneratedAlgebraicKernel(compiledTerms) {
         };
         wrapper.raw = raw;
         return wrapper;
-    } catch (error) {
+    } catch {
         return null;
     }
 }
@@ -1656,7 +1634,7 @@ export function evaluateAlgebraicChaining(z_re, z_im, context = null) {
         if (algebraicZExprCacheKey !== state.algebraicChainingZExpr) {
             try {
                 algebraicZExprCompiled = compileExpression(state.algebraicChainingZExpr, { allowedVariables: ['z'] });
-            } catch (e) {
+            } catch {
                 algebraicZExprCompiled = null;
             }
             algebraicZExprCacheKey = state.algebraicChainingZExpr;
@@ -1672,7 +1650,7 @@ export function evaluateAlgebraicChaining(z_re, z_im, context = null) {
                 return NAN_COMPLEX;
             }
             if (invalidComplex(z)) return NAN_COMPLEX;
-        } catch (e) {
+        } catch {
             return NAN_COMPLEX;
         }
     }
@@ -1745,9 +1723,6 @@ const MAPPED_TRANSFORM_DIAGNOSTIC_STENCIL = Object.freeze([
     Object.freeze({ re: 2.75, im: 2.25 }),
     Object.freeze({ re: -2.5, im: -2.25 })
 ]);
-
-let mappedTransformProfileCacheKey = null;
-let mappedTransformProfileCacheValue = null;
 
 export function mappedTransformNumberKey(value) {
     return finite(value) ? value.toFixed(12) : `${value}`;
@@ -2470,36 +2445,6 @@ function cacheTaylorCoefficients(cacheKey, coefficients) {
     taylorSeriesCoefficientCache.coefficients = coefficients;
     return coefficients;
 }
-
-function computeCauchyCoefficients(originalTransformFunc, z0Complex, contourPoints, order) {
-    const integrals = Array.from({ length: order + 1 }, zeroLike);
-
-    for (let i = 0; i < contourPoints.length - 1; i++) {
-        const a = contourPoints[i];
-        const b = contourPoints[i + 1];
-        const dz = complexSub(b, a);
-        const mid = { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 };
-        const functionValue = originalTransformFunc(mid.re, mid.im);
-
-        if (!isFiniteComplex(functionValue)) return null;
-
-        const delta = { re: mid.re - z0Complex.re, im: mid.im - z0Complex.im };
-        const inverseDelta = complexReciprocal(delta);
-
-        if (!isFiniteComplex(inverseDelta)) return null;
-
-        let inversePower = inverseDelta;
-
-        for (let n = 0; n <= order; n++) {
-            addInto(integrals[n], complexMul(complexMul(functionValue, inversePower), dz));
-            inversePower = complexMul(inversePower, inverseDelta);
-        }
-    }
-
-    const coefficients = integrals.map(integral => complexDivide(integral, { re: 0, im: TWO_PI }));
-    return coefficients.every(isFiniteComplex) ? coefficients : null;
-}
-
 
 function computeCauchyCoefficientsOnCircle(originalTransformFunc, z0Complex, radius, stepCount, order) {
     const accRe = new Float64Array(order + 1);

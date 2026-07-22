@@ -1,5 +1,4 @@
 import { state, zPlaneParams } from '../store/state.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
 import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
 import { generateCurrentInputShapePointSets, generateCurrentMappedInputShapePointSets } from './shape-generators.js';
 import { resolveActiveMap } from '../math/active-map.js';

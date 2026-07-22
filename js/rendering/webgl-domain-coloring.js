@@ -564,18 +564,6 @@ function uniformInt(value, fallback) {
   return Number.isFinite(number) ? Math.trunc(number) : fallback;
 }
 
-function finiteRange(candidate) {
-  if (!Array.isArray(candidate) || candidate.length < 2) return null;
-
-  const start = Number(candidate[0]);
-  const end = Number(candidate[1]);
-  return Number.isFinite(start) && Number.isFinite(end) ? [start, end] : null;
-}
-
-function chooseRange(primary, fallback) {
-  return finiteRange(primary) || finiteRange(fallback);
-}
-
 function recordFromPlanes(factory) {
   return Object.fromEntries(PLANES.map((plane) => [plane, factory(plane)]));
 }
@@ -676,7 +664,7 @@ function registerUniformSlot(slots, location, slot) {
   if (location === null || location === undefined) return;
   try {
     slots.set(location, slot);
-  } catch (_error) {
+  } catch {
     // Host WebGLUniformLocation objects are normally WeakMap-compatible; this
     // fallback keeps unusual test doubles functional without changing output.
   }

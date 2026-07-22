@@ -81,6 +81,16 @@ test('Preact controls preserve the public DOM and interaction contract', async (
         element.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await expect(page.locator('#dynamic_sequence_bindings_list input[type="number"]')).toHaveCount(2);
+
+    await page.locator('#enable_real_plots_cb').evaluate(element => {
+        element.checked = true;
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    for (const part of ['input', 'imag']) {
+        await page.locator(`#real_plots_${part}_preset`).selectOption('custom');
+        await expect(page.locator(`#real_plots_custom_${part}_container`)).not.toHaveClass(/hidden/);
+        await page.locator(`#real_plots_custom_${part}`).fill(part === 'input' ? 'x + y' : 'x - y');
+    }
     expect(errors).toEqual([]);
 });
 

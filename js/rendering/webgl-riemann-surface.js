@@ -141,7 +141,6 @@ const SHADER_LIBRARY_CACHE = new Map();
 const SHADER_LIBRARY_CACHE_LIMIT = 256;
 
 const EMPTY_ARRAY = Object.freeze([]);
-const OBJECT_HAS_OWN = Object.prototype.hasOwnProperty;
 const ZERO_COMPLEX = Object.freeze({ re: 0, im: 0 });
 const UINT16_INDEX_LIMIT = 0xffff;
 
@@ -217,22 +216,6 @@ function finiteInteger(value, fallback = 0) {
   return Number.isFinite(value) ? Math.floor(value) : fallback;
 }
 
-function tableValue(table, key, fallback) {
-  return OBJECT_HAS_OWN.call(table, key) ? table[key] : fallback;
-}
-
-function getChainModeId(mode) {
-  return tableValue(CHAIN_MODE_IDS, mode, CHAIN_MODE_IDS.recursion);
-}
-
-function getSurfaceComponentId(component) {
-  return tableValue(SURFACE_COMPONENT_IDS, component, SURFACE_COMPONENT_IDS.imaginary);
-}
-
-function getPaletteId(palette) {
-  return getDomainPaletteShaderId(palette);
-}
-
 function normalizeStage(stage) {
   return clamp(finiteInteger(stage, LIMITS.minStage), LIMITS.minStage, LIMITS.maxStage);
 }
@@ -245,18 +228,6 @@ function normalizeResolution(gridDensity) {
 function normalizeRendererResolution(gridDensity, supportsUint32Indices) {
   const resolution = normalizeResolution(gridDensity);
   return supportsUint32Indices ? resolution : Math.min(resolution, LIMITS.uint16MaxResolution);
-}
-
-function readRange(range, fallbackMin, fallbackMax) {
-  return Array.isArray(range) && range.length >= 2
-    ? [finiteNumber(range[0], fallbackMin), finiteNumber(range[1], fallbackMax)]
-    : [fallbackMin, fallbackMax];
-}
-
-function rangeValue(range, index, fallback) {
-  return Array.isArray(range) && range.length > index
-    ? finiteNumber(range[index], fallback)
-    : fallback;
 }
 
 function rememberBounded(cache, key, value, limit) {
@@ -1252,29 +1223,6 @@ function disposeMeshCache(gl, meshCache) {
   meshCache.clear();
 }
 
-function formulaRefsFunction(algebraicTerms, dynamicTerms, algebraicZ, functionName) {
-  if (typeof algebraicZ === 'string' && algebraicZ.includes(functionName)) return true;
-
-  if (Array.isArray(algebraicTerms)) {
-    for (let termIndex = 0; termIndex < algebraicTerms.length; termIndex++) {
-      const factors = algebraicTerms[termIndex] && algebraicTerms[termIndex].factors;
-      if (!Array.isArray(factors)) continue;
-      for (let factorIndex = 0; factorIndex < factors.length; factorIndex++) {
-        const factor = factors[factorIndex];
-        if (factor && (factor.func === functionName || factor.chainedFunc === functionName)) return true;
-      }
-    }
-  }
-
-  if (Array.isArray(dynamicTerms)) {
-    for (let index = 0; index < dynamicTerms.length; index++) {
-      if (dynamicTerms[index] && dynamicTerms[index].func === functionName) return true;
-    }
-  }
-
-  return false;
-}
-
 function algebraicStructureSignature(algebraicTerms) {
   const terms = Array.isArray(algebraicTerms) ? algebraicTerms : EMPTY_ARRAY;
   let signature = '[';
@@ -1307,7 +1255,6 @@ function getProgramSignature(appState) {
   const algebraic = algebraicTermsArray(appState);
   const algebraicZ = appState.algebraicChainingZExpr || 'z';
   const dynamicActive = isDynamicAggregateGLSLActive(appState);
-  const dynamicTerms = dynamicActive ? (appState.dynamicAggregateTerms || EMPTY_ARRAY) : EMPTY_ARRAY;
   const algebraicSignature = algebraicStructureSignature(algebraic);
   const dynamicSignature = dynamicActive
     ? dynamicAggregateGLSLSignature(appState)
@@ -1323,16 +1270,11 @@ function getProgramSignature(appState) {
     return cached.signature;
   }
 
-  const usesPolynomial = formulaRefsFunction(algebraic, dynamicTerms, algebraicZ, 'polynomial');
-  const usesMobius = formulaRefsFunction(algebraic, dynamicTerms, algebraicZ, 'mobius');
-
   PROGRAM_SIGNATURE_BY_STATE.set(appState, {
     algebraicZ,
     dynamicActive,
     algebraicSignature,
     dynamicSignature,
-    usesPolynomial,
-    usesMobius,
     signature
   });
 
@@ -1422,16 +1364,6 @@ function uploadAlgebraicUniforms(gl, locations, appState) {
       }
     }
   }
-}
-
-function updateFormulaUniformUsage(renderer, appState) {
-  const algebraic = algebraicTermsArray(appState);
-  const algebraicZ = appState.algebraicChainingZExpr || 'z';
-  const dynamicTerms = isDynamicAggregateGLSLActive(appState)
-    ? (appState.dynamicAggregateTerms || EMPTY_ARRAY)
-    : EMPTY_ARRAY;
-  renderer.formulaUsesPolynomial = formulaRefsFunction(algebraic, dynamicTerms, algebraicZ, 'polynomial');
-  renderer.formulaUsesMobius = formulaRefsFunction(algebraic, dynamicTerms, algebraicZ, 'mobius');
 }
 
 function collectUniformLocations(gl, program, appState) {

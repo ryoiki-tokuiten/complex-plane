@@ -158,7 +158,7 @@ function sampleRiemannHeightField(width, height) {
                     value = componentFromComplex(mapped, component);
                     rgb = domainColorForValue(mapped.re, mapped.im, state);
                 }
-            } catch (error) {
+            } catch {
                 value = NaN;
             }
 

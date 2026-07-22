@@ -3,7 +3,6 @@ import {
     applyDynamicPlottingPreset,
     getDynamicPlotResult,
     getDynamicFreeParameterSymbols,
-    getDynamicPlottingPresets,
     getDynamicTermBindings,
     invalidateDynamicPlotting
 } from '../analysis/dynamic-plotting.js';
@@ -752,8 +751,6 @@ export function applyDynamicPlottingPresetFromUI(presetId) {
     syncDynamicPlottingUI();
     redraw(true);
 }
-
-const applyPresetFromUI = applyDynamicPlottingPresetFromUI;
 
 function setEquationHelpExpanded(expanded) {
     const guide = element('dynamic_equation_help');

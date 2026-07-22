@@ -431,14 +431,10 @@ export function analyzeStability(poles) {
     }
     
     let maxRealPart = -Infinity;
-    let hasPolesOnAxis = false;
     
     for (const pole of poles) {
         if (pole.sigma > maxRealPart) {
             maxRealPart = pole.sigma;
-        }
-        if (Math.abs(pole.sigma) < 0.01) { // Near imaginary axis
-            hasPolesOnAxis = true;
         }
     }
     
@@ -506,8 +502,6 @@ export function updateLaplaceEvaluationPoint() {
     const frequency = state.laplaceFrequency || 2.0;
     const damping = state.laplaceDamping || 0.5;
     const amplitude = state.laplaceAmplitude || 1.0;
-    const timeWindow = 5.0;
-    
     const sigma = state.laplaceSigma || 0;
     const omega = state.laplaceOmega || 1;
     

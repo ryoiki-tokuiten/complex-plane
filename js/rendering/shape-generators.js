@@ -5,7 +5,7 @@ import {
     COLOR_Z_GRID_ZETA_UNDEFINED_SUM_REGION,
     COLOR_INPUT_SHAPE_Z, COLOR_INPUT_LINE_IM_Z
 } from '../constants/colors.js';
-import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_MEDIUM, LINE_WIDTH_THICK } from '../constants/rendering.js';
+import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_THICK } from '../constants/rendering.js';
 
 const EPSILON = 1e-9;
 const MIN_VISIBLE_RADIUS = 0.1;
@@ -43,8 +43,6 @@ const RADIAL_STEP_SINGULARITIES = Object.freeze({
 const UNIT_CIRCLE_CACHE = new Map();
 
 const emptyPointSets = () => [];
-const degreesToRadians = degrees => degrees * DEG_TO_RAD;
-
 function defaultRange() {
     return [-1, 1];
 }
@@ -130,20 +128,6 @@ function logarithmicRadialSegment(angle, minLogRadius, maxLogRadius, segments) {
     for (let index = 0; index <= count; index += 1) {
         points[index] = { re: radius * cos, im: radius * sin };
         radius *= ratio;
-    }
-
-    return points;
-}
-
-function arcPoints(radius, startAngle, endAngle, segments) {
-    const count = integerAtLeast(segments, 1);
-    const points = new Array(count + 1);
-    const inv = 1 / count;
-    const angleDelta = endAngle - startAngle;
-
-    for (let index = 0; index <= count; index += 1) {
-        const angle = startAngle + angleDelta * index * inv;
-        points[index] = { re: radius * Math.cos(angle), im: radius * Math.sin(angle) };
     }
 
     return points;

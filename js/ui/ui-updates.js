@@ -1,6 +1,5 @@
 import { state, context, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import { getChainedTransformFunction } from '../math-utils.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { DEFAULT_TAYLOR_SERIES_CENTER, CRITICAL_POINT_EPSILON } from '../constants/numerical.js';
 import {
@@ -253,10 +252,6 @@ function setStyleColor(key, color) {
     if (node?.style && color) {
         node.style.color = color;
     }
-}
-
-function isFixedRenderable(value) {
-    return typeof value === 'number' && !Number.isNaN(value);
 }
 
 function toFixedText(value, digits) {
@@ -895,21 +890,6 @@ function currentFunctionFormulaHtml() {
             return 'tanh(z)';
         default:
             return `${state.currentFunction}(z)`;
-    }
-}
-
-function compactRecursionSymbol() {
-    switch (state.currentFunction) {
-        case 'polynomial':
-            return `P<sub>deg ${state.polynomialN}</sub>`;
-        case 'mobius':
-            return 'Möbius';
-        case 'zeta':
-            return 'ζ';
-        case 'power':
-            return `z<sup>${fractionalPowerExponent()}</sup>`;
-        default:
-            return state.currentFunction;
     }
 }
 

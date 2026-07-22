@@ -377,7 +377,7 @@ export function buildTransformationGraphData(planeParams = zPlaneParams) {
         let output = { re: NaN, im: NaN };
         try {
             output = map.evaluate(input.re, input.im);
-        } catch (error) {
+        } catch {
             output = { re: NaN, im: NaN };
         }
         const t = inputSamples.length <= 1 ? 0 : index / (inputSamples.length - 1);
@@ -822,7 +822,7 @@ class TransformationGraphRenderer {
         }
     }
 
-    addOutputTicks(group, outputScale) {
+    addOutputTicks(group) {
         [-1, 0, 1].forEach(ratio => {
             const y = ratio * OUTPUT_AXIS_HALF;
             const z = ratio * DEPTH_AXIS_HALF;

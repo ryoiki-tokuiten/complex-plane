@@ -2,6 +2,7 @@ import { state } from '../store/state.js';
 import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
     buildDynamicAggregateGLSL,
+    dynamicAggregateGLSLSignature,
     isDynamicAggregateGLSLActive,
     compileCustomExpressionToGLSL,
     GLSL_EXPRESSION_HELPERS
@@ -530,71 +531,32 @@ export function getAlgebraicStructureSignatureShared(terms) {
     return signature;
 }
 
-function snapshotDynamicTerms(terms) {
-    const list = Array.isArray(terms) ? terms : [];
-    const snapshot = new Array(list.length * 3 + 1);
-    snapshot[0] = list.length;
-    let cursor = 1;
-    for (let i = 0; i < list.length; i++) {
-        const present = hasOwn.call(list, i);
-        snapshot[cursor++] = present;
-        if (present) {
-            const term = list[i];
-            snapshot[cursor++] = term && term.func;
-            snapshot[cursor++] = term && term.scale;
-        } else {
-            snapshot[cursor++] = undefined;
-            snapshot[cursor++] = undefined;
-        }
-    }
-    return snapshot;
-}
-
-function dynamicSnapshotMatches(terms, snapshot) {
-    const list = Array.isArray(terms) ? terms : [];
-    if (!snapshot || snapshot[0] !== list.length) return false;
-    let cursor = 1;
-    for (let i = 0; i < list.length; i++) {
-        const present = hasOwn.call(list, i);
-        if (snapshot[cursor++] !== present) return false;
-        if (present) {
-            const term = list[i];
-            if (snapshot[cursor++] !== (term && term.func)) return false;
-            if (snapshot[cursor++] !== (term && term.scale)) return false;
-        } else {
-            cursor += 2;
-        }
-    }
-    return true;
-}
-
-function appStateMemoMatches(appState, memo, dynamicActive, zExpr) {
+function appStateMemoMatches(appState, memo, dynamicActive, dynamicSignature, zExpr) {
     return memo &&
         memo.dynamicActive === dynamicActive &&
+        memo.dynamicSignature === dynamicSignature &&
         memo.zExpr === zExpr &&
-        dynamicSnapshotMatches(appState.dynamicAggregateTerms || [], memo.dynamicTerms) &&
         algebraicSnapshotMatches(appState.algebraicChainingTerms, memo.algebraicTerms);
 }
 
-function rememberAppStateLibrary(appState, dynamicActive, zExpr, cacheKey, source) {
+function rememberAppStateLibrary(appState, dynamicActive, dynamicSignature, zExpr, cacheKey, source) {
     if (appState && (typeof appState === 'object' || typeof appState === 'function')) {
         appStateLibraryMemo.set(appState, {
             dynamicActive,
+            dynamicSignature,
             zExpr,
             cacheKey,
             source,
-            dynamicTerms: snapshotDynamicTerms(appState.dynamicAggregateTerms || []),
             algebraicTerms: algebraicSignatureMemo.get(appState.algebraicChainingTerms)?.snapshot ?? snapshotAlgebraicTerms(appState.algebraicChainingTerms)
         });
     }
 }
 
-function getGLSLComplexMathLibraryCacheKey(appState, dynamicActive = isDynamicAggregateGLSLActive(appState), zExpr = appState?.algebraicChainingZExpr || 'z') {
+function getGLSLComplexMathLibraryCacheKey(appState, dynamicActive, dynamicSignature, zExpr) {
     if (!appState) return '';
     try {
-        const dynamicSig = dynamicActive ? (appState.dynamicAggregateTerms || []).map(t => `${t.func}:${t.scale}`).join('|') : '';
         const algebraicSig = getAlgebraicStructureSignatureShared(appState.algebraicChainingTerms);
-        return `d:${dynamicActive ? 1 : 0}:${dynamicSig}|z:${zExpr}|a:${algebraicSig}`;
+        return `d:${dynamicActive ? 1 : 0}:${dynamicSignature}|z:${zExpr}|a:${algebraicSig}`;
     } catch {
         return null;
     }
@@ -704,14 +666,16 @@ function buildGLSLComplexMathLibraryUncached(appState) {
 
 export function getGLSLComplexMathLibrary(appState) {
     let dynamicActive = false;
+    let dynamicSignature = '';
     let zExpr = 'z';
 
     if (appState && (typeof appState === 'object' || typeof appState === 'function')) {
         try {
             dynamicActive = isDynamicAggregateGLSLActive(appState);
+            dynamicSignature = dynamicActive ? dynamicAggregateGLSLSignature(appState) : '';
             zExpr = appState.algebraicChainingZExpr || 'z';
             const memo = appStateLibraryMemo.get(appState);
-            if (appStateMemoMatches(appState, memo, dynamicActive, zExpr)) {
+            if (appStateMemoMatches(appState, memo, dynamicActive, dynamicSignature, zExpr)) {
                 return memo.source;
             }
         } catch {
@@ -719,11 +683,11 @@ export function getGLSLComplexMathLibrary(appState) {
         }
     }
 
-    const cacheKey = getGLSLComplexMathLibraryCacheKey(appState, dynamicActive, zExpr);
+    const cacheKey = getGLSLComplexMathLibraryCacheKey(appState, dynamicActive, dynamicSignature, zExpr);
     if (cacheKey !== null && cacheKey !== '') {
         const cached = webglSharedLibraryCache.get(cacheKey);
         if (cached !== undefined) {
-            rememberAppStateLibrary(appState, dynamicActive, zExpr, cacheKey, cached);
+            rememberAppStateLibrary(appState, dynamicActive, dynamicSignature, zExpr, cacheKey, cached);
             return cached;
         }
     }
@@ -734,7 +698,7 @@ export function getGLSLComplexMathLibrary(appState) {
             webglSharedLibraryCache.clear();
         }
         webglSharedLibraryCache.set(cacheKey, source);
-        rememberAppStateLibrary(appState, dynamicActive, zExpr, cacheKey, source);
+        rememberAppStateLibrary(appState, dynamicActive, dynamicSignature, zExpr, cacheKey, source);
     }
     return source;
 }

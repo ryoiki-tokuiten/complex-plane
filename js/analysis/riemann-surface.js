@@ -89,7 +89,7 @@ export function baseExpressionHasBranches(runtimeState) {
     return isMultivaluedFunction(runtimeState.currentFunction, runtimeState);
 }
 
-export function surfaceStageHasBranches(runtimeState, stage = 1) {
+export function surfaceStageHasBranches(runtimeState) {
     const baseHasBranches = baseExpressionHasBranches(runtimeState);
     return baseHasBranches;
 }

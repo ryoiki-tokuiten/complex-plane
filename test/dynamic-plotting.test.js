@@ -10,6 +10,7 @@ import {
     invalidateDynamicPlotting
 } from '../js/analysis/dynamic-plotting.js';
 import { buildDynamicAggregateGLSL, compileCustomExpressionToGLSL } from '../js/math/expression/glsl.js';
+import { getGLSLComplexMathLibrary } from '../js/rendering/webgl-shared.js';
 import {
     dynamicExpressionHasBranches,
     surfaceStageHasBranches
@@ -93,6 +94,16 @@ test('visible-term playback reports the visible prefix and empty identities', ()
     result = getDynamicPlotResult();
     assert.deepEqual(result.reduction.finalValue, { re: 1, im: 0 });
     assert.equal(result.reduction.product.logAbs, 0);
+});
+
+test('WebGL library cache observes in-place dynamic expression edits', () => {
+    configure({ term: { kind: 'expression', expression: 'd' } });
+    const linearLibrary = getGLSLComplexMathLibrary(state);
+
+    state.dynamicPlotting.term.expression = 'd^2';
+    const squaredLibrary = getGLSLComplexMathLibrary(state);
+
+    assert.notEqual(squaredLibrary, linearLibrary);
 });
 
 test('large aggregates retain exact evaluation beyond the former background threshold', () => {

@@ -29,7 +29,7 @@ export function initializeTooltips() {
             }
         });
 
-        trigger.addEventListener('mouseout', (event) => {
+        trigger.addEventListener('mouseout', () => {
             
             if (globalTooltipElement.dataset.isStatic === "true" &&
                 globalTooltipElement.dataset.targetElementId === trigger.id) {

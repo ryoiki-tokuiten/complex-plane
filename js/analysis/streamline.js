@@ -37,7 +37,7 @@ function safeEvaluateComplex(evaluate, x, y) {
     try {
         const value = evaluate(x, y);
         return isFiniteComplex(value) ? value : null;
-    } catch (_error) {
+    } catch {
         return null;
     }
 }
@@ -65,7 +65,7 @@ function safeEvaluateVector(evaluate, x, y) {
 
     try {
         return safeVector(evaluate(x, y));
-    } catch (_error) {
+    } catch {
         return ZERO_VECTOR;
     }
 }
@@ -186,7 +186,7 @@ export function getStreamlineColorByMagnitude(magnitude) {
         if (parts.length === 4) {
             alpha = parseFloat(parts[3]);
         }
-    } catch (e) {
+    } catch {
         // Fallback
     }
 

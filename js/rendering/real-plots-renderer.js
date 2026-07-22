@@ -190,7 +190,7 @@ function getCompiledPreset(preset) {
     if (!compiledPresetCache.has(preset)) {
         try {
             compiledPresetCache.set(preset, compileExpression(preset, { allowedVariables: ['x', 'y'] }));
-        } catch (e) {
+        } catch {
             compiledPresetCache.set(preset, null);
         }
     }
@@ -273,7 +273,7 @@ class InputEvaluator {
                 out[0] = 0;
                 out[1] = 0;
             }
-        } catch (e) {
+        } catch {
             out[0] = 0;
             out[1] = 0;
         }
@@ -734,7 +734,7 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
                         rawValue = selectRawValue(result.re, result.im, outputMode);
                         if (usePhaseColor) phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
                     }
-                } catch (e) {
+                } catch {
                     rawValue = invalidValue;
                     phase = 0.5;
                 }
@@ -805,7 +805,7 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
     let sample;
     try {
         sample = sampleValuesPass(transformFunc, config, false);
-    } catch (e) {
+    } catch {
         sample = sampleValuesPass(transformFunc, config, true);
     }
 

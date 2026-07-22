@@ -5,7 +5,6 @@ import {
     COLOR_TEXT_ON_CANVAS,
     COLOR_CRITICAL_POINT_Z,
     COLOR_CRITICAL_VALUE_W,
-    COLOR_PROBE_NEIGHBORHOOD,
     COLOR_FTA_C_MARKER,
     COLOR_W_ORIGIN_GLOW
 } from '../constants/colors.js';
@@ -60,14 +59,11 @@ import {
 import { getStaleDomainData, getCurrentFuncSignature } from './domain-dynamics.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices } from '../analysis/tissot.js';
 
-let zCanvas;
 let wCanvas;
 let zCtx;
 let wCtx;
 let zDomainColorCanvas;
-let wDomainColorCanvas;
 let zDomainColorCtx;
-let wDomainColorCtx;
 let wCanvasList;
 let wCtxList;
 let wPlaneParamsList;
@@ -86,13 +82,6 @@ let wPlanarTransformedLayerCacheList = [];
 const zPlanarInputLayerCache = createLayerCache();
 const zFlowLayerCache = createLayerCache();
 const conformalIndicatrixCache = { key: null, value: [] };
-
-const GRID_INPUT_SHAPES = new Set([
-    'grid_cartesian',
-    'grid_polar',
-    'grid_logpolar',
-    'grid_logcartesian'
-]);
 
 // A renderer is a tiny fallback pipeline: prefer capture when requested, degrade to raster.
 const WEBGL_PIPELINES = Object.freeze({
@@ -199,10 +188,6 @@ function isPanning(panState) {
     return Boolean(panState?.isPanning);
 }
 
-function isGridInputShape(shape = state.currentInputShape) {
-    return GRID_INPUT_SHAPES.has(shape);
-}
-
 function invalidateCache(cache) {
     if (cache) {
         cache.key = null;
@@ -211,15 +196,12 @@ function invalidateCache(cache) {
 }
 
 function syncRenderContext() {
-    zCanvas = context.zCanvas;
     wCanvas = context.wCanvas;
     zCtx = context.zCtx;
     wCtx = context.wCtx;
 
     zDomainColorCanvas = context.zDomainColorCanvas;
-    wDomainColorCanvas = context.wDomainColorCanvas;
     zDomainColorCtx = context.zDomainColorCtx;
-    wDomainColorCtx = context.wDomainColorCtx;
 
     wCanvasList = context.wCanvasList;
     wCtxList = context.wCtxList;
@@ -774,7 +756,7 @@ function refreshZPlanarDomainColoring(map) {
     }
 }
 
-function renderZSphere(map) {
+function renderZSphere() {
     const sphereParams = sphereViewParams.z;
 
     drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
@@ -998,13 +980,13 @@ function renderZTaylorOverlay() {
     );
 }
 
-function renderZProbeOverlay(map) {
+function renderZProbeOverlay() {
     drawLayerWhen(
         state.probeActive && !state.navigationModeEnabled && !isPanning(runtime.interaction.panZ),
         zCtx,
         zPlaneParams,
         'z',
-        layerCtx => drawPlanarProbe(layerCtx, zPlaneParams, map),
+        layerCtx => drawPlanarProbe(layerCtx, zPlaneParams),
         'capture'
     );
 }
@@ -1035,7 +1017,7 @@ function renderZPlanar(map) {
     renderZGraphSelectionOverlay();
     renderZConformalIndicatrices(map);
     renderZTaylorOverlay();
-    renderZProbeOverlay(map);
+    renderZProbeOverlay();
     renderZParticles(map);
 }
 
@@ -1049,7 +1031,7 @@ export function drawZPlaneContent() {
     const map = resolveActiveMap();
 
     if (state.riemannSphereViewEnabled && !state.splitViewEnabled) {
-        renderZSphere(map);
+        renderZSphere();
         return;
     }
 

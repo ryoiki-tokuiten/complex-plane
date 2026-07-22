@@ -6,7 +6,6 @@ import { drawArrowHead } from './canvas-primitives.js';
  */
 export function drawIntegralResultSplit(ctx, windingData, params) {
     const integral = windingData.integral;
-    const origin = { x: params.origin.x, y: params.origin.y };
     const resultCanvas = {
         x: params.origin.x + integral.real * params.scale.x,
         y: params.origin.y - integral.imag * params.scale.y

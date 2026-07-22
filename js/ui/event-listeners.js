@@ -1,9 +1,9 @@
-import { state, context, mutateState, subscribeState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
+import { state, context, subscribeState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, processUploadedVideoFrame } from '../utils/raster-media.js';
-import { updatePlaneViewportRanges, mapCanvasToWorldCoords, inverseRotate3D, rotate3D, projectSphereToCanvas2D } from '../utils/canvas-utils.js';
+import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
 import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
 import { updateLaplaceTransform, updateLaplaceEvaluationPoint, analyzeStability, findPolesZeros } from '../analysis/laplace-transform.js';
@@ -41,7 +41,7 @@ import {
     selectStableTissotIndicatrices,
     getTissotViewportBounds
 } from '../analysis/tissot.js';
-import { drawRealPlot, disposeRealPlotsRenderer } from '../rendering/real-plots-renderer.js';
+import { disposeRealPlotsRenderer } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
 
@@ -282,10 +282,6 @@ function laterFrame(callback, delay = DEFAULT_FRAME_DELAY) {
     frame(() => setTimeout(callback, delay));
 }
 
-function toArray(value) {
-    return Array.isArray(value) ? value : [];
-}
-
 function setStyles(element, styles) {
     if (element) Object.assign(element.style, styles);
 }
@@ -324,10 +320,6 @@ function syncOrbitColoringModeControl() {
     state.orbitColoringMode = normalized;
     if (controls.orbitColoringModeSelect) controls.orbitColoringModeSelect.value = normalized;
     hidden(controls.orbitColoringModeGroup, !(state.domainColoringEnabled && state.chainingEnabled));
-}
-
-function closest(target, selector) {
-    return target && typeof target.closest === 'function' ? target.closest(selector) : null;
 }
 
 function parseControlValue(control, parser = parseFloat, fallback = 0) {
@@ -1942,33 +1934,6 @@ function canvasFor(planeType) {
     return planeType === 'z' ? zCanvas : wCanvas;
 }
 
-function mapSphereCanvasToWorldCoords(cX, cY, cSP) {
-    const rotX = cSP.rotX;
-    const rotY = cSP.rotY;
-    const sCX = cSP.centerX;
-    const sCY = cSP.centerY;
-    const sR = cSP.radius;
-    if (sR === 0) return { re: NaN, im: NaN };
-
-    const x1 = (cX - sCX) / sR;
-    const y1 = (sCY - cY) / sR;
-
-    const cY_cos = Math.cos(rotY), sY_sin = Math.sin(rotY);
-    const cX_cos = Math.cos(rotX), sX_sin = Math.sin(rotX);
-
-    const denom = cX_cos * cY_cos;
-    if (Math.abs(denom) < 1e-5) {
-        return { re: NaN, im: NaN };
-    }
-
-    const t = (x1 * sY_sin - y1 * sX_sin * cY_cos) / denom;
-
-    const p3D_rot = { x: x1, y: y1, z: t };
-    const p3D_world = inverseRotate3D(p3D_rot, rotX, rotY);
-
-    return { re: p3D_world.x, im: p3D_world.y };
-}
-
 function handleSphereMouseDown(event, planeType) {
     const params = sphereParams(planeType);
     if (!isSphereInteractionActive(planeType === 'z')) return;
@@ -2005,11 +1970,6 @@ function flushSphereMouseMove(ctx) {
 function scheduleSphereMouseMove(ctx, event) {
     updatePointerSnapshot(ctx.pendingSphereMove, event);
     flushSphereMouseMove(ctx);
-}
-
-function handleSphereMouseMove(event, planeType) {
-    const ctx = canvasInteractionContexts[planeType];
-    if (ctx) scheduleSphereMouseMove(ctx, event);
 }
 
 function handleSphereMouseUp(planeType) {
@@ -2540,6 +2500,21 @@ function toggleGraphFullscreen() {
     }, state.isGraphFullScreen ? 150 : 100);
 }
 
+function bindRealPlotsExpressionControls({ preset, input, expressionKey, customKey, fallback }) {
+    bindControlListener(preset, 'change', (_event, selector) => {
+        const custom = selector.value === 'custom';
+        state[customKey] = custom;
+        state[expressionKey] = custom ? controls[input]?.value || fallback : selector.value;
+        requestUiRedraw();
+    });
+
+    bindControlListener(input, 'input', (_event, field) => {
+        state[expressionKey] = field.value || fallback;
+        state[customKey] = true;
+        requestUiRedraw();
+    });
+}
+
 function bindRealPlotsControls() {
     bindCheckbox('enableRealPlotsCb', 'realPlotsEnabled', (event, val) => {
         state.realPlotsEnabled = val;
@@ -2583,50 +2558,19 @@ function bindRealPlotsControls() {
         });
     });
 
-    bindSelector('realPlotsInputPreset', 'realPlotsInputPreset', (event, val) => {
-        if (val === 'custom') {
-            state.realPlotsInputIsCustom = true;
-            controls.realPlotsCustomInputContainer?.classList.remove('hidden');
-            const customVal = controls.realPlotsCustomInput?.value || 'x';
-            state.realPlotsInputExpr = customVal;
-            updateCustomFormulaPreview(controls.realPlotsCustomInput, controls.realPlotsCustomInputMath);
-        } else {
-            state.realPlotsInputIsCustom = false;
-            controls.realPlotsCustomInputContainer?.classList.add('hidden');
-            state.realPlotsInputExpr = val;
-        }
-        requestUiRedraw();
+    bindRealPlotsExpressionControls({
+        preset: 'realPlotsInputPreset',
+        input: 'realPlotsCustomInput',
+        expressionKey: 'realPlotsInputExpr',
+        customKey: 'realPlotsInputIsCustom',
+        fallback: 'x'
     });
-
-    bindControlListener('realPlotsCustomInput', 'input', () => {
-        const val = controls.realPlotsCustomInput?.value || 'x';
-        state.realPlotsInputExpr = val;
-        state.realPlotsInputIsCustom = true;
-        updateCustomFormulaPreview(controls.realPlotsCustomInput, controls.realPlotsCustomInputMath);
-        requestUiRedraw();
-    });
-
-    bindSelector('realPlotsImagPreset', 'realPlotsImagPreset', (event, val) => {
-        if (val === 'custom') {
-            state.realPlotsImagIsCustom = true;
-            controls.realPlotsCustomImagContainer?.classList.remove('hidden');
-            const customVal = controls.realPlotsCustomImag?.value || '0';
-            state.realPlotsImagExpr = customVal;
-            updateCustomFormulaPreview(controls.realPlotsCustomImag, controls.realPlotsCustomImagMath);
-        } else {
-            state.realPlotsImagIsCustom = false;
-            controls.realPlotsCustomImagContainer?.classList.add('hidden');
-            state.realPlotsImagExpr = val;
-        }
-        requestUiRedraw();
-    });
-
-    bindControlListener('realPlotsCustomImag', 'input', () => {
-        const val = controls.realPlotsCustomImag?.value || '0';
-        state.realPlotsImagExpr = val;
-        state.realPlotsImagIsCustom = true;
-        updateCustomFormulaPreview(controls.realPlotsCustomImag, controls.realPlotsCustomImagMath);
-        requestUiRedraw();
+    bindRealPlotsExpressionControls({
+        preset: 'realPlotsImagPreset',
+        input: 'realPlotsCustomImag',
+        expressionKey: 'realPlotsImagExpr',
+        customKey: 'realPlotsImagIsCustom',
+        fallback: '0'
     });
 
     bindSelector('realPlotsOutputComponent', 'realPlotsOutputComponent', (event, val) => {

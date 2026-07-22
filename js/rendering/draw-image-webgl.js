@@ -185,44 +185,6 @@ function readRenderState() {
     return snapshot;
 }
 
-function mixHash(hash, value) {
-    hash ^= value >>> 0;
-    return Math.imul(hash, 16777619) >>> 0;
-}
-
-function hashString(hash, text) {
-    for (let i = 0; i < text.length; i++) hash = mixHash(hash, text.charCodeAt(i));
-    return hash;
-}
-
-function hashScalar(hash, value) {
-    if (typeof value === 'number') {
-        return hashString(hash, Number.isFinite(value) ? value.toPrecision(12) : String(value));
-    }
-    if (typeof value === 'string') return hashString(hash, value);
-    if (typeof value === 'boolean') return mixHash(hash, value ? 1 : 0);
-    return mixHash(hash, 2166136261);
-}
-
-function hashStructure(value, hash = 2166136261) {
-    if (value === null || typeof value !== 'object') return hashScalar(hash, value);
-
-    if (Array.isArray(value)) {
-        hash = mixHash(hash, value.length);
-        for (let i = 0; i < value.length; i++) hash = hashStructure(value[i], hash);
-        return hash;
-    }
-
-    for (const key in value) {
-        const item = value[key];
-        if (typeof item === 'function') continue;
-        hash = hashString(hash, key);
-        hash = hashStructure(item, hash);
-    }
-
-    return hash;
-}
-
 function getAlgebraicHash(snapshot) {
     return `${snapshot.algebraicChainingZExpr || 'z'}:${getAlgebraicStructureSignatureShared(snapshot.algebraicChainingTerms)}`;
 }
@@ -930,7 +892,7 @@ function uploadForwardMesh(renderer, dimensions) {
 
 function shouldUseCpuForwardEvaluation(isWP, snapshot, map) {
     if (!isWP) return false;
-    return map?.presentation === 'derivative' || Boolean(snapshot.chainingEnabled && (
+    return snapshot.currentFunction === 'algebraic_chaining' || map?.presentation === 'derivative' || Boolean(snapshot.chainingEnabled && (
         snapshot.chainCount > 1 ||
         snapshot.chainingMode === 'zero_seed'
     ));

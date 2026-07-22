@@ -159,7 +159,7 @@ export function drawMappedLineSetOnSphere(ctx, cSP, z_pts_src_arr, col, isWP, ma
     });
 }
 
-export function getSpherePointSetColor(pointSet, isWP) {
+export function getSpherePointSetColor(pointSet) {
     return pointSet.color || COLOR_SPHERE_GRID;
 }
 

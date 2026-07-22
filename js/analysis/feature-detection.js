@@ -175,7 +175,7 @@ export function findZerosAndPoles() {
     };
 
     
-    const addPole = (re, im, type = 'pole', order = 'unknown', residue = null) => {
+    const addPole = (re, im) => {
         const poleObject = {re, im}; 
 
         
@@ -360,7 +360,6 @@ export function analyzeSingularity(pole_obj, funcWrapper, funcString) {
     const MAX_POLE_ORDER_CHECK = 5; 
     const LIMIT_DELTA = 1e-6; 
     const DERIV_H = 1e-4; 
-    const ZERO_TOLERANCE = 1e-7; 
     const FINITE_NON_ZERO_TOLERANCE = 1e-5; 
 
     let poleOrder = 'unknown';

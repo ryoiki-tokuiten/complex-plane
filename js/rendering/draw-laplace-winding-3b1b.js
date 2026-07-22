@@ -97,7 +97,6 @@ export function computeLaplaceWindingData(signal, sigma, omega) {
     const points = [];
     let integralReal = 0;
     let integralImag = 0;
-    let count = 0;
 
     // Animation time parameter (0 to 1)
     const animTime = state.laplaceAnimationTime !== undefined ? state.laplaceAnimationTime : 1.0;
@@ -133,7 +132,6 @@ export function computeLaplaceWindingData(signal, sigma, omega) {
 
         integralReal += real;
         integralImag += imag;
-        count++;
     }
 
     // Normalize integral (Riemann sum approximation)
@@ -156,8 +154,6 @@ export function computeLaplaceWindingData(signal, sigma, omega) {
 export function drawWindingSpiral(ctx, windingData, planeParams) {
     const points = windingData.points;
     if (points.length < 2) return;
-
-    const origin = mapToCanvasCoords(0, 0, planeParams);
 
     // Draw sample points first (so path draws over them)
     const sampleInterval = Math.max(1, Math.floor(points.length / 40));

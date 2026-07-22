@@ -31,7 +31,6 @@ import {
     generateCurrentMappedInputShapePointSets,
     generateRadialDiscreteStepPointSets
 } from './shape-generators.js';
-import { hslToRgb } from './canvas-primitives.js';
 
 const EPSILON = 1e-9;
 const DEGENERATE_SEGMENT_EPSILON = 1e-12;
@@ -784,54 +783,6 @@ function drawCircleMarker(ctx, canvasPoint, radius, fillStyle, strokeStyle, line
     }
 }
 
-function strokeSegmentedCanvasPath(ctx, items, resolveCanvasPoint) {
-    if (!items || typeof items[Symbol.iterator] !== 'function') {
-        return;
-    }
-
-    ctx.beginPath();
-    let segmentOpen = false;
-
-    for (const item of items) {
-        const canvasPoint = resolveCanvasPoint(item);
-
-        if (!isFiniteCanvasPoint(canvasPoint)) {
-            if (segmentOpen) {
-                ctx.stroke();
-                ctx.beginPath();
-                segmentOpen = false;
-            }
-            continue;
-        }
-
-        if (segmentOpen) {
-            ctx.lineTo(canvasPoint.x, canvasPoint.y);
-        } else {
-            ctx.moveTo(canvasPoint.x, canvasPoint.y);
-            segmentOpen = true;
-        }
-    }
-
-    if (segmentOpen) {
-        ctx.stroke();
-    }
-}
-
-function createCirclePoints(center, radius, segments) {
-    const pointCount = Math.max(3, Math.floor(finiteOr(segments, PROBE_NEIGHBORHOOD_SEGMENTS)));
-    const points = [];
-
-    for (let i = 0; i <= pointCount; i++) {
-        const angle = (i / pointCount) * TWO_PI;
-        points.push({
-            re: center.re + radius * Math.cos(angle),
-            im: center.im + radius * Math.sin(angle)
-        });
-    }
-
-    return points;
-}
-
 function drawWorldCircle(ctx, planeParams, center, radius, segments) {
     if (!isRenderableComplexPoint(center) || !isFiniteNumber(radius)) {
         return;
@@ -895,10 +846,6 @@ function evaluateProfilePoint(mappedTransform, re, im, evalContext = null) {
     ) || INVALID_COMPLEX_POINT;
 }
 
-function createProfileEvaluator(mappedTransform) {
-    return (re, im) => evaluateProfilePoint(mappedTransform, re, im);
-}
-
 function getViewportJumpThresholdSq(planeParams) {
     const xRange = getPlaneXRanges(planeParams);
     const yRange = getPlaneYRanges(planeParams);
@@ -906,23 +853,6 @@ function getViewportJumpThresholdSq(planeParams) {
     const spanY = yRange[1] - yRange[0];
 
     return (spanX * spanX + spanY * spanY) * 4;
-}
-
-function breakOpenPath(ctx, pathState) {
-    if (pathState.open) {
-        ctx.stroke();
-    }
-    ctx.beginPath();
-    pathState.open = false;
-}
-
-function appendCanvasPointToPath(ctx, pathState, canvasPoint) {
-    if (pathState.open) {
-        ctx.lineTo(canvasPoint.x, canvasPoint.y);
-    } else {
-        ctx.moveTo(canvasPoint.x, canvasPoint.y);
-        pathState.open = true;
-    }
 }
 
 function getFirstVisibleColor(pointSets, colorResolver, fallback) {
@@ -1059,60 +989,6 @@ function syncParticlePool(renderState, planeParams) {
     }
 }
 
-function writeNormalizedParticleVector(x, y, vectorEvaluator, out) {
-    const vector = vectorEvaluator ? vectorEvaluator(x, y) : null;
-
-    if (!vector || !isFiniteNumber(vector.vx) || !isFiniteNumber(vector.vy)) {
-        return false;
-    }
-
-    const magnitudeSq = vector.vx * vector.vx + vector.vy * vector.vy;
-    if (magnitudeSq < EPSILON * EPSILON || !Number.isFinite(magnitudeSq)) {
-        return false;
-    }
-
-    const inverseMagnitude = 1 / Math.sqrt(magnitudeSq);
-    out.x = vector.vx * inverseMagnitude;
-    out.y = vector.vy * inverseMagnitude;
-    return true;
-}
-
-function getNormalizedParticleVector(x, y, vectorEvaluator) {
-    const out = { x: 0, y: 0 };
-    return writeNormalizedParticleVector(x, y, vectorEvaluator, out) ? out : null;
-}
-
-function advanceParticleRK2(particle, speed, renderState, vectorEvaluator = null) {
-    const first = { x: 0, y: 0 };
-    const second = { x: 0, y: 0 };
-
-    if (!writeNormalizedParticleVector(particle.x, particle.y, vectorEvaluator, first)) {
-        return false;
-    }
-
-    const midpointX = particle.x + first.x * speed * 0.5;
-    const midpointY = particle.y + first.y * speed * 0.5;
-    const hasSecond = writeNormalizedParticleVector(midpointX, midpointY, vectorEvaluator, second);
-    const direction = hasSecond ? second : first;
-
-    particle.x += direction.x * speed;
-    particle.y += direction.y * speed;
-    return true;
-}
-
-function shouldRespawnParticle(particle, planeParams, renderState) {
-    const xRange = getPlaneXRanges(planeParams);
-    const yRange = getPlaneYRanges(planeParams);
-
-    return particle.lifetime > renderState.particleMaxLifetime ||
-        particle.x < xRange[0] ||
-        particle.x > xRange[1] ||
-        particle.y < yRange[0] ||
-        particle.y > yRange[1] ||
-        !Number.isFinite(particle.x) ||
-        !Number.isFinite(particle.y);
-}
-
 function getParticleSpeed(planeParams, renderState) {
     const xRange = getPlaneXRanges(planeParams);
     const yRange = getPlaneYRanges(planeParams);
@@ -1163,42 +1039,6 @@ function drawProbeSegment(ctx, planeParams, startWorld, endWorld, color, require
     ctx.moveTo(startCanvas.x, startCanvas.y);
     ctx.lineTo(endCanvas.x, endCanvas.y);
     ctx.stroke();
-}
-
-function getClosestPointOnInfiniteLine(startPoint, endPoint, targetPoint) {
-    const vectorRe = endPoint.re - startPoint.re;
-    const vectorIm = endPoint.im - startPoint.im;
-    const pointToTargetRe = startPoint.re - targetPoint.re;
-    const pointToTargetIm = startPoint.im - targetPoint.im;
-    const lengthSq = vectorRe * vectorRe + vectorIm * vectorIm;
-
-    if (Math.abs(lengthSq) < DEGENERATE_SEGMENT_EPSILON) {
-        return startPoint;
-    }
-
-    const t = -(pointToTargetRe * vectorRe + pointToTargetIm * vectorIm) / lengthSq;
-    return {
-        re: startPoint.re + t * vectorRe,
-        im: startPoint.im + t * vectorIm
-    };
-}
-
-function isZetaDirectSeriesSegment(startPoint, endPoint, evalPoint) {
-    return appState.currentFunction === 'zeta' &&
-        !appState.zetaContinuationEnabled &&
-        (
-            (startPoint.re <= ZETA_REFLECTION_POINT_RE && endPoint.re <= ZETA_REFLECTION_POINT_RE) ||
-            evalPoint.re <= ZETA_REFLECTION_POINT_RE
-        );
-}
-
-function nudgeIfAtZetaPole(point) {
-    const atPole = Math.abs(point.re - ZETA_POLE.re) < EPSILON &&
-        Math.abs(point.im - ZETA_POLE.im) < EPSILON;
-
-    return atPole
-        ? { re: ZETA_POLE.re + 1e-7, im: ZETA_POLE.im + 1e-7 }
-        : point;
 }
 
 function isInteractionActive() {
@@ -1267,10 +1107,6 @@ function drawMappedProbeNeighborhood(ctx, planeParams, center, radius, transform
     }
 }
 
-function getArrowColor(vector, brightness) {
-    return getArrowColorFromComponents(vector.re, vector.im, brightness);
-}
-
 function getArrowColorFromComponents(re, im, brightness) {
     const phase = Math.atan2(im, re);
     let hue = (phase / TWO_PI) % 1.0;
@@ -1283,32 +1119,6 @@ function getArrowColorFromComponents(re, im, brightness) {
     const lightness = clamp(0.35 + Math.log(1.0 + magnitude) * 0.08 * brightness, 0.2, 0.85);
 
     return hslToRgbCss(hue, 0.85, lightness);
-}
-
-function drawVectorArrow(ctx, origin, direction, length, headSize) {
-    const tipX = origin.x + direction.x * length;
-    const tipY = origin.y - direction.y * length;
-    const baseCenterX = tipX - direction.x * headSize * 2.5;
-    const baseCenterY = tipY + direction.y * headSize * 2.5;
-    const perpendicularX = -direction.y;
-    const perpendicularY = -direction.x;
-
-    const leftX = baseCenterX + perpendicularX * headSize;
-    const leftY = baseCenterY - perpendicularY * headSize;
-    const rightX = baseCenterX - perpendicularX * headSize;
-    const rightY = baseCenterY + perpendicularY * headSize;
-
-    ctx.beginPath();
-    ctx.moveTo(origin.x, origin.y);
-    ctx.lineTo(tipX, tipY);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(tipX, tipY);
-    ctx.lineTo(leftX, leftY);
-    ctx.lineTo(rightX, rightY);
-    ctx.closePath();
-    ctx.fill();
 }
 
 export function isRenderableComplexPoint(point) {
@@ -1671,7 +1481,7 @@ export function drawConformalityProbeSegments(ctx, planeParams, center_world, tf
     });
 }
 
-export function drawPlanarProbe(ctx, planeParams, _map = null) {
+export function drawPlanarProbe(ctx, planeParams) {
     if (!isRenderableComplexPoint(appState.probeZ)) {
         return;
     }

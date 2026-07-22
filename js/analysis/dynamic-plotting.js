@@ -505,7 +505,7 @@ function transformEnvironmentSignature() {
             enabled: state.taylorSeriesEnabled,
             order: state.taylorSeriesOrder,
             center: state.taylorSeriesCenter,
-            radius: state.taylorSeriesRadius
+            radius: state.taylorSeriesConvergenceRadius
         },
         chaining: {
             enabled: state.chainingEnabled,

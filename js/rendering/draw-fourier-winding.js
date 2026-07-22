@@ -152,8 +152,6 @@ export function drawWindingVisualization(ctx, signal, planeParams) {
 
     // Draw CENTER OF MASS with beautiful emphasis (KEY insight!)
     const comCanvas = mapToCanvasCoords(centerOfMassX, centerOfMassY, planeParams);
-    const comMag = Math.sqrt(centerOfMassX * centerOfMassX + centerOfMassY * centerOfMassY);
-
     // Large outer glow
     ctx.beginPath();
     ctx.arc(comCanvas.x, comCanvas.y, 20, 0, 2 * Math.PI);

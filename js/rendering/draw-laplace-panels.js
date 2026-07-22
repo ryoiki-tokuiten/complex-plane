@@ -131,7 +131,6 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
 
         const canvasPos = mapToCanvasCoords(pt.t, weightedValue, planeParams);
 
-        const t = i / signal.length;
         const dampingIntensity = sigma > 0 ? weight : Math.min(1, weight);
 
         // Outer glow
