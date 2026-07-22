@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/Complex-Function-Analysis/',
+  base: '/complex-plane/',
   server: {
     port: 3000
   }
