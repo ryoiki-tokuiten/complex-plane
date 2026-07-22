@@ -13,7 +13,6 @@ import {
     MAX_DYNAMIC_SOURCE_COUNT
 } from '../analysis/discrete-sources.js';
 import {
-    SEQUENCE_BINDING_KINDS,
     synchronizeSequenceBindings
 } from '../analysis/sequence-bindings.js';
 import {
@@ -24,7 +23,7 @@ import {
     createProductFactor,
     decomposeProductExpression
 } from '../math/expression/index.js';
-import { createElement, createSelect } from './dom-components.js';
+import { createElement } from './dom-components.js';
 
 const SOURCE_GROUPS = Object.freeze({
     integers: [],
@@ -47,8 +46,6 @@ let initialized = false;
 let studioMinimized = false;
 let sourcePreviewCacheKey = null;
 let sourcePreviewCache = null;
-let termFactorSource = null;
-let termFactors = [];
 
 const OPERATION_COPY = Object.freeze({
     none: {
@@ -140,7 +137,7 @@ function integer(value, fallback) {
     return Math.floor(finiteNumber(value, fallback));
 }
 
-function update(mutator, options = {}) {
+export function updateDynamicPlotting(mutator, options = {}) {
     mutateState('dynamicPlotting', dynamic => {
         mutator(dynamic);
         if (!options.preservePreset) dynamic.preset = 'custom';
@@ -149,6 +146,8 @@ function update(mutator, options = {}) {
     syncDynamicPlottingUI();
     redraw(options.domainDirty !== false);
 }
+
+const update = updateDynamicPlotting;
 
 function bind(id, event, handler) {
     const control = element(id);
@@ -466,7 +465,7 @@ function sequenceVariableNames() {
     ];
 }
 
-function bindingRuleLabel(binding) {
+export function getDynamicBindingRuleLabel(binding) {
     switch (binding.kind) {
         case 'parameter':
             return 'free complex parameter, fixed while j advances';
@@ -551,7 +550,7 @@ function renderFormulaBanner(result = null, error = null) {
             definitions.appendChild(textNode(
                 'div',
                 'dynamic-formula-definition',
-                `${binding.symbol}_j: ${bindingRuleLabel(binding)}`
+                `${binding.symbol}_j: ${getDynamicBindingRuleLabel(binding)}`
             ));
         }
         content.appendChild(definitions);
@@ -570,88 +569,8 @@ function renderFormulaBanner(result = null, error = null) {
     explanation.textContent = operation.explanation;
 }
 
-function renderExampleGallery() {
-    const gallery = element('dynamic_example_gallery');
-    if (!gallery || gallery.childElementCount > 0) return;
-
-    const presets = getDynamicPlottingPresets().filter(item => item.id !== 'custom');
-    const count = element('dynamic_example_count');
-    if (count) count.textContent = `${presets.length} ready-made constructions`;
-
-    for (const preset of presets) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'dynamic-example-button';
-        button.dataset.dynamicPreset = preset.id;
-        button.append(
-            textNode('span', 'dynamic-example-category', preset.category || 'Example'),
-            textNode('strong', '', preset.label),
-            textNode('span', 'dynamic-example-description', preset.description || '')
-        );
-        button.addEventListener('click', () => {
-            applyPresetFromUI(preset.id);
-            button.closest('details')?.removeAttribute('open');
-        });
-        gallery.appendChild(button);
-    }
-}
-
-function syncExampleButtons() {
-    document.querySelectorAll('[data-dynamic-preset]').forEach(button => {
-        button.classList.toggle('is-active', button.dataset.dynamicPreset === config().preset);
-    });
-}
-
-function formatParameterValue(value) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? String(Number(numeric.toFixed(8))) : '0';
-}
-
-function optionSelect(options, value, onChange, className = 'control-select') {
-    return createSelect(options, value, onChange, className);
-}
-
-function labeledControl(label, control, hint = '') {
-    const wrapper = document.createElement('label');
-    wrapper.className = 'dynamic-field';
-    wrapper.appendChild(textNode('span', '', label));
-    if (hint) wrapper.appendChild(textNode('div', 'dynamic-field-hint', hint));
-    wrapper.appendChild(control);
-    return wrapper;
-}
-
-function numberControl(value, onChange, options = {}) {
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.className = 'dynamic-number-input';
-    input.value = String(value ?? '');
-    input.step = options.step || 'any';
-    if (options.min !== undefined) input.min = String(options.min);
-    input.addEventListener('change', event => onChange(finiteNumber(event.target.value, options.fallback ?? 0)));
-    return input;
-}
-
-function textControl(value, onChange) {
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'dynamic-formula-input';
-    input.value = String(value ?? '');
-    input.spellcheck = false;
-    input.addEventListener('change', event => onChange(event.target.value));
-    return input;
-}
-
-function updateBinding(index, mutator) {
-    update(dynamic => {
-        const binding = dynamic.term?.bindings?.[index];
-        if (binding) mutator(binding, dynamic.term.bindings);
-    });
-}
-
 function commitTermFactors(nextFactors) {
-    termFactors = nextFactors;
-    const expression = composeProductExpression(termFactors);
-    termFactorSource = expression;
+    const expression = composeProductExpression(nextFactors);
     const input = element('dynamic_term_expression');
     if (input) input.value = expression;
     update(dynamic => {
@@ -660,367 +579,12 @@ function commitTermFactors(nextFactors) {
     });
 }
 
-function factorExpression(factor) {
-    return composeProductExpression([{ ...factor, denominator: false }]);
-}
-
-function renderTermFactor(factor, index) {
-    const card = document.createElement('div');
-    card.className = 'dynamic-term-factor-card';
-
-    const heading = document.createElement('div');
-    heading.className = 'dynamic-term-factor-heading';
-    heading.append(
-        textNode('strong', '', `Factor ${index + 1}`),
-        textNode('span', 'dynamic-factor-position', factor.denominator ? 'Denominator' : 'Numerator')
-    );
-    if (termFactors.length > 1) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'dynamic-factor-remove';
-        remove.textContent = 'Remove';
-        remove.addEventListener('click', () => {
-            commitTermFactors(termFactors.filter((_, factorIndex) => factorIndex !== index));
-        });
-        heading.appendChild(remove);
-    }
-
-    const preview = document.createElement('div');
-    preview.className = 'dynamic-factor-math';
+function currentTermFactors() {
     try {
-        preview.appendChild(createExpressionMathML(factorExpression(factor), {
-            sequenceVariables: sequenceVariableNames()
-        }));
+        return decomposeProductExpression(String(config().term?.expression || '1'));
     } catch {
-        preview.textContent = factorExpression(factor);
+        return [createProductFactor(false)];
     }
-
-    const placement = optionSelect([
-        { id: 'numerator', label: 'Numerator' },
-        { id: 'denominator', label: 'Denominator' }
-    ], factor.denominator ? 'denominator' : 'numerator', event => {
-        const next = termFactors.map((item, factorIndex) => factorIndex === index
-            ? { ...item, denominator: event.target.value === 'denominator' }
-            : item);
-        commitTermFactors(next);
-    });
-    const wrapper = optionSelect([
-        { id: 'none', label: 'No wrapper' },
-        { id: 'factorial', label: 'Factorial u!' },
-        { id: 'ln', label: 'ln(u)' },
-        { id: 'exp', label: 'exp(u)' },
-        { id: 'sqrt', label: 'sqrt(u)' },
-        { id: 'sin', label: 'sin(u)' },
-        { id: 'cos', label: 'cos(u)' },
-        { id: 'abs', label: '|u|' },
-        { id: 'conj', label: 'conj(u)' },
-        { id: 'selected', label: 'selected f(u)' }
-    ], factor.wrapper || 'none', event => {
-        const next = termFactors.map((item, factorIndex) => factorIndex === index
-            ? { ...item, wrapper: event.target.value }
-            : item);
-        commitTermFactors(next);
-    });
-    const base = textControl(factor.base, value => {
-        const next = termFactors.map((item, factorIndex) => factorIndex === index
-            ? { ...item, base: value || '1' }
-            : item);
-        commitTermFactors(next);
-    });
-    const exponent = textControl(factor.exponent, value => {
-        const next = termFactors.map((item, factorIndex) => factorIndex === index
-            ? { ...item, exponent: value }
-            : item);
-        commitTermFactors(next);
-    });
-
-    const controls = document.createElement('div');
-    controls.className = 'dynamic-factor-controls';
-    controls.append(
-        labeledControl('Position', placement),
-        labeledControl('Base expression u', base),
-        labeledControl('Power (optional)', exponent, 'Examples: n, 2j+1, -s'),
-        labeledControl('Wrapper', wrapper)
-    );
-    card.append(heading, preview, controls);
-    return card;
-}
-
-function renderTermFactors() {
-    const container = element('dynamic_term_factors');
-    if (!container || config().term?.kind !== 'expression') return;
-    const source = String(config().term?.expression || '1');
-    if (source !== termFactorSource) {
-        try {
-            termFactors = decomposeProductExpression(source);
-            termFactorSource = source;
-        } catch {
-            return;
-        }
-    }
-    if (document.activeElement && container.contains(document.activeElement)) return;
-    container.replaceChildren(...termFactors.map(renderTermFactor));
-}
-
-function bindingPreviewValues(symbol) {
-    try {
-        const result = getDynamicPlotResult();
-        const values = result?.samples
-            ?.slice(0, 7)
-            .map(sample => sample.symbolValues?.[symbol])
-            .filter(Boolean)
-            .map(value => formatComplex(value)) || [];
-        return values.length ? values.join(', ') : 'no generated values';
-    } catch {
-        return 'preview unavailable';
-    }
-}
-
-function renderBindingControls(binding, index) {
-    const controls = document.createElement('div');
-    controls.className = 'dynamic-binding-controls';
-    const change = (key, value) => updateBinding(index, target => { target[key] = value; });
-
-    if (binding.kind === 'parameter' || binding.kind === 'parameter_real') {
-        controls.appendChild(textNode(
-            'div',
-            'dynamic-binding-parameter-note',
-            binding.kind === 'parameter_real'
-                ? 'This symbol uses the real part of the plotted argument and stays fixed while j advances.'
-                : 'This symbol is the free complex argument plotted across the output plane. It stays fixed while j advances.'
-        ));
-        return controls;
-    }
-
-    if (binding.kind === 'constant') {
-        controls.append(
-            labeledControl('Real part', numberControl(binding.value.re, value =>
-                updateBinding(index, target => { target.value.re = value; }))),
-            labeledControl('Imaginary part', numberControl(binding.value.im, value =>
-                updateBinding(index, target => { target.value.im = value; })))
-        );
-        return controls;
-    }
-
-    if (binding.kind === 'naturals' || binding.kind === 'integers') {
-        controls.appendChild(textNode(
-            'div',
-            'dynamic-binding-parameter-note',
-            binding.kind === 'naturals'
-                ? 'Uses 0, 1, 2, 3, ... in order. Choose Arithmetic progression or Custom rule for a different pattern.'
-                : 'Uses 0, 1, -1, 2, -2, ... in symmetric order.'
-        ));
-        return controls;
-    }
-
-    if (binding.kind === 'arithmetic') {
-        controls.append(
-            labeledControl('First value', numberControl(binding.start, value => change('start', value))),
-            labeledControl('Common difference', numberControl(binding.step, value => change('step', value)))
-        );
-        return controls;
-    }
-
-    if (binding.kind === 'geometric') {
-        controls.append(
-            labeledControl('First value', numberControl(binding.start, value => change('start', value))),
-            labeledControl('Common ratio', numberControl(binding.ratio, value => change('ratio', value)))
-        );
-        return controls;
-    }
-
-    if (binding.kind === 'harmonic') {
-        controls.append(
-            labeledControl('First denominator', numberControl(binding.start, value => change('start', value))),
-            labeledControl('Denominator difference', numberControl(binding.step, value => change('step', value)))
-        );
-        return controls;
-    }
-
-    if (binding.kind === 'primes') {
-        const maximum = document.createElement('input');
-        maximum.type = 'number';
-        maximum.className = 'dynamic-number-input';
-        maximum.min = '2';
-        maximum.value = binding.max ?? '';
-        maximum.addEventListener('change', event => {
-            change('max', event.target.value === '' ? '' : Number(event.target.value));
-        });
-        controls.append(
-            labeledControl('Minimum prime', numberControl(binding.min, value => change('min', Math.max(2, Math.floor(value))), { min: 2 })),
-            labeledControl('Optional maximum', maximum)
-        );
-        const negative = document.createElement('input');
-        negative.type = 'checkbox';
-        negative.checked = Boolean(binding.includeNegative);
-        negative.addEventListener('change', event => change('includeNegative', event.target.checked));
-        const label = document.createElement('label');
-        label.className = 'dynamic-check';
-        label.append(negative, textNode('span', 'custom-checkbox-visual', ''), document.createTextNode('Include negative associates'));
-        controls.appendChild(label);
-        return controls;
-    }
-
-    if (binding.kind === 'gaussian_integers' || binding.kind === 'gaussian_primes') {
-        controls.append(
-            labeledControl(
-                'Starting search radius',
-                numberControl(binding.bound, value =>
-                    change('bound', Math.max(1, Math.floor(value))), { min: 1 }),
-                'The search expands automatically until every requested term is found.'
-            ),
-            labeledControl('Bound shape', optionSelect([
-                { id: 'norm', label: 'Norm radius' },
-                { id: 'square', label: 'Square' }
-            ], binding.boundType, event => change('boundType', event.target.value))),
-            labeledControl('Associates', optionSelect([
-                { id: 'all', label: 'All associates' },
-                { id: 'representatives', label: 'One representative' }
-            ], binding.associatePolicy, event => change('associatePolicy', event.target.value)))
-        );
-        return controls;
-    }
-
-    if (binding.kind === 'expression') {
-        controls.appendChild(labeledControl(
-            `${binding.symbol}_j =`,
-            textControl(binding.generatorExpression, value => change('generatorExpression', value)),
-            'Use j as the zero-based term index, for example 2j+1.'
-        ));
-        return controls;
-    }
-
-    if (binding.kind === 'custom_points') {
-        const textarea = document.createElement('textarea');
-        textarea.className = 'dynamic-formula-input';
-        textarea.rows = 3;
-        textarea.value = binding.pointsText || '';
-        textarea.addEventListener('change', event => change('pointsText', event.target.value));
-        controls.appendChild(labeledControl('Values', textarea, 'One value per line, or use semicolons.'));
-    }
-    return controls;
-}
-
-function renderSequenceBinding(binding, index) {
-    const card = document.createElement('div');
-    card.className = 'dynamic-sequence-binding-card';
-    const heading = document.createElement('div');
-    heading.className = 'dynamic-binding-heading';
-    const identity = document.createElement('div');
-    identity.className = 'dynamic-binding-identity';
-    identity.append(
-        textNode('strong', '', `${binding.symbol}_j`),
-        textNode('span', '', bindingRuleLabel(binding))
-    );
-    const kind = optionSelect(SEQUENCE_BINDING_KINDS, binding.kind, event => {
-        updateBinding(index, (target, bindings) => {
-            if (event.target.value === 'parameter' || event.target.value === 'parameter_real') {
-                bindings.forEach(other => {
-                    if (
-                        other !== target &&
-                        (other.kind === 'parameter' || other.kind === 'parameter_real')
-                    ) {
-                        other.kind = 'constant';
-                        other.value = { ...config().aggregateParameter };
-                    }
-                });
-            }
-            target.kind = event.target.value;
-            if (target.kind === 'naturals') {
-                target.start = 0;
-                target.step = 1;
-                target.ordering = 'ascending';
-            } else if (target.kind === 'integers') {
-                target.start = 1;
-                target.step = 1;
-                target.ordering = 'symmetric';
-                target.includeZero = true;
-            } else if (target.kind === 'geometric') {
-                target.start = 1;
-                target.ratio = 2;
-            } else if (target.kind === 'harmonic') {
-                target.start = 1;
-                target.step = 1;
-            }
-        });
-    });
-    heading.append(identity, kind);
-    const preview = textNode(
-        'div',
-        'dynamic-binding-preview',
-        `${binding.symbol}_j = ${bindingPreviewValues(binding.symbol)}`
-    );
-    card.append(heading, renderBindingControls(binding, index), preview);
-    return card;
-}
-
-function renderSequenceBindings() {
-    const container = element('dynamic_sequence_bindings_list');
-    if (!container) return;
-    const bindings = getDynamicTermBindings();
-    container.replaceChildren(...bindings.map(renderSequenceBinding));
-}
-
-function parameterCard(parameter, index) {
-    const card = document.createElement('div');
-    card.className = 'dynamic-parameter-card';
-    card.dataset.parameterIndex = String(index);
-
-    const header = document.createElement('div');
-    header.className = 'dynamic-parameter-header';
-
-    const name = document.createElement('input');
-    name.type = 'text';
-    name.className = 'dynamic-text-input dynamic-parameter-name';
-    name.value = parameter.name || `p${index + 1}`;
-    name.setAttribute('aria-label', `Parameter ${index + 1} name`);
-
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'dynamic-small-button dynamic-remove-parameter';
-    remove.textContent = 'Remove';
-    remove.disabled = config().parameters.length <= 1;
-
-    header.append(name, remove);
-
-    const fields = document.createElement('div');
-    fields.className = 'dynamic-parameter-fields';
-    for (const [key, label] of [
-        ['value', 'Value'],
-        ['min', 'Min'],
-        ['max', 'Max'],
-        ['step', 'Step']
-    ]) {
-        const wrapper = document.createElement('label');
-        wrapper.textContent = label;
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.className = `dynamic-number-input dynamic-parameter-${key}`;
-        input.value = formatParameterValue(parameter[key]);
-        input.step = key === 'step' ? 'any' : 'any';
-        wrapper.appendChild(input);
-        fields.appendChild(wrapper);
-    }
-
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.className = 'dynamic-parameter-slider';
-    slider.min = String(parameter.min);
-    slider.max = String(parameter.max);
-    slider.step = String(parameter.step);
-    slider.value = String(parameter.value);
-
-    card.append(header, fields, slider);
-    return card;
-}
-
-function renderParameters() {
-    const container = element('dynamic_parameters_list');
-    if (!container) return;
-    const active = document.activeElement;
-    if (active && container.contains(active)) return;
-
-    container.replaceChildren(...config().parameters.map(parameterCard));
 }
 
 function renderStatus() {
@@ -1089,7 +653,6 @@ export function syncDynamicPlottingUI() {
     const dynamic = config();
 
     synchronizeTermBindingState();
-    renderExampleGallery();
     setChecked('enable_dynamic_plotting_cb', dynamic.enabled);
     setHidden('dynamic_plotting_controls_container', !dynamic.enabled);
     setValue('dynamic_source_kind', dynamic.source.kind);
@@ -1125,13 +688,9 @@ export function syncDynamicPlottingUI() {
     syncSourceVisibility();
     syncTermVisibility();
     syncPlayback();
-    syncExampleButtons();
     renderSourceDefinition();
     renderSourcePreview();
     renderGeneralTermMath();
-    renderTermFactors();
-    renderSequenceBindings();
-    renderParameters();
     renderStatus();
 }
 
@@ -1187,67 +746,14 @@ function setVisibleCount(value) {
     });
 }
 
-function bindParameterEvents() {
-    const container = element('dynamic_parameters_list');
-    if (!container) return;
-
-    container.addEventListener('change', event => {
-        const card = event.target.closest('.dynamic-parameter-card');
-        if (!card) return;
-        const index = integer(card.dataset.parameterIndex, -1);
-        const parameter = config().parameters[index];
-        if (!parameter) return;
-
-        update(dynamic => {
-            const target = dynamic.parameters[index];
-            if (event.target.classList.contains('dynamic-parameter-name')) {
-                const name = event.target.value.trim();
-                if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) target.name = name;
-            }
-            for (const key of ['value', 'min', 'max', 'step']) {
-                if (event.target.classList.contains(`dynamic-parameter-${key}`)) {
-                    target[key] = finiteNumber(event.target.value, target[key]);
-                }
-            }
-            if (target.min > target.max) [target.min, target.max] = [target.max, target.min];
-            target.step = Math.max(Number.EPSILON, Math.abs(target.step));
-            target.value = Math.max(target.min, Math.min(target.max, target.value));
-        });
-    });
-
-    container.addEventListener('input', event => {
-        if (!event.target.classList.contains('dynamic-parameter-slider')) return;
-        const card = event.target.closest('.dynamic-parameter-card');
-        const index = integer(card?.dataset.parameterIndex, -1);
-        if (!config().parameters[index]) return;
-        mutateState('dynamicPlotting', dynamic => {
-            dynamic.parameters[index].value = finiteNumber(event.target.value, 0);
-        }, `dynamicPlotting.parameters.${index}.value`);
-        invalidateDynamicPlotting();
-        const valueInput = card.querySelector('.dynamic-parameter-value');
-        if (valueInput) valueInput.value = event.target.value;
-        renderStatus();
-        redraw(true);
-    });
-
-    container.addEventListener('click', event => {
-        const remove = event.target.closest('.dynamic-remove-parameter');
-        if (!remove) return;
-        const card = remove.closest('.dynamic-parameter-card');
-        const index = integer(card?.dataset.parameterIndex, -1);
-        if (index < 0) return;
-        update(dynamic => {
-            if (dynamic.parameters.length > 1) dynamic.parameters.splice(index, 1);
-        });
-    });
-}
-
-function applyPresetFromUI(presetId) {
+export function applyDynamicPlottingPresetFromUI(presetId) {
     if (!presetId) return;
     applyDynamicPlottingPreset(presetId);
     syncDynamicPlottingUI();
     redraw(true);
 }
+
+const applyPresetFromUI = applyDynamicPlottingPresetFromUI;
 
 function setEquationHelpExpanded(expanded) {
     const guide = element('dynamic_equation_help');
@@ -1292,10 +798,10 @@ function bindControls() {
     });
 
     bind('dynamic_add_numerator_factor_btn', 'click', () => {
-        commitTermFactors([...termFactors, createProductFactor(false)]);
+        commitTermFactors([...currentTermFactors(), createProductFactor(false)]);
     });
     bind('dynamic_add_denominator_factor_btn', 'click', () => {
-        commitTermFactors([...termFactors, createProductFactor(true)]);
+        commitTermFactors([...currentTermFactors(), createProductFactor(true)]);
     });
 
     document.querySelectorAll('input[name="dynamic_reduction_kind_radio"]').forEach(radio => {
@@ -1395,7 +901,6 @@ function bindControls() {
         });
     }));
 
-    bindParameterEvents();
 }
 
 export function initializeDynamicPlottingUI(options = {}) {

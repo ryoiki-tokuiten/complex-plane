@@ -1,4 +1,5 @@
 import { state, context, sliderParamKeys } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import { getChainedTransformFunction } from '../math-utils.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { DEFAULT_TAYLOR_SERIES_CENTER, CRITICAL_POINT_EPSILON } from '../constants/numerical.js';
@@ -6,7 +7,6 @@ import {
     ORBIT_COLORING_MODE_LABELS,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { updatePolynomialCoeffDisplays } from './polynomial-ui.js';
 import { syncVideoPlaybackUI } from '../utils/raster-media.js';
 import { findTaylorCenterPreset, formatTaylorNumericValue, getChainingTitleHTML } from '../utils/dom-utils.js';
 import { syncNavigationControls } from '../navigation-plane.js';
@@ -15,7 +15,7 @@ import {
     getVisibleBranchIndices,
     surfaceStageHasBranches
 } from '../analysis/riemann-surface.js';
-import { renderDomainPalettesUI, domainPalettes, renderRealPlotsPalettesUI, realPlotsPalettes } from './theme-manager.js';
+import { domainPalettes } from './theme-manager.js';
 import { startRiemannTransformationAnimation, stopRiemannTransformationAnimation, syncRiemannTransformationPlayPauseButton, initThreeJSRenderers, buildThreeJSMeshes, syncRiemannSliders, disposeThreeJSRenderers } from '../rendering/riemann-transformation-animation.js';
 import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
 import { createExpressionMathML } from '../math/expression/index.js';
@@ -223,7 +223,7 @@ function setText(key, value) {
 function setHtml(key, html) {
     const node = control(key);
     if (node) {
-        node.innerHTML = html;
+        node.replaceChildren(createFormulaFragment(html));
     }
 }
 
@@ -334,13 +334,6 @@ function hideControls(keys) {
 function syncDisclosure(checkboxKey, contentKey, enabled) {
     setChecked(checkboxKey, enabled);
     setHidden(contentKey, !enabled);
-}
-
-function syncPointEditor(editorKey, points) {
-    const editor = context?.[editorKey];
-    if (typeof editor?.setPoints === 'function') {
-        editor.setPoints(points, false);
-    }
 }
 
 function syncDelegates() {
@@ -455,7 +448,6 @@ function syncMobiusDisplays() {
 
 function syncPolynomialDisplays() {
     setText('polynomialNValueDisplay', state.polynomialN);
-    updatePolynomialCoeffDisplays();
 }
 
 function syncFractionalPowerDisplays() {
@@ -541,7 +533,6 @@ function syncTaylorControls() {
     );
 
     syncTaylorSeriesCenterStatus();
-    syncPointEditor('taylorCenterUI', [state.taylorSeriesCustomCenter]);
 }
 
 function syncVectorFlowControls() {
@@ -605,10 +596,6 @@ export function syncTaylorSeriesCenterStatus() {
     }
 
     setText('taylorSeriesCenterStatus', formatTaylorCenterStatusText(getTaylorDisplayCenter()));
-}
-
-export function syncTaylorSeriesPresetSelection() {
-    syncPointEditor('taylorCenterUI', [state.taylorSeriesCustomCenter]);
 }
 
 export function formatProbeValue(v) {
@@ -711,8 +698,8 @@ export function updateProbeInfo() {
             && !state.navigationModeEnabled
             && !state.fourierModeEnabled
             && !state.laplaceModeEnabled
-            && !isPanning(state.panStateZ)
-            && !isPanning(state.panStateW)
+            && !isPanning(runtime.interaction.panZ)
+            && !isPanning(runtime.interaction.panW)
             && finiteComplex(state.probeZ);
 
         if (!probeCanRender) {
@@ -1233,14 +1220,6 @@ function syncDomainColoringControls() {
     setHidden('domainColoringOptionsDiv', !state.domainColoringEnabled);
     setHidden('orbitColoringModeGroup', !(state.domainColoringEnabled && state.chainingEnabled));
 
-    const paletteCirclesContainer = typeof document !== 'undefined'
-        ? document.getElementById('domain_palette_circles')
-        : null;
-
-    if (paletteCirclesContainer && typeof renderDomainPalettesUI === 'function') {
-        renderDomainPalettesUI(paletteCirclesContainer);
-    }
-
     for (const selector of [
         control('domainPaletteSelect'),
         control('riemannSurfacePaletteSelect')
@@ -1350,25 +1329,34 @@ export function updateDomainColoringKey() {
     const paletteId = state.domainPalette || 'analytic-base';
     const paletteObj = domainPalettes.find(palette => palette.id === paletteId) || domainPalettes[0];
     const orbitMode = normalizeOrbitColoringMode(state.orbitColoringMode);
-    const lines = ['<strong>Domain Coloring Key:</strong><br>'];
+    const content = document.createDocumentFragment();
+    const appendLine = (text, className = '') => {
+        const line = document.createElement('span');
+        line.className = className;
+        line.textContent = text;
+        content.append(line, document.createElement('br'));
+    };
 
+    const title = document.createElement('strong');
+    title.textContent = 'Domain Coloring Key:';
+    content.append(title, document.createElement('br'));
     if (paletteObj?.key) {
-        lines.push('<span style="display:inline-block; margin-bottom: 4px;">- Color maps to Argument (Angle):</span><br>');
-
+        appendLine('- Color maps to Argument (Angle):', 'domain-key-line');
         for (const item of paletteObj.key) {
-            lines.push(
-                `&nbsp;&nbsp;&nbsp;<span style="color:${item.color}; font-weight:bold; text-shadow: 0 0 2px rgba(0,0,0,0.5);">${item.label}</span>: Arg = ${item.angle}<br>`
-            );
+            const row = document.createElement('span');
+            row.className = 'domain-key-entry';
+            const label = document.createElement('strong');
+            label.style.color = item.color;
+            label.textContent = item.label;
+            row.append(label, document.createTextNode(`: Arg = ${item.angle}`));
+            content.append(row, document.createElement('br'));
         }
     }
-
     if (state.chainingEnabled) {
-        lines.push(
-            `<span style="display:inline-block; margin-top: 4px;">- Orbit observable: ${ORBIT_COLORING_MODE_LABELS[orbitMode] || orbitMode}</span><br>`
-        );
+        appendLine(`- Orbit observable: ${ORBIT_COLORING_MODE_LABELS[orbitMode] || orbitMode}`, 'domain-key-note');
     }
-    lines.push('<span style="display:inline-block; margin-top: 4px;">- Optional lightness shading can emphasize magnitude.</span>');
-    keyDiv.innerHTML = lines.join('');
+    appendLine('- Optional lightness shading can emphasize magnitude.', 'domain-key-note');
+    keyDiv.replaceChildren(content);
 }
 
 export function syncRiemannTransformationUI() {
@@ -1435,17 +1423,6 @@ export function syncRealPlotsUI() {
             customImag.value = vVal;
         }
         updateCustomFormulaPreview(customImag, customImagMath);
-    }
-
-    const paletteCirclesContainer = document.getElementById('real_plots_palette_circles');
-    if (paletteCirclesContainer && typeof renderRealPlotsPalettesUI === 'function') {
-        renderRealPlotsPalettesUI(paletteCirclesContainer);
-    }
-
-    const paletteNameLabel = document.getElementById('active_real_plots_palette_name');
-    if (paletteNameLabel) {
-        const activePalette = realPlotsPalettes.find(p => p.id === state.realPlotsPalette) || realPlotsPalettes.find(p => p.id === 'viridis');
-        if (activePalette) paletteNameLabel.textContent = activePalette.name;
     }
 
     const colorModeEl = document.getElementById('real_plots_color_mode');

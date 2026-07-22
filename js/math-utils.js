@@ -1,4 +1,5 @@
 import { state, subscribeState } from './store/state.js';
+import { runtime } from './store/runtime.js';
 import { compileExpression } from './math/expression/evaluator.js';
 
 let cachesDirty = true;
@@ -697,8 +698,8 @@ export function writeZetaEvalCache(cacheKey, value) {
 
 function zetaInteractionThrottled() {
     return !!(
-        state.panStateZ?.isPanning ||
-        state.panStateW?.isPanning ||
+        runtime.interaction.panZ?.isPanning ||
+        runtime.interaction.panW?.isPanning ||
         state.particleAnimationEnabled
     );
 }

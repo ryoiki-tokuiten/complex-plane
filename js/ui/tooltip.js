@@ -1,3 +1,5 @@
+import { createSafeMarkupFragment } from './dom-components.js';
+
 let globalTooltipElement = null;
 
 export function initializeTooltips() {
@@ -91,7 +93,7 @@ export function moveTooltip(pageX, pageY) {
  */
 export function showDynamicTooltip(htmlContent, pageX, pageY, isStatic = false, targetElement = null) {
     if (!globalTooltipElement) return;
-    globalTooltipElement.innerHTML = htmlContent;
+    globalTooltipElement.replaceChildren(createSafeMarkupFragment(htmlContent));
     globalTooltipElement.style.display = 'block'; 
     globalTooltipElement.dataset.isStatic = isStatic ? "true" : "false";
 

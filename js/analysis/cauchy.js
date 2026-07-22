@@ -1,4 +1,5 @@
 import { state, context } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import {
     getChainedTransformFunction,
     getContourPoints,
@@ -14,6 +15,7 @@ import {
     RESIDUE_BOUNDARY_CHECK_FACTOR,
     NUM_RESIDUE_INTEGRAL_STEPS
 } from '../constants/numerical.js';
+import { createSafeMarkupFragment } from '../ui/dom-components.js';
 
 const { controls } = context;
 
@@ -22,7 +24,7 @@ export function performCauchyAnalysis() {
     const isZPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
 
     if (!state.cauchyIntegralModeEnabled || !isZPlanar) { 
-        controls.cauchy_integral_results_info.innerHTML = '';
+        controls.cauchy_integral_results_info.replaceChildren();
         controls.cauchy_integral_results_info.classList.add('hidden');
         return;
     }
@@ -30,11 +32,11 @@ export function performCauchyAnalysis() {
 
     const func = getChainedTransformFunction(state.currentFunction);
     if (!func) {
-        controls.cauchy_integral_results_info.innerHTML = 'Error: Current function not found.';
+        controls.cauchy_integral_results_info.textContent = 'Error: Current function not found.';
         return;
     }
     if (state.currentFunction === 'poincare') { 
-        controls.cauchy_integral_results_info.innerHTML = 'Cauchy/Residue analysis not applicable for Poincare map.';
+        controls.cauchy_integral_results_info.textContent = 'Cauchy/Residue analysis not applicable for Poincare map.';
         return;
     }
 
@@ -44,25 +46,25 @@ export function performCauchyAnalysis() {
 
     if (state.currentInputShape === 'circle') {
         if (state.circleR <= 0) {
-            controls.cauchy_integral_results_info.innerHTML = 'Cauchy mode: Circle radius must be positive.';
+            controls.cauchy_integral_results_info.textContent = 'Cauchy mode: Circle radius must be positive.';
             return;
         }
         contourParams = { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR };
         contourC_points = getContourPoints('circle', contourParams, NUM_INTEGRAL_STEPS);
     } else if (state.currentInputShape === 'ellipse') {
         if (state.ellipseA <= 0 || state.ellipseB <= 0) {
-            controls.cauchy_integral_results_info.innerHTML = 'Cauchy mode: Ellipse axes must be positive.';
+            controls.cauchy_integral_results_info.textContent = 'Cauchy mode: Ellipse axes must be positive.';
             return;
         }
         contourParams = { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
         contourC_points = getContourPoints('ellipse', contourParams, NUM_INTEGRAL_STEPS);
     } else {
-        controls.cauchy_integral_results_info.innerHTML = 'Cauchy mode: Select Circle or Ellipse contour C.';
+        controls.cauchy_integral_results_info.textContent = 'Cauchy mode: Select Circle or Ellipse contour C.';
         return;
     }
 
     if (!contourC_points || contourC_points.length === 0) {
-        controls.cauchy_integral_results_info.innerHTML = 'Error generating contour points for C.';
+        controls.cauchy_integral_results_info.textContent = 'Error generating contour points for C.';
         return;
     }
 
@@ -175,11 +177,11 @@ export function performCauchyAnalysis() {
         resultsHTML += `<br/>(Enable 'Show Zeros/Poles' for Residue Theorem)`;
     }
 
-    controls.cauchy_integral_results_info.innerHTML = resultsHTML;
+    controls.cauchy_integral_results_info.replaceChildren(createSafeMarkupFragment(resultsHTML));
 }
 
 export function updateWindingNumberDisplay(tf) {
-    controls.wPlaneAnalysisInfo.innerHTML = ''; 
+    controls.wPlaneAnalysisInfo.replaceChildren();
     let contourC_points = null;
     let contourParams = {};
     const N_winding_num_pts = 150; 
@@ -228,10 +230,15 @@ export function updateWindingNumberDisplay(tf) {
             state.poles.forEach(pole => {if (isPointInsideContour(pole, contourParams.type, contourParams)) P_in_C++;});
             argumentPrincipleText = ` (Z-P in C = ${Z_in_C}-${P_in_C} = ${Z_in_C - P_in_C})`;
         }
-        controls.wPlaneAnalysisInfo.innerHTML = `W(f(C),0): ${windingNumber}${argumentPrincipleText}`;
-        if (!pathCrossesOrigin && !pathHasNaN && typeof windingNumber === 'number' && state.previousWindingNumber !== null && windingNumber !== state.previousWindingNumber) {state.wOriginGlowTime = Date.now();}
-        state.previousWindingNumber = (typeof windingNumber === 'number') ? windingNumber : null;
+        controls.wPlaneAnalysisInfo.textContent = `W(f(C),0): ${windingNumber}${argumentPrincipleText}`;
+        const windingChanged = !pathCrossesOrigin && !pathHasNaN &&
+            typeof windingNumber === 'number' &&
+            runtime.rendering.previousWindingNumber !== null &&
+            windingNumber !== runtime.rendering.previousWindingNumber;
+        if (windingChanged) runtime.rendering.wOriginGlowTime = Date.now();
+        runtime.rendering.previousWindingNumber = (typeof windingNumber === 'number') ? windingNumber : null;
     } else {
-        controls.wPlaneAnalysisInfo.innerHTML = ''; state.previousWindingNumber = null;
+        controls.wPlaneAnalysisInfo.replaceChildren();
+        runtime.rendering.previousWindingNumber = null;
     }
 }

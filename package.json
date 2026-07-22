@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
     "benchmark": "node --expose-gc test/benchmarks/index.js",
     "benchmark:smoke": "BENCH_PROFILE=smoke node --expose-gc test/benchmarks/index.js"
   },
@@ -24,9 +25,12 @@
   },
   "homepage": "https://github.com/ryoiki-tokuiten/Complex-Function-Analysis#readme",
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "vite": "^8.0.16"
   },
   "dependencies": {
+    "@preact/signals": "^2.9.4",
+    "preact": "^10.29.7",
     "three": "^0.184.0"
   }
 }

@@ -17,10 +17,25 @@ import { resolveActiveMap } from '../math/active-map.js';
 const ANIMATION_DURATION = 4.0;
 const BOUNCE_PAUSE_TIME = 1.5;
 
-const SVG_ICONS = {
-    PLAY: `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>`,
-    PAUSE: `<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`
-};
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+function createPlaybackIcon(playing) {
+    const svg = document.createElementNS(SVG_NAMESPACE, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    if (!playing) {
+        const path = document.createElementNS(SVG_NAMESPACE, 'path');
+        path.setAttribute('d', 'M8 5v14l11-7z');
+        svg.appendChild(path);
+        return svg;
+    }
+    for (const x of ['6', '14']) {
+        const rect = document.createElementNS(SVG_NAMESPACE, 'rect');
+        Object.entries({ x, y: '4', width: '4', height: '16' })
+            .forEach(([name, value]) => rect.setAttribute(name, value));
+        svg.appendChild(rect);
+    }
+    return svg;
+}
 
 /**
  * Plane Configuration Descriptor
@@ -153,7 +168,7 @@ class PlaneController {
         // Sync Button (Guarded against innerHTML thrashing)
         if (currentPlaying !== this.cache.playing) {
             if (this.ui.button) {
-                this.ui.button.innerHTML = currentPlaying ? SVG_ICONS.PAUSE : SVG_ICONS.PLAY;
+                this.ui.button.replaceChildren(createPlaybackIcon(currentPlaying));
                 this.ui.button.classList.toggle('playing', currentPlaying);
             }
             this.cache.playing = currentPlaying;

@@ -1,6 +1,7 @@
 import { eventBus } from '../store/events.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import { state, context } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import {
     createDomainDynamicsTileRenderer,
     domainDynamicsSignature,
@@ -192,9 +193,9 @@ function clearTarget(targetCtx, viewport) {
 
 function setDomainProcessing(isWPlane, isProcessing) {
     if (isWPlane) {
-        state.isProcessingWDomainDynamics = isProcessing;
+        runtime.rendering.processingWDomainDynamics = isProcessing;
     } else {
-        state.isProcessingZDomainDynamics = isProcessing;
+        runtime.rendering.processingZDomainDynamics = isProcessing;
     }
 
     if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {

@@ -29,11 +29,11 @@ export function createSelect(options, value, onChange, className = '') {
     return select;
 }
 
-const FORMULA_ELEMENTS = new Set(['SUB', 'SUP', 'SPAN']);
+const SAFE_MARKUP_ELEMENTS = new Set(['B', 'BR', 'CODE', 'I', 'STRONG', 'SUB', 'SUP', 'SPAN']);
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 
-export function createFormulaFragment(markup) {
+export function createSafeMarkupFragment(markup) {
     const parsed = new DOMParser().parseFromString(String(markup), 'text/html');
     const fragment = document.createDocumentFragment();
 
@@ -42,7 +42,7 @@ export function createFormulaFragment(markup) {
             parent.appendChild(document.createTextNode(source.textContent || ''));
             return;
         }
-        if (source.nodeType !== ELEMENT_NODE || !FORMULA_ELEMENTS.has(source.tagName)) return;
+        if (source.nodeType !== ELEMENT_NODE || !SAFE_MARKUP_ELEMENTS.has(source.tagName)) return;
 
         const element = document.createElement(source.tagName.toLowerCase());
         if (source.tagName === 'SPAN' && source.classList.contains('formula-note')) {
@@ -55,3 +55,5 @@ export function createFormulaFragment(markup) {
     parsed.body.childNodes.forEach(node => appendSafeNode(node, fragment));
     return fragment;
 }
+
+export const createFormulaFragment = createSafeMarkupFragment;

@@ -1,7 +1,7 @@
 import { state, context, zPlaneParams } from './store/state.js';
 import { eventBus } from './store/events.js';
 import { setupDOMReferences, setupVisualParameters } from './utils/dom-utils.js';
-import { initializePolynomialCoeffs, generatePolynomialCoeffSliders } from './ui/polynomial-ui.js';
+import { initializePolynomialCoeffs } from './ui/polynomial-ui.js';
 import { setupEventListeners, setActiveFunctionButton, initializeStateFromControls, getCachedCanvasEventPosition } from './ui/event-listeners.js';
 import { initializeSectionAnimations } from './ui/section-animations.js';
 import { initializeTooltips, showDynamicTooltip, hideDynamicTooltip } from './ui/tooltip.js';
@@ -13,6 +13,8 @@ import {
 } from './rendering/draw-dynamic-plotting.js';
 import { renderApplicationFrame } from './rendering/application-renderer.js';
 import { configureRedrawScheduler, requestRedrawAll } from './rendering/redraw-scheduler.js';
+import { mountFrontend } from './frontend/mount-frontend.jsx';
+import { startUiSynchronization } from './frontend/controllers/ui-sync-controller.js';
 
 export { requestRedrawAll } from './rendering/redraw-scheduler.js';
 
@@ -39,7 +41,7 @@ function setup() {
         initializeStateFromControls();
 
         initializePolynomialCoeffs(state.polynomialN, false); 
-        generatePolynomialCoeffSliders(); 
+        mountFrontend();
 
         if (!controls.funcButtons[state.currentFunction]) {
             state.currentFunction = 'cos';
@@ -52,6 +54,7 @@ function setup() {
         initializeAnimationSpeedSelectors();
 
         setupEventListeners();
+        startUiSynchronization();
         context.domainColoringDirty = true;
         initializeSectionAnimations();
         initializeTooltips();

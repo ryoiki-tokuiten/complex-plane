@@ -37,59 +37,6 @@ export function applyTheme(themeId) {
     state.gridColor1 = theme.colors.gridPri;
     state.gridColor2 = theme.colors.gridSec;
 
-    // Update the color inputs to reflect the new grid colors
-    const grid1Input = document.getElementById('grid_color_1_input');
-    const grid2Input = document.getElementById('grid_color_2_input');
-    if (grid1Input) {
-        grid1Input.value = state.gridColor1;
-        const wrapper = document.getElementById('grid_color_1_picker_wrapper');
-        if (wrapper) wrapper.style.backgroundColor = state.gridColor1;
-    }
-    if (grid2Input) {
-        grid2Input.value = state.gridColor2;
-        const wrapper = document.getElementById('grid_color_2_picker_wrapper');
-        if (wrapper) wrapper.style.backgroundColor = state.gridColor2;
-    }
-}
-
-export function renderThemesList(container) {
-    if (!container) return;
-    container.innerHTML = themes.map(theme => {
-        const isActive = state.themeId === theme.id;
-        const previewDots = [theme.colors.accent, theme.colors.gridPri, theme.colors.gridSec];
-        return `
-            <button class="theme-card ${isActive ? 'active' : ''}" data-theme-id="${theme.id}" type="button">
-                <div class="theme-preview-pill">
-                    ${previewDots.map(c => `<div class="theme-preview-dot" style="background-color: ${c};"></div>`).join('')}
-                </div>
-                <div class="theme-info">
-                    <h3>${theme.name}</h3>
-                    <p>${theme.desc}</p>
-                </div>
-            </button>
-        `;
-    }).join('');
-}
-
-export function renderDomainPalettesUI(container) {
-    if (!container) return;
-    container.innerHTML = domainPalettes.map((p) => {
-        const isActive = state.domainPalette === p.id;
-        return `
-            <button class="domain-palette-circle-btn ${isActive ? 'active' : ''}" 
-                data-palette-id="${p.id}" 
-                type="button"
-                style="background: conic-gradient(${p.colors});"
-                title="${p.name}">
-            </button>
-        `;
-    }).join('');
-
-    const labelSpan = document.getElementById('active_domain_palette_name');
-    if (labelSpan) {
-        const activePalette = domainPalettes.find(p => p.id === state.domainPalette) || domainPalettes[0];
-        labelSpan.textContent = activePalette.name;
-    }
 }
 
 // 3D Real Plots Palettes mapped for linear/conic gradient
@@ -125,18 +72,3 @@ export const realPlotsPalettes = [
         colors: "#440154, #3b528b, #21908d, #5dc963, #fde725"
     }
 ];
-
-export function renderRealPlotsPalettesUI(container) {
-    if (!container) return;
-    container.innerHTML = realPlotsPalettes.map((p) => {
-        const isActive = state.realPlotsPalette === p.id;
-        return `
-            <button class="domain-palette-circle-btn ${isActive ? 'active' : ''}" 
-                data-palette-id="${p.id}" 
-                type="button"
-                style="background: conic-gradient(from 270deg, ${p.colors});"
-                title="${p.name}">
-            </button>
-        `;
-    }).join('');
-}

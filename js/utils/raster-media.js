@@ -1,4 +1,5 @@
 import { state, context } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 const { controls } = context;
 
@@ -19,7 +20,7 @@ export function isRasterInputShape(shape = state.currentInputShape) {
 }
 
 export function getRasterSourceForShape(shape = state.currentInputShape) {
-    return shape === 'video' ? state.uploadedVideo : state.uploadedImage;
+    return shape === 'video' ? runtime.media.video : runtime.media.image;
 }
 
 
@@ -96,7 +97,7 @@ export function processUploadedImageSource(img) {
         return false;
     }
 
-    state.uploadedImage = img;
+    runtime.media.image = img;
     const { aspectRatio } = getRasterSourceDimensions(img);
     state.imageAspectRatio = aspectRatio;
     state.imageContentVersion += 1;
@@ -104,13 +105,13 @@ export function processUploadedImageSource(img) {
 }
 
 export function processUploadedVideoFrame(force = false) {
-    const video = state.uploadedVideo;
+    const video = runtime.media.video;
     if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         return false;
     }
 
     const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
-    if (!force && Math.abs(currentTime - state.videoLastProcessedMediaTime) < RASTER_MEDIA_TIME_EPSILON) {
+    if (!force && Math.abs(currentTime - runtime.media.lastProcessedMediaTime) < RASTER_MEDIA_TIME_EPSILON) {
         return false;
     }
 
@@ -120,7 +121,7 @@ export function processUploadedVideoFrame(force = false) {
 
 
     state.videoFrameVersion += 1;
-    state.videoLastProcessedMediaTime = currentTime;
+    runtime.media.lastProcessedMediaTime = currentTime;
     syncVideoPlaybackUI();
     return true;
 }
@@ -143,11 +144,11 @@ export function formatMediaClockTime(totalSeconds) {
 }
 
 export function buildVideoStatusText() {
-    if (!state.uploadedVideo) {
+    if (!runtime.media.video) {
         return state.videoStatusMessage || 'No video loaded.';
     }
 
-    const video = state.uploadedVideo;
+    const video = runtime.media.video;
     const statusLabel = state.videoStatusMessage || (state.videoIsPlaying ? 'Playing' : 'Paused');
     const currentTime = formatMediaClockTime(video.currentTime);
     const duration = formatMediaClockTime(video.duration);
@@ -160,7 +161,7 @@ export function buildVideoStatusText() {
 
 export function syncVideoPlaybackUI() {
     if (controls.videoPlayPauseBtn) {
-        controls.videoPlayPauseBtn.disabled = !state.uploadedVideo;
+        controls.videoPlayPauseBtn.disabled = !runtime.media.video;
         controls.videoPlayPauseBtn.textContent = state.videoIsPlaying ? '⏸ Pause' : '▶ Play';
     }
 
@@ -170,27 +171,27 @@ export function syncVideoPlaybackUI() {
 }
 
 export function stopVideoProcessingLoop() {
-    if (state.videoProcessingLoopHandle) {
-        cancelAnimationFrame(state.videoProcessingLoopHandle);
-        state.videoProcessingLoopHandle = null;
+    if (runtime.media.processingFrame) {
+        cancelAnimationFrame(runtime.media.processingFrame);
+        runtime.media.processingFrame = null;
     }
 }
 
 export function runVideoProcessingLoop(now) {
-    state.videoProcessingLoopHandle = null;
+    runtime.media.processingFrame = null;
 
-    if (!state.uploadedVideo || !state.videoIsPlaying || state.currentInputShape !== 'video') {
+    if (!runtime.media.video || !state.videoIsPlaying || state.currentInputShape !== 'video') {
         syncVideoPlaybackUI();
         return;
     }
 
     const targetFps = Math.max(1, state.videoProcessingFps || 24);
     const targetInterval = 1000 / targetFps;
-    const elapsed = now - state.videoLastProcessedWallTime;
+    const elapsed = now - runtime.media.lastProcessedWallTime;
 
     if (elapsed >= targetInterval) {
         if (processUploadedVideoFrame()) {
-            state.videoLastProcessedWallTime = now;
+            runtime.media.lastProcessedWallTime = now;
             if (typeof requestDomainRedraw === 'function') {
                 requestDomainRedraw(false);
             } else if (typeof requestRedrawAll === 'function') {
@@ -201,30 +202,30 @@ export function runVideoProcessingLoop(now) {
         }
     }
 
-    state.videoProcessingLoopHandle = requestAnimationFrame(runVideoProcessingLoop);
+    runtime.media.processingFrame = requestAnimationFrame(runVideoProcessingLoop);
 }
 
 export function startVideoProcessingLoop() {
     stopVideoProcessingLoop();
 
-    if (!state.uploadedVideo || !state.videoIsPlaying || state.currentInputShape !== 'video') {
+    if (!runtime.media.video || !state.videoIsPlaying || state.currentInputShape !== 'video') {
         syncVideoPlaybackUI();
         return;
     }
 
-    state.videoLastProcessedWallTime = performance.now() - (1000 / Math.max(1, state.videoProcessingFps || 24));
-    state.videoProcessingLoopHandle = requestAnimationFrame(runVideoProcessingLoop);
+    runtime.media.lastProcessedWallTime = performance.now() - (1000 / Math.max(1, state.videoProcessingFps || 24));
+    runtime.media.processingFrame = requestAnimationFrame(runVideoProcessingLoop);
     syncVideoPlaybackUI();
 }
 
 export function pauseUploadedVideoPlayback() {
-    const video = state.uploadedVideo;
+    const video = runtime.media.video;
     if (video) {
         video.pause();
     }
 
     state.videoIsPlaying = false;
-    if (state.uploadedVideo) {
+    if (runtime.media.video) {
         state.videoStatusMessage = 'Paused';
     }
     stopVideoProcessingLoop();
@@ -236,7 +237,7 @@ export function pauseUploadedVideoPlayback() {
 }
 
 export function startUploadedVideoPlayback() {
-    const video = state.uploadedVideo;
+    const video = runtime.media.video;
     if (!video) {
         syncVideoPlaybackUI();
         return Promise.resolve(false);
@@ -279,16 +280,16 @@ export function toggleUploadedVideoPlayback() {
 }
 
 export function cleanupUploadedVideo() {
-    const previousVideo = state.uploadedVideo;
-    const previousUrl = state.uploadedVideoUrl;
+    const previousVideo = runtime.media.video;
+    const previousUrl = runtime.media.videoUrl;
 
-    state.uploadedVideo = null;
-    state.uploadedVideoUrl = '';
+    runtime.media.video = null;
+    runtime.media.videoUrl = '';
     state.videoIsPlaying = false;
     state.videoAspectRatio = 1.0;
     state.videoFrameVersion += 1;
-    state.videoLastProcessedWallTime = 0;
-    state.videoLastProcessedMediaTime = -1;
+    runtime.media.lastProcessedWallTime = 0;
+    runtime.media.lastProcessedMediaTime = -1;
     state.videoStatusMessage = 'No video loaded.';
 
     stopVideoProcessingLoop();
@@ -325,13 +326,13 @@ export function loadUploadedVideoFile(file) {
     video.muted = true;
     video.playsInline = true;
 
-    state.uploadedVideo = video;
-    state.uploadedVideoUrl = objectUrl;
+    runtime.media.video = video;
+    runtime.media.videoUrl = objectUrl;
     state.videoStatusMessage = 'Loading video';
     syncVideoPlaybackUI();
 
     const handleReady = () => {
-        if (state.uploadedVideo !== video) {
+        if (runtime.media.video !== video) {
             return;
         }
 
@@ -350,7 +351,7 @@ export function loadUploadedVideoFile(file) {
 
     video.addEventListener('loadeddata', handleReady, { once: true });
     video.addEventListener('play', () => {
-        if (state.uploadedVideo !== video) {
+        if (runtime.media.video !== video) {
             return;
         }
         state.videoIsPlaying = true;
@@ -361,7 +362,7 @@ export function loadUploadedVideoFile(file) {
         syncVideoPlaybackUI();
     });
     video.addEventListener('pause', () => {
-        if (state.uploadedVideo !== video) {
+        if (runtime.media.video !== video) {
             return;
         }
         state.videoIsPlaying = false;
@@ -374,7 +375,7 @@ export function loadUploadedVideoFile(file) {
         }
     });
     video.addEventListener('error', () => {
-        if (state.uploadedVideo !== video) {
+        if (runtime.media.video !== video) {
             return;
         }
         state.videoIsPlaying = false;

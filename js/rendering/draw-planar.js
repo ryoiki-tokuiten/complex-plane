@@ -1,4 +1,5 @@
 import { state as appState, zPlaneParams } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import {
     COLOR_PROBE_MARKER, COLOR_PROBE_NEIGHBORHOOD, COLOR_TEXT_ON_CANVAS,
@@ -1035,11 +1036,7 @@ function getRandomPointInView(planeParams) {
 }
 
 function syncParticlePool(renderState, planeParams) {
-    if (!Array.isArray(renderState.particles)) {
-        renderState.particles = [];
-    }
-
-    const particles = renderState.particles;
+    const particles = runtime.particles;
     const targetDensity = Math.max(0, Math.floor(finiteOr(renderState.particleDensity, 0)));
 
     if (particles.length < targetDensity) {
@@ -1206,16 +1203,16 @@ function nudgeIfAtZetaPole(point) {
 
 function isInteractionActive() {
     return !!(
-        (appState.panStateZ && appState.panStateZ.isPanning) ||
-        (appState.panStateW && appState.panStateW.isPanning) ||
+        runtime.interaction.panZ.isPanning ||
+        runtime.interaction.panW.isPanning ||
         appState.particleAnimationEnabled
     );
 }
 
 function isViewportManipulationActive() {
     return !!(
-        (appState.panStateZ && appState.panStateZ.isPanning) ||
-        (appState.panStateW && appState.panStateW.isPanning)
+        runtime.interaction.panZ.isPanning ||
+        runtime.interaction.panW.isPanning
     );
 }
 
@@ -1551,7 +1548,7 @@ export function initializeSingleParticle(planeParams) {
 
 export function updateAndDrawParticles(ctx, planeParams, state, map) {
     if (!state.particleAnimationEnabled) {
-        state.particles = [];
+        runtime.particles.length = 0;
         return;
     }
 
@@ -1574,7 +1571,7 @@ export function updateAndDrawParticles(ctx, planeParams, state, map) {
         const spawnSpanY = maxY - minY;
         const maxLifetime = state.particleMaxLifetime;
         const fastMap = hasFastCanvasMapping(planeParams);
-        const particles = state.particles;
+        const particles = runtime.particles;
 
         for (let i = 0, length = particles.length; i < length; i++) {
             const particle = particles[i];

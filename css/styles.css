@@ -34,7 +34,7 @@ html,
 body {
     height: 100%;
     overflow: hidden;
-    /* Prevent body scroll if main handles it */
+
 }
 
 body {
@@ -43,15 +43,15 @@ body {
     font-family: var(--font-family);
     /* Ensured */
     overflow-x: hidden;
-    /* already exists, keep it */
+
     line-height: 1.6;
-    /* already exists */
+
     -webkit-font-smoothing: antialiased;
-    /* already exists */
+
     -moz-osx-font-smoothing: grayscale;
-    /* already exists */
+
     display: flex;
-    /* Make body a flex container */
+
     flex-direction: column;
     /* Stack children vertically */
 }
@@ -138,15 +138,14 @@ body {
 
 main {
     width: 100%;
-    /* Ensure it takes up width within flex context */
-    /* margin: 0 auto; /* Removed for full width */
+
     display: flex;
     flex-direction: column;
     flex-grow: 1;
     overflow: hidden;
     gap: 1.5rem;
     padding: 1.5rem;
-    /* max-width: 1000px; /* Removed for full width */
+
 }
 
 .section {
@@ -154,9 +153,9 @@ main {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
-    /* Default gap for content within a section */
+
     padding: 2.5rem;
-    /* Default padding for a section */
+
     background: var(--card-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 20px;
@@ -174,7 +173,7 @@ main {
 }
 
 #controls_options_section {
-    /* There exist 2 main top and bottom panels, both are set to fully transparent / invisible now for visibility. */
+
     flex-shrink: 0;
     padding: 0.7rem;
     border-radius: 20px;
@@ -339,16 +338,15 @@ main {
 .viz-panel-top-right-controls {
     position: absolute;
     top: 1rem;
-    /* Corresponds to panel's internal padding */
+
     right: 1rem;
-    /* Corresponds to panel's internal padding */
+
     z-index: 10;
     /* Above other static grid content */
 }
 
 .viz-panel-top-right-controls button {
-    /* Using general button styles, or can be more specific if needed */
-    /* Example: make it match canvas header buttons for consistency */
+
     padding: 0.4rem 0.8rem;
     font-size: 0.85rem;
 }
@@ -357,7 +355,7 @@ main {
     display: flex;
     flex-direction: row;
     gap: 1rem;
-    /* Space between the two control groups in the row */
+
     width: 100%;
 }
 
@@ -365,7 +363,7 @@ main {
     flex: 1;
     /* Each control group takes half the space */
     min-width: 0;
-    /* Allow shrinking */
+
 }
 
 .viz-feature-section {
@@ -911,9 +909,9 @@ hr.panel-separator {
     top: 10px;
     left: 10px;
     z-index: 50;
-    /* Below probe-info (100) but above canvas */
+
     background-color: rgba(var(--bg-color-rgb, 13, 15, 38), 0.75);
-    /* Fallback if var fails */
+
     backdrop-filter: blur(5px);
     -webkit-backdrop-filter: blur(5px);
     /* For Safari */
@@ -921,11 +919,11 @@ hr.panel-separator {
     border-radius: 8px;
     border: 1px solid var(--border-color);
     max-width: calc(100% - 20px);
-    /* Prevent overflow from parent */
+
     font-size: 0.8rem;
     line-height: 1.4;
     color: var(--text-secondary-color);
-    /* The .hidden class (display: none !important;) will handle visibility */
+
 }
 
 #domain_coloring_key strong {
@@ -939,14 +937,11 @@ hr.panel-separator {
 
 #domain_coloring_key span[style*="color"] {
     font-weight: 500;
-    /* Optional: slightly bolder for color examples */
-    /* display: inline-block; /* Ensures proper rendering of text with background color */
-    /* padding: 0 0.2em; /* Small padding around color names if needed */
+
 }
 
-
 #canvases_section {
-    /* There exist 2 main top and bottom panels, both are set to fully transparent / invisible now for visibility. */
+
     flex-grow: 1;
     display: flex;
     flex-direction: column;
@@ -965,9 +960,9 @@ hr.panel-separator {
 #canvases_section .two-column-layout {
     flex-grow: 1;
     min-height: 0;
-    /* gap: 2.5rem; already exists */
+
     align-items: stretch;
-    /* Ensure columns stretch to the same height if content differs, default is stretch */
+
 }
 
 #canvases_section .plane-column,
@@ -980,7 +975,7 @@ hr.panel-separator {
     position: relative;
     /* For overlays and ensuring children are contained */
     overflow: hidden;
-    /* Crucial to prevent canvas from expanding its column */
+
     background: var(--card-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 16px;
@@ -1079,13 +1074,13 @@ hr.panel-separator {
 #real_plots_column>div:not(.canvas-header-line):not(.collapsed-placeholder-content),
 #graph_column>div:not(.canvas-header-line):not(.collapsed-placeholder-content) {
     flex-grow: 1;
-    /* Allows this container to take up available space in the column */
+
     min-height: 0;
     /* Essential for descendant flex items (like canvas) to scale correctly */
     position: relative;
     /* For positioning overlays like probe_info */
     display: flex;
-    /* Use flex to manage canvas and overlays if needed */
+
     flex-direction: column;
     /* Stack canvas and overlays */
     border: 1px solid var(--border-color);
@@ -1096,53 +1091,47 @@ hr.panel-separator {
     transform: translateZ(0);
 }
 
-
-
-
 .canvas-header-line {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
-    /* Space between header line and canvas content below */
+
     flex-wrap: nowrap;
-    /* Ensure title and controls stay on one line */
+
     gap: 1rem;
     /* Spacing between title and controls block */
 }
 
 .canvas-header-line .section-title {
-    /* font-size: 1.2rem; padding-bottom: 0; border-bottom: none; margin-bottom:0; */
-    /* Applied as per prompt */
+
     font-size: 1.2rem;
     padding-bottom: 0;
     border-bottom: none;
     margin-bottom: 0;
     min-width: 100px;
-    /* Ensure some part of the title is always visible */
+
     flex-grow: 1;
-    /* Allow title to take available space */
+
     flex-shrink: 1;
-    /* Allow title to shrink and truncate */
+
     overflow: hidden;
     /* Required for text-overflow */
     text-overflow: ellipsis;
-    /* Add ... if text is too long */
+
     white-space: nowrap;
-    /* Prevent title from wrapping to multiple lines */
+
 }
 
 .canvas-header-controls {
     display: flex;
     align-items: center;
     gap: 1rem;
-    /* Space between controls like select and button */
+
     flex-wrap: nowrap;
-    /* Ensure controls themselves don't wrap to new lines within their container */
-    /* justify-content: flex-start; /* Not as relevant if not wrapping */
-    /* min-width: 0; /* Not needed if flex-shrink is 0 */
+
     flex-shrink: 0;
-    /* Prevent this container from shrinking, forcing title to shrink first */
+
 }
 
 .canvas-header-controls label {
@@ -1150,18 +1139,17 @@ hr.panel-separator {
     font-size: 0.8rem;
 }
 
-
 canvas {
-    /* object-fit: contain; /* Not applicable to canvas, content is drawn */
+
     display: block;
-    /* Good default */
+
     border-radius: 8px;
     flex-grow: 1;
-    /* Allows canvas to fill its flex parent (the new div) */
+
     min-height: 0;
     /* Essential for scaling within a flex container */
     cursor: crosshair;
-    /* Added default cursor */
+
 }
 
 .riemann-surface-canvas {
@@ -1213,7 +1201,6 @@ canvas {
     font-size: 0.75rem;
 }
 
-
 .section-title {
     font-size: 1.65rem;
     font-weight: 500;
@@ -1233,23 +1220,6 @@ canvas {
     font-weight: 600;
 }
 
-/* The .input-controls class is now used by the new panels if they inherit that class,
-   or its styles are directly applied to #function-controls-panel and #visualization-options-panel.
-   If .input-controls was on the outer div that is now #controls_options_section,
-   its old grid/scroll properties are removed/replaced by flex properties for side-by-side layout.
-   The grid layout is now part of #function-controls-panel and #visualization-options-panel.
-*/
-/*
-.input-controls {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 1.5rem;
-    align-items: start;
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-}
-*/
-
 .control-group {
     display: flex;
     flex-direction: column;
@@ -1264,7 +1234,7 @@ canvas {
     align-items: center;
     color: var(--text-secondary-color);
     letter-spacing: 0.01em;
-    /* Align label text with the center of taller inputs */
+
 }
 
 /* Override for checkbox labels to align left */
@@ -1274,16 +1244,16 @@ canvas {
 
 .control-group label>output,
 .control-group .slider-value-output {
-    /* If output is part of label OR a sibling with this class */
+
     margin-left: auto;
-    /* Push output to the right if it's meant to be inline */
+
     font-size: 0.8rem;
     padding: 0.25rem 0.5rem;
     background-color: rgba(0, 0, 0, 0.25);
     border-radius: 6px;
     color: var(--text-color);
     min-width: 40px;
-    /* Ensure consistent width */
+
     text-align: center;
 }
 
@@ -1383,12 +1353,6 @@ input[type="range"]:active::-moz-range-thumb {
 input[type="range"]:focus::-moz-range-thumb {
     box-shadow: 0 0 15px color-mix(in srgb, var(--accent-purple) 60%, transparent), inset 0 0 4px rgba(0, 0, 0, 0.2);
 }
-
-/* Specific inputA and inputB styles are removed to use the general style or specific classes if needed */
-/* Example: if inputA needs a pink thumb, add a class to it and style that class */
-/* input[type="range"].pink-thumb::-webkit-slider-thumb { background: var(--accent-pink); } */
-/* input[type="range"].pink-thumb:hover::-webkit-slider-thumb { box-shadow: 0 0 10px var(--accent-pink); } */
-
 
 .two-column-layout {
     display: flex;
@@ -1607,19 +1571,6 @@ input[type="range"]:focus::-moz-range-thumb {
 }
 
 /* .slider-pair-row is renamed to .slider-row and styled above */
-/*
-.slider-pair-row {
-    display: flex;
-    flex-direction: row;
-    gap: 2rem;
-    align-items: flex-start;
-}
-
-.slider-pair-row > .control-group {
-    flex: 1;
-    min-width: 0;
-}
-*/
 
 .helix-cards-container {
     display: grid;
@@ -1877,15 +1828,8 @@ input[type="range"]:focus::-moz-range-thumb {
     overflow: hidden;
     clip: rect(1px, 1px, 1px, 1px);
     white-space: nowrap;
-    /* For good measure */
-}
 
-/*
-button.active {
-    box-shadow: 0 0 8px var(--glow-color);
-    filter: brightness(1.2);
 }
-*/
 
 #fullscreen_container {
     position: fixed;
@@ -1898,7 +1842,7 @@ button.active {
     display: flex;
     justify-content: center;
     align-items: center;
-    /* padding: 1px; Removed padding to allow child to be 100% */
+
     box-sizing: border-box;
 }
 
@@ -1972,7 +1916,7 @@ button:hover {
     background-color: color-mix(in srgb, var(--card-bg-color) 90%, white 10%);
     border-color: var(--accent-purple);
     color: var(--text-color);
-    /* Ensure text color remains readable */
+
     box-shadow: 0 3px 10px rgba(var(--bg-color-rgb), 0.3);
 }
 
@@ -1982,7 +1926,7 @@ button:active {
     border-color: var(--accent-purple-dark);
     color: #fff;
     box-shadow: 0 1px 5px rgba(var(--bg-color-rgb), 0.2);
-    /* filter: brightness(0.95); Removed */
+
 }
 
 /* Container for function selection buttons */
@@ -2000,9 +1944,9 @@ button:active {
     box-shadow: 0 0 15px var(--glow-color);
     /* Glassy glow using active theme glow */
     filter: brightness(1);
-    /* Reset any generic active brightness - already present */
+
     transform: translateY(0px);
-    /* Ensure no press effect persists - already present */
+
 }
 
 .icon-button {
@@ -2101,7 +2045,7 @@ select {
     font-size: 0.8rem;
     /* This is more specific, so it will override the 0.85rem above */
     padding-right: 1.8rem;
-    /* Keep custom padding for smaller selects if needed */
+
 }
 
 .canvas-shape-select,
@@ -2151,13 +2095,13 @@ select:focus {
     background-color: rgba(0, 0, 0, 0.25);
     border-radius: 6px;
     font-size: 0.8rem;
-    /* Applied as per prompt */
+
     color: var(--text-color);
-    /* Applied as per prompt */
+
     min-width: 40px;
-    /* Already part of the unified .slider-value-output style */
+
     text-align: center;
-    /* Already part of the unified .slider-value-output style */
+
     /* No margin-left here, as it's handled by the parent label or specific positioning rules */
 }
 
@@ -2202,11 +2146,11 @@ select:focus {
     -webkit-backdrop-filter: blur(8px);
     /* For Safari */
     z-index: 100;
-    /* Ensure it's above the canvas */
+
     pointer-events: none;
     /* So it doesn't interfere with mouse events on canvas */
     max-width: calc(100% - 20px);
-    /* Prevent overflow from its container */
+
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
     /* Subtle shadow */
 }
@@ -2238,7 +2182,7 @@ select:focus {
     z-index: 100;
     pointer-events: none;
     max-width: calc(100% - 70px);
-    /* Avoid overlap with probe if both visible */
+
     text-align: left;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
@@ -2260,13 +2204,13 @@ select:focus {
     flex: 1;
     /* Each control group takes equal width */
     min-width: 0;
-    /* Allow shrinking in flex context */
+
 }
 
 /* Custom Checkbox Styling */
 .control-group label input[type="checkbox"] {
     opacity: 0;
-    /* Hide the default checkbox */
+
     position: absolute;
     width: 0;
     height: 0;
@@ -2274,15 +2218,15 @@ select:focus {
 
 .control-group label {
     position: relative;
-    /* For positioning pseudo-elements if needed, and for clickability */
+
     cursor: pointer;
     user-select: none;
-    /* Prevent text selection on click */
+
     display: flex;
     /* Use flex for alignment */
     align-items: center;
     /* Vertically align custom box and text */
-    /* font-size: 1rem; font-weight: 500; (already from .control-group label, but ensure it applies well) */
+
 }
 
 /* The custom checkbox box */
@@ -2293,13 +2237,13 @@ select:focus {
     background-color: rgba(var(--bg-color-rgb), 0.3);
     border: 1px solid var(--border-color);
     box-shadow: none;
-    /* Ensure no default box shadow */
+
     border-radius: 4px;
     margin-right: 0.5rem;
-    /* Space between custom box and label text (was 0.25rem, prompt implies general .control-group label styling for color) */
+
     transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     flex-shrink: 0;
-    /* Prevent shrinking if label text is long */
+
     position: relative;
     /* For the checkmark */
 }
@@ -2340,19 +2284,18 @@ select:focus {
     /* Final state: visible */
 }
 
-/* Focus style for accessibility (applied to the custom visual when the hidden input has focus) */
 .control-group label input[type="checkbox"]:focus+.custom-checkbox-visual {
     box-shadow: 0 0 0 3px var(--glow-color);
     /* Consistent glow */
     border-color: var(--accent-purple);
-    /* Optionally make border match glow on focus */
+
 }
 
 /* Hover style on the custom box */
 .control-group label:hover .custom-checkbox-visual {
     border-color: var(--accent-purple);
     /* Highlight on hover */
-    /* box-shadow: 0 0 0 2px rgba(var(--glow-color), 0.3); /* Optional subtle glow on hover */
+
 }
 
 /* Disabled style for checkboxes and labels */
@@ -2371,7 +2314,7 @@ select:focus {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
-    /* Space between each coefficient's row */
+
     padding-top: 0.5rem;
     /* Add some space above the first coefficient */
 }
@@ -2381,7 +2324,7 @@ select:focus {
     flex-direction: row;
     /* Re and Im parts side-by-side */
     gap: 1.5rem;
-    /* Space between Re and Im control groups */
+
     align-items: flex-start;
     /* Align to the top */
 }
@@ -2390,20 +2333,19 @@ select:focus {
     flex: 1;
     /* Each part (Re/Im) takes equal space */
     min-width: 0;
-    /* Allow shrinking in flex context */
-    /* Styles for .control-group (gap, etc.) are already global */
+
 }
 
 /* Specific styles for polynomial controls for compactness */
 .polynomial-coeff-row .control-group label {
     font-size: 0.85rem;
     /* Retains its specific size */
-    /* If output is NOT in label, space-between might not be ideal. */
+
     /* For poly, output is a sibling to label, so this won't push output to right. */
     justify-content: flex-start;
-    /* Align label text to the start */
+
     color: var(--text-secondary-color);
-    /* Ensure color is inherited or set */
+
 }
 
 /* Style for the output that is a sibling of the label in polynomial controls */
@@ -2413,7 +2355,7 @@ select:focus {
     margin-bottom: 0.25rem;
     /* Space it above the slider */
     display: block;
-    /* Make it block to sit on its own line */
+
     text-align: left;
     /* Align text to the left */
     padding: 0.1rem 0;
@@ -2429,7 +2371,7 @@ select:focus {
     flex-direction: row;
     /* Re and Im parts side-by-side */
     gap: 1.5rem;
-    /* Space between Re and Im control groups */
+
     align-items: flex-start;
     /* Align to the top */
 }
@@ -2438,7 +2380,7 @@ select:focus {
     flex: 1;
     /* Each part (Re/Im) takes equal space */
     min-width: 0;
-    /* Allow shrinking in flex context */
+
 }
 
 /* Specific styles for Mobius controls for consistency with polynomial */
@@ -2446,21 +2388,18 @@ select:focus {
     font-size: 0.85rem;
     /* Retains its specific size */
     justify-content: flex-start;
-    /* Align label text to the start */
+
     color: var(--text-secondary-color);
-    /* Ensure color is inherited or set */
+
 }
 
 /* This assumes the <output> is part of the <label> for Mobius, unlike polynomial */
-/* If output is part of label: .mobius-coeff-row .control-group label > output */
-/* If output is a sibling (like poly): .mobius-coeff-row .control-group .slider-value-output */
+
 /* The HTML structure used output inside label, so this should be fine: */
 .mobius-coeff-row .control-group label>output {
     margin-left: 0.5rem;
-    /* Space between "Re(a):" and "1.0" */
-    /* Other output styles are inherited or default */
-}
 
+}
 
 .mobius-coeff-row .control-group input[type="range"] {
     height: 6px;
@@ -2485,7 +2424,6 @@ select:focus {
     padding: 0.3rem 0.5rem;
     font-size: 0.75rem;
 }
-
 
 .polynomial-coeff-row .control-group input[type="range"] {
     height: 6px;
@@ -2554,7 +2492,6 @@ select:focus {
     box-shadow: 0 0 0 3px var(--glow-color);
 }
 
-/* Explicitly ensure pointer events are enabled for these inputs */
 #taylor_series_custom_center_re_input,
 #taylor_series_custom_center_im_input {
     pointer-events: auto !important;
@@ -2728,10 +2665,6 @@ select:focus {
         grid-template-columns: 1fr;
     }
 }
-
-/* ==========================================================================
-   Algebraic Chaining UI Redesign
-   ========================================================================== */
 
 #algebraic_chaining_controls_container {
     margin-top: 12px;
@@ -4822,10 +4755,7 @@ textarea.dynamic-formula-input {
 
 .slider-container { flex-grow: 1; display: flex; align-items: center; }
 
-
-
 .labels { display: flex; justify-content: space-between; width: 100%; font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
-
 
 /* Trio Grid layout */
 .viz-toggle-grid--trio {
@@ -4996,7 +4926,6 @@ body.vertical-layout #canvases_section .two-column-layout {
     padding-bottom: 0 !important;
 }
 
-/* Ensure divs stack correctly and expand if one is collapsed */
 body.vertical-layout #canvases_section .two-column-layout > div,
 body.vertical-layout #canvases_section .two-column-layout > .plane-column,
 body.vertical-layout #canvases_section .two-column-layout:has(#laplace_3d_column:not(.hidden)) > div {
@@ -5047,7 +4976,6 @@ body.vertical-layout #controls_options_section .viz-toggle-grid--trio {
     gap: 0.75rem !important;
 }
 
-/* Force all controls panels to auto height and prevent double scrollbars */
 body.vertical-layout .controls-panel {
     height: auto !important;
     min-height: 0 !important;
@@ -5198,3 +5126,281 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     border: 1px solid var(--border-color);
     border-radius: 8px;
 }
+.domain-key-line {
+    display: inline-block;
+    margin-bottom: 4px;
+}
+
+.domain-key-entry {
+    display: inline-block;
+    padding-left: 1.5rem;
+}
+
+.domain-key-entry strong {
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+.domain-key-note {
+    display: inline-block;
+    margin-top: 4px;
+}
+.palette-guide-intro,
+.palette-guide-strip {
+    margin-bottom: 1rem;
+}
+
+.palette-guide-strip {
+    margin-top: 1rem;
+}
+
+.palette-guide-wheel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+}
+
+.palette-guide-wheel-canvas {
+    max-width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+}
+
+.palette-guide-strip-title {
+    margin-bottom: 0.35rem;
+    color: var(--text-color);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.palette-guide-strip-copy {
+    margin-bottom: 0.75rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.palette-guide-scale {
+    position: relative;
+    padding: 1rem 1.25rem 0.75rem;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.palette-guide-scale-canvas {
+    display: block;
+    width: 100%;
+    height: 24px;
+    border-radius: 4px;
+}
+
+.palette-guide-ticks {
+    position: relative;
+    height: 16px;
+    margin-top: 0.35rem;
+    color: var(--text-muted);
+    font-family: monospace;
+    font-size: 0.75rem;
+}
+
+.palette-guide-tick {
+    position: absolute;
+    transform: translateX(-50%);
+}
+
+.palette-guide-tick.is-start { left: 0; transform: none; }
+.palette-guide-tick.is-near-start { left: 2.5%; }
+.palette-guide-tick.is-quarter { left: 25%; }
+.palette-guide-tick.is-middle { left: 50%; }
+.palette-guide-tick.is-end { right: 0; transform: none; }
+.theme-modal-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.theme-modal-section h3 {
+    margin-bottom: 0.75rem;
+    color: var(--text-color);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.theme-modal-control-group {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border: 0;
+}
+
+.grid-color-pickers-container {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+.control-group-compact { margin-bottom: 8px; }
+.control-group-tight { margin-bottom: 6px; }
+.control-group-flush { margin-bottom: 0; }
+
+.control-toggle-heading {
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.compact-label {
+    margin: 0;
+    color: var(--text-secondary-color);
+    font-size: 0.8rem;
+}
+
+.compact-text { font-size: 0.8rem; }
+.micro-text { font-size: 11px; }
+.small-output { font-size: 12px; }
+
+.compact-control-select {
+    padding: 0.25rem;
+    color: #fff;
+    font-size: 0.8rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.compact-formula-input {
+    padding: 0.25rem;
+    font-size: 0.8rem;
+}
+
+.compact-formula-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.5rem;
+    padding: 0.25rem;
+    margin: 0;
+    font-size: 0.8rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.control-row-between,
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.control-row-between { justify-content: space-between; }
+.control-row-wide { gap: 1rem; }
+
+.control-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.compact-formula-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.1rem;
+}
+
+.active-palette-label {
+    color: var(--accent-purple);
+    font-family: monospace;
+    font-weight: 700;
+}
+
+.fill-container { width: 100%; height: 100%; }
+.fill-relative { position: relative; width: 100%; height: 100%; }
+.flex-relative-host { position: relative; flex: 1; }
+.full-width-control { min-width: 100%; }
+
+.canvas-layer-host {
+    position: relative;
+    display: flex;
+    flex: 1;
+    width: 100%;
+    height: 100%;
+}
+
+.canvas-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: inherit;
+}
+
+.centered-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.transform-control-grid {
+    display: grid;
+    width: 100%;
+    gap: 16px;
+}
+.transform-control-grid.is-three-column { grid-template-columns: repeat(3, 1fr); }
+.transform-control-grid.is-four-column { grid-template-columns: repeat(4, 1fr); }
+
+.accent-blue { accent-color: #6c9aff; }
+.accent-teal { accent-color: #5fb4cc; }
+.accent-gold { accent-color: #ffdc64; }
+.accent-orange { accent-color: #ffb464; }
+.accent-pink { accent-color: #ff6b9d; }
+.accent-green { accent-color: #64dc96; }
+.accent-purple { accent-color: #b478ff; }
+.accent-salmon { accent-color: #ffb478; }
+
+.winding-note {
+    padding: 8px;
+    margin-bottom: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border-left: 2px solid rgba(255, 220, 100, 0.5);
+    border-radius: 6px;
+}
+.winding-note-copy { color: rgba(255, 240, 200, 0.8); font-size: 9px; line-height: 1.4; }
+.winding-note-copy strong { color: rgb(255, 220, 100); }
+.winding-slider { cursor: pointer; }
+.winding-scale { display: flex; justify-content: space-between; margin-top: 3px; color: rgba(255, 220, 150, 0.5); font-size: 8px; }
+
+.laplace-playback-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+.laplace-playback-button { padding: 8px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 6px; }
+.laplace-playback-button.is-play { color: rgb(180, 255, 200); background: rgba(100, 255, 150, 0.25); border: 1px solid rgba(100, 220, 150, 0.5); }
+.laplace-playback-button.is-reset { color: rgb(255, 220, 180); background: rgba(255, 150, 100, 0.2); border: 1px solid rgba(255, 180, 100, 0.4); }
+.laplace-full-spiral { width: 100%; padding: 6px; color: rgba(255, 220, 180, 0.9); font-size: 10px; font-weight: 600; cursor: pointer; background: rgba(255, 200, 100, 0.15); border: 1px solid rgba(255, 180, 100, 0.3); border-radius: 5px; }
+
+.nested-control-stack { display: flex; flex-direction: column; gap: 0.5rem; padding-left: 1.5rem; margin-top: 0.5rem; }
+.palette-controls-header { display: flex; align-items: center; justify-content: space-between; }
+.palette-label-row { display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary-color); font-size: 0.8rem; }
+.palette-guide-button { margin-left: 0.5rem; }
+.nowrap-label { white-space: nowrap; }
+.compact-select-wide { padding: 0.25rem 0.5rem; }
+.value-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
+.accent-value { color: var(--accent-purple); font-family: monospace; font-size: 0.8rem; }
+.spaced-control { margin-top: 0.5rem; }
+.control-divider { width: 100%; height: 1px; margin: 0.5rem 0; background: var(--border-color); }
+
+.chaining-controls { padding-left: 10px; margin-top: 10px; border-left: 2px solid var(--border-color); }
+.chaining-controls label { margin-top: 5px; }
+.chaining-mode-select { margin-bottom: 10px; }
+.chaining-grid-button { width: 100%; margin-top: 10px; color: var(--accent-purple); background: transparent; border: 1px solid var(--accent-purple); }
+.formula-editor-stack { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
+.formula-editor-label { color: var(--text-secondary-color); font-size: 0.8rem; }
+.compact-step-copy { margin-bottom: 0.45rem; }
+
+.domain-palette-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; gap: 0.5rem; }
+.domain-palette-label { justify-content: flex-start; gap: 0.5rem; margin: 0; }
+.analysis-copy { font-size: 0.8rem; line-height: 1.3; }
+.auxiliary-surface-column { display: flex; flex: 1; flex-direction: column; }
+.canvas-header-control-row { display: flex; align-items: center; gap: 1rem; }
+.canvas-fill-host { position: relative; display: flex; flex: 1; width: 100%; height: 100%; }

@@ -76,8 +76,8 @@
                             Continuation</button>
                     </div>
 
-                    <div id="fourier_specific_controls" class="hidden"
-                        style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%;">
+                    <div id="fourier_specific_controls" class="hidden transform-control-grid is-three-column"
+                       >
 
                         <!-- Signal Configuration Section -->
                         <div class="control-section fourier-signal">
@@ -86,7 +86,7 @@
                                 Signal Configuration
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 8px;">
+                            <div class="control-group control-group-compact">
                                 <label for="fourier_function_selector" class="slider-label">Waveform Type</label>
                                 <select id="fourier_function_selector" name="fourier_function_selector"
                                     class="control-select fourier-select"
@@ -117,7 +117,7 @@
                                 </select>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 6px;">
+                            <div class="control-group control-group-tight">
                                 <label for="fourier_frequency_slider" class="slider-label">
                                     Frequency:
                                     <output id="fourier_frequency_value_display" class="slider-value">1.0</output> Hz
@@ -125,11 +125,11 @@
                                 <div class="slider-container">
                                     <input type="range" id="fourier_frequency_slider" name="fourier_frequency_slider"
                                         min="0.1" max="10" step="0.1" value="1.0" data-tooltip="Frequency of the signal"
-                                        style="accent-color: #6c9aff;">
+                                        class="accent-blue">
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 0;">
+                            <div class="control-group control-group-flush">
                                 <label for="fourier_amplitude_slider" class="slider-label">
                                     Amplitude:
                                     <output id="fourier_amplitude_value_display" class="slider-value">1.0</output>
@@ -137,7 +137,7 @@
                                 <div class="slider-container">
                                     <input type="range" id="fourier_amplitude_slider" name="fourier_amplitude_slider"
                                         min="0.1" max="5" step="0.1" value="1.0" data-tooltip="Signal amplitude"
-                                        style="accent-color: #6c9aff;">
+                                        class="accent-blue">
                                 </div>
                             </div>
                         </div>
@@ -149,7 +149,7 @@
                                 Sampling Parameters
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 6px;">
+                            <div class="control-group control-group-tight">
                                 <label for="fourier_time_window_slider" class="slider-label">
                                     Time Window:
                                     <output id="fourier_time_window_value_display" class="slider-value">4.0</output> s
@@ -157,11 +157,11 @@
                                 <div class="slider-container">
                                     <input type="range" id="fourier_time_window_slider"
                                         name="fourier_time_window_slider" min="1" max="10" step="0.5" value="4.0"
-                                        data-tooltip="Duration of signal to analyze" style="accent-color: #5fb4cc;">
+                                        data-tooltip="Duration of signal to analyze" class="accent-teal">
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 0;">
+                            <div class="control-group control-group-flush">
                                 <label for="fourier_samples_slider" class="slider-label">
                                     Samples:
                                     <output id="fourier_samples_value_display" class="slider-value">128</output>
@@ -170,7 +170,7 @@
                                     <input type="range" id="fourier_samples_slider" name="fourier_samples_slider"
                                         min="32" max="512" step="32" value="128"
                                         data-tooltip="Number of sample points (higher = more accurate)"
-                                        style="accent-color: #5fb4cc;">
+                                        class="accent-teal">
                                 </div>
                             </div>
                         </div>
@@ -183,35 +183,35 @@
                             </div>
 
                             <div
-                                style="background: rgba(0,0,0,0.25); padding: 8px; border-radius: 6px; margin-bottom: 10px; border-left: 2px solid rgba(255,220,100,0.5);">
-                                <div style="font-size: 9px; color: rgba(255,240,200,0.8); line-height: 1.4;">
-                                    Watch the <strong style="color: rgba(255,220,100,1);">golden center of mass</strong>
+                                class="winding-note">
+                                <div class="winding-note-copy">
+                                    Watch the <strong class="winding-note-emphasis">golden center of mass</strong>
                                     jump when winding frequency matches signal frequency!
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 8px;">
-                                <label for="fourier_winding_frequency_slider" class="slider-label"
-                                    style="font-size: 11px;">
+                            <div class="control-group control-group-compact">
+                                <label for="fourier_winding_frequency_slider" class="slider-label micro-text"
+                                   >
                                     Winding Freq:
-                                    <output id="fourier_winding_frequency_value_display" class="slider-value"
-                                        style="font-size: 12px;">1.0</output> Hz
+                                    <output id="fourier_winding_frequency_value_display" class="slider-value small-output"
+                                       >1.0</output> Hz
                                 </label>
                                 <div class="slider-container">
                                     <input type="range" id="fourier_winding_frequency_slider"
                                         name="fourier_winding_frequency_slider" min="0.1" max="10" step="0.1"
                                         value="1.0"
                                         data-tooltip="Test frequency - when this matches signal frequency, magic happens!"
-                                        style="accent-color: #ffdc64; cursor: pointer;">
+                                        class="accent-gold winding-slider">
                                 </div>
                                 <div
-                                    style="display: flex; justify-content: space-between; margin-top: 3px; font-size: 8px; color: rgba(255,220,150,0.5);">
+                                    class="winding-scale">
                                     <span>0.1</span>
                                     <span>10</span>
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 0;">
+                            <div class="control-group control-group-flush">
                                 <label for="fourier_winding_time_slider" class="slider-label">
                                     Progress:
                                     <output id="fourier_winding_time_value_display" class="slider-value">100</output>%
@@ -220,15 +220,15 @@
                                     <input type="range" id="fourier_winding_time_slider"
                                         name="fourier_winding_time_slider" min="0" max="1" step="0.01" value="1.0"
                                         data-tooltip="Control how much of the signal to show"
-                                        style="accent-color: #ffb464;">
+                                        class="accent-orange">
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- Laplace Transform Controls -->
-                    <div id="laplace_specific_controls" class="hidden"
-                        style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; width: 100%;">
+                    <div id="laplace_specific_controls" class="hidden transform-control-grid is-four-column"
+                       >
 
                         <!-- Signal Configuration Section -->
                         <div class="control-section laplace-signal">
@@ -237,7 +237,7 @@
                                 Signal Configuration
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 8px;">
+                            <div class="control-group control-group-compact">
                                 <label for="laplace_function_selector" class="slider-label">Waveform Type</label>
                                 <select id="laplace_function_selector" class="control-select laplace-select"
                                     data-tooltip="Select the time domain signal type">
@@ -262,18 +262,18 @@
                                 </select>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 6px;">
+                            <div class="control-group control-group-tight">
                                 <label for="laplace_frequency_slider" class="slider-label">
                                     Frequency:
                                     <output id="laplace_frequency_value_display" class="slider-value">2.0</output> Hz
                                 </label>
                                 <div class="slider-container">
                                     <input type="range" id="laplace_frequency_slider" min="0.5" max="10" step="0.1"
-                                        value="2.0" data-tooltip="Oscillation frequency" style="accent-color: #ff6b9d;">
+                                        value="2.0" data-tooltip="Oscillation frequency" class="accent-pink">
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 0;">
+                            <div class="control-group control-group-flush">
                                 <label for="laplace_damping_slider" class="slider-label">
                                     Damping σ:
                                     <output id="laplace_damping_value_display" class="slider-value">0.5</output>
@@ -281,7 +281,7 @@
                                 <div class="slider-container">
                                     <input type="range" id="laplace_damping_slider" min="0.1" max="5" step="0.1"
                                         value="0.5" data-tooltip="Damping factor (decay rate)"
-                                        style="accent-color: #ff6b9d;">
+                                        class="accent-pink">
                                 </div>
                             </div>
                         </div>
@@ -293,20 +293,20 @@
                                 s-Plane Exploration
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 6px;">
-                                <label for="laplace_sigma_slider" class="slider-label" style="font-size: 11px;">
+                            <div class="control-group control-group-tight">
+                                <label for="laplace_sigma_slider" class="slider-label micro-text">
                                     σ (Real):
-                                    <output id="laplace_sigma_value_display" class="slider-value"
-                                        style="font-size: 12px;">0.0</output>
+                                    <output id="laplace_sigma_value_display" class="slider-value small-output"
+                                       >0.0</output>
                                 </label>
                                 <div class="slider-container">
                                     <input type="range" id="laplace_sigma_slider" min="-5" max="5" step="0.1"
                                         value="0.0" data-tooltip="Real part of s = σ + jω"
-                                        style="accent-color: #64dc96;">
+                                        class="accent-green">
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 6px;">
+                            <div class="control-group control-group-tight">
                                 <label for="laplace_omega_slider" class="slider-label">
                                     ω (Imaginary):
                                     <output id="laplace_omega_value_display" class="slider-value">1.0</output>
@@ -314,11 +314,11 @@
                                 <div class="slider-container">
                                     <input type="range" id="laplace_omega_slider" min="-10" max="10" step="0.1"
                                         value="1.0" data-tooltip="Imaginary part of s = σ + jω"
-                                        style="accent-color: #64dc96;">
+                                        class="accent-green">
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 0;">
+                            <div class="control-group control-group-flush">
                                 <label for="laplace_show_roc_cb" class="control-label tooltip-label slider-label"
                                     data-tooltip="Show/hide Region of Convergence boundary and shading on the s-plane">
                                     <input type="checkbox" id="laplace_show_roc_cb" class="control-checkbox" checked>
@@ -335,7 +335,7 @@
                                 3D Visualization
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 8px;">
+                            <div class="control-group control-group-compact">
                                 <label for="laplace_viz_mode_selector" class="slider-label">Display Mode</label>
                                 <select id="laplace_viz_mode_selector" class="control-select laplace-3d-select">
                                     <option value="magnitude" selected>Magnitude |F(s)|</option>
@@ -344,7 +344,7 @@
                                 </select>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 6px;">
+                            <div class="control-group control-group-tight">
                                 <label for="laplace_clip_height_slider" class="slider-label">
                                     Clip Height:
                                     <output id="laplace_clip_height_value_display" class="slider-value">10</output>
@@ -352,11 +352,11 @@
                                 <div class="slider-container">
                                     <input type="range" id="laplace_clip_height_slider" min="1" max="50" step="1"
                                         value="10" data-tooltip="Maximum height for poles (prevents infinite spikes)"
-                                        style="accent-color: #b478ff;">
+                                        class="accent-purple">
                                 </div>
                             </div>
 
-                            <div class="control-group" style="margin-bottom: 0;">
+                            <div class="control-group control-group-flush">
                                 <label for="laplace_show_poles_zeros_cb"
                                     class="control-label tooltip-label slider-label"
                                     data-tooltip="Show/hide poles (×) and zeros (○) on the 3D surface and winding visualization">
@@ -376,19 +376,19 @@
                             </div>
 
                             <!-- Animation buttons -->
-                            <div style="margin-bottom: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                            <div class="laplace-playback-actions">
                                 <button id="laplace_play_pause_btn" data-tooltip="Play/Pause animation"
-                                    style="background: rgba(100,255,150,0.25); border: 1px solid rgba(100,220,150,0.5); color: rgba(180,255,200,1); padding: 8px; border-radius: 6px; font-size: 11px; cursor: pointer; font-weight: 700;">
+                                    class="laplace-playback-button is-play">
                                     ▶ Play
                                 </button>
                                 <button id="laplace_reset_btn" data-tooltip="Reset to beginning"
-                                    style="background: rgba(255,150,100,0.2); border: 1px solid rgba(255,180,100,0.4); color: rgba(255,220,180,1); padding: 8px; border-radius: 6px; font-size: 11px; cursor: pointer; font-weight: 700;">
+                                    class="laplace-playback-button is-reset">
                                     ↺ Reset
                                 </button>
                             </div>
 
                             <!-- Animation speed -->
-                            <div class="control-group" style="margin-bottom: 8px;">
+                            <div class="control-group control-group-compact">
                                 <label for="laplace_animation_speed_slider" class="slider-label">
                                     Speed:
                                     <output id="laplace_animation_speed_display" class="slider-value">3.0</output>s
@@ -396,12 +396,12 @@
                                 <div class="slider-container">
                                     <input type="range" id="laplace_animation_speed_slider" min="0.5" max="10"
                                         step="0.5" value="3.0" data-tooltip="Animation duration in seconds"
-                                        style="accent-color: #ffb478;">
+                                        class="accent-salmon">
                                 </div>
                             </div>
 
                             <!-- Animation loop -->
-                            <div class="control-group" style="margin-bottom: 6px;">
+                            <div class="control-group control-group-tight">
                                 <label for="laplace_animation_loop_cb" class="control-label tooltip-label slider-label"
                                     data-tooltip="Automatically restart the animation when it completes">
                                     <input type="checkbox" id="laplace_animation_loop_cb" class="control-checkbox"
@@ -412,9 +412,9 @@
                             </div>
 
                             <!-- Show full spiral button -->
-                            <div style="margin-bottom: 0;">
+                            <div class="control-group-flush">
                                 <button id="laplace_show_full_btn" data-tooltip="Show complete spiral (no animation)"
-                                    style="width: 100%; background: rgba(255,200,100,0.15); border: 1px solid rgba(255,180,100,0.3); color: rgba(255,220,180,0.9); padding: 6px; border-radius: 5px; font-size: 10px; cursor: pointer; font-weight: 600;">
+                                    class="laplace-full-spiral">
                                     Show Full Spiral
                                 </button>
                             </div>
@@ -422,8 +422,8 @@
                     </div>
 
                     <!-- Real Plots Panel -->
-                    <div id="real_plots_params" class="control-group"
-                        style="padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+                    <div id="real_plots_params" class="control-group control-toggle-heading"
+                       >
                         <label for="enable_real_plots_cb" class="control-label tooltip-label slider-label"
                             data-tooltip="Render a real 3D surface plot using the active complex function pipeline with real inputs.">
                             <input type="checkbox" id="enable_real_plots_cb" class="control-checkbox">
@@ -431,14 +431,14 @@
                             Real Plots
                         </label>
 
-                        <div id="real_plots_controls_container" class="hidden"
-                            style="margin-top: 0.5rem; padding-left: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                        <div id="real_plots_controls_container" class="hidden nested-control-stack"
+                           >
                             <!-- Input Equation Select / Presets -->
-                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+                            <div class="control-row-between control-row-wide">
                                 <label
-                                    style="font-size: 0.8rem; color: var(--text-secondary-color); margin: 0;">u(x,y):</label>
-                                <select id="real_plots_input_preset" class="control-select"
-                                    style="padding: 0.25rem; font-size: 0.8rem; border-radius: 4px; background: rgba(0,0,0,0.3); color: #fff; border: 1px solid var(--border-color);">
+                                    class="compact-label">u(x,y):</label>
+                                <select id="real_plots_input_preset" class="control-select compact-control-select"
+                                   >
                                     <option value="x" selected>x</option>
                                     <option value="y">y</option>
                                     <option value="x+y">x + y</option>
@@ -450,21 +450,21 @@
                             </div>
 
                             <!-- Custom Real Input -->
-                            <div id="real_plots_custom_input_container" class="hidden"
-                                style="display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.1rem;">
-                                <input type="text" id="real_plots_custom_input" class="dynamic-formula-input"
-                                    style="font-size: 0.8rem; padding: 0.25rem;" placeholder="e.g. sin(x)*cos(y)"
+                            <div id="real_plots_custom_input_container" class="hidden compact-formula-stack"
+                               >
+                                <input type="text" id="real_plots_custom_input" class="dynamic-formula-input compact-formula-input"
+                                    placeholder="e.g. sin(x)*cos(y)"
                                     value="x" spellcheck="false" autocomplete="off">
-                                <div id="real_plots_custom_input_math" class="dynamic-math-display"
-                                    style="font-size: 0.8rem; margin: 0; padding: 0.25rem; background: rgba(0,0,0,0.2); border-radius: 4px; min-height: 1.5rem; display: flex; align-items: center; justify-content: center;">
+                                <div id="real_plots_custom_input_math" class="dynamic-math-display compact-formula-preview"
+                                   >
                                 </div>
                             </div>
 
-                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+                            <div class="control-row-between control-row-wide">
                                 <label
-                                    style="font-size: 0.8rem; color: var(--text-secondary-color); margin: 0;">v(x,y):</label>
-                                <select id="real_plots_imag_preset" class="control-select"
-                                    style="padding: 0.25rem; font-size: 0.8rem; border-radius: 4px; background: rgba(0,0,0,0.3); color: #fff; border: 1px solid var(--border-color);">
+                                    class="compact-label">v(x,y):</label>
+                                <select id="real_plots_imag_preset" class="control-select compact-control-select"
+                                   >
                                     <option value="y">y</option>
                                     <option value="0" selected>0</option>
                                     <option value="x">x</option>
@@ -477,36 +477,36 @@
                             </div>
 
                             <!-- Custom Imag Input -->
-                            <div id="real_plots_custom_imag_container" class="hidden"
-                                style="display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.1rem;">
-                                <input type="text" id="real_plots_custom_imag" class="dynamic-formula-input"
-                                    style="font-size: 0.8rem; padding: 0.25rem;" placeholder="e.g. cos(x)*sin(y)"
+                            <div id="real_plots_custom_imag_container" class="hidden compact-formula-stack"
+                               >
+                                <input type="text" id="real_plots_custom_imag" class="dynamic-formula-input compact-formula-input"
+                                    placeholder="e.g. cos(x)*sin(y)"
                                     value="0" spellcheck="false" autocomplete="off">
-                                <div id="real_plots_custom_imag_math" class="dynamic-math-display"
-                                    style="font-size: 0.8rem; margin: 0; padding: 0.25rem; background: rgba(0,0,0,0.2); border-radius: 4px; min-height: 1.5rem; display: flex; align-items: center; justify-content: center;">
+                                <div id="real_plots_custom_imag_math" class="dynamic-math-display compact-formula-preview"
+                                   >
                                 </div>
                             </div>
 
-                            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div class="control-stack">
+                                <div class="palette-controls-header">
                                     <span
-                                        style="font-size: 0.8rem; color: var(--text-secondary-color); display: flex; gap: 0.5rem; align-items: center;">
+                                        class="palette-label-row">
                                         <span>Color Palette:</span>
                                         <span id="active_real_plots_palette_name"
-                                            style="color: var(--accent-purple); font-family: monospace; font-weight: bold;">Viridis
+                                            class="active-palette-label">Viridis
                                             Scientific</span>
-                                        <button id="view_real_plots_palette_circle_btn" class="view-palette-circle-btn"
-                                            style="margin-left: 0.5rem;" type="button"
+                                        <button id="view_real_plots_palette_circle_btn" class="view-palette-circle-btn palette-guide-button"
+                                            type="button"
                                             data-tooltip="View color guide circle for active palette">
                                             View Color Circle
                                         </button>
                                     </span>
-                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <div class="control-row">
                                         <label
-                                            style="font-size: 0.8rem; color: var(--text-secondary-color); margin: 0; white-space: nowrap;">Mapped
+                                            class="compact-label nowrap-label">Mapped
                                             To:</label>
-                                        <select id="real_plots_color_mode" class="control-select"
-                                            style="padding: 0.25rem 0.5rem; font-size: 0.8rem; border-radius: 4px; background: rgba(0,0,0,0.3); color: #fff; border: 1px solid var(--border-color);">
+                                        <select id="real_plots_color_mode" class="control-select compact-control-select compact-select-wide"
+                                           >
                                             <option value="height" selected>Height (Value)</option>
                                             <option value="phase">Phase (Argument)</option>
                                         </select>
@@ -519,18 +519,18 @@
 
                             <div class="control-group">
                                 <div
-                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                                    class="value-row">
                                     <label for="real_plots_height_scale_slider"
-                                        style="font-size: 0.8rem; color: var(--text-secondary-color); margin: 0;">Height
+                                        class="compact-label">Height
                                         Scale:</label>
                                     <output id="real_plots_height_scale_value_display"
-                                        style="font-size: 0.8rem; font-family: monospace; color: var(--accent-purple);">1.00</output>
+                                        class="accent-value">1.00</output>
                                 </div>
                                 <input type="range" id="real_plots_height_scale_slider" min="0.15" max="10.0"
                                     step="0.05" value="1.0" class="control-slider">
                             </div>
 
-                            <div class="control-group" style="margin-top: 0.5rem;">
+                            <div class="control-group spaced-control">
                                 <label for="real_plots_contours_cb" class="control-label tooltip-label"
                                     data-tooltip="Overlay level contour lines onto the 3D real surface plot">
                                     <input type="checkbox" id="real_plots_contours_cb" class="control-checkbox">
@@ -564,14 +564,14 @@
                                 </div>
                             </div>
 
-                            <div style="height: 1px; background: var(--border-color); width: 100%; margin: 0.5rem 0;">
+                            <div class="control-divider">
                             </div>
                         </div>
                     </div>
 
                     <!-- Derivative Panel -->
-                    <div id="derivative_params" class="control-group"
-                        style="padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+                    <div id="derivative_params" class="control-group control-toggle-heading"
+                       >
                         <label for="enable_derivative_cb" class="control-label tooltip-label slider-label"
                             data-tooltip="Show the numerical derivative of the active map in map visualizations">
                             <input type="checkbox" id="enable_derivative_cb" class="control-checkbox">
@@ -581,8 +581,8 @@
                     </div>
 
                     <!-- Output Chaining Panel -->
-                    <div id="chaining_params" class="control-group"
-                        style="padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+                    <div id="chaining_params" class="control-group control-toggle-heading"
+                       >
                         <label for="enable_chaining_cb" class="control-label tooltip-label slider-label"
                             data-tooltip="Enable chained sequence of output transformations across multiple panels">
                             <input type="checkbox" id="enable_chaining_cb" class="control-checkbox">
@@ -591,15 +591,15 @@
                         </label>
 
                         <div id="chaining_controls_container"
-                            style="display: none; margin-top: 10px; padding-left: 10px; border-left: 2px solid var(--border-color);">
-                            <label for="chain_mode_selector" style="margin-top: 5px;">Chain Mode:</label>
-                            <select id="chain_mode_selector" class="control-select" style="margin-bottom: 10px;"
+                            class="chaining-controls hidden">
+                            <label for="chain_mode_selector" class="chaining-label">Chain Mode:</label>
+                            <select id="chain_mode_selector" class="control-select chaining-mode-select"
                                 data-tooltip="Mathematical operation to chain across outputs">
                                 <option value="recursion">Recursion: f(w)</option>
                                 <option value="zero_seed">Zero Seed: f(w), z₀ = 0</option>
                             </select>
 
-                            <label for="chain_count_slider" style="margin-top: 5px;">
+                            <label for="chain_count_slider" class="chaining-label">
                                 Chain Depth:
                                 <output id="chain_count_value_display">1</output>
                             </label>
@@ -608,16 +608,16 @@
                                     step="1" value="1" data-tooltip="Number of repeated applications">
                             </div>
 
-                            <button id="grid_view_btn" class="sidebar-button"
-                                style="margin-top: 10px; width: 100%; border: 1px solid var(--accent-purple); color: var(--accent-purple); background: transparent;">
+                            <button id="grid_view_btn" class="sidebar-button chaining-grid-button"
+                               >
                                 <span class="icon">⊞</span> Grid View
                             </button>
                         </div>
                     </div>
 
                     <!-- Algebraic Chaining Panel -->
-                    <div id="algebraic_chaining_params" class="control-group"
-                        style="padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+                    <div id="algebraic_chaining_params" class="control-group control-toggle-heading"
+                       >
                         <label for="enable_algebraic_chaining_cb" class="control-label tooltip-label slider-label"
                             data-tooltip="Sum multiple complex functions together: a*f(z)*g(z) + b*h(z)...">
                             <input type="checkbox" id="enable_algebraic_chaining_cb" class="control-checkbox">
@@ -625,15 +625,15 @@
                             <span id="enable_algebraic_chaining_text">Enable Algebraic Chaining</span>
                         </label>
 
-                        <div id="algebraic_chaining_controls_container" style="display: none;">
-                            <div style="margin-bottom: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
-                                <label style="font-size: 0.8rem; color: var(--text-secondary-color);">Custom z
+                        <div id="algebraic_chaining_controls_container" class="hidden">
+                            <div class="formula-editor-stack">
+                                <label class="formula-editor-label">Custom z
                                     expression (optional):</label>
-                                <input type="text" id="algebraic_chaining_z_input" class="dynamic-formula-input"
-                                    style="font-size: 0.8rem; padding: 0.25rem;" placeholder="e.g. z^2 + 1" value="z"
+                                <input type="text" id="algebraic_chaining_z_input" class="dynamic-formula-input compact-formula-input"
+                                    placeholder="e.g. z^2 + 1" value="z"
                                     spellcheck="false" autocomplete="off">
-                                <div id="algebraic_chaining_z_math" class="dynamic-math-display"
-                                    style="font-size: 0.8rem; margin: 0; padding: 0.25rem; background: rgba(0,0,0,0.2); border-radius: 4px; min-height: 1.5rem; display: flex; align-items: center; justify-content: center;">
+                                <div id="algebraic_chaining_z_math" class="dynamic-math-display compact-formula-preview"
+                                   >
                                 </div>
                             </div>
                             <div id="algebraic_terms_list">
@@ -647,8 +647,8 @@
                     </div>
 
                     <!-- Dynamic Plotting Panel -->
-                    <div id="dynamic_plotting_params" class="control-group dynamic-plotting-panel"
-                        style="padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+                    <div id="dynamic_plotting_params" class="control-group dynamic-plotting-panel control-toggle-heading"
+                       >
                         <label for="enable_dynamic_plotting_cb" class="control-label tooltip-label slider-label"
                             data-tooltip="Plot discrete integer and number-theory domains, or build finite complex sums and products">
                             <input type="checkbox" id="enable_dynamic_plotting_cb" class="control-checkbox">
@@ -1038,7 +1038,7 @@
                                         <div id="dynamic_operation_explanation" class="dynamic-operation-explanation">
                                         </div>
                                         <!-- Keep hidden select for JS compatibility -->
-                                        <select id="dynamic_reduction_kind" class="control-select" style="display:none">
+                                        <select id="dynamic_reduction_kind" class="control-select hidden">
                                             <option value="none">Map values</option>
                                             <option value="sum">Series sum</option>
                                             <option value="product">Product</option>
@@ -1067,8 +1067,8 @@
                                         <div id="dynamic_aggregate_parameter_row" class="dynamic-options-card hidden">
                                             <div id="dynamic_free_parameter_title" class="dynamic-card-title">Free
                                                 parameter</div>
-                                            <div id="dynamic_free_parameter_copy" class="dynamic-step-subtitle"
-                                                style="margin-bottom:0.45rem">Evaluate the construction at this complex
+                                            <div id="dynamic_free_parameter_copy" class="dynamic-step-subtitle compact-step-copy"
+                                               >Evaluate the construction at this complex
                                                 value.</div>
                                             <div class="dynamic-s-param-group">
                                                 <span id="dynamic_free_parameter_label" class="dynamic-s-label">s
@@ -1114,7 +1114,7 @@
                             <!-- Accumulation Playback -->
                             <div class="dynamic-options-card dynamic-playback-card">
                                 <div class="dynamic-card-title">Accumulation Playback</div>
-                                <div class="dynamic-step-subtitle" style="margin-bottom:0.45rem">Watch terms accumulate
+                                <div class="dynamic-step-subtitle compact-step-copy">Watch terms accumulate
                                     one by one. The slider controls how many terms are visible.</div>
                                 <div class="dynamic-playback-row">
                                     <button id="dynamic_reset_playback_btn" type="button"
@@ -1150,8 +1150,8 @@
 
 
                     <!-- Complex Plane Navigation Panel -->
-                    <div id="navigation_params" class="control-group"
-                        style="padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+                    <div id="navigation_params" class="control-group control-toggle-heading"
+                       >
                         <label for="enable_navigation_mode_cb" class="control-label tooltip-label slider-label"
                             data-tooltip="Drive a vehicle through the z-plane and watch it map through the selected function">
                             <input type="checkbox" id="enable_navigation_mode_cb" class="control-checkbox">
@@ -1606,7 +1606,7 @@
                                 a<sub>n-1</sub>z +
                                 a<sub>n</sub></label>
                         </div>
-                        <div class="control-group" style="min-width: 100%;">
+                        <div class="control-group full-width-control">
                             <label for="polynomialN_slider">
                                 Degree (n):
                                 <output id="polynomialN_value_display">2</output>
@@ -1622,7 +1622,7 @@
                         <div class="control-group">
                             <label class="panel-formula-label">Fractional Power: w = z<sup>n</sup></label>
                         </div>
-                        <div class="control-group" style="min-width: 100%;">
+                        <div class="control-group full-width-control">
                             <label for="fractionalPowerN_slider">
                                 Power (n):
                                 <output id="fractionalPowerN_value_display">0.5</output>
@@ -1653,7 +1653,7 @@
                             <button id="theme_selector_btn" class="icon-button top-controls-toggle-btn" type="button"
                                 data-tooltip="Select application theme" aria-label="Select application theme">
                                 <span aria-hidden="true"
-                                    style="display: flex; align-items: center; justify-content: center;">
+                                    class="centered-row">
                                     <i data-lucide="palette"></i>
                                 </span>
                                 <span class="hidden-visually">Select theme</span>
@@ -2008,13 +2008,13 @@
                         <div id="domain_coloring_options_div" class="dependent-settings-block hidden">
                             <div class="viz-settings-grid">
                                 <div class="domain-palette-selector-container">
-                                    <div class="domain-palette-header-row"
-                                        style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; width: 100%;">
-                                        <span class="domain-palette-selector-label"
-                                            style="margin: 0; justify-content: flex-start; gap: 0.5rem;">
+                                    <div class="domain-palette-header-row domain-palette-header"
+                                       >
+                                        <span class="domain-palette-selector-label domain-palette-label"
+                                           >
                                             <span>Domain Palette:</span>
                                             <span id="active_domain_palette_name"
-                                                style="color: var(--accent-purple); font-family: monospace; font-weight: bold;">Analytic
+                                                class="active-palette-label">Analytic
                                                 Base</span>
                                         </span>
                                         <button id="view_palette_circle_btn" class="view-palette-circle-btn"
@@ -2027,7 +2027,7 @@
                                     </div>
                                 </div>
                                 <div class="control-group" id="orbit_coloring_mode_group">
-                                    <label for="orbit_coloring_mode_select" style="font-size:0.8rem;">Orbit
+                                    <label for="orbit_coloring_mode_select" class="compact-text">Orbit
                                         Coloring:</label>
                                     <select id="orbit_coloring_mode_select" class="control-select"
                                         data-tooltip="Choose which orbit observable colors recursive output chains">
@@ -2038,7 +2038,7 @@
                                     </select>
                                 </div>
                                 <div class="control-group">
-                                    <label for="domain_brightness_slider" style="font-size:0.8rem;">
+                                    <label for="domain_brightness_slider" class="compact-text">
                                         Brightness:
                                         <output id="domain_brightness_value_display">1.0</output>
                                     </label>
@@ -2049,7 +2049,7 @@
                                     </div>
                                 </div>
                                 <div class="control-group">
-                                    <label for="domain_contrast_slider" style="font-size:0.8rem;">
+                                    <label for="domain_contrast_slider" class="compact-text">
                                         Contrast:
                                         <output id="domain_contrast_value_display">1.0</output>
                                     </label>
@@ -2060,7 +2060,7 @@
                                     </div>
                                 </div>
                                 <div class="control-group">
-                                    <label for="domain_saturation_slider" style="font-size:0.8rem;">
+                                    <label for="domain_saturation_slider" class="compact-text">
                                         Saturation:
                                         <output id="domain_saturation_value_display">1.0</output>
                                     </label>
@@ -2071,7 +2071,7 @@
                                     </div>
                                 </div>
                                 <div class="control-group">
-                                    <label for="domain_lightness_cycles_slider" style="font-size:0.8rem;">
+                                    <label for="domain_lightness_cycles_slider" class="compact-text">
                                         Lightness Cycles:
                                         <output id="domain_lightness_cycles_value_display">1.00</output>
                                     </label>
@@ -2379,7 +2379,7 @@
                         </div>
                     </div>
                     <div id="z_plane_canvas_wrapper"
-                        style="position:relative; width: 100%; height: 100%; display: flex; flex: 1;">
+                        class="canvas-layer-host">
                         <canvas id="z_plane_canvas"></canvas>
                         <div id="z_plane_refining_indicator" class="refining-indicator hidden">
                             <span class="pulsing-dot"></span>
@@ -2388,8 +2388,8 @@
                         <div id="z_plane_probe_info" class="probe-info-overlay hidden"></div>
 
                         <!-- Three.js Transformation Overlays -->
-                        <div id="z_plane_threejs_container" class="threejs-container hidden"
-                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; border-radius: inherit; overflow: hidden;">
+                        <div id="z_plane_threejs_container" class="threejs-container hidden canvas-overlay"
+                           >
                         </div>
 
                         <div id="z_plane_transformation_overlay" class="ui-layer hidden">
@@ -2460,16 +2460,16 @@
                         </div>
                     </div>
                     <div id="w_plane_canvas_wrapper"
-                        style="position: relative; width: 100%; height: 100%; display: flex; flex: 1;">
+                        class="canvas-layer-host">
                         <canvas id="w_plane_canvas"></canvas>
-                        <div id="w_plane_threejs_container" class="threejs-container hidden"
-                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; border-radius: inherit; overflow: hidden;">
+                        <div id="w_plane_threejs_container" class="threejs-container hidden canvas-overlay"
+                           >
                         </div>
                         <div id="w_plane_refining_indicator" class="refining-indicator hidden">
                             <span class="pulsing-dot"></span>
                             <span>Refining...</span>
                         </div>
-                        <div id="w_plane_three_container" class="hidden" style="width: 100%; height: 100%;"></div>
+                        <div id="w_plane_three_container" class="hidden fill-container"></div>
                         <div id="w_plane_probe_info" class="probe-info-overlay hidden"></div>
 
                         <div id="w_plane_transformation_overlay" class="ui-layer hidden">
@@ -2490,8 +2490,8 @@
                                 <span>Riemann Sphere</span>
                             </div>
                         </div>
-                        <div id="cauchy_integral_results_info" class="cauchy-info-overlay hidden"
-                            style="font-size: 0.8rem; line-height:1.3;"></div>
+                        <div id="cauchy_integral_results_info" class="cauchy-info-overlay hidden analysis-copy"
+                           ></div>
                     </div>
                 </div>
                 <div id="graph_column" class="hidden">
@@ -2512,11 +2512,11 @@
                             </button>
                         </div>
                     </div>
-                    <div id="graph_container" style="flex: 1; position: relative;">
-                        <div id="graph_3d_container" style="width: 100%; height: 100%; position: relative;"></div>
+                    <div id="graph_container" class="flex-relative-host">
+                        <div id="graph_3d_container" class="fill-relative"></div>
                     </div>
                 </div>
-                <div id="laplace_3d_column" class="hidden" style="flex: 1; display: flex; flex-direction: column;">
+                <div id="laplace_3d_column" class="hidden auxiliary-surface-column">
                     <div class="canvas-header-line">
                         <h2 class="section-title"><span id="laplace_3d_title_label">3D Surface: |F(s)| Magnitude</span>
                         </h2>
@@ -2529,19 +2529,19 @@
                             </button>
                         </div>
                     </div>
-                    <div style="flex: 1; position: relative;">
-                        <div id="laplace_3d_container" style="width: 100%; height: 100%;"></div>
+                    <div class="flex-relative-host">
+                        <div id="laplace_3d_container" class="fill-container"></div>
                     </div>
                 </div>
                 <div id="real_plots_column" class="hidden">
                     <div class="canvas-header-line">
                         <h2 class="section-title"><span id="real_plots_title_label">Real Plot (3D Surface)</span></h2>
-                        <div class="canvas-header-controls" style="display: flex; gap: 1rem; align-items: center;">
-                            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                <label style="font-size: 0.8rem; color: var(--text-secondary-color); margin: 0;">Display
+                        <div class="canvas-header-controls canvas-header-control-row">
+                            <div class="control-row">
+                                <label class="compact-label">Display
                                     Component:</label>
-                                <select id="real_plots_output_component" class="control-select"
-                                    style="padding: 0.25rem; font-size: 0.8rem; border-radius: 4px; background: rgba(0,0,0,0.3); color: #fff; border: 1px solid var(--border-color);">
+                                <select id="real_plots_output_component" class="control-select compact-control-select"
+                                   >
                                     <option value="real" selected>Real Part: Re(f)</option>
                                     <option value="imag">Imaginary Part: Im(f)</option>
                                     <option value="magnitude">Magnitude: |f|</option>
@@ -2555,9 +2555,9 @@
                             </button>
                         </div>
                     </div>
-                    <div style="flex: 1; position: relative;">
-                        <div id="real_plots_container" style="width: 100%; height: 100%; position: relative;">
-                            <div id="real_plots_3d_container" style="width: 100%; height: 100%;"></div>
+                    <div class="flex-relative-host">
+                        <div id="real_plots_container" class="fill-relative">
+                            <div id="real_plots_3d_container" class="fill-container"></div>
                         </div>
                     </div>
                 </div>
@@ -2573,7 +2573,7 @@
                             </button>
                         </div>
                     </div>
-                    <div style="flex: 1; position: relative; width: 100%; height: 100%; display: flex;">
+                    <div class="canvas-fill-host">
                         <canvas id="contour_2d_canvas"></canvas>
                     </div>
                 </div>
@@ -2591,168 +2591,15 @@
     </script>
 
     <div id="tooltip"></div>
-    <div id="theme_modal" class="hidden">
-        <div class="theme-modal-backdrop" id="theme_modal_backdrop"></div>
-        <div class="theme-modal-content">
-            <button id="close_theme_modal_btn" class="theme-modal-close-btn" aria-label="Close theme modal">
-                <i data-lucide="x"></i>
-            </button>
-            <div class="theme-modal-header">
-                <h2>Themes</h2>
-                <p>Select application theme, accent colors, and styling.</p>
-            </div>
-            <div class="theme-list-container custom-scroll" id="theme_list_container">
-                <!-- Themes dynamically generated here -->
-            </div>
-            <div class="theme-modal-layout-settings"
-                style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-                <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-color);">
-                    Layout Settings</h3>
-                <div class="control-group" style="padding-bottom: 0; border: none; margin-bottom: 0;">
-                    <label for="enable_vertical_layout_cb" class="control-label tooltip-label slider-label"
-                        data-tooltip="Switch to vertical layout: panels on left, planes on right">
-                        <input type="checkbox" id="enable_vertical_layout_cb" class="control-checkbox">
-                        <span class="custom-checkbox-visual"></span>
-                        Enable Vertical Layout
-                    </label>
-                </div>
-            </div>
-
-            <div class="theme-modal-grid-colors"
-                style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-                <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-color);">
-                    Custom Grid Colors</h3>
-                <div class="grid-color-pickers-container" style="display: flex; gap: 1.5rem; align-items: center;">
-                    <div class="circle-color-picker-wrapper">
-                        <div class="circle-color-picker" id="grid_color_1_picker_wrapper"
-                            style="background-color: #FB923C;">
-                            <input type="color" id="grid_color_1_input" value="#FB923C">
-                        </div>
-                        <span class="circle-color-picker-label">Grid Line 1</span>
-                    </div>
-                    <div class="circle-color-picker-wrapper">
-                        <div class="circle-color-picker" id="grid_color_2_picker_wrapper"
-                            style="background-color: #C084FC;">
-                            <input type="color" id="grid_color_2_input" value="#C084FC">
-                        </div>
-                        <span class="circle-color-picker-label">Grid Line 2</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <div id="frontend_modal_root"></div>
     <!-- Domain Palette Color Wheel Guide Panel (Root Level) -->
     <div id="domain_palette_circle_panel" class="dynamic-plotting-controls hidden" role="dialog" aria-modal="false"
         aria-label="Domain Coloring Guide">
-        <div class="dynamic-studio-header">
-            <div class="dynamic-studio-identity">
-                <span class="dynamic-section-eyebrow">Domain Coloring Guide</span>
-                <strong id="domain_palette_circle_title">Analytic Base</strong>
-            </div>
-            <div class="dynamic-studio-actions">
-                <button id="close_domain_palette_circle_btn" type="button"
-                    class="dynamic-studio-action dynamic-studio-close"
-                    aria-label="Close Domain Coloring Guide">Close</button>
-            </div>
-        </div>
-
-        <div class="dynamic-intro" style="margin-bottom: 1rem;">
-            <div>
-                <div class="dynamic-intro-title">Color Guide Wheel</div>
-                <div class="dynamic-intro-copy">
-                    Shows how complex phase angles map to colors (ring) and how modulus magnitude maps to
-                    lightness/shading.
-                </div>
-            </div>
-        </div>
-
-        <!-- Phase Angle Ring Canvas -->
-        <div class="color-wheel-canvas-container"
-            style="display: flex; justify-content: center; align-items: center; padding: 2rem; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 1.5rem;">
-            <canvas id="domain_palette_circle_canvas" width="360" height="360"
-                style="max-width: 100%; height: auto; aspect-ratio: 1;"></canvas>
-        </div>
-
-        <!-- Modulus (Amplitude) vs Lightness Strip -->
-        <div class="amplitude-strip-container" style="margin-top: 1rem;">
-            <div class="dynamic-intro-title"
-                style="font-size: 0.85rem; margin-bottom: 0.35rem; font-weight: 600; color: var(--text-color);">
-                Modulus (Amplitude) vs. Lightness
-            </div>
-            <div class="dynamic-intro-copy"
-                style="font-size: 0.75rem; margin-bottom: 0.75rem; color: var(--text-muted);">
-                Shows current magnitude lightness shading on a representative active-palette hue (from |z| = 0 to 10¹²,
-                logarithmic).
-            </div>
-            <div
-                style="position: relative; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem 1.25rem 0.75rem;">
-                <canvas id="amplitude_strip_canvas" width="320" height="24"
-                    style="width: 100%; height: 24px; display: block; border-radius: 4px;"></canvas>
-                <div
-                    style="position: relative; height: 16px; margin-top: 0.35rem; font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">
-                    <span style="position: absolute; left: 0%; transform: translateX(0%);">|z| = 0</span>
-                    <span style="position: absolute; left: 2.5%; transform: translateX(-50%);">1</span>
-                    <span style="position: absolute; left: 25%; transform: translateX(-50%);">10³</span>
-                    <span style="position: absolute; left: 50%; transform: translateX(-50%);">10⁶</span>
-                    <span style="position: absolute; left: 100%; transform: translateX(-100%);">|z| = 10¹²</span>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Real Plots Palette Color Wheel Guide Panel -->
     <div id="real_plots_palette_circle_panel" class="dynamic-plotting-controls hidden" role="dialog" aria-modal="false"
         aria-label="Real Plots Color Guide">
-        <div class="dynamic-studio-header">
-            <div class="dynamic-studio-identity">
-                <span class="dynamic-section-eyebrow">Real Plots Color Guide</span>
-                <strong id="real_plots_palette_circle_title">Viridis Scientific</strong>
-            </div>
-            <div class="dynamic-studio-actions">
-                <button id="close_real_plots_palette_circle_btn" type="button"
-                    class="dynamic-studio-action dynamic-studio-close"
-                    aria-label="Close Real Plots Color Guide">Close</button>
-            </div>
-        </div>
-
-        <div class="dynamic-intro" style="margin-bottom: 1rem;">
-            <div>
-                <div class="dynamic-intro-title">Color Guide Wheel</div>
-                <div class="dynamic-intro-copy">
-                    Shows how complex phase angles or surface heights map to the selected color palette.
-                </div>
-            </div>
-        </div>
-
-        <!-- Phase Angle Ring Canvas -->
-        <div class="color-wheel-canvas-container"
-            style="display: flex; justify-content: center; align-items: center; padding: 2rem; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 1.5rem;">
-            <canvas id="real_plots_palette_circle_canvas" width="360" height="360"
-                style="max-width: 100%; height: auto; aspect-ratio: 1;"></canvas>
-        </div>
-
-        <!-- Modulus (Amplitude) vs Lightness Strip -->
-        <div class="amplitude-strip-container" style="margin-top: 1rem;">
-            <div class="dynamic-intro-title"
-                style="font-size: 0.85rem; margin-bottom: 0.35rem; font-weight: 600; color: var(--text-color);">
-                Surface Height (Value) vs. Mapping
-            </div>
-            <div class="dynamic-intro-copy"
-                style="font-size: 0.75rem; margin-bottom: 0.75rem; color: var(--text-muted);">
-                Shows how surface heights map to the gradient when color is mapped to "Height (Value)".
-            </div>
-            <div
-                style="position: relative; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem 1.25rem 0.75rem;">
-                <canvas id="real_plots_amplitude_strip_canvas" width="320" height="24"
-                    style="width: 100%; height: 24px; display: block; border-radius: 4px;"></canvas>
-                <div
-                    style="position: relative; height: 16px; margin-top: 0.35rem; font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">
-                    <span style="position: absolute; left: 0%; transform: translateX(0%);">Low</span>
-                    <span style="position: absolute; left: 50%; transform: translateX(-50%);">Middle</span>
-                    <span style="position: absolute; left: 100%; transform: translateX(-100%);">High</span>
-                </div>
-            </div>
-        </div>
     </div>
 
     <div id="fullscreen_container" class="hidden">

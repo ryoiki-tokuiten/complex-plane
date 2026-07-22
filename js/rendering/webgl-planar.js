@@ -1,4 +1,5 @@
 import { state, context } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import {
     createWebGLProgramShared,
     getWebGLBackendInfoShared
@@ -268,8 +269,8 @@ export function createWebGLLineRenderer() {
 
 function isLineRendererInteractionActive() {
     return !!(state && (
-        (state.panStateZ && state.panStateZ.isPanning) ||
-        (state.panStateW && state.panStateW.isPanning) ||
+        (runtime.interaction.panZ && runtime.interaction.panZ.isPanning) ||
+        (runtime.interaction.panW && runtime.interaction.panW.isPanning) ||
         state.particleAnimationEnabled
     ));
 }

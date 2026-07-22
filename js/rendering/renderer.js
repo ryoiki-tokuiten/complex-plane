@@ -1,4 +1,5 @@
 import { state, context, zPlaneParams as defaultZPlaneParams, wPlaneParams as defaultWPlaneParams, sphereViewParams } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import {
     COLOR_CANVAS_BACKGROUND,
     COLOR_TEXT_ON_CANVAS,
@@ -524,8 +525,8 @@ function shouldUseWPlanarTransformedLayerCache() {
         && !state.splitViewEnabled
         && !state.navigationModeEnabled
         && state.currentInputShape !== 'video'
-        && !isPanning(state.panStateZ)
-        && !isPanning(state.panStateW);
+        && !isPanning(runtime.interaction.panZ)
+        && !isPanning(runtime.interaction.panW);
 }
 
 function shouldUseZPlanarInputLayerCache() {
@@ -533,13 +534,13 @@ function shouldUseZPlanarInputLayerCache() {
         && !state.vectorFieldEnabled
         && !(state.riemannSphereViewEnabled && !state.splitViewEnabled)
         && state.currentInputShape !== 'video'
-        && !isPanning(state.panStateZ);
+        && !isPanning(runtime.interaction.panZ);
 }
 
 function shouldUseZFlowLayerCache() {
     return (state.vectorFieldEnabled || state.streamlineFlowEnabled)
         && !(state.riemannSphereViewEnabled && !state.splitViewEnabled)
-        && !isPanning(state.panStateZ);
+        && !isPanning(runtime.interaction.panZ);
 }
 
 function fillCanvasBackground(ctx, planeParams) {
@@ -556,7 +557,9 @@ function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
         ctx.save();
         try {
             const isWPlane = !planeParams.currentVisXRange;
-            const isProcessing = isWPlane ? state.isProcessingWDomainDynamics : state.isProcessingZDomainDynamics;
+            const isProcessing = isWPlane
+                ? runtime.rendering.processingWDomainDynamics
+                : runtime.rendering.processingZDomainDynamics;
             if (isProcessing) {
                 ctx.filter = 'blur(3px)';
             }
@@ -727,7 +730,7 @@ function drawPolynomialOriginMarkerOverlay(ctx, planeParams) {
 }
 
 function drawWOriginGlowOverlay(ctx, planeParams) {
-    const startedAt = Number(state.wOriginGlowTime) || 0;
+    const startedAt = Number(runtime.rendering.wOriginGlowTime) || 0;
 
     if (startedAt <= 0) {
         return;
@@ -736,7 +739,7 @@ function drawWOriginGlowOverlay(ctx, planeParams) {
     const elapsed = Date.now() - startedAt;
 
     if (elapsed >= ORIGIN_GLOW_DURATION_MS) {
-        state.wOriginGlowTime = 0;
+        runtime.rendering.wOriginGlowTime = 0;
         return;
     }
 
@@ -997,7 +1000,7 @@ function renderZTaylorOverlay() {
 
 function renderZProbeOverlay(map) {
     drawLayerWhen(
-        state.probeActive && !state.navigationModeEnabled && !isPanning(state.panStateZ),
+        state.probeActive && !state.navigationModeEnabled && !isPanning(runtime.interaction.panZ),
         zCtx,
         zPlaneParams,
         'z',
@@ -1215,7 +1218,7 @@ function renderThreeWPlane(map, stageIndex) {
 
     if (threeRenderer.lastGridConfigKey !== gridConfigKey) {
         // Skip rebuilding heavy 3D geometries continuously during 2D canvas drag-panning
-        if (state.panStateZ.isPanning || state.panStateW.isPanning) {
+        if (runtime.interaction.panZ.isPanning || runtime.interaction.panW.isPanning) {
             // We'll catch it on the pointerup event which triggers a redraw
         } else {
             threeRenderer.lastGridConfigKey = gridConfigKey;

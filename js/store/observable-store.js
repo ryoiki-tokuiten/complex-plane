@@ -1,10 +1,14 @@
+import { batch, signal } from '@preact/signals';
+
 function normalizeKeys(keys) {
     if (!keys) return null;
     return keys instanceof Set ? keys : new Set(Array.isArray(keys) ? keys : [keys]);
 }
 
 export function createObservableStore(initialState, options = {}) {
-    const values = { ...initialState };
+    const signals = new Map(
+        Object.entries(initialState).map(([key, value]) => [key, signal(value)])
+    );
     const state = {};
     const subscribers = new Set();
     let transactionDepth = 0;
@@ -30,35 +34,48 @@ export function createObservableStore(initialState, options = {}) {
         Object.defineProperty(state, key, {
             enumerable: true,
             configurable: false,
-            get: () => values[key],
+            get: () => signals.get(key).value,
             set: value => set(key, value)
         });
     }
 
     function set(key, value) {
-        if (!Object.hasOwn(values, key)) {
+        const stateSignal = signals.get(key);
+        if (!stateSignal) {
             throw new Error(`Unknown state key "${key}"`);
         }
 
-        const oldValue = values[key];
-        const normalized = options.normalize?.(key, value, values);
+        const oldValue = stateSignal.peek();
+        const normalized = options.normalize?.(key, value, state);
         const nextValue = normalized === undefined ? value : normalized;
         if (Object.is(oldValue, nextValue)) return false;
 
-        values[key] = nextValue;
+        stateSignal.value = nextValue;
         notify({ key, path: key, value: nextValue, oldValue });
         return true;
     }
 
     function touch(key, path = key) {
-        if (!Object.hasOwn(values, key)) {
+        const stateSignal = signals.get(key);
+        if (!stateSignal) {
             throw new Error(`Cannot notify unknown state key "${key}"`);
         }
+        const value = stateSignal.peek();
+        const nextValue = Array.isArray(value)
+            ? value.slice()
+            : value instanceof Map
+                ? new Map(value)
+                : value instanceof Set
+                    ? new Set(value)
+                    : value && typeof value === 'object'
+                        ? { ...value }
+                        : value;
+        stateSignal.value = nextValue;
         notify({
             key,
             path,
-            value: values[key],
-            oldValue: values[key],
+            value: nextValue,
+            oldValue: value,
             mutation: true
         });
     }
@@ -66,7 +83,7 @@ export function createObservableStore(initialState, options = {}) {
     function transaction(callback) {
         transactionDepth += 1;
         try {
-            return callback(state);
+            return batch(() => callback(state));
         } finally {
             transactionDepth -= 1;
             if (transactionDepth === 0 && pendingChanges.size > 0) {
@@ -79,7 +96,11 @@ export function createObservableStore(initialState, options = {}) {
 
     function mutate(key, mutator, path = key) {
         return transaction(() => {
-            const result = mutator(values[key]);
+            const value = signals.get(key)?.peek();
+            if (value === undefined && !signals.has(key)) {
+                throw new Error(`Cannot mutate unknown state key "${key}"`);
+            }
+            const result = mutator(value);
             touch(key, path);
             return result;
         });
@@ -94,8 +115,14 @@ export function createObservableStore(initialState, options = {}) {
         return () => subscribers.delete(subscription);
     }
 
-    Object.keys(values).forEach(defineKey);
+    function getSignal(key) {
+        const stateSignal = signals.get(key);
+        if (!stateSignal) throw new Error(`Unknown state key "${key}"`);
+        return stateSignal;
+    }
+
+    signals.forEach((_value, key) => defineKey(key));
     Object.preventExtensions(state);
 
-    return Object.freeze({ state, set, touch, mutate, transaction, subscribe });
+    return Object.freeze({ state, set, touch, mutate, transaction, subscribe, getSignal });
 }

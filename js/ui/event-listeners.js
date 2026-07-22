@@ -1,4 +1,5 @@
 import { state, context, mutateState, subscribeState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
+import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, processUploadedVideoFrame } from '../utils/raster-media.js';
@@ -6,8 +7,7 @@ import { updatePlaneViewportRanges, mapCanvasToWorldCoords, inverseRotate3D, rot
 import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
 import { updateLaplaceTransform, updateLaplaceEvaluationPoint, analyzeStability, findPolesZeros } from '../analysis/laplace-transform.js';
-import { ComplexPointsUI } from './complex-points-ui.js';
-import { TAYLOR_CENTER_PRESET_GROUPS, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
+import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
 import {
     SPHERE_SENSITIVITY,
     SPHERE_INITIAL_ROT_X,
@@ -15,15 +15,15 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { updateTitlesAndGlobalUI, syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, updateCustomFormulaPreview } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, updateCustomFormulaPreview } from './ui-updates.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
 import { toggleRiemannTransformationAnimationZ, toggleRiemannTransformationAnimationW, syncRiemannTransformationPlayPauseButton } from '../rendering/riemann-transformation-animation.js';
 import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
 import { toggleAnimation } from './animation.js';
-import { initializePolynomialCoeffs, generatePolynomialCoeffSliders } from './polynomial-ui.js';
+import { initializePolynomialCoeffs } from './polynomial-ui.js';
 import { updateLaplace3DSurface, resizeLaplace3DSurface } from '../rendering/laplace-3d-surface.js';
 import { getRiemannSurfaceCanvas, resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
-import { applyTheme, renderThemesList, renderDomainPalettesUI, domainPalettes, renderRealPlotsPalettesUI, realPlotsPalettes } from './theme-manager.js';
+import { applyTheme, domainPalettes, realPlotsPalettes } from './theme-manager.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
 import {
     initializeDynamicPlottingUI,
@@ -42,7 +42,8 @@ import {
     getTissotViewportBounds
 } from '../analysis/tissot.js';
 import { drawRealPlot, disposeRealPlotsRenderer } from '../rendering/real-plots-renderer.js';
-import { createElement as h, createSelect as select } from './dom-components.js';
+import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
+import { openThemeModal } from '../frontend/components/theme-modal.jsx';
 
 const { controls = {} } = context;
 
@@ -214,23 +215,6 @@ const SPHERE_VIEW_BUTTONS = {
     sphereViewResetBtn: { rotX: SPHERE_INITIAL_ROT_X, rotY: SPHERE_INITIAL_ROT_Y }
 };
 
-const ALGEBRAIC_FUNCTION_OPTIONS = [
-    ['none', 'None'], ['c', 'c'], ['cos', 'cos(z)'], ['sin', 'sin(z)'], ['tan', 'tan(z)'],
-    ['sec', 'sec(z)'], ['exp', 'e^z'], ['ln', 'ln(z)'], ['sinh', 'sinh(z)'],
-    ['cosh', 'cosh(z)'], ['tanh', 'tanh(z)'], ['power', 'z^n'], ['reciprocal', '1/z'],
-    ['mobius', 'Möbius'], ['zeta', 'ζ(z)'], ['polynomial', 'Polynomial'],
-    ['poincare', 'Poincare Disk']
-].map(([value, label]) => ({ value, label }));
-
-const ALGEBRAIC_SYMBOLS = new Map([
-    ['c', 'c'],
-    ['power', 'z^n'],
-    ['zeta', 'ζ'],
-    ['polynomial', 'P'],
-    ['mobius', 'Möbius'],
-    ['poincare', 'Poincare']
-]);
-
 const BINDERS = [
     bindBaseParameterControls,
     bindAlgebraicChainingControls,
@@ -317,8 +301,8 @@ function hidden(element, shouldHide) {
     if (element) element.classList.toggle('hidden', Boolean(shouldHide));
 }
 
-function display(element, visible, value = 'block') {
-    if (element) element.style.display = visible ? value : 'none';
+function display(element, visible) {
+    hidden(element, !visible);
 }
 
 function checked(controlKey, value) {
@@ -570,7 +554,6 @@ function syncChainingControlsFromState() {
 function syncAlgebraicControlsFromState() {
     checked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
     display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
-    if (state.algebraicChainingEnabled) renderAlgebraicChainingTerms();
 }
 
 function syncDomainControlsFromState() {
@@ -579,7 +562,6 @@ function syncDomainControlsFromState() {
     hidden(controls.domainColoringKeyDiv, !state.domainColoringEnabled);
     if (controls.domainPaletteSelect) controls.domainPaletteSelect.value = state.domainPalette;
     syncOrbitColoringModeControl();
-    call(renderDomainPalettesUI, $('domain_palette_circles'));
     call(updateDomainColoringKey);
 }
 
@@ -600,9 +582,7 @@ function activateFractalPreset(key) {
     syncDomainControlsFromState();
     syncInputShapeControlFromState();
     updateModePanels();
-    generatePolynomialCoeffSliders();
     setActiveFunctionButton(key);
-    updateTitlesAndGlobalUI();
     syncParameterControlsPanelVisibility();
     if (state.dynamicPlotting?.enabled) syncDynamicPlottingUI();
     requestDomainRedraw(true);
@@ -768,11 +748,11 @@ function processUploadedImage(img) {
 }
 
 function reprocessUploadedImage() {
-    if (state.uploadedImage) processUploadedImage(state.uploadedImage);
+    if (runtime.media.image) processUploadedImage(runtime.media.image);
 }
 
 function reprocessUploadedVideo() {
-    if (!state.uploadedVideo) return;
+    if (!runtime.media.video) return;
     processUploadedVideoFrame(true);
     requestDomainRedraw(true);
 }
@@ -793,24 +773,12 @@ function initializeMobiusState() {
     });
 }
 
-function syncTaylorCustomCenterInputs() {
-    if (context.taylorCenterUI) context.taylorCenterUI.setPoints([state.taylorSeriesCustomCenter], false);
-}
-
-function setTaylorCustomCenter(re, im, shouldRedraw = true) {
-    mutateState('taylorSeriesCustomCenter', center => Object.assign(center, { re, im }));
-    syncTaylorCustomCenterInputs();
-    call(syncTaylorSeriesCenterStatus);
-    if (shouldRedraw) requestUiRedraw();
-}
-
 function initializeScalarBindings() {
     sliderParamKeys.forEach(key => readSliderState(`${key}Slider`, key));
     BASIC_SLIDER_BINDINGS.forEach(({ controlKey, stateKey, parser }) => readSliderState(controlKey, stateKey, parser));
     BASIC_CHECKBOX_BINDINGS.forEach(({ controlKey, stateKey }) => readCheckboxState(controlKey, stateKey));
     BASIC_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => readSelectorState(controlKey, stateKey));
     initializeMobiusState();
-    syncTaylorCustomCenterInputs();
     call(initializeNavigationStateFromControls);
 }
 
@@ -910,11 +878,10 @@ function bindVideoControls() {
     bindSlider('videoOpacitySlider', 'videoOpacity', parseFloat, () => requestDomainRedraw(true));
 }
 
-function syncPalette(selectors, container) {
+function syncPalette(selectors) {
     selectors.forEach(selector => {
         selector.value = state.domainPalette;
     });
-    renderDomainPalettesUI(container);
     call(updateDomainColoringKey);
     requestDomainRedraw(true);
 }
@@ -952,28 +919,19 @@ function bindDomainColoringControls() {
     });
 
     const selectors = [controls.riemannSurfacePaletteSelect].filter(Boolean);
-    const paletteContainer = $('domain_palette_circles');
-
     selectors.forEach(selector => {
-        selector.innerHTML = '';
+        selector.replaceChildren();
         domainPalettes.forEach(palette => {
-            const option = h('option', { text: palette.name });
+            const option = document.createElement('option');
+            option.textContent = palette.name;
             option.value = palette.id;
             selector.appendChild(option);
         });
         selector.value = state.domainPalette;
         bindElementListener(selector, 'change', event => {
             state.domainPalette = event.target.value;
-            syncPalette(selectors, paletteContainer);
+            syncPalette(selectors);
         });
-    });
-
-    renderDomainPalettesUI(paletteContainer);
-    bindElementListener(paletteContainer, 'click', event => {
-        const button = closest(event.target, '.domain-palette-circle-btn');
-        if (!button) return;
-        state.domainPalette = button.dataset.paletteId;
-        syncPalette(selectors, paletteContainer);
     });
 
     syncOrbitColoringModeControl();
@@ -1049,7 +1007,6 @@ function bindConformalGridControls() {
             state.currentInputShape = 'empty_grid';
             if (controls.inputShapeSelector) controls.inputShapeSelector.value = 'empty_grid';
             fitConformalGridOutputViewport();
-            call(updateTitlesAndGlobalUI);
         }
         requestUiRedraw();
     });
@@ -1232,8 +1189,8 @@ function bindNavigationControls() {
     bindSlider('navigationOpacitySlider', 'navigationOpacity', parseFloat, () => requestDomainRedraw(false));
     bindSlider('navigationSpeedSlider', 'navigationSpeed', parseFloat, () => requestDomainRedraw(false));
     bindSlider('navigationTrailLengthSlider', 'navigationTrailLength', parseInteger, () => {
-        if (state.navigationTrail.length > state.navigationTrailLength) {
-            state.navigationTrail.splice(0, state.navigationTrail.length - state.navigationTrailLength);
+        if (runtime.navigation.trail.length > state.navigationTrailLength) {
+            runtime.navigation.trail.splice(0, runtime.navigation.trail.length - state.navigationTrailLength);
         }
         requestDomainRedraw(false);
     });
@@ -1242,7 +1199,7 @@ function bindNavigationControls() {
     bindElementListener(document, 'keydown', event => call(setNavigationKey, event, true));
     bindElementListener(document, 'keyup', event => call(setNavigationKey, event, false));
     bindElementListener(window, 'blur', () => {
-        state.navigationKeys = {};
+        runtime.navigation.keys = {};
         call(stopNavigationLoop);
     });
 }
@@ -1281,23 +1238,11 @@ function bindTaylorControls() {
         requestUiRedraw();
     });
 
-    if (controls.taylorComplexPointsUiContainer) {
-        context.taylorCenterUI = new ComplexPointsUI(controls.taylorComplexPointsUiContainer, {
-            multiple: false,
-            presets: TAYLOR_CENTER_PRESET_GROUPS,
-            initialPoints: [state.taylorSeriesCustomCenter],
-            onChange: points => {
-                const point = points[0] || { re: 0, im: 0 };
-                setTaylorCustomCenter(point.re, point.im, true);
-            }
-        });
-    }
 }
 
 function bindPolynomialControls() {
     bindSlider('polynomialNSlider', 'polynomialN', parseInteger, value => {
         initializePolynomialCoeffs(value, true);
-        generatePolynomialCoeffSliders();
         requestDomainRedraw(true);
     });
 }
@@ -1314,12 +1259,12 @@ function bindRadialAndZetaControls() {
 function bindParticleControls() {
     bindCheckbox('enableParticleAnimationCb', 'particleAnimationEnabled', () => {
         hidden(controls.particleAnimationDetailsDiv, !state.particleAnimationEnabled);
-        if (!state.particleAnimationEnabled) state.particles = [];
+        if (!state.particleAnimationEnabled) runtime.particles.length = 0;
         requestUiRedraw();
     });
 
     bindSlider('particleDensitySlider', 'particleDensity', parseInteger, () => {
-        state.particles = [];
+        runtime.particles.length = 0;
         requestUiRedraw();
     });
     bindSlider('particleSpeedSlider', 'particleSpeed');
@@ -1418,8 +1363,8 @@ function bindLaplaceControls() {
 
 function canvasContext(planeType) {
     return planeType === 'z'
-        ? { planeType, canvas: zCanvas, params: zPlaneParams, pan: state.panStateZ, isZ: true }
-        : { planeType, canvas: wCanvas, params: wPlaneParams, pan: state.panStateW, isZ: false };
+        ? { planeType, canvas: zCanvas, params: zPlaneParams, pan: runtime.interaction.panZ, isZ: true }
+        : { planeType, canvas: wCanvas, params: wPlaneParams, pan: runtime.interaction.panW, isZ: false };
 }
 
 function isSphereInteractionActive(isZCanvas) {
@@ -1549,7 +1494,7 @@ function handleCanvasMoveNow(ctx, pointer) {
         return;
     }
 
-    if (ctx.isZ && !state.chainingEnabled && !state.panStateZ.isPanning && !state.panStateW.isPanning) {
+    if (ctx.isZ && !state.chainingEnabled && !runtime.interaction.panZ.isPanning && !runtime.interaction.panW.isPanning) {
         updateProbe(ctx, pos, true);
         requestUiRedraw();
     }
@@ -1933,6 +1878,8 @@ export function setupEventListeners() {
     uiEventListenersBound = true;
 
     subscribeState(() => syncLaplacePlayPauseButton(), 'laplaceAnimationPlaying');
+    subscribeState(() => updateDomainPaletteCirclePanel(), 'domainPalette');
+    subscribeState(() => updateRealPlotsPaletteCirclePanel(), 'realPlotsPalette');
     BINDERS.forEach(fn => fn());
 
     syncTopControlsCollapseState();
@@ -1943,7 +1890,7 @@ function bindChainingControls() {
     bindSelector('inputShapeSelector', 'currentInputShape', (_event, value) => {
         if (value !== 'video' && state.videoIsPlaying) {
             call(pauseUploadedVideoPlayback);
-        } else if (value === 'video' && state.uploadedVideo && state.videoIsPlaying) {
+        } else if (value === 'video' && runtime.media.video && state.videoIsPlaying) {
             call(startVideoProcessingLoop);
         }
         requestDomainRedraw(true);
@@ -1961,7 +1908,6 @@ function bindChainingControls() {
         display(controls.chainingControlsContainer, state.chainingEnabled);
         syncOrbitColoringModeControl();
         call(updateChainingColumns, state.chainingEnabled ? state.chainCount : 1);
-        updateTitlesAndGlobalUI();
         syncParameterControlsPanelVisibility();
         requestUiRedraw();
     });
@@ -1984,55 +1930,8 @@ function bindChainingControls() {
 }
 
 function bindThemeControls() {
-    const themeBtn = $('theme_selector_btn');
-    const themeModal = $('theme_modal');
-    const themeModalBackdrop = $('theme_modal_backdrop');
-    const closeThemeModalBtn = $('close_theme_modal_btn');
-    const themeListContainer = $('theme_list_container');
-    const close = () => hidden(themeModal, true);
-
     applyTheme(state.themeId);
-
-    bindElementListener(themeBtn, 'click', () => {
-        renderThemesList(themeListContainer);
-        hidden(themeModal, false);
-    });
-    bindElementListener(themeModalBackdrop, 'click', close);
-    bindElementListener(closeThemeModalBtn, 'click', close);
-    bindElementListener(themeListContainer, 'click', event => {
-        const card = closest(event.target, '.theme-card');
-        if (!card) return;
-        state.themeId = card.dataset.themeId;
-        applyTheme(state.themeId);
-        renderThemesList(themeListContainer);
-        requestDomainRedraw(true);
-    });
-
-    const verticalLayoutCb = $('enable_vertical_layout_cb');
-    if (verticalLayoutCb) {
-        if (state.verticalLayoutEnabled === undefined) {
-            state.verticalLayoutEnabled = localStorage.getItem('complex_verticalLayoutEnabled') === 'true';
-        }
-        verticalLayoutCb.checked = state.verticalLayoutEnabled;
-        document.body.classList.toggle('vertical-layout', state.verticalLayoutEnabled);
-
-        const triggerResize = () => window.dispatchEvent(new Event('resize'));
-        if (state.verticalLayoutEnabled) {
-            setTimeout(triggerResize, 50);
-            setTimeout(triggerResize, 150);
-        }
-
-        bindElementListener(verticalLayoutCb, 'change', event => {
-            state.verticalLayoutEnabled = event.target.checked;
-            localStorage.setItem('complex_verticalLayoutEnabled', state.verticalLayoutEnabled);
-            document.body.classList.toggle('vertical-layout', state.verticalLayoutEnabled);
-
-            triggerResize();
-            setTimeout(triggerResize, 50);
-            setTimeout(triggerResize, 150);
-            setTimeout(triggerResize, 350);
-        });
-    }
+    bindControlListener('themeSelectorBtn', 'click', openThemeModal);
 }
 
 function sphereParams(planeType) {
@@ -2236,19 +2135,12 @@ function bindAlgebraicChainingControls() {
         state.currentFunction = state.algebraicChainingEnabled ? 'algebraic_chaining' : 'cos';
         setActiveFunctionButton(state.currentFunction);
 
-        if (state.algebraicChainingEnabled) renderAlgebraicChainingTerms();
-
-        updateTitlesAndGlobalUI();
         syncParameterControlsPanelVisibility();
         requestAlgebraicRedraw();
     });
 
     bindElementListener(controls.addAlgebraicTermBtn, 'click', () => {
-        algebraicTerms().push(createAlgebraicTerm());
-        renderAlgebraicChainingTerms();
-        updateTitlesAndGlobalUI();
-        syncParameterControlsPanelVisibility();
-        requestAlgebraicRedraw();
+        appendAlgebraicTerm();
     });
 
     bindControlListener('algebraicChainingZInput', 'input', () => {
@@ -2263,283 +2155,6 @@ function bindAlgebraicChainingControls() {
         state.algebraicChainingZExpr = val;
         updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath);
         requestAlgebraicRedraw();
-    });
-}
-
-function createAlgebraicFactor(func = 'cos') {
-    return { func, chainedFunc: 'none', power: 1.0, reciprocal: false, log: false, exp: false };
-}
-
-function createAlgebraicTerm() {
-    return { coeff: { re: 1.0, im: 0.0 }, factors: [createAlgebraicFactor()] };
-}
-
-function normalizeAlgebraicFactor(factor) {
-    const normalized = factor && typeof factor === 'object' ? factor : createAlgebraicFactor();
-    normalized.func ??= 'cos';
-    normalized.chainedFunc ??= 'none';
-    normalized.power ??= 1.0;
-    normalized.reciprocal = Boolean(normalized.reciprocal);
-    normalized.log = Boolean(normalized.log);
-    normalized.exp = Boolean(normalized.exp);
-    return normalized;
-}
-
-function normalizeAlgebraicTerm(term) {
-    const normalized = term && typeof term === 'object' ? term : createAlgebraicTerm();
-    normalized.coeff ||= { re: 1.0, im: 0.0 };
-    normalized.coeff.re = Number(normalized.coeff.re) || 0;
-    normalized.coeff.im = Number(normalized.coeff.im) || 0;
-    normalized.factors = toArray(normalized.factors).map(normalizeAlgebraicFactor);
-    if (normalized.factors.length === 0) normalized.factors = [createAlgebraicFactor()];
-    return normalized;
-}
-
-function algebraicTerms() {
-    if (!Array.isArray(state.algebraicChainingTerms) || state.algebraicChainingTerms.length === 0) {
-        state.algebraicChainingTerms = [createAlgebraicTerm()];
-    }
-
-    state.algebraicChainingTerms = state.algebraicChainingTerms.map(normalizeAlgebraicTerm);
-    return state.algebraicChainingTerms;
-}
-
-function mutateAlgebraicTerms(mutator, path = 'algebraicChainingTerms') {
-    return mutateState('algebraicChainingTerms', mutator, path);
-}
-
-function nearZero(value) {
-    return Math.abs(value) < 1e-9;
-}
-
-function coefficientText(term) {
-    const re = Number(term.coeff.re) || 0;
-    const im = Number(term.coeff.im) || 0;
-    const hasFactors = toArray(term.factors).some(factor => factor.func && factor.func !== 'none');
-
-    if (nearZero(re) && nearZero(im)) return '0';
-    if (nearZero(im)) {
-        if (hasFactors && nearZero(re - 1)) return '';
-        if (hasFactors && nearZero(re + 1)) return '-';
-        return re.toFixed(1);
-    }
-
-    const reText = nearZero(re) ? '' : re.toFixed(1);
-    const sign = im >= 0 ? '+' : '-';
-    const imMagnitude = Math.abs(im);
-    const imText = nearZero(imMagnitude - 1) ? 'i' : `${imMagnitude.toFixed(1)}i`;
-
-    return reText === '' ? (im >= 0 ? imText : `-${imText}`) : `(${reText}${sign}${imText})`;
-}
-
-function algebraicSymbol(func) {
-    return ALGEBRAIC_SYMBOLS.get(func) || func;
-}
-
-function factorText(factor) {
-    const inputVar = 'z';
-    let text = factor.func === 'c'
-        ? 'c'
-        : factor.chainedFunc && factor.chainedFunc !== 'none'
-            ? `${algebraicSymbol(factor.func)}(${algebraicSymbol(factor.chainedFunc)}(${inputVar}))`
-            : `${algebraicSymbol(factor.func)}(${inputVar})`;
-
-    if (factor.power !== undefined && factor.power !== 1) text = `(${text})^${Number(factor.power).toFixed(1)}`;
-    if (factor.reciprocal) text = `1/(${text})`;
-    if (factor.log) text = `ln(${text})`;
-    if (factor.exp) text = `e^(${text})`;
-    return text;
-}
-
-function termPreview(term) {
-    const coeff = coefficientText(term);
-    if (coeff === '0') return '0';
-
-    const factors = toArray(term.factors)
-        .filter(factor => factor.func && factor.func !== 'none')
-        .map(factorText);
-
-    if (factors.length === 0) return coeff === '' ? '1' : coeff;
-
-    const product = factors.join('·');
-    if (coeff === '') return product;
-    if (coeff === '-') return `-${product}`;
-    return `${coeff}·${product}`;
-}
-
-function algebraicRange(label, value, onInput) {
-    const valueNode = h('span', { className: 'algebraic-slider-value', text: Number(value).toFixed(1) });
-    const slider = h('input', { type: 'range' });
-
-    Object.assign(slider, { min: '-5', max: '5', step: '0.1', value });
-    const update = event => {
-        const next = parseFloat(event.target.value);
-        valueNode.textContent = next.toFixed(1);
-        onInput(next, event.type === 'change');
-    };
-    slider.addEventListener('input', update);
-    slider.addEventListener('change', update);
-
-    return h('div', { className: 'algebraic-slider-row' }, [
-        h('label', { className: 'algebraic-slider-label' }, [label, valueNode]),
-        h('div', { className: 'algebraic-slider-container' }, [slider])
-    ]);
-}
-
-function refreshAlgebraicFormula(preview, term, committed = true) {
-    if (preview) preview.textContent = termPreview(term);
-    if (committed) updateTitlesAndGlobalUI();
-    requestAlgebraicRedraw();
-}
-
-function trimFactors(factors) {
-    const stop = factors.findIndex(factor => factor.func === 'none');
-    return stop < 0 ? factors : factors.slice(0, stop + 1);
-}
-
-function setFactorFunction(term, index, func) {
-    if (index < term.factors.length) term.factors[index].func = func;
-    else term.factors.push(createAlgebraicFactor(func));
-    if (func === 'c') term.factors[index].chainedFunc = 'none';
-
-    term.factors = trimFactors(term.factors);
-}
-
-function renderAlgebraicHeader(term, termIndex) {
-    const header = h('div', { className: 'algebraic-term-header' }, [
-        h('div', { className: 'algebraic-term-title-wrapper' }, [
-            h('span', { className: 'algebraic-term-title', text: `Term ${termIndex + 1}` }),
-            h('div', { className: 'algebraic-term-formula', text: termPreview(term) })
-        ])
-    ]);
-
-    if (algebraicTerms().length > 1) {
-        const remove = h('button', { type: 'button', className: 'algebraic-term-remove-btn', text: '✕ Remove' });
-        remove.addEventListener('click', () => {
-            mutateAlgebraicTerms(terms => terms.splice(termIndex, 1));
-            renderAlgebraicChainingTerms();
-            updateTitlesAndGlobalUI();
-            syncParameterControlsPanelVisibility();
-            requestAlgebraicRedraw();
-        });
-        header.appendChild(remove);
-    }
-
-    return header;
-}
-
-function renderCoefficientControls(term, preview) {
-    return h('div', { className: 'algebraic-coeff-grid' }, [
-        algebraicRange('Re coeff ', term.coeff.re, (value, immediate) => {
-            mutateAlgebraicTerms(() => { term.coeff.re = value; }, 'algebraicChainingTerms.coeff.re');
-            refreshAlgebraicFormula(preview, term, immediate);
-        }),
-        algebraicRange('Im coeff ', term.coeff.im, (value, immediate) => {
-            mutateAlgebraicTerms(() => { term.coeff.im = value; }, 'algebraicChainingTerms.coeff.im');
-            refreshAlgebraicFormula(preview, term, immediate);
-        })
-    ]);
-}
-
-function visibleFactors(term) {
-    const factors = term.factors.slice();
-    if (factors.length < 5 && (factors.length === 0 || factors.at(-1).func !== 'none')) {
-        factors.push(createAlgebraicFactor('none'));
-    }
-    return factors;
-}
-
-function modifierCheckbox(factor, key, label, onChange) {
-    const checkbox = h('input', { type: 'checkbox' });
-    checkbox.checked = Boolean(factor[key]);
-    checkbox.addEventListener('change', event => {
-        mutateAlgebraicTerms(() => { factor[key] = event.target.checked; }, `algebraicChainingTerms.factor.${key}`);
-        onChange();
-    });
-
-    return h('label', { className: 'algebraic-checkbox-label' }, [
-        checkbox,
-        h('span', { className: 'custom-checkbox-visual' }),
-        label
-    ]);
-}
-
-function renderFactorDetails(term, factor, preview) {
-    const rows = [];
-
-    if (factor.func !== 'c') {
-        rows.push(h('div', { className: 'algebraic-factor-detail-row' }, [
-            h('span', { className: 'algebraic-factor-label', text: 'Chain f(g(z))' }),
-            select(ALGEBRAIC_FUNCTION_OPTIONS, factor.chainedFunc, event => {
-                mutateAlgebraicTerms(() => {
-                    factor.chainedFunc = event.target.value;
-                }, 'algebraicChainingTerms.factor.chainedFunc');
-                refreshAlgebraicFormula(preview, term);
-                syncParameterControlsPanelVisibility();
-            })
-        ]));
-    }
-
-    rows.push(
-        algebraicRange('Power ', factor.power === undefined ? 1.0 : factor.power, (value, immediate) => {
-            mutateAlgebraicTerms(() => { factor.power = value; }, 'algebraicChainingTerms.factor.power');
-            refreshAlgebraicFormula(preview, term, immediate);
-        }),
-        h('div', { className: 'algebraic-checkbox-row' }, [
-            modifierCheckbox(factor, 'reciprocal', '1/f', () => refreshAlgebraicFormula(preview, term)),
-            modifierCheckbox(factor, 'log', 'ln(f)', () => refreshAlgebraicFormula(preview, term)),
-            modifierCheckbox(factor, 'exp', 'e^f', () => refreshAlgebraicFormula(preview, term))
-        ])
-    );
-
-    return h('div', { className: 'algebraic-factor-details' }, rows);
-}
-
-function renderFactor(term, factor, index, preview) {
-    const card = h('div', { className: 'algebraic-factor-card' }, [
-        h('div', { className: 'algebraic-factor-main-row' }, [
-            h('span', { className: 'algebraic-factor-label', text: `Factor ${index + 1}` }),
-            select(ALGEBRAIC_FUNCTION_OPTIONS, factor.func, event => {
-                mutateAlgebraicTerms(() => setFactorFunction(term, index, event.target.value));
-                renderAlgebraicChainingTerms();
-                updateTitlesAndGlobalUI();
-                syncParameterControlsPanelVisibility();
-                requestAlgebraicRedraw();
-            })
-        ])
-    ]);
-
-    if (factor.func !== 'none') card.appendChild(renderFactorDetails(term, factor, preview));
-    return card;
-}
-
-function renderFactors(term, preview) {
-    return h('div', { className: 'algebraic-factors-container' }, [
-        h('div', { className: 'algebraic-factors-title', text: 'Factors' }),
-        ...visibleFactors(term).map((factor, index) => renderFactor(term, factor, index, preview))
-    ]);
-}
-
-function renderAlgebraicChainingTerms() {
-    if (!controls.algebraicTermsList) return;
-
-    if (controls.algebraicChainingZInput && state.algebraicChainingZExpr) {
-        if (controls.algebraicChainingZInput.value !== state.algebraicChainingZExpr) {
-            controls.algebraicChainingZInput.value = state.algebraicChainingZExpr;
-            updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath);
-        }
-    }
-
-    controls.algebraicTermsList.innerHTML = '';
-    algebraicTerms().forEach((term, index) => {
-        const header = renderAlgebraicHeader(term, index);
-        const preview = header.querySelector('.algebraic-term-formula');
-
-        controls.algebraicTermsList.appendChild(h('div', { className: 'algebraic-term-card' }, [
-            header,
-            renderCoefficientControls(term, preview),
-            renderFactors(term, preview)
-        ]));
     });
 }
 
@@ -3019,24 +2634,6 @@ function bindRealPlotsControls() {
         requestUiRedraw();
     });
 
-    const rpPaletteContainer = document.getElementById('real_plots_palette_circles');
-    if (rpPaletteContainer) {
-        renderRealPlotsPalettesUI(rpPaletteContainer);
-        rpPaletteContainer.addEventListener('click', event => {
-            const button = event.target.closest('.domain-palette-circle-btn');
-            if (!button) return;
-            state.realPlotsPalette = button.dataset.paletteId;
-            renderRealPlotsPalettesUI(rpPaletteContainer);
-
-            const panel = document.getElementById('real_plots_palette_circle_panel');
-            if (panel && !panel.classList.contains('hidden')) {
-                updateRealPlotsPaletteCirclePanel();
-            }
-
-            requestUiRedraw();
-        });
-    }
-
     bindSelector('realPlotsColorMode', 'realPlotsColorMode', (event, val) => {
         state.realPlotsColorMode = val;
         requestUiRedraw();
@@ -3143,12 +2740,10 @@ function bindContourControls() {
     });
     bindControlListener('riemannSurfaceShow2DContourBtn', 'click', () => {
         state.show2DContourPlot = !state.show2DContourPlot;
-        updateTitlesAndGlobalUI();
         requestUiRedraw();
     });
     bindControlListener('realPlotsShow2DContourBtn', 'click', () => {
         state.show2DContourPlot = !state.show2DContourPlot;
-        updateTitlesAndGlobalUI();
         requestUiRedraw();
     });
     bindControlListener('toggleFullscreenContour2DBtn', 'click', toggleContour2DFullscreen);

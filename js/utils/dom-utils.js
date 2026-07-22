@@ -1,6 +1,6 @@
 import { state, context, zPlaneParams, wPlaneParams, sphereViewParams, wPlaneInitialRanges, zPlaneInitialRanges } from '../store/state.js';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT, SPHERE_INITIAL_ROT_X, SPHERE_INITIAL_ROT_Y, SPHERE_VIEW_RADIUS_FACTOR } from '../constants/rendering.js';
-import { TAYLOR_CENTER_PRESETS, TAYLOR_CENTER_PRESET_GROUPS } from '../constants/numerical.js';
+import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
 import { initializeWebGLLineSupport } from '../rendering/webgl-planar.js';
 import { initializeWebGLDomainColoringSupport } from '../rendering/webgl-domain-coloring.js';
@@ -9,7 +9,7 @@ import { captureBeforeResize } from '../rendering/domain-dynamics.js';
 import { eventBus } from '../store/events.js';
 import { registerControls } from '../ui/control-registry.js';
 
-const { controls, polynomialCoeffUIElements } = context;
+const { controls } = context;
 
 let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas, wDomainColorCanvas, zDomainColorCtx, wDomainColorCtx;
 let wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList, sphereViewWParamsList;
@@ -30,42 +30,6 @@ export function findTaylorCenterPreset(re, im) {
     ) || null;
 }
 
-export function renderTaylorPresetGroups() {
-    if (!controls.taylorSeriesPresetGroups) {
-        return;
-    }
-
-    const fragment = document.createDocumentFragment();
-
-    TAYLOR_CENTER_PRESET_GROUPS.forEach(group => {
-        const groupElement = document.createElement('div');
-        groupElement.className = 'taylor-series-preset-group';
-
-        const headingElement = document.createElement('div');
-        headingElement.className = 'taylor-series-preset-group-title';
-        headingElement.textContent = group.label;
-        groupElement.appendChild(headingElement);
-
-        const buttonRow = document.createElement('div');
-        buttonRow.className = 'taylor-series-preset-buttons';
-
-        group.presets.forEach(preset => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'taylor-series-preset-btn';
-            button.textContent = preset.label;
-            button.dataset.taylorPresetRe = String(preset.re);
-            button.dataset.taylorPresetIm = String(preset.im);
-            buttonRow.appendChild(button);
-        });
-
-        groupElement.appendChild(buttonRow);
-        fragment.appendChild(groupElement);
-    });
-
-    controls.taylorSeriesPresetGroups.replaceChildren(fragment);
-}
-
 export function setupDOMReferences() {
     zCanvas = document.getElementById('z_plane_canvas'); wCanvas = document.getElementById('w_plane_canvas');
     zCtx = zCanvas.getContext('2d');
@@ -83,7 +47,6 @@ export function setupDOMReferences() {
     }
 
     registerControls(document, controls);
-    renderTaylorPresetGroups();
     controls.cauchy_integral_results_info = controls.cauchyIntegralResultsInfo;
     controls.zPlaneCanvas = zCanvas;
     controls.wPlaneCanvas = wCanvas;
@@ -282,14 +245,23 @@ export function getChainingTitleHTML(i, mode) {
     return getNestedHTML(i + 1, mode === 'zero_seed' ? '0' : 'z');
 }
 
+function renderChainingTitle(target, index, derivative = false) {
+    const code = document.createElement('code');
+    code.id = `w-plane-title-func_${index}`;
+    code.textContent = getChainingTitleHTML(index, state.chainingMode);
+    target.replaceChildren(
+        document.createTextNode(`${getChainedOutputLabel()} (Chain ${index}: ${derivative ? 'Derivative of ' : ''}`),
+        code,
+        document.createTextNode(')')
+    );
+}
+
 export function updateChainingTitles() {
     if (!wCanvasList) return;
     for (let i = 1; i < wCanvasList.length; i++) {
         const titleSpan = document.getElementById(`w-plane-title_${i}`);
         if (titleSpan) {
-            const outputLabel = getChainedOutputLabel();
-            const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
-            titleSpan.innerHTML = `${outputLabel} (Chain ${i}: ${derivativePrefix}<code id="w-plane-title-func_${i}">${getChainingTitleHTML(i, state.chainingMode)}</code>)`;
+            renderChainingTitle(titleSpan, i, state.mapPresentation === 'derivative');
         }
     }
 }
@@ -328,8 +300,7 @@ export function updateChainingColumns(count) {
         const titleSpan = newCol.querySelector('#w-plane-title');
         if (titleSpan) {
             titleSpan.id = `w-plane-title_${i}`;
-            const outputLabel = getChainedOutputLabel();
-            titleSpan.innerHTML = `${outputLabel} (Chain ${i}: <code id="w-plane-title-func_${i}">${getChainingTitleHTML(i, state.chainingMode)}</code>)`;
+            renderChainingTitle(titleSpan, i);
         }
 
         newCol.querySelectorAll('.riemann-surface-canvas, .riemann-surface-hud').forEach(element => {
@@ -410,7 +381,7 @@ export function updateChainingColumns(count) {
     // Update the original w_plane title if needed
     const wPlaneTitleFunc = document.getElementById('w-plane-title-func');
     if (wPlaneTitleFunc && displayCount > 1) {
-        wPlaneTitleFunc.innerHTML = getChainingTitleHTML(0, state.chainingMode);
+        wPlaneTitleFunc.textContent = getChainingTitleHTML(0, state.chainingMode);
     }
     
     setupVisualParameters(false, false);

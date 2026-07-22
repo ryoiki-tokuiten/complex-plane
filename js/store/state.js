@@ -72,9 +72,6 @@ const rawState = {
     criticalPoints: [],
     criticalValues: [],
     zetaContinuationEnabled: false,
-    wOriginGlowTime: 0,
-    previousWindingNumber: null,
-
     vectorFieldEnabled: false,
     vectorFieldFunction: 'f(z)',
     vectorFieldScale: 0.1,
@@ -91,7 +88,6 @@ const rawState = {
     imageOpacity: 1.0,
     imageAspectRatio: 1.0,
     imageContentVersion: 0,
-    uploadedImage: null,
 
     videoResolution: 300,
     videoProcessingFps: 60,
@@ -99,16 +95,8 @@ const rawState = {
     videoOpacity: 1.0,
     videoAspectRatio: 1.0,
     videoFrameVersion: 0,
-    uploadedVideo: null,
-    uploadedVideoUrl: '',
     videoIsPlaying: false,
     videoStatusMessage: 'No video loaded.',
-    videoProcessingLoopHandle: null,
-    videoLastProcessedWallTime: 0,
-    videoLastProcessedMediaTime: -1,
-
-    panStateZ: { isPanning: false, panStart: { x: 0, y: 0 }, panStartOrigin: { x: 0, y: 0 } },
-    panStateW: { isPanning: false, panStart: { x: 0, y: 0 }, panStartOrigin: { x: 0, y: 0 } },
 
     isZFullScreen: false,
     isWFullScreen: false,
@@ -145,7 +133,6 @@ const rawState = {
     particleDensity: 150,
     particleSpeed: 0.04,
     particleMaxLifetime: 300,
-    particles: [], 
 
     vectorFlowOptionsEnabled: false, 
     globalViewOptionsEnabled: false,
@@ -299,17 +286,10 @@ const rawState = {
     },
 
     navigationModeEnabled: false,
-    navigationPosition: { re: 0, im: 0 },
-    navigationHeading: 0,
     navigationSize: 0.55,
     navigationOpacity: 0.9,
     navigationSpeed: 1.1,
-    navigationTrailLength: 0,
-    navigationKeys: {},
-    navigationTrail: [],
-    navigationLastTime: 0,
-    isProcessingZDomainDynamics: false,
-    isProcessingWDomainDynamics: false
+    navigationTrailLength: 0
 };
 
 const store = createObservableStore(rawState, {
@@ -325,6 +305,7 @@ export const setState = store.set;
 export const mutateState = store.mutate;
 export const batchStateChanges = store.transaction;
 export const subscribeState = store.subscribe;
+export const getStateSignal = store.getSignal;
 
 // Preserve the probe/chaining invariant at the state boundary instead of in UI handlers.
 subscribeState(({ value }) => {
@@ -355,7 +336,6 @@ export const context = {
     domainColoringDirtyQueued: false,
 
     controls: {},
-    polynomialCoeffUIElements: [],
 
     webglSupport: {
         available: false,

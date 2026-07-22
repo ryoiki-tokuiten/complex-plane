@@ -55,7 +55,7 @@ export class ThreeRiemannRenderer {
         this.renderer.setClearColor(COLOR_BACKGROUND);
         
         // Clear old children if any
-        this.container.innerHTML = '';
+        this.container.replaceChildren();
         this.container.appendChild(this.renderer.domElement);
 
         // Orbit controls

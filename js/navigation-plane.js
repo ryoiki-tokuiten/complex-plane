@@ -1,4 +1,5 @@
 import { state, context, zPlaneParams, wPlaneParams } from './store/state.js';
+import { runtime } from './store/runtime.js';
 import { eventBus } from './store/events.js';
 import { ROCKET_DATA_URIS } from './rocket-assets.js';
 import { getChainedTransformFunction } from './math-utils.js';
@@ -117,7 +118,7 @@ export function setNavigationModeEnabled(enabled) {
         if (controls.enableThreeSphereCb) controls.enableThreeSphereCb.checked = false;
         followNavigationViewports();
     } else {
-        state.navigationKeys = {};
+        runtime.navigation.keys = {};
         stopNavigationLoop();
     }
 
@@ -125,16 +126,16 @@ export function setNavigationModeEnabled(enabled) {
 }
 
 export function resetNavigationVehicle() {
-    state.navigationPosition = { re: 0, im: 0 };
-    state.navigationHeading = 0;
-    state.navigationTrail = [];
+    runtime.navigation.position = { re: 0, im: 0 };
+    runtime.navigation.heading = 0;
+    runtime.navigation.trail = [];
     setupVisualParameters(true, true);
     followNavigationViewports();
     eventBus.emit('redraw:domain', true);
 }
 
 function getNavigationInputVector() {
-    const keys = state.navigationKeys || {};
+    const keys = runtime.navigation.keys || {};
     let x = 0;
     let y = 0;
     if (keys.ArrowLeft) x -= 1;
@@ -155,7 +156,7 @@ export function setNavigationKey(event, pressed) {
     }
 
     event.preventDefault();
-    state.navigationKeys[event.key] = pressed;
+    runtime.navigation.keys[event.key] = pressed;
 
     // Visual feedback on the keyhint widget
     const keyToDirection = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
@@ -173,7 +174,7 @@ export function setNavigationKey(event, pressed) {
 
 function startNavigationLoop() {
     if (navigationAnimationFrame || !state.navigationModeEnabled) return;
-    state.navigationLastTime = performance.now();
+    runtime.navigation.lastTime = performance.now();
     navigationAnimationFrame = requestAnimationFrame(updateNavigationLoop);
 }
 
@@ -200,21 +201,21 @@ function updateNavigationVehicle(now) {
     const direction = getNavigationInputVector();
     if (!direction) return false;
 
-    const dt = Math.min(0.05, Math.max(0.001, (now - (state.navigationLastTime || now)) / 1000));
-    state.navigationLastTime = now;
+    const dt = Math.min(0.05, Math.max(0.001, (now - (runtime.navigation.lastTime || now)) / 1000));
+    runtime.navigation.lastTime = now;
 
     const xSpan = zPlaneParams.currentVisXRange[1] - zPlaneParams.currentVisXRange[0];
     const ySpan = zPlaneParams.currentVisYRange[1] - zPlaneParams.currentVisYRange[0];
     const speed = state.navigationSpeed * Math.max(xSpan, ySpan) * 0.12;
 
-    state.navigationPosition.re += direction.x * speed * dt;
-    state.navigationPosition.im += direction.y * speed * dt;
-    state.navigationHeading = Math.atan2(direction.y, direction.x);
+    runtime.navigation.position.re += direction.x * speed * dt;
+    runtime.navigation.position.im += direction.y * speed * dt;
+    runtime.navigation.heading = Math.atan2(direction.y, direction.x);
 
-    state.navigationTrail.push({ re: state.navigationPosition.re, im: state.navigationPosition.im });
+    runtime.navigation.trail.push({ ...runtime.navigation.position });
     const maxTrail = Math.max(0, Math.floor(state.navigationTrailLength));
-    if (state.navigationTrail.length > maxTrail) {
-        state.navigationTrail.splice(0, state.navigationTrail.length - maxTrail);
+    if (runtime.navigation.trail.length > maxTrail) {
+        runtime.navigation.trail.splice(0, runtime.navigation.trail.length - maxTrail);
     }
 
     return followNavigationViewports();
@@ -235,21 +236,21 @@ function centerPlaneOnNavigationPoint(planeParams, point, panState) {
 }
 
 export function followNavigationViewports() {
-    let shifted = centerPlaneOnNavigationPoint(zPlaneParams, state.navigationPosition, state.panStateZ);
+    let shifted = centerPlaneOnNavigationPoint(zPlaneParams, runtime.navigation.position, runtime.interaction.panZ);
 
     const transformFunc = getChainedTransformFunction(state.currentFunction);
     if (typeof transformFunc !== 'function') return shifted;
 
     // Center w-plane on the mapped point of the vehicle position
-    const mappedCenter = transformFunc(state.navigationPosition.re, state.navigationPosition.im);
-    shifted = centerPlaneOnNavigationPoint(wPlaneParams, mappedCenter, state.panStateW) || shifted;
+    const mappedCenter = transformFunc(runtime.navigation.position.re, runtime.navigation.position.im);
+    shifted = centerPlaneOnNavigationPoint(wPlaneParams, mappedCenter, runtime.interaction.panW) || shifted;
     return shifted;
 }
 
 // ── Image state injection for the existing pipeline ────────────────────────────
 //
 // Instead of custom drawing, we temporarily set the rocket PNG as the active
-// image (state.uploadedImage, state.currentInputShape='image', etc.) so that the
+// image (runtime.media.image, state.currentInputShape='image', etc.) so that the
 // existing drawPlanarInputShape / drawPlanarTransformedShape / drawImageWithWebGL
 // pipeline processes it exactly like a user-uploaded image.
 //
@@ -261,7 +262,7 @@ export function followNavigationViewports() {
 let _navImageStateSaved = null;
 
 function applyNavigationImageState(pos) {
-    const img = getRocketImageForHeading(state.navigationHeading);
+    const img = getRocketImageForHeading(runtime.navigation.heading);
     if (!img || !(img instanceof HTMLImageElement) || !img.complete || img.naturalWidth === 0) {
         return false;
     }
@@ -269,7 +270,7 @@ function applyNavigationImageState(pos) {
     // Save existing state
     _navImageStateSaved = {
         currentInputShape: state.currentInputShape,
-        uploadedImage: state.uploadedImage,
+        uploadedImage: runtime.media.image,
         imageAspectRatio: state.imageAspectRatio,
         imageSize: state.imageSize,
         imageOpacity: state.imageOpacity,
@@ -280,7 +281,7 @@ function applyNavigationImageState(pos) {
 
     // Inject the rocket image as the active raster source
     state.currentInputShape = 'image';
-    state.uploadedImage = img;
+    runtime.media.image = img;
     state.imageAspectRatio = img.naturalWidth / Math.max(1, img.naturalHeight);
     state.imageSize = state.navigationSize * 2;
     state.imageOpacity = state.navigationOpacity;
@@ -295,7 +296,7 @@ function restoreNavigationImageState() {
     if (!_navImageStateSaved) return;
 
     state.currentInputShape = _navImageStateSaved.currentInputShape;
-    state.uploadedImage = _navImageStateSaved.uploadedImage;
+    runtime.media.image = _navImageStateSaved.uploadedImage;
     state.imageAspectRatio = _navImageStateSaved.imageAspectRatio;
     state.imageSize = _navImageStateSaved.imageSize;
     state.imageOpacity = _navImageStateSaved.imageOpacity;
@@ -307,7 +308,7 @@ function restoreNavigationImageState() {
 }
 
 function drawNavigationTrail(ctx, planeParams, transformFunc) {
-    if (!state.navigationTrail || state.navigationTrail.length < 2 || state.navigationTrailLength <= 0) return;
+    if (!runtime.navigation.trail || runtime.navigation.trail.length < 2 || state.navigationTrailLength <= 0) return;
 
     ctx.save();
     ctx.globalAlpha = Math.min(0.34, state.navigationOpacity * 0.45);
@@ -317,9 +318,9 @@ function drawNavigationTrail(ctx, planeParams, transformFunc) {
     ctx.lineCap = 'round';
 
     if (transformFunc) {
-        drawPlanarTransformedLine(ctx, planeParams, transformFunc, state.navigationTrail, 'rgba(126, 228, 255, 0.55)');
+        drawPlanarTransformedLine(ctx, planeParams, transformFunc, runtime.navigation.trail, 'rgba(126, 228, 255, 0.55)');
     } else {
-        drawComplexLineSetOnPlane(ctx, planeParams, state.navigationTrail);
+        drawComplexLineSetOnPlane(ctx, planeParams, runtime.navigation.trail);
     }
     ctx.restore();
 }
@@ -344,8 +345,8 @@ export function drawNavigationLayer(ctx, planeParams, planeKey, transformFunc = 
 
     // Compute the correct position of the vehicle in this plane's coordinates
     const pos = transformFunc
-        ? transformFunc(state.navigationPosition.re, state.navigationPosition.im)
-        : state.navigationPosition;
+        ? transformFunc(runtime.navigation.position.re, runtime.navigation.position.im)
+        : runtime.navigation.position;
 
     if (!pos || isNaN(pos.re) || isNaN(pos.im) || !isFinite(pos.re) || !isFinite(pos.im)) {
         return;

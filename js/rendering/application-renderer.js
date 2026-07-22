@@ -3,7 +3,7 @@ import { findZerosAndPoles, findCriticalPoints } from '../analysis/feature-detec
 import { updateTaylorSeriesCenterAndRadius } from '../math-utils.js';
 import { performCauchyAnalysis } from '../analysis/cauchy.js';
 import { drawZPlaneContent, drawWPlaneContent } from './renderer.js';
-import { updateTitlesAndGlobalUI } from '../ui/ui-updates.js';
+import { updateProbeInfo } from '../ui/ui-updates.js';
 import { drawLaplace3DSurface } from './laplace-3d-surface.js';
 import { drawRealPlot } from './real-plots-renderer.js';
 import {
@@ -95,7 +95,7 @@ export function renderApplicationFrame() {
         drawZPlaneContent();
         drawWPlaneContent({ renderRiemannSurface: !state.riemannSurfaceEnabled });
     }
-    updateTitlesAndGlobalUI();
+    updateProbeInfo();
 
     syncOptionalColumn(controls.laplace3DColumn, !state.laplaceModeEnabled);
     if (state.laplaceModeEnabled) drawLaplace3DSurface('laplace_3d_container');

@@ -7,3 +7,5 @@ dist/
 mandelbrot-main/
 Experiment
 fractal-garden-master
+playwright-report/
+test-results/

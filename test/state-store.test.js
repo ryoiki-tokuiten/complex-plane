@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { effect } from '@preact/signals';
 
 import { createObservableStore } from '../js/store/observable-store.js';
 
@@ -55,6 +56,20 @@ test('nested state changes require an explicit mutation boundary', () => {
     assert.equal(changes[0].mutation, true);
 });
 
+test('state signals batch component-facing updates across a transaction', () => {
+    const store = createObservableStore({ count: 0 });
+    const values = [];
+    const dispose = effect(() => values.push(store.getSignal('count').value));
+
+    store.transaction(state => {
+        state.count = 1;
+        state.count = 2;
+    });
+
+    assert.deepEqual(values, [0, 2]);
+    dispose();
+});
+
 test('the application store enforces mutually exclusive probe and chaining modes', async () => {
     const { state } = await import('../js/store/state.js');
     state.chainingEnabled = false;
@@ -67,4 +82,16 @@ test('the application store enforces mutually exclusive probe and chaining modes
     assert.equal(state.probeActive, false);
 
     state.chainingEnabled = false;
+});
+
+test('reactive application state excludes DOM and frame-runtime handles', async () => {
+    const { state } = await import('../js/store/state.js');
+    for (const key of [
+        'uploadedImage', 'uploadedVideo', 'videoProcessingLoopHandle',
+        'panStateZ', 'panStateW', 'navigationKeys', 'navigationTrail', 'navigationPosition',
+        'navigationHeading', 'particles', 'isProcessingZDomainDynamics',
+        'isProcessingWDomainDynamics', 'wOriginGlowTime', 'previousWindingNumber'
+    ]) {
+        assert.equal(Object.hasOwn(state, key), false, key);
+    }
 });
