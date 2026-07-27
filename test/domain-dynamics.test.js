@@ -293,6 +293,64 @@ test('dynamics snapshots represent Mandelbrot, Newton, and generic output chains
     }
 });
 
+test('built dynamics snapshots isolate and freeze nested algebraic data', () => {
+    const before = snapshotState();
+    const zExpr = {
+        op: '+',
+        left: 'z',
+        right: { type: 'number', value: 1 }
+    };
+    const terms = [{
+        coeff: { re: 1, im: 0 },
+        factors: [algebraicFactor('sin', { pipeline: [{ func: 'cos' }] })]
+    }];
+
+    try {
+        configureDynamics({
+            currentFunction: 'algebraic_chaining',
+            algebraicChainingEnabled: true,
+            algebraicChainingZExpr: zExpr,
+            algebraicChainingTerms: terms
+        });
+
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        assert.ok(Object.isFrozen(snapshot));
+        assert.ok(Object.isFrozen(snapshot.algebraicChainingZExpr.right));
+        assert.ok(Object.isFrozen(snapshot.algebraicChainingTerms[0].factors[0].pipeline[0]));
+        assert.notEqual(snapshot.algebraicChainingZExpr, zExpr);
+        assert.notEqual(snapshot.algebraicChainingTerms[0].factors[0], terms[0].factors[0]);
+
+        zExpr.right.value = 2;
+        terms[0].factors[0].pipeline[0].func = 'sin';
+        assert.equal(snapshot.algebraicChainingZExpr.right.value, 1);
+        assert.equal(snapshot.algebraicChainingTerms[0].factors[0].pipeline[0].func, 'cos');
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('mutable algebraic AST edits never reuse a stale accelerator', () => {
+    const makeSnapshot = offset => makeAlgebraicDynamicsSnapshot({
+        algebraicChainingZExpr: {
+            op: '+',
+            left: 'z',
+            right: { type: 'number', value: offset }
+        },
+        algebraicChainingTerms: [{
+            coeff: { re: 1, im: 0 },
+            factors: [algebraicFactor('polynomial')]
+        }]
+    });
+    const snapshot = makeSnapshot(1);
+    const otherSnapshot = makeSnapshot(10);
+    Object.freeze(snapshot);
+
+    approxComplex(evaluateDomainDynamicsValue(snapshot, 2, 0), { re: 3, im: 0 });
+    evaluateDomainDynamicsValue(otherSnapshot, 2, 0);
+    snapshot.algebraicChainingZExpr.right.value = 2;
+    approxComplex(evaluateDomainDynamicsValue(snapshot, 2, 0), { re: 4, im: 0 });
+});
+
 test('orbit coloring modes distinguish escape and attractor observables', () => {
     const before = snapshotState();
 
@@ -416,6 +474,8 @@ test('async renderer reaches final scale one without another redraw trigger', as
         assert.equal(renderPlanarDomainDynamics(targetCtx, PLANE, snapshot), true);
         await waitFor(() => targetCtx.draws.some(draw => draw.width === PLANE.width && draw.height === PLANE.height));
         assert.ok(targetCtx.draws.length <= 3);
+        assert.equal(selectDomainDynamicsBackend().queue.length, 0);
+        assert.equal(selectDomainDynamicsBackend().queueIndex, 0);
     } finally {
         disposePlanarDomainDynamics();
         restoreGlobals();

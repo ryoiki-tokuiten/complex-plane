@@ -5,6 +5,7 @@ import { runtime } from '../store/runtime.js';
 import {
     createDomainDynamicsTileRenderer,
     domainDynamicsSignature,
+    freezeDomainDynamicsSnapshot,
     isDomainDynamicsSnapshot,
     renderDomainDynamicsTile
 } from './domain-dynamics-core.js';
@@ -40,9 +41,11 @@ let activeBackend = null;
 let activeJobId = 0;
 
 function cloneComplex(value, fallback = { re: 0, im: 0 }) {
+    const re = Number(value?.re);
+    const im = Number(value?.im);
     return {
-        re: Number.isFinite(Number(value?.re)) ? Number(value.re) : fallback.re,
-        im: Number.isFinite(Number(value?.im)) ? Number(value.im) : fallback.im
+        re: Number.isFinite(re) ? re : fallback.re,
+        im: Number.isFinite(im) ? im : fallback.im
     };
 }
 
@@ -50,12 +53,23 @@ function cloneComplexList(values) {
     return Array.isArray(values) ? values.map(value => cloneComplex(value)) : [];
 }
 
+function clonePlainData(value) {
+    if (Array.isArray(value)) return value.map(clonePlainData);
+    if (!value || typeof value !== 'object') return value;
+
+    const clone = {};
+    for (const [key, nested] of Object.entries(value)) {
+        clone[key] = clonePlainData(nested);
+    }
+    return clone;
+}
+
 function cloneAlgebraicTerms(terms) {
     return Array.isArray(terms)
         ? terms.map(term => ({
             coeff: cloneComplex(term?.coeff, { re: 1, im: 0 }),
             factors: Array.isArray(term?.factors)
-                ? term.factors.map(factor => ({ ...factor }))
+                ? term.factors.map(clonePlainData)
                 : []
         }))
         : [];
@@ -95,7 +109,7 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         orbitColoringMode,
         algebraicChainingEnabled: !!runtimeState.algebraicChainingEnabled,
         algebraicChainingTerms: cloneAlgebraicTerms(runtimeState.algebraicChainingTerms),
-        algebraicChainingZExpr: runtimeState.algebraicChainingZExpr || 'z',
+        algebraicChainingZExpr: clonePlainData(runtimeState.algebraicChainingZExpr || 'z'),
         mobiusA: cloneComplex(runtimeState.mobiusA, { re: 1, im: 0 }),
         mobiusB: cloneComplex(runtimeState.mobiusB),
         mobiusC: cloneComplex(runtimeState.mobiusC),
@@ -122,7 +136,7 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
     };
 
     if (snapshot.taylorSeriesEnabled || snapshot.dynamicAggregateEnabled) return null;
-    return isDomainDynamicsSnapshot(snapshot) ? snapshot : null;
+    return isDomainDynamicsSnapshot(snapshot) ? freezeDomainDynamicsSnapshot(snapshot) : null;
 }
 
 function canUseWorker() {
@@ -216,6 +230,7 @@ class WorkerCpuDomainDynamicsBackend {
         this.id = 'worker-cpu';
         this.workers = [];
         this.queue = [];
+        this.queueIndex = 0;
         this.activeJob = null;
         this.pass = null;
         this.inlineTimer = null;
@@ -247,6 +262,7 @@ class WorkerCpuDomainDynamicsBackend {
             setDomainProcessing(this.activeJob.snapshot.isWPlaneColoring, false);
         }
         this.queue = [];
+        this.queueIndex = 0;
         this.pass = null;
         if (this.inlineTimer) {
             clearTimeout(this.inlineTimer);
@@ -308,6 +324,7 @@ class WorkerCpuDomainDynamicsBackend {
         const startIndex = Math.max(0, PASS_SCALES.indexOf(currentScale));
         job.passIndex = startIndex - 1;
         this.queue = [];
+        this.queueIndex = 0;
         this.pass = null;
         this.startNextPass();
     }
@@ -348,6 +365,7 @@ class WorkerCpuDomainDynamicsBackend {
             remaining: 0
         };
         this.queue = createTileList(passWidth, passHeight, sampleStep);
+        this.queueIndex = 0;
         this.pass.remaining = this.queue.length;
 
         if (!this.queue.length) {
@@ -366,8 +384,9 @@ class WorkerCpuDomainDynamicsBackend {
         const job = this.activeJob;
         if (!job || job.cancelled || entry.busy) return;
 
-        const tile = this.queue.shift();
+        const tile = this.queue[this.queueIndex];
         if (!tile) return;
+        this.queueIndex += 1;
 
         entry.busy = true;
         entry.worker.postMessage({
@@ -407,6 +426,8 @@ class WorkerCpuDomainDynamicsBackend {
                 lastCompletedSnapshot[job.snapshot.isWPlaneColoring ? 'w' : 'z'] = job.snapshot;
                 setDomainProcessing(job.snapshot.isWPlaneColoring, false);
             }
+            this.queue = [];
+            this.queueIndex = 0;
             this.startNextPass();
         }
     }
@@ -421,8 +442,9 @@ class WorkerCpuDomainDynamicsBackend {
             const currentPass = this.pass;
             if (!currentJob || currentJob.cancelled || currentPass !== pass) return;
 
-            const tile = this.queue.shift();
+            const tile = this.queue[this.queueIndex];
             if (!tile) return;
+            this.queueIndex += 1;
 
             const pixels = currentJob.renderTile
                 ? currentJob.renderTile(tile)
@@ -435,7 +457,7 @@ class WorkerCpuDomainDynamicsBackend {
                 pixels
             });
 
-            if (this.queue.length && this.pass === currentPass && !currentJob.cancelled) {
+            if (this.queueIndex < this.queue.length && this.pass === currentPass && !currentJob.cancelled) {
                 this.inlineTimer = setTimeout(runOne, 0);
             }
         };

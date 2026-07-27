@@ -6,6 +6,9 @@ const DOMAIN_LIGHTNESS_MIN = 0.34;
 const DOMAIN_LIGHTNESS_MAX = 0.72;
 const DOMAIN_LIGHTNESS_DETAIL_BASE = 0.72;
 const DOMAIN_LIGHTNESS_DETAIL_SCALE = 0.28;
+// Squared magnitude is faster than Math.hypot on the color hot path; this guard
+// preserves overflow behavior before taking that fast path.
+const HYPOT_FAST_OVERFLOW_GUARD = Math.sqrt(Number.MAX_VALUE / 2);
 import { compileExpression } from '../math/expression/evaluator.js';
 import {
     ORBIT_COLORING_MODES,
@@ -32,9 +35,33 @@ const DEFAULT_PALETTE_STOPS = Object.freeze([
 
 const zetaLogIntegerCache = [0, 0];
 const zetaHasseBinomialRowsCache = new Map();
-const NO_ACCELERATOR = Object.freeze({ type: 'none' });
-let lastDynamicsAcceleratorSnapshot = null;
-let lastDynamicsAccelerator = NO_ACCELERATOR;
+const NO_ACCELERATOR = Object.freeze({
+    type: 'none',
+    // Component evaluation is synchronous and non-reentrant. A module-owned pair
+    // removes one typed-array allocation from every public scalar evaluation.
+    scratch: new Float64Array(2)
+});
+const dynamicsAcceleratorCache = new WeakMap();
+const immutableDynamicsSnapshots = new WeakSet();
+const colorContextCache = new WeakMap();
+
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) {
+        return value;
+    }
+
+    seen.add(value);
+    for (const nested of Object.values(value)) deepFreeze(nested, seen);
+    return Object.freeze(value);
+}
+
+export function freezeDomainDynamicsSnapshot(snapshot) {
+    if (snapshot && typeof snapshot === 'object') {
+        deepFreeze(snapshot);
+        immutableDynamicsSnapshots.add(snapshot);
+    }
+    return snapshot;
+}
 
 function finite(value) {
     return Number.isFinite(value);
@@ -581,7 +608,13 @@ function createPolynomialParameterAccelerator(snapshot) {
             cCoeff,
             cCoeffRe: cCoeff.re,
             cCoeffIm: cCoeff.im,
-            hasParameter
+            hasParameter,
+            canonicalUnitQuadratic: degree === 2 && hasParameter &&
+                coeffs[0].re === 0 && coeffs[0].im === 0 &&
+                coeffs[1].re === 0 && coeffs[1].im === 0 &&
+                coeffs[2].re === 1 && coeffs[2].im === 0 &&
+                cCoeff.re === 1 && cCoeff.im === 0,
+            scratch: new Float64Array(2)
         }
         : null;
 }
@@ -649,7 +682,8 @@ function createLaurentParameterAccelerator(snapshot) {
             cCoeff,
             cCoeffRe: cCoeff.re,
             cCoeffIm: cCoeff.im,
-            hasParameter
+            hasParameter,
+            scratch: new Float64Array(2)
         }
         : null;
 }
@@ -1462,6 +1496,7 @@ function createCompiledAlgebraicAccelerator(snapshot) {
     }
 
     const degree = Math.max(0, Math.floor(Number(snapshot.polynomialN) || 0));
+    const fractionalPowerN = Number(snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER);
     const polynomialCoeffsRe = new Float64Array(degree + 1);
     const polynomialCoeffsIm = new Float64Array(degree + 1);
     for (let k = 0; k <= degree; k += 1) {
@@ -1498,9 +1533,10 @@ function createCompiledAlgebraicAccelerator(snapshot) {
             if (!raw || raw.func === 'none') break;
             const start = ops.length;
             if (!compilePrimitiveAlgebraicBlock(raw, ops, args)) return null;
+            const end = ops.length;
             factorOpStart.push(start);
-            factorOpEnd.push(ops.length);
-            if (ops.length - start > maxOps) maxOps = ops.length - start;
+            factorOpEnd.push(end);
+            if (end - start > maxOps) maxOps = end - start;
         }
         termFactorEnd.push(factorOpStart.length);
     }
@@ -1528,7 +1564,7 @@ function createCompiledAlgebraicAccelerator(snapshot) {
         mobiusCIm: mobiusC.im,
         mobiusDRe: mobiusD.re,
         mobiusDIm: mobiusD.im,
-        fractionalPowerN: Number(snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER),
+        fractionalPowerN,
         zetaContinuationEnabled: !!snapshot.zetaContinuationEnabled,
         zExpr,
         scratch: new Float64Array(Math.max(8, (maxOps + 4) * 2))
@@ -1859,7 +1895,12 @@ function acceleratorResultObject(out) {
 }
 
 function createDynamicsAccelerator(snapshot) {
-    if (snapshot === lastDynamicsAcceleratorSnapshot) return lastDynamicsAccelerator;
+    const cacheable = !!snapshot && typeof snapshot === 'object' &&
+        immutableDynamicsSnapshots.has(snapshot);
+    if (cacheable) {
+        const cached = dynamicsAcceleratorCache.get(snapshot);
+        if (cached) return cached;
+    }
 
     const accelerator =
         createPolynomialParameterAccelerator(snapshot) ||
@@ -1868,8 +1909,7 @@ function createDynamicsAccelerator(snapshot) {
         createDirectBuiltinAccelerator(snapshot) ||
         NO_ACCELERATOR;
 
-    lastDynamicsAcceleratorSnapshot = snapshot;
-    lastDynamicsAccelerator = accelerator;
+    if (cacheable) dynamicsAcceleratorCache.set(snapshot, accelerator);
     return accelerator;
 }
 
@@ -1985,6 +2025,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
     const scratch = accelerator.scratch || new Float64Array(2);
     const count = snapshotChainCount(snapshot);
     const mode = snapshot.chainMode || 'recursion';
+    const detectFixedPoint = count >= 64;
 
     if (!snapshot.chainingEnabled || (count <= 1 && mode !== 'zero_seed')) {
         if (!evaluateComponentBaseInto(snapshot, accelerator, re, im, re, im, scratch)) return null;
@@ -2000,6 +2041,8 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
         let lastIm = NaN;
         let hasLast = false;
         for (let i = 0; i < count; i += 1) {
+            const previousRe = currentRe;
+            const previousIm = currentIm;
             if (!evaluateComponentBaseInto(snapshot, accelerator, currentRe, currentIm, re, im, scratch)) return null;
             currentRe = scratch[0];
             currentIm = scratch[1];
@@ -2009,6 +2052,9 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
             lastRe = currentRe;
             lastIm = currentIm;
             hasLast = true;
+            if (detectFixedPoint && Object.is(currentRe, previousRe) && Object.is(currentIm, previousIm)) {
+                return { re: currentRe, im: currentIm };
+            }
             if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
                 (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
                 return { re: currentRe, im: currentIm };
@@ -2023,6 +2069,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
     if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) return null;
     let lastRe = currentRe;
     let lastIm = currentIm;
+    if (detectFixedPoint && Object.is(currentRe, re) && Object.is(currentIm, im)) return { re: currentRe, im: currentIm };
     if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
         (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
         return { re: currentRe, im: currentIm };
@@ -2036,6 +2083,9 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
         currentIm = scratch[1];
         if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) {
             return { re: lastRe, im: lastIm };
+        }
+        if (detectFixedPoint && Object.is(currentRe, lastRe) && Object.is(currentIm, lastIm)) {
+            return { re: currentRe, im: currentIm };
         }
         lastRe = currentRe;
         lastIm = currentIm;
@@ -2058,7 +2108,7 @@ function supportsComponentValueEvaluation(snapshot, accelerator) {
     if (accelerator.type !== 'none') return false;
     const mode = snapshot.chainMode || 'recursion';
     if (mode !== 'recursion' && mode !== 'zero_seed') return false;
-    return !!evaluateBuiltinComponents(snapshot.functionKey, 0.125, -0.25, snapshot, new Float64Array(2));
+    return supportsBuiltinComponentEvaluation(snapshot.functionKey);
 }
 
 export function evaluateDomainDynamicsValue(snapshot, re, im, accelerator = createDynamicsAccelerator(snapshot)) {
@@ -2231,8 +2281,88 @@ function writeRgb(data, idx, r, g, b) {
     data[idx + 3] = 255;
 }
 
+// Deep zoom can map many adjacent screen samples to the exact same IEEE-754
+// coordinate. Evaluate each distinct coordinate pair once, then replicate pixels.
+function axisHasDuplicateSamples(start, step, count) {
+    // Skip the scan unless the step is near the rounding resolution of this axis.
+    // The generous bound is conservative: it may scan unnecessarily, but cannot
+    // suppress exact duplicate detection.
+    const end = start + (count - 1) * step;
+    const scale = Math.max(1, Math.abs(start), Math.abs(end), Math.abs(end - start));
+    if (Math.abs(step) > 8 * Number.EPSILON * scale) return false;
+
+    let previous = start;
+    for (let i = 1; i < count; i += 1) {
+        const current = start + i * step;
+        if (Object.is(current, previous)) return true;
+        previous = current;
+    }
+    return false;
+}
+
+function renderDuplicateSampleValueTile(snapshot, tile, accelerator) {
+    if (!snapshotUsesValueColoring(snapshot) ||
+        !supportsComponentValueEvaluation(snapshot, accelerator)) return null;
+
+    const xRange = snapshot.viewport.xRange;
+    const yRange = snapshot.viewport.yRange;
+    const spanX = xRange[1] - xRange[0];
+    const spanY = yRange[1] - yRange[0];
+    const xStep = tile.scale * spanX / snapshot.viewport.width;
+    const yStep = -tile.scale * spanY / snapshot.viewport.height;
+    const xStart = xRange[0] + (tile.x + 0.5) * tile.scale * spanX / snapshot.viewport.width;
+    const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
+    const duplicateX = axisHasDuplicateSamples(xStart, xStep, tile.width);
+    const duplicateY = axisHasDuplicateSamples(yStart, yStep, tile.height);
+    if (!duplicateX && !duplicateY) return null;
+
+    const data = new Uint8ClampedArray(tile.width * tile.height * 4);
+    const colors = colorContext(snapshot);
+    let rowStart = 0;
+    while (rowStart < tile.height) {
+        const im = yStart + rowStart * yStep;
+        let rowEnd = rowStart + 1;
+        while (rowEnd < tile.height && Object.is(yStart + rowEnd * yStep, im)) rowEnd += 1;
+
+        let columnStart = 0;
+        while (columnStart < tile.width) {
+            const re = xStart + columnStart * xStep;
+            let columnEnd = columnStart + 1;
+            while (columnEnd < tile.width && Object.is(xStart + columnEnd * xStep, re)) columnEnd += 1;
+
+            const value = evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator);
+            const first = (rowStart * tile.width + columnStart) * 4;
+            writeDomainColorWithContext(data, first, value?.re, value?.im, colors);
+            const r = data[first];
+            const g = data[first + 1];
+            const b = data[first + 2];
+            const a = data[first + 3];
+            for (let y = rowStart; y < rowEnd; y += 1) {
+                let idx = (y * tile.width + columnStart) * 4;
+                for (let x = columnStart; x < columnEnd; x += 1, idx += 4) {
+                    data[idx] = r;
+                    data[idx + 1] = g;
+                    data[idx + 2] = b;
+                    data[idx + 3] = a;
+                }
+            }
+            columnStart = columnEnd;
+        }
+        rowStart = rowEnd;
+    }
+    return data;
+}
+
 export function writeBlack(data, idx) {
     writeRgb(data, idx, 0, 0, 0);
+}
+
+// Escape renderers are black-dominant. Preinitializing opacity lets every proven
+// bounded pixel become a zero-write fast path while preserving RGBA output.
+function createOpaqueBlackBuffer(pixelCount) {
+    const data = new Uint8ClampedArray(pixelCount * 4);
+    for (let i = 3; i < data.length; i += 4) data[i] = 255;
+    return data;
 }
 
 function paletteComponents(stops, h) {
@@ -2297,6 +2427,31 @@ function colorContext(snapshot) {
         ? snapshot.paletteStops
         : DEFAULT_PALETTE_STOPS;
     const length = palette.length;
+    const brightness = finite(style.brightness) ? style.brightness : 1;
+    const contrast = finite(style.contrast) ? style.contrast : 1;
+    const saturation = Math.min(1, Math.max(0, finite(style.saturation) ? style.saturation : 1));
+    const lightnessCycles = Number(style.lightnessCycles) || 0;
+    const cached = colorContextCache.get(snapshot);
+    if (cached &&
+        cached.palette === palette &&
+        cached.paletteLast === length - 1 &&
+        cached.brightness === brightness &&
+        cached.contrast === contrast &&
+        cached.saturation === saturation &&
+        cached.lightnessCycles === lightnessCycles) {
+        let unchanged = true;
+        for (let i = 0; i < length; i += 1) {
+            const stop = palette[i];
+            if (cached.paletteR[i] !== stop[0] ||
+                cached.paletteG[i] !== stop[1] ||
+                cached.paletteB[i] !== stop[2]) {
+                unchanged = false;
+                break;
+            }
+        }
+        if (unchanged) return cached;
+    }
+
     const paletteR = new Float64Array(length);
     const paletteG = new Float64Array(length);
     const paletteB = new Float64Array(length);
@@ -2306,17 +2461,22 @@ function colorContext(snapshot) {
         paletteG[i] = stop[1];
         paletteB[i] = stop[2];
     }
-    return {
+    const context = {
         palette,
         paletteR,
         paletteG,
         paletteB,
         paletteLast: length - 1,
-        brightness: finite(style.brightness) ? style.brightness : 1,
-        contrast: finite(style.contrast) ? style.contrast : 1,
-        saturation: Math.min(1, Math.max(0, finite(style.saturation) ? style.saturation : 1)),
-        lightnessCycles: Number(style.lightnessCycles) || 0
+        brightness,
+        contrast,
+        saturation,
+        lightnessCycles,
+        // Zero detail makes lightness magnitude-independent, so the renderer can
+        // avoid hypot/log1p for the overwhelmingly common flat-lightness style.
+        needsMagnitudeDetail: lightnessCycles > 0.0001
     };
+    colorContextCache.set(snapshot, context);
+    return context;
 }
 
 function writeStyledColorComponents(data, idx, baseR, baseG, baseB, lightness, saturation) {
@@ -2353,16 +2513,27 @@ function writeDomainColorWithContext(data, idx, re, im, context) {
         return;
     }
 
-    const modValue = Math.hypot(re, im);
-    if (!finite(modValue)) {
-        writeBlack(data, idx);
-        return;
+    let lightnessBase = 0.5;
+    if (context.needsMagnitudeDetail) {
+        const absRe = re < 0 ? -re : re;
+        const absIm = im < 0 ? -im : im;
+        const modValue = absRe <= HYPOT_FAST_OVERFLOW_GUARD && absIm <= HYPOT_FAST_OVERFLOW_GUARD
+            ? Math.sqrt(re * re + im * im)
+            : Math.hypot(re, im);
+        if (!finite(modValue)) {
+            writeBlack(data, idx);
+            return;
+        }
+        lightnessBase = magnitudeLightness(Math.log1p(modValue), context.lightnessCycles);
+    } else if ((re < 0 ? -re : re) > HYPOT_FAST_OVERFLOW_GUARD ||
+        (im < 0 ? -im : im) > HYPOT_FAST_OVERFLOW_GUARD) {
+        if (!finite(Math.hypot(re, im))) {
+            writeBlack(data, idx);
+            return;
+        }
     }
-
-    const logMod = Math.log1p(modValue);
-    const lightnessBase = magnitudeLightness(logMod, context.lightnessCycles);
     const lightness = Math.min(0.95, Math.max(0.05, (0.5 + (lightnessBase - 0.5) * context.contrast) * context.brightness));
-    let hue = (Math.atan2(im, re) / TWO_PI) % 1;
+    let hue = Math.atan2(im, re) / TWO_PI;
     if (hue < 0) hue += 1;
 
     const value = Math.min(0.999999, Math.max(0, hue)) * context.paletteLast;
@@ -2682,7 +2853,10 @@ function renderPolynomialParameterValueTile(snapshot, tile, accelerator) {
 }
 
 function renderQuadraticPolynomialParameterOrbitTile(snapshot, tile, accelerator) {
-    const data = new Uint8ClampedArray(tile.width * tile.height * 4);
+    const opaqueBlackBackground = snapshot.chainMode === 'zero_seed' && accelerator.canonicalUnitQuadratic;
+    const data = opaqueBlackBackground
+        ? createOpaqueBlackBuffer(tile.width * tile.height)
+        : new Uint8ClampedArray(tile.width * tile.height * 4);
     const xRange = snapshot.viewport.xRange;
     const yRange = snapshot.viewport.yRange;
     const spanX = xRange[1] - xRange[0];
@@ -2710,6 +2884,11 @@ function renderQuadraticPolynomialParameterOrbitTile(snapshot, tile, accelerator
             const cr = xStart + x * xStep;
             const paramRe = hasParameter ? br * cr - bi * ci : 0;
             const paramIm = hasParameter ? br * ci + bi * cr : 0;
+            const idx = (y * tile.width + x) * 4;
+            if (opaqueBlackBackground &&
+                definitelyInsideUnitQuadraticCardioidOrBulb(paramRe, paramIm)) {
+                continue;
+            }
             let zr = zeroSeed ? 0 : cr;
             let zi = zeroSeed ? 0 : ci;
             let smoothIteration = count;
@@ -2744,10 +2923,9 @@ function renderQuadraticPolynomialParameterOrbitTile(snapshot, tile, accelerator
                 zi = ni;
             }
 
-            const idx = (y * tile.width + x) * 4;
             if (escaped) {
                 writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, colors);
-            } else {
+            } else if (!opaqueBlackBackground) {
                 writeBlack(data, idx);
             }
         }
@@ -3148,7 +3326,7 @@ function renderLaurentParameterOrbitTile(snapshot, tile, accelerator) {
     const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
     const count = snapshotChainCount(snapshot);
     const zeroSeed = snapshot.chainMode === 'zero_seed';
-    const scratch = new Float64Array(2);
+    const scratch = accelerator.scratch;
     const colors = colorContext(snapshot);
 
     for (let y = 0; y < tile.height; y += 1) {
@@ -3215,7 +3393,7 @@ function renderLaurentParameterValueTile(snapshot, tile, accelerator) {
     const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
     const count = snapshotChainCount(snapshot);
     const zeroSeed = mode === 'zero_seed';
-    const scratch = new Float64Array(2);
+    const scratch = accelerator.scratch;
     const colors = colorContext(snapshot);
 
     for (let y = 0; y < tile.height; y += 1) {
@@ -3412,6 +3590,30 @@ function evaluateBuiltinComponents(functionKey, re, im, snapshot, out) {
     }
 }
 
+function supportsBuiltinComponentEvaluation(functionKey) {
+    switch (functionKey) {
+        case 'exp':
+        case 'ln':
+        case 'sin':
+        case 'cos':
+        case 'tan':
+        case 'sec':
+        case 'reciprocal':
+        case 'sinh':
+        case 'cosh':
+        case 'tanh':
+        case 'power':
+        case 'mobius':
+        case 'polynomial':
+        case 'poincare':
+        case 'zeta':
+        case 'c':
+            return true;
+        default:
+            return false;
+    }
+}
+
 function renderCompiledAlgebraicValueTile(snapshot, tile, accelerator) {
     if (!snapshotUsesValueColoring(snapshot) || accelerator.type !== 'compiled-algebraic') return null;
     const mode = snapshot.chainMode || 'recursion';
@@ -3427,6 +3629,7 @@ function renderCompiledAlgebraicValueTile(snapshot, tile, accelerator) {
     const xStart = xRange[0] + (tile.x + 0.5) * tile.scale * spanX / snapshot.viewport.width;
     const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
     const count = snapshotChainCount(snapshot);
+    const detectFixedPoint = count >= 64;
     const colors = colorContext(snapshot);
     const scratch = accelerator.scratch;
 
@@ -3451,12 +3654,15 @@ function renderCompiledAlgebraicValueTile(snapshot, tile, accelerator) {
                 currentRe = 0;
                 currentIm = 0;
                 for (let i = 0; i < count; i += 1) {
+                    const previousRe = currentRe;
+                    const previousIm = currentIm;
                     evaluateCompiledAlgebraicInto(accelerator, currentRe, currentIm, cr, ci, scratch);
                     currentRe = scratch[0];
                     currentIm = scratch[1];
                     if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
                     lastRe = currentRe;
                     lastIm = currentIm;
+                    if (detectFixedPoint && Object.is(currentRe, previousRe) && Object.is(currentIm, previousIm)) break;
                     if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
                         (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
                 }
@@ -3467,6 +3673,10 @@ function renderCompiledAlgebraicValueTile(snapshot, tile, accelerator) {
                 if (currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm)) {
                     lastRe = currentRe;
                     lastIm = currentIm;
+                    if (detectFixedPoint && Object.is(currentRe, cr) && Object.is(currentIm, ci)) {
+                        writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
+                        continue;
+                    }
                     if (!((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
                         (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE)) {
                         for (let i = 1; i < count; i += 1) {
@@ -3474,6 +3684,7 @@ function renderCompiledAlgebraicValueTile(snapshot, tile, accelerator) {
                             currentRe = scratch[0];
                             currentIm = scratch[1];
                             if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
+                            if (detectFixedPoint && Object.is(currentRe, lastRe) && Object.is(currentIm, lastIm)) break;
                             lastRe = currentRe;
                             lastIm = currentIm;
                             if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
@@ -3580,7 +3791,7 @@ function directPolynomialCoefficientArrays(snapshot) {
     return { degree, coeffsRe, coeffsIm };
 }
 
-function renderDirectPolynomialValueTile(snapshot, tile) {
+function renderDirectPolynomialValueTile(snapshot, tile, accelerator) {
     if (snapshot.functionKey !== 'polynomial' || !snapshotUsesValueColoring(snapshot)) return null;
     const mode = snapshot.chainMode || 'recursion';
     if (mode !== 'recursion' && mode !== 'zero_seed') return null;
@@ -3597,7 +3808,10 @@ function renderDirectPolynomialValueTile(snapshot, tile) {
     const count = snapshotChainCount(snapshot);
     const iterations = snapshot.chainingEnabled || mode === 'zero_seed' ? count : 1;
     const zeroSeed = mode === 'zero_seed';
-    const { degree, coeffsRe, coeffsIm } = directPolynomialCoefficientArrays(snapshot);
+    const direct = accelerator?.type === 'direct-polynomial'
+        ? accelerator
+        : directPolynomialCoefficientArrays(snapshot);
+    const { degree, coeffsRe, coeffsIm } = direct;
     const colors = colorContext(snapshot);
     const width = tile.width;
     let idx = 0;
@@ -3637,7 +3851,7 @@ function renderDirectPolynomialValueTile(snapshot, tile) {
 }
 
 
-function renderDirectMobiusValueTile(snapshot, tile) {
+function renderDirectMobiusValueTile(snapshot, tile, accelerator) {
     if (snapshot.functionKey !== 'mobius' || !snapshotUsesValueColoring(snapshot)) return null;
     const mode = snapshot.chainMode || 'recursion';
     if (mode !== 'recursion') return null;
@@ -3652,16 +3866,17 @@ function renderDirectMobiusValueTile(snapshot, tile) {
     const xStart = xRange[0] + (tile.x + 0.5) * tile.scale * spanX / snapshot.viewport.width;
     const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
     const iterations = snapshot.chainingEnabled ? snapshotChainCount(snapshot) : 1;
-    const ar = scalarRe(snapshot.mobiusA);
-    const ai = scalarIm(snapshot.mobiusA);
-    const br = scalarRe(snapshot.mobiusB);
-    const bi = scalarIm(snapshot.mobiusB);
-    const mr = scalarRe(snapshot.mobiusC);
-    const mi = scalarIm(snapshot.mobiusC);
-    const dr = scalarRe(snapshot.mobiusD);
-    const di = scalarIm(snapshot.mobiusD);
+    const direct = accelerator?.type === 'direct-mobius' ? accelerator : null;
+    const ar = direct ? direct.aRe : scalarRe(snapshot.mobiusA);
+    const ai = direct ? direct.aIm : scalarIm(snapshot.mobiusA);
+    const br = direct ? direct.bRe : scalarRe(snapshot.mobiusB);
+    const bi = direct ? direct.bIm : scalarIm(snapshot.mobiusB);
+    const mr = direct ? direct.cRe : scalarRe(snapshot.mobiusC);
+    const mi = direct ? direct.cIm : scalarIm(snapshot.mobiusC);
+    const dr = direct ? direct.dRe : scalarRe(snapshot.mobiusD);
+    const di = direct ? direct.dIm : scalarIm(snapshot.mobiusD);
     const colors = colorContext(snapshot);
-    const scratch = new Float64Array(2);
+    const scratch = direct?.scratch || new Float64Array(2);
     const width = tile.width;
     let idx = 0;
 
@@ -3694,7 +3909,7 @@ function renderDirectMobiusValueTile(snapshot, tile) {
     return data;
 }
 
-function renderDirectZetaValueTile(snapshot, tile) {
+function renderDirectZetaValueTile(snapshot, tile, accelerator) {
     if (snapshot.functionKey !== 'zeta' || !snapshotUsesValueColoring(snapshot)) return null;
     const mode = snapshot.chainMode || 'recursion';
     if (mode !== 'recursion') return null;
@@ -3714,16 +3929,21 @@ function renderDirectZetaValueTile(snapshot, tile) {
     const colors = colorContext(snapshot);
     const continuation = !!snapshot.zetaContinuationEnabled;
 
-    // ζ(s) is separable per term: exp(-x log n) · cis(-y log n).  Tiles vary x by
+    // ζ(s) is separable per term: exp(-x log n) · cis(-y log n). Tiles vary x by
     // column and y by row, so cache the expensive transcendental pieces once per
-    // column/row instead of inside every pixel×series-term iteration.
+    // column/row instead of inside every pixel × series-term iteration.
     const termCount = continuation ? NUM_ZETA_HASSE_LEVELS : NUM_ZETA_TERMS_DIRECT_SUM;
     const coeffs = continuation ? zetaHasseCollapsedTerms(NUM_ZETA_HASSE_LEVELS).coeffs : null;
     const logs = continuation ? zetaHasseCollapsedTerms(NUM_ZETA_HASSE_LEVELS).logs : null;
     if (!continuation) ensureZetaLogIntegerCache(NUM_ZETA_TERMS_DIRECT_SUM);
 
-    const magByX = new Float64Array(width * termCount);
-    const cosSinByY = new Float64Array(height * termCount * 2);
+    const cache = accelerator?.type === 'direct-zeta' ? accelerator : null;
+    const magLength = width * termCount;
+    const phaseLength = height * termCount * 2;
+    if (cache && (!cache.magByX || cache.magByX.length < magLength)) cache.magByX = new Float64Array(magLength);
+    if (cache && (!cache.cosSinByY || cache.cosSinByY.length < phaseLength)) cache.cosSinByY = new Float64Array(phaseLength);
+    const magByX = cache ? cache.magByX : new Float64Array(magLength);
+    const cosSinByY = cache ? cache.cosSinByY : new Float64Array(phaseLength);
 
     for (let x = 0; x < width; x += 1) {
         const re = xStart + x * xStep;
@@ -3747,8 +3967,10 @@ function renderDirectZetaValueTile(snapshot, tile) {
     }
 
     const log2 = Math.log(2);
-    const denMagX = continuation ? new Float64Array(width) : null;
-    const denCosSinY = continuation ? new Float64Array(height * 2) : null;
+    if (continuation && cache && (!cache.denMagX || cache.denMagX.length < width)) cache.denMagX = new Float64Array(width);
+    if (continuation && cache && (!cache.denCosSinY || cache.denCosSinY.length < height * 2)) cache.denCosSinY = new Float64Array(height * 2);
+    const denMagX = continuation ? (cache ? cache.denMagX : new Float64Array(width)) : null;
+    const denCosSinY = continuation ? (cache ? cache.denCosSinY : new Float64Array(height * 2)) : null;
     if (continuation) {
         for (let x = 0; x < width; x += 1) denMagX[x] = expSafe((1 - (xStart + x * xStep)) * log2);
         for (let y = 0; y < height; y += 1) {
@@ -3759,7 +3981,7 @@ function renderDirectZetaValueTile(snapshot, tile) {
     }
 
     let idx = 0;
-    const scratch = continuation ? new Float64Array(2) : null;
+    const scratch = continuation ? (cache?.scratch || new Float64Array(2)) : null;
     for (let y = 0; y < height; y += 1) {
         const phaseBase = y * termCount * 2;
         let re = xStart;
@@ -3806,7 +4028,7 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
     if (!snapshotUsesValueColoring(snapshot) || accelerator.type !== 'none') return null;
     const mode = snapshot.chainMode || 'recursion';
     if (mode !== 'recursion' && mode !== 'zero_seed') return null;
-    if (!evaluateBuiltinComponents(snapshot.functionKey, 0.125, -0.25, snapshot, [0, 0])) return null;
+    if (!supportsBuiltinComponentEvaluation(snapshot.functionKey)) return null;
 
     const data = new Uint8ClampedArray(tile.width * tile.height * 4);
     const xRange = snapshot.viewport.xRange;
@@ -3818,8 +4040,9 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
     const xStart = xRange[0] + (tile.x + 0.5) * tile.scale * spanX / snapshot.viewport.width;
     const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
     const count = snapshotChainCount(snapshot);
+    const detectFixedPoint = count >= 64;
     const colors = colorContext(snapshot);
-    const scratch = new Float64Array(2);
+    const scratch = accelerator.scratch;
 
     for (let y = 0; y < tile.height; y += 1) {
         const ci = yStart + y * yStep;
@@ -3842,12 +4065,15 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
                 currentRe = 0;
                 currentIm = 0;
                 for (let i = 0; i < count; i += 1) {
+                    const previousRe = currentRe;
+                    const previousIm = currentIm;
                     evaluateBuiltinComponents(snapshot.functionKey, currentRe, currentIm, snapshot, scratch);
                     currentRe = scratch[0];
                     currentIm = scratch[1];
                     if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
                     lastRe = currentRe;
                     lastIm = currentIm;
+                    if (detectFixedPoint && Object.is(currentRe, previousRe) && Object.is(currentIm, previousIm)) break;
                     if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
                         (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
                 }
@@ -3858,6 +4084,10 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
                 if (currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm)) {
                     lastRe = currentRe;
                     lastIm = currentIm;
+                    if (detectFixedPoint && Object.is(currentRe, cr) && Object.is(currentIm, ci)) {
+                        writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
+                        continue;
+                    }
                     if (!((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
                         (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE)) {
                         for (let i = 1; i < count; i += 1) {
@@ -3865,6 +4095,7 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
                             currentRe = scratch[0];
                             currentIm = scratch[1];
                             if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
+                            if (detectFixedPoint && Object.is(currentRe, lastRe) && Object.is(currentIm, lastIm)) break;
                             lastRe = currentRe;
                             lastIm = currentIm;
                             if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
@@ -3882,12 +4113,15 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
 }
 
 export function renderDomainDynamicsTile(snapshot, tile, accelerator = createDynamicsAccelerator(snapshot)) {
+    const duplicateSampleTile = renderDuplicateSampleValueTile(snapshot, tile, accelerator);
+    if (duplicateSampleTile) return duplicateSampleTile;
+
     const accelerated = renderPolynomialParameterTile(snapshot, tile, accelerator) ||
         renderLaurentParameterTile(snapshot, tile, accelerator) ||
         renderCompiledAlgebraicTile(snapshot, tile, accelerator) ||
-        renderDirectPolynomialValueTile(snapshot, tile) ||
-        renderDirectMobiusValueTile(snapshot, tile) ||
-        renderDirectZetaValueTile(snapshot, tile) ||
+        renderDirectPolynomialValueTile(snapshot, tile, accelerator) ||
+        renderDirectMobiusValueTile(snapshot, tile, accelerator) ||
+        renderDirectZetaValueTile(snapshot, tile, accelerator) ||
         renderBuiltinValueTile(snapshot, tile, accelerator);
     if (accelerated) return accelerated;
 
