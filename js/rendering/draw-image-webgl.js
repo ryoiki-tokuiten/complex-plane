@@ -11,7 +11,6 @@ import {
 import {
     getRasterSourceForShape,
     getRasterVersionTokenForShape,
-    getRasterAspectRatioForShape,
     getRasterDisplayDimensions,
     getRasterOpacityForShape,
     isRasterInputShape,
@@ -19,16 +18,37 @@ import {
 } from '../utils/raster-media.js';
 import { getChainedTransformFunction } from '../math-utils.js';
 import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
+import { DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE } from '../constants/domain-dynamics.js';
 
 const MAX_POLY_DEGREE = 10;
 const QUAD_VERTEX_COUNT = 4;
 const DEFAULT_ALPHA_CUTOFF = 0.05;
-const DEFAULT_INVALID_CLIP = 10.0;
 const DEFAULT_RASTER_RESOLUTION = 300;
 const UINT16_VERTEX_LIMIT = 65535;
 const EMPTY_ARRAY = Object.freeze([]);
-const MESH_CACHE_LIMIT = 12;
 const MAX_INVERSE_CHAIN_INDEX = 15;
+
+const inverseMetadata = injectivity => Object.freeze({ injectivity });
+
+const IMAGE_TRANSFORM_INVERSE_METADATA = Object.freeze({
+    cos: inverseMetadata('no'),
+    sin: inverseMetadata('no'),
+    tan: inverseMetadata('no'),
+    sec: inverseMetadata('no'),
+    exp: inverseMetadata('no'),
+    ln: inverseMetadata('yes'),
+    reciprocal: inverseMetadata('yes'),
+    mobius: inverseMetadata('conditional'),
+    polynomial: inverseMetadata('conditional'),
+    poincare: inverseMetadata('yes'),
+    zeta: inverseMetadata('no'),
+    sinh: inverseMetadata('no'),
+    cosh: inverseMetadata('no'),
+    tanh: inverseMetadata('no'),
+    power: inverseMetadata('conditional'),
+    algebraic_chaining: inverseMetadata('no'),
+    dynamic_aggregate: inverseMetadata('no')
+});
 
 const CHAIN_MODE = Object.freeze({
     recursion: 1,
@@ -547,7 +567,6 @@ function getForwardLocs(gl, program, snapshot) {
         aTexCoord: gl.getAttribLocation(program, 'a_texCoord'),
         aMappedPos: gl.getAttribLocation(program, 'a_mappedPos'),
         uUseCpuEval: gl.getUniformLocation(program, 'u_useCpuEval'),
-        uInvalidClip: gl.getUniformLocation(program, 'u_invalidClip'),
         uZetaContinuationEnabled: gl.getUniformLocation(program, 'u_zetaContinuationEnabled'),
         uZetaReflectionBoundary: gl.getUniformLocation(program, 'u_zetaReflectionBoundary'),
         uFracPower: gl.getUniformLocation(program, 'u_fracPower')
@@ -645,7 +664,6 @@ function createForwardVertexShader(snapshot) {
         'uniform vec2 u_center;',
         'uniform vec4 u_viewBounds;',
         'uniform float u_useCpuEval;',
-        'uniform float u_invalidClip;',
         '',
         'uniform float u_isWPlane;',
         'uniform float u_functionId;',
@@ -698,7 +716,7 @@ function createForwardVertexShader(snapshot) {
         '',
         '  if (!ok || !isFiniteVec2Compat(mappedValue)) {',
         '    v_valid = 0.0;',
-        '    gl_Position = vec4(u_invalidClip, u_invalidClip, u_invalidClip, 1.0);',
+        '    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);',
         '    return;',
         '  }',
         '',
@@ -760,124 +778,369 @@ function getResolutionTier(currentRes) {
     return Math.ceil(value / 256) * 256;
 }
 
-function getCpuForwardResolution(currentRes) {
-    const value = Math.max(2, finiteOr(currentRes, DEFAULT_RASTER_RESOLUTION));
-    if (value <= 192) return 192;
-    if (value <= 320) return 320;
-    return 384;
+const ADAPTIVE_BASE_RESOLUTION_MIN = 8;
+const ADAPTIVE_BASE_RESOLUTION_MAX = 32;
+const ADAPTIVE_MAX_DEPTH = 5;
+const ADAPTIVE_MAX_CELLS = 8192;
+const ADAPTIVE_EDGE_ERROR = 0.025;
+const ADAPTIVE_DISCONTINUITY_RATIO = 0.2;
+const ADAPTIVE_CONVERGENCE_RATIO = 0.9;
+const ADAPTIVE_MIN_MAPPED_SPAN = 1e-12;
+
+function getAdaptiveBaseResolution(currentRes) {
+    return Math.max(
+        ADAPTIVE_BASE_RESOLUTION_MIN,
+        Math.min(ADAPTIVE_BASE_RESOLUTION_MAX, Math.round(getResolutionTier(currentRes) / 24))
+    );
 }
 
-function getMeshDimensions(currentRes, currentShape) {
-    const aspect = getRasterAspectRatioForShape(currentShape) || 1.0;
-    const res = getResolutionTier(currentRes);
-
-    /*
-     * A canonical square UV lattice is independent of media aspect; aspect is
-     * already applied in shader space through u_imageSize. Bucketing upward
-     * prevents continuous buffer churn while preserving or improving visual
-     * tessellation quality relative to the requested resolution.
-     */
-    return { aspect, resX: res, resY: res, vertexCount: res * res };
+function pointError(point, expectedX, expectedY) {
+    const dx = point.x - expectedX;
+    const dy = point.y - expectedY;
+    return Math.hypot(dx, dy);
 }
 
-function getSafeMeshDimensions(gl, currentRes, currentShape) {
-    const requested = getMeshDimensions(currentRes, currentShape);
+function relativePointError(point, expectedX, expectedY, first, second) {
+    const mappedSpan = Math.max(
+        Math.hypot(first.x - second.x, first.y - second.y),
+        ADAPTIVE_MIN_MAPPED_SPAN
+    );
+    return pointError(point, expectedX, expectedY) / mappedSpan;
+}
 
-    if (requested.vertexCount <= UINT16_VERTEX_LIMIT) return Object.assign(requested, { useUint32: false });
-    if (gl.getExtension('OES_element_index_uint')) return Object.assign(requested, { useUint32: true });
+export function buildAdaptiveImageMesh({
+    resolution = DEFAULT_RASTER_RESOLUTION,
+    bounds,
+    sample,
+    baseResolution = getAdaptiveBaseResolution(resolution),
+    maxDepth = ADAPTIVE_MAX_DEPTH,
+    maxCells = ADAPTIVE_MAX_CELLS,
+    edgeError = ADAPTIVE_EDGE_ERROR
+} = {}) {
+    if (typeof sample !== 'function' || !bounds ||
+        !Number.isFinite(bounds.xSpan) || !Number.isFinite(bounds.ySpan) ||
+        Math.abs(bounds.xSpan) <= 0 || Math.abs(bounds.ySpan) <= 0) {
+        return { vertices: new Float32Array(0), indices: new Uint16Array(0), mappedPositions: new Float32Array(0) };
+    }
 
-    const scale = Math.sqrt(UINT16_VERTEX_LIMIT / requested.vertexCount);
-    const scaledRes = Math.max(2, Math.floor(requested.resX * scale));
+    const pointRows = new Map();
+    const vertices = [];
+    const mappedPositions = [];
+    const indices = [];
+    const leafCells = [];
+    const safeBaseResolution = Math.max(1, Math.min(
+        Math.floor(Math.sqrt(UINT16_VERTEX_LIMIT / 4)),
+        Math.floor(Number.isFinite(Number(baseResolution)) ? baseResolution : ADAPTIVE_BASE_RESOLUTION_MIN)
+    ));
+    const safeMaxDepth = Math.max(0, Math.floor(Number.isFinite(Number(maxDepth)) ? maxDepth : ADAPTIVE_MAX_DEPTH));
+    const requestedMaxCells = Number(maxCells);
+    const safeMaxCells = Math.max(safeBaseResolution * safeBaseResolution, Math.min(
+        Number.isFinite(requestedMaxCells) ? Math.floor(requestedMaxCells) : ADAPTIVE_MAX_CELLS,
+        Math.floor(UINT16_VERTEX_LIMIT / 4)
+    ));
+    let sampleCount = 0;
+
+    function sampleAt(u, v) {
+        let row = pointRows.get(u);
+        const cached = row?.get(v);
+        if (cached) return cached;
+
+        let value = null;
+        try {
+            value = sample(u, v);
+        } catch {
+            value = null;
+        }
+
+        const re = Number(value?.re);
+        const im = Number(value?.im);
+        const validValue = Number.isFinite(re) && Number.isFinite(im) &&
+            Math.abs(re) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE && Math.abs(im) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE;
+        const point = validValue ? {
+            u,
+            v,
+            valid: true,
+            x: (re - bounds.x0) * (2 / bounds.xSpan) - 1,
+            y: (im - bounds.y0) * (2 / bounds.ySpan) - 1
+        } : { u, v, valid: false, x: NaN, y: NaN };
+
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) point.valid = false;
+        if (!row) {
+            row = new Map();
+            pointRows.set(u, row);
+        }
+        row.set(v, point);
+        sampleCount += 1;
+        return point;
+    }
+
+    function appendLeaf(u0, v0, u1, v1) {
+        if (leafCells.length >= safeMaxCells) return;
+        leafCells.push({ u0, v0, u1, v1 });
+    }
+
+    const cells = [];
+    function enqueueCell(u0, v0, u1, v1, depth, parentRelativeError = null) {
+        cells.push({ u0, v0, u1, v1, depth, parentRelativeError });
+    }
+
+    for (let y = 0; y < safeBaseResolution; y += 1) {
+        for (let x = 0; x < safeBaseResolution; x += 1) {
+            enqueueCell(
+                x / safeBaseResolution,
+                y / safeBaseResolution,
+                (x + 1) / safeBaseResolution,
+                (y + 1) / safeBaseResolution,
+                0
+            );
+        }
+    }
+
+    for (let cellIndex = 0; cellIndex < cells.length; cellIndex += 1) {
+        const { u0, v0, u1, v1, depth, parentRelativeError } = cells[cellIndex];
+        const centerU = (u0 + u1) * 0.5;
+        const centerV = (v0 + v1) * 0.5;
+        const topLeft = sampleAt(u0, v0);
+        const topRight = sampleAt(u1, v0);
+        const bottomLeft = sampleAt(u0, v1);
+        const bottomRight = sampleAt(u1, v1);
+        const top = sampleAt(centerU, v0);
+        const right = sampleAt(u1, centerV);
+        const bottom = sampleAt(centerU, v1);
+        const left = sampleAt(u0, centerV);
+        const center = sampleAt(centerU, centerV);
+        const valid = topLeft.valid && topRight.valid && bottomLeft.valid && bottomRight.valid &&
+            top.valid && right.valid && bottom.valid && left.valid && center.valid;
+
+        if (!valid) {
+            if (depth < safeMaxDepth && cells.length + 4 <= safeMaxCells) {
+                enqueueCell(u0, v0, centerU, centerV, depth + 1);
+                enqueueCell(centerU, v0, u1, centerV, depth + 1);
+                enqueueCell(u0, centerV, centerU, v1, depth + 1);
+                enqueueCell(centerU, centerV, u1, v1, depth + 1);
+            }
+            continue;
+        }
+
+        const edgeChecks = [
+            [top, topLeft, topRight],
+            [right, topRight, bottomRight],
+            [bottom, bottomLeft, bottomRight],
+            [left, topLeft, bottomLeft]
+        ];
+        let maxError = 0;
+        let maxRelativeError = 0;
+        for (const [midpoint, first, second] of edgeChecks) {
+            const expectedX = (first.x + second.x) * 0.5;
+            const expectedY = (first.y + second.y) * 0.5;
+            const error = pointError(midpoint, expectedX, expectedY);
+            maxError = Math.max(maxError, error);
+            maxRelativeError = Math.max(
+                maxRelativeError,
+                relativePointError(midpoint, expectedX, expectedY, first, second)
+            );
+        }
+
+        const expectedCenterX = (topLeft.x + topRight.x + bottomLeft.x + bottomRight.x) * 0.25;
+        const expectedCenterY = (topLeft.y + topRight.y + bottomLeft.y + bottomRight.y) * 0.25;
+        const centerError = pointError(
+            center,
+            expectedCenterX,
+            expectedCenterY
+        );
+        const cornerMappedSpan = Math.max(
+            Math.hypot(topLeft.x - topRight.x, topLeft.y - topRight.y),
+            Math.hypot(topLeft.x - bottomLeft.x, topLeft.y - bottomLeft.y),
+            Math.hypot(topRight.x - bottomRight.x, topRight.y - bottomRight.y),
+            Math.hypot(bottomLeft.x - bottomRight.x, bottomLeft.y - bottomRight.y),
+            Math.hypot(topLeft.x - bottomRight.x, topLeft.y - bottomRight.y),
+            Math.hypot(topRight.x - bottomLeft.x, topRight.y - bottomLeft.y),
+            ADAPTIVE_MIN_MAPPED_SPAN
+        );
+        maxError = Math.max(maxError, centerError);
+        maxRelativeError = Math.max(
+            maxRelativeError,
+            centerError / cornerMappedSpan
+        );
+
+        const needsSubdivision = maxError > edgeError || maxRelativeError > ADAPTIVE_DISCONTINUITY_RATIO;
+        const canSubdivide = depth < safeMaxDepth && cells.length + 4 <= safeMaxCells;
+        if (needsSubdivision && canSubdivide) {
+            enqueueCell(u0, v0, centerU, centerV, depth + 1, maxRelativeError);
+            enqueueCell(centerU, v0, u1, centerV, depth + 1, maxRelativeError);
+            enqueueCell(u0, centerV, centerU, v1, depth + 1, maxRelativeError);
+            enqueueCell(centerU, centerV, u1, v1, depth + 1, maxRelativeError);
+            continue;
+        }
+
+        const minX = Math.min(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x, top.x, right.x, bottom.x, left.x, center.x);
+        const maxX = Math.max(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x, top.x, right.x, bottom.x, left.x, center.x);
+        const minY = Math.min(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y, top.y, right.y, bottom.y, left.y, center.y);
+        const maxY = Math.max(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y, top.y, right.y, bottom.y, left.y, center.y);
+        if (maxX + maxError < -1 || minX - maxError > 1 ||
+            maxY + maxError < -1 || minY - maxError > 1) continue;
+
+        const persistentDiscontinuity = needsSubdivision &&
+            Number.isFinite(parentRelativeError) &&
+            parentRelativeError > ADAPTIVE_DISCONTINUITY_RATIO &&
+            Number.isFinite(maxRelativeError) &&
+            maxRelativeError > parentRelativeError * ADAPTIVE_CONVERGENCE_RATIO;
+        if (!persistentDiscontinuity) {
+            appendLeaf(u0, v0, u1, v1);
+        }
+    }
+
+    const gridSize = safeBaseResolution * (2 ** safeMaxDepth);
+    const toGrid = value => Math.round(value * gridSize);
+    const pointCache = new Map();
+    const edgeMaps = {
+        top: new Map(),
+        right: new Map(),
+        bottom: new Map(),
+        left: new Map()
+    };
+
+    function edgeMapEntry(map, boundary, start, end) {
+        const entries = map.get(boundary) || [];
+        entries.push({ start, end });
+        map.set(boundary, entries);
+    }
+
+    for (const leaf of leafCells) {
+        leaf.grid = {
+            x0: toGrid(leaf.u0),
+            y0: toGrid(leaf.v0),
+            x1: toGrid(leaf.u1),
+            y1: toGrid(leaf.v1)
+        };
+        const { x0, y0, x1, y1 } = leaf.grid;
+        edgeMapEntry(edgeMaps.top, y0, x0, x1);
+        edgeMapEntry(edgeMaps.right, x1, y0, y1);
+        edgeMapEntry(edgeMaps.bottom, y1, x0, x1);
+        edgeMapEntry(edgeMaps.left, x0, y0, y1);
+    }
+
+    function pointAtGrid(x, y) {
+        const key = `${x},${y}`;
+        const cached = pointCache.get(key);
+        if (cached) return cached;
+        const point = sampleAt(x / gridSize, y / gridSize);
+        pointCache.set(key, point);
+        return point;
+    }
+
+    function getEdgeBreaks(map, boundary, start, end) {
+        const positions = new Set([start, end]);
+        for (const entry of map.get(boundary) || []) {
+            if (entry.start >= end || entry.end <= start) continue;
+            positions.add(Math.max(start, entry.start));
+            positions.add(Math.min(end, entry.end));
+        }
+        return [...positions].sort((a, b) => a - b);
+    }
+
+    function appendBoundaryPoint(boundary, x, y) {
+        const previous = boundary[boundary.length - 1];
+        if (!previous || previous[0] !== x || previous[1] !== y) boundary.push([x, y]);
+    }
+
+    function getLeafBoundary(leaf) {
+        const { x0, y0, x1, y1 } = leaf.grid;
+        const boundary = [];
+
+        for (const x of getEdgeBreaks(edgeMaps.bottom, y0, x0, x1)) appendBoundaryPoint(boundary, x, y0);
+        for (const y of getEdgeBreaks(edgeMaps.left, x1, y0, y1)) appendBoundaryPoint(boundary, x1, y);
+        for (const x of getEdgeBreaks(edgeMaps.top, y1, x0, x1).reverse()) appendBoundaryPoint(boundary, x, y1);
+        for (const y of getEdgeBreaks(edgeMaps.right, x0, y0, y1).reverse()) appendBoundaryPoint(boundary, x0, y);
+
+        const last = boundary[boundary.length - 1];
+        if (boundary.length > 1 &&
+            boundary[0][0] === last[0] &&
+            boundary[0][1] === last[1]) {
+            boundary.pop();
+        }
+        return boundary;
+    }
+
+    const vertexMap = new Map();
+    function getVertex(x, y) {
+        const key = `${x},${y}`;
+        const cached = vertexMap.get(key);
+        if (cached !== undefined) return cached;
+
+        const point = pointAtGrid(x, y);
+        if (!point.valid || vertices.length / 2 >= UINT16_VERTEX_LIMIT) return -1;
+
+        const index = vertices.length / 2;
+        vertices.push(point.u, point.v);
+        mappedPositions.push(point.x, point.y);
+        vertexMap.set(key, index);
+        return index;
+    }
+
+    for (const leaf of leafCells) {
+        const { x0, y0, x1, y1 } = leaf.grid;
+        const boundary = getLeafBoundary(leaf);
+        if (boundary.length === 4) {
+            const topLeft = getVertex(x0, y0);
+            const bottomLeft = getVertex(x0, y1);
+            const topRight = getVertex(x1, y0);
+            const bottomRight = getVertex(x1, y1);
+            if ([topLeft, bottomLeft, topRight, bottomRight].some(index => index < 0)) continue;
+            indices.push(topLeft, bottomLeft, topRight, topRight, bottomLeft, bottomRight);
+            continue;
+        }
+
+        const center = getVertex((x0 + x1) / 2, (y0 + y1) / 2);
+        const boundaryVertices = boundary.map(([x, y]) => getVertex(x, y));
+        if (center < 0 || boundaryVertices.some(index => index < 0)) continue;
+        for (let index = 0; index < boundaryVertices.length; index += 1) {
+            const current = boundaryVertices[index];
+            const next = boundaryVertices[(index + 1) % boundaryVertices.length];
+            indices.push(center, next, current);
+        }
+    }
+
     return {
-        aspect: requested.aspect,
-        resX: scaledRes,
-        resY: scaledRes,
-        vertexCount: scaledRes * scaledRes,
-        useUint32: false
+        vertices: Float32Array.from(vertices),
+        indices: Uint16Array.from(indices),
+        mappedPositions: Float32Array.from(mappedPositions),
+        cellCount: leafCells.length,
+        sampleCount
     };
 }
 
-function getMeshKey(currentRes, currentShape) {
-    const dimensions = getMeshDimensions(currentRes, currentShape);
-    return `${getResolutionTier(currentRes)}:${dimensions.resX}x${dimensions.resY}`;
+function getMeshKey(currentRes, currentShape, planeParams, isWP, snapshot, map) {
+    const bounds = getViewBounds(planeParams);
+    const media = getRasterDisplayDimensions(currentShape);
+    const transformSignature = map?.signature || JSON.stringify({
+        function: snapshot.currentFunction,
+        chainCount: snapshot.chainCount,
+        chainMode: snapshot.chainingMode,
+        algebraicTerms: snapshot.algebraicChainingTerms,
+        algebraicZExpr: snapshot.algebraicChainingZExpr,
+        mobius: [snapshot.mobiusA, snapshot.mobiusB, snapshot.mobiusC, snapshot.mobiusD],
+        polynomial: [snapshot.polynomialN, snapshot.polynomialCoeffs],
+        fractionalPower: snapshot.fractionalPowerN
+    });
+    return [
+        getResolutionTier(currentRes),
+        currentShape,
+        isWP ? 1 : 0,
+        snapshot.a0,
+        snapshot.b0,
+        bounds.x0,
+        bounds.x1,
+        bounds.y0,
+        bounds.y1,
+        media.width,
+        media.height,
+        transformSignature
+    ].join('|');
 }
 
-
-const meshCache = new Map();
-
-function getMeshCacheKey(resX, resY, useUint32) {
-    return `${resX}x${resY}:${useUint32 ? 1 : 0}`;
-}
-
-function buildMeshVertices(resX, resY) {
-    const vertices = new Float32Array(resX * resY * 2);
-    const stepX = 1 / (resX - 1);
-    const stepY = 1 / (resY - 1);
-    let offset = 0;
-    let ty = 0;
-
-    for (let y = 0; y < resY; y++, ty += stepY) {
-        let tx = 0;
-        for (let x = 0; x < resX; x++, tx += stepX) {
-            vertices[offset++] = tx;
-            vertices[offset++] = ty;
-        }
-    }
-
-    vertices[vertices.length - 2] = 1;
-    vertices[vertices.length - 1] = 1;
-    return vertices;
-}
-
-function buildMeshIndices(resX, resY, useUint32) {
-    const cellCount = (resX - 1) * (resY - 1);
-    const IndexArray = useUint32 ? Uint32Array : Uint16Array;
-    const indices = new IndexArray(cellCount * 6);
-    let offset = 0;
-
-    for (let y = 0; y < resY - 1; y++) {
-        let tl = y * resX;
-        let bl = tl + resX;
-
-        for (let x = 0; x < resX - 1; x++, tl++, bl++) {
-            const tr = tl + 1;
-            const br = bl + 1;
-
-            indices[offset++] = tl;
-            indices[offset++] = bl;
-            indices[offset++] = tr;
-            indices[offset++] = tr;
-            indices[offset++] = bl;
-            indices[offset++] = br;
-        }
-    }
-
-    return indices;
-}
-
-function getCachedMesh(dimensions) {
-    const key = getMeshCacheKey(dimensions.resX, dimensions.resY, dimensions.useUint32);
-    const cached = meshCache.get(key);
-
-    if (cached) {
-        meshCache.delete(key);
-        meshCache.set(key, cached);
-        return cached;
-    }
-
-    const mesh = {
-        vertices: buildMeshVertices(dimensions.resX, dimensions.resY),
-        indices: buildMeshIndices(dimensions.resX, dimensions.resY, dimensions.useUint32)
-    };
-
-    meshCache.set(key, mesh);
-    if (meshCache.size > MESH_CACHE_LIMIT) meshCache.delete(meshCache.keys().next().value);
-    return mesh;
-}
-
-function uploadForwardMesh(renderer, dimensions) {
+function uploadForwardMesh(renderer, mesh) {
     const gl = renderer.gl;
-    const mesh = getCachedMesh(dimensions);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, renderer.forwardVertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, mesh.vertices, gl.STATIC_DRAW);
@@ -886,8 +1149,8 @@ function uploadForwardMesh(renderer, dimensions) {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
 
     renderer.forwardIndexCount = mesh.indices.length;
-    renderer.forwardIndexType = dimensions.useUint32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
-    renderer.forwardMeshDimensions = dimensions;
+    renderer.forwardIndexType = gl.UNSIGNED_SHORT;
+    renderer.forwardMesh = mesh;
 }
 
 function shouldUseCpuForwardEvaluation(isWP, snapshot, map) {
@@ -900,60 +1163,6 @@ function shouldUseCpuForwardEvaluation(isWP, snapshot, map) {
 
 function getForwardTransform(isWP, map) {
     return isWP ? (map?.evaluate || getChainedTransformFunction()) : (re, im) => ({ re, im });
-}
-
-function getMappedPositionBuffer(renderer, vertexCount) {
-    const length = vertexCount * 2;
-    if (!renderer.forwardMappedCpuBuffer || renderer.forwardMappedCpuBuffer.length !== length) {
-        renderer.forwardMappedCpuBuffer = new Float32Array(length);
-    }
-    return renderer.forwardMappedCpuBuffer;
-}
-
-function writeInvalidMappedPoint(mapped, offset) {
-    mapped[offset] = DEFAULT_INVALID_CLIP;
-    mapped[offset + 1] = DEFAULT_INVALID_CLIP;
-}
-
-function buildCpuMappedPositions(renderer, planeParams, currentShape, isWP, snapshot, map) {
-    const dimensions = renderer.forwardMeshDimensions;
-    if (!dimensions) return null;
-
-    const bounds = getViewBounds(planeParams);
-    if (!hasUsableBounds(bounds)) return null;
-
-    const media = getRasterDisplayDimensions(currentShape);
-    const transform = getForwardTransform(isWP, map);
-    const mapped = getMappedPositionBuffer(renderer, dimensions.resX * dimensions.resY);
-    const stepX = 1 / (dimensions.resX - 1);
-    const stepY = 1 / (dimensions.resY - 1);
-    const halfWidth = media.width * 0.5;
-    const halfHeight = media.height * 0.5;
-    const invXSpan = 2.0 / bounds.xSpan;
-    const invYSpan = 2.0 / bounds.ySpan;
-    let offset = 0;
-    let ty = 0;
-
-    for (let y = 0; y < dimensions.resY; y++, ty += stepY) {
-        const im = snapshot.b0 - (ty * 2.0 - 1.0) * halfHeight;
-        let tx = 0;
-
-        for (let x = 0; x < dimensions.resX; x++, tx += stepX) {
-            const re = snapshot.a0 + (tx * 2.0 - 1.0) * halfWidth;
-            const value = transform(re, im);
-
-            if (!value || !Number.isFinite(value.re) || !Number.isFinite(value.im)) {
-                writeInvalidMappedPoint(mapped, offset);
-            } else {
-                mapped[offset] = (value.re - bounds.x0) * invXSpan - 1.0;
-                mapped[offset + 1] = (value.im - bounds.y0) * invYSpan - 1.0;
-            }
-
-            offset += 2;
-        }
-    }
-
-    return mapped;
 }
 
 function configureAttribute(gl, location, size, buffer) {
@@ -979,13 +1188,15 @@ function bindInverseGeometry(renderer, locs) {
     return vaoBound || configureAttribute(gl, locs.aPosition, 2, renderer.quadBuffer);
 }
 
-function uploadCpuMappedPositions(renderer, planeParams, currentShape, isWP, snapshot, map) {
-    const mappedPositions = buildCpuMappedPositions(renderer, planeParams, currentShape, isWP, snapshot, map);
-    if (!mappedPositions) return false;
+function uploadCpuMappedPositions(renderer) {
+    const mesh = renderer.forwardMesh;
+    if (!mesh) return false;
+    if (renderer.forwardMappedMesh === mesh) return true;
 
     const gl = renderer.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, renderer.forwardMappedBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mappedPositions, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.mappedPositions, gl.STATIC_DRAW);
+    renderer.forwardMappedMesh = mesh;
     return true;
 }
 
@@ -1019,13 +1230,11 @@ function bindForwardGeometry(renderer, locs, useCpuEval) {
     return true;
 }
 
-function prepareForwardGeometry(renderer, locs, planeParams, currentShape, isWP, snapshot, useCpuEval, map) {
+function prepareForwardGeometry(renderer, locs, useCpuEval) {
     const gl = renderer.gl;
 
     setUniform1fIfPresent(gl, locs.uUseCpuEval, useCpuEval ? 1.0 : 0.0);
-    setUniform1fIfPresent(gl, locs.uInvalidClip, DEFAULT_INVALID_CLIP);
-
-    if (useCpuEval && !uploadCpuMappedPositions(renderer, planeParams, currentShape, isWP, snapshot, map)) return false;
+    if (useCpuEval && !uploadCpuMappedPositions(renderer)) return false;
 
     return bindForwardGeometry(renderer, locs, useCpuEval);
 }
@@ -1087,14 +1296,14 @@ function drawForwardImagePath(renderer, planeParams, isWP, currentShape, snapsho
 
     const currentRes = getRasterResolutionForShape(currentShape) || DEFAULT_RASTER_RESOLUTION;
     const useCpuEval = shouldUseCpuForwardEvaluation(isWP, snapshot, map);
-    ensureForwardMesh(renderer, useCpuEval ? getCpuForwardResolution(currentRes) : currentRes);
+    ensureForwardMesh(renderer, currentRes, planeParams, isWP, currentShape, snapshot, map);
     if (!renderer.forwardIndexCount) return false;
 
     const gl = renderer.gl;
     const locs = renderer.forwardLocs;
 
     gl.useProgram(renderer.forwardProgram);
-    if (!prepareForwardGeometry(renderer, locs, planeParams, currentShape, isWP, snapshot, useCpuEval, map)) {
+    if (!prepareForwardGeometry(renderer, locs, useCpuEval)) {
         unbindVao(renderer);
         return false;
     }
@@ -1111,13 +1320,41 @@ function drawForwardImagePath(renderer, planeParams, isWP, currentShape, snapsho
 }
 
 function isInverseImageRenderSupportedForSnapshot(snapshot) {
-    const funcId = getWebGLDomainColorFunctionIdShared(snapshot.currentFunction);
-
+    if (!snapshot) return false;
     if (snapshot.chainingMode === 'zero_seed') return false;
-    if (funcId === 11) return false;
-    if (funcId === 9) return (snapshot.polynomialN || 0) <= 2;
+    const metadata = IMAGE_TRANSFORM_INVERSE_METADATA[snapshot.currentFunction];
+    if (!metadata || metadata.injectivity === 'no') return false;
 
-    return funcId >= 1 && funcId <= 15;
+    if (snapshot.currentFunction === 'mobius') {
+        const a = snapshot.mobiusA || {};
+        const b = snapshot.mobiusB || {};
+        const c = snapshot.mobiusC || {};
+        const d = snapshot.mobiusD || {};
+        const determinantRe = complexPart(a, 're') * complexPart(d, 're') -
+            complexPart(a, 'im') * complexPart(d, 'im') -
+            complexPart(b, 're') * complexPart(c, 're') +
+            complexPart(b, 'im') * complexPart(c, 'im');
+        const determinantIm = complexPart(a, 're') * complexPart(d, 'im') +
+            complexPart(a, 'im') * complexPart(d, 're') -
+            complexPart(b, 're') * complexPart(c, 'im') -
+            complexPart(b, 'im') * complexPart(c, 're');
+        return Number.isFinite(determinantRe) && Number.isFinite(determinantIm) &&
+            determinantRe * determinantRe + determinantIm * determinantIm > 1e-18;
+    }
+
+    if (snapshot.currentFunction === 'polynomial') {
+        const degree = Math.max(0, Math.floor(Number(snapshot.polynomialN) || 0));
+        const leading = snapshot.polynomialCoeffs?.[degree];
+        const leadingRe = complexPart(leading, 're');
+        const leadingIm = complexPart(leading, 'im');
+        return degree === 1 && leadingRe * leadingRe + leadingIm * leadingIm > 1e-18;
+    }
+
+    if (snapshot.currentFunction === 'power') {
+        return Number(snapshot.fractionalPowerN) === 1;
+    }
+
+    return true;
 }
 
 export function shouldUseInverseImagePath(isWP, snapshot, chainIndex = 0) {
@@ -1380,7 +1617,7 @@ export function createWebGLImageRenderer() {
         forwardVertexBuffer: resources.forwardVertexBuffer,
         forwardIndexBuffer: resources.forwardIndexBuffer,
         forwardMappedBuffer: resources.forwardMappedBuffer,
-        forwardMappedCpuBuffer: null,
+        forwardMappedMesh: null,
         forwardGpuVao: null,
         forwardCpuVao: null,
 
@@ -1392,7 +1629,7 @@ export function createWebGLImageRenderer() {
         forwardIndexCount: 0,
         forwardIndexType: gl.UNSIGNED_SHORT,
         forwardMeshKey: '',
-        forwardMeshDimensions: null,
+        forwardMesh: null,
 
         contextLost: false,
         disposed: false,
@@ -1443,7 +1680,7 @@ export function disposeWebGLRenderer(renderer) {
     renderer.forwardVertexBuffer = null;
     renderer.forwardIndexBuffer = null;
     renderer.forwardMappedBuffer = null;
-    renderer.forwardMappedCpuBuffer = null;
+    renderer.forwardMappedMesh = null;
     renderer.inverseProgram = null;
     renderer.forwardProgram = null;
     renderer.inverseLocs = null;
@@ -1451,7 +1688,7 @@ export function disposeWebGLRenderer(renderer) {
     renderer.uploadedSource = null;
     renderer.uploadedSourceToken = -1;
     renderer.forwardIndexCount = 0;
-    renderer.forwardMeshDimensions = null;
+    renderer.forwardMesh = null;
     renderer.disposed = true;
 
     if (webglImageSupport.renderer === renderer) {
@@ -1502,20 +1739,32 @@ export function updateImageTexture(renderer) {
     return true;
 }
 
-export function ensureForwardMesh(renderer, currentRes) {
+export function ensureForwardMesh(renderer, currentRes, planeParams, isWP, currentShape, snapshot, map) {
     if (!isContextUsable(renderer)) return;
+    if (!planeParams) return;
 
-    const snapshot = readRenderState();
-    const gl = renderer.gl;
-    const currentShape = snapshot.currentInputShape;
-    const meshKey = getMeshKey(currentRes, currentShape);
+    const frame = snapshot || readRenderState();
+    const shape = currentShape ?? frame.currentInputShape;
+    const meshKey = getMeshKey(currentRes, shape, planeParams, Boolean(isWP), frame, map);
 
-    if (renderer.forwardMeshKey === meshKey) return;
+    if (renderer.forwardMeshKey === meshKey && renderer.forwardMesh) return;
 
-    const dimensions = getSafeMeshDimensions(gl, currentRes, currentShape);
+    const bounds = getViewBounds(planeParams);
+    if (!hasUsableBounds(bounds)) return;
 
+    const media = getRasterDisplayDimensions(shape);
+    const transform = getForwardTransform(Boolean(isWP), map);
+    const mesh = buildAdaptiveImageMesh({
+        resolution: currentRes,
+        bounds: { ...bounds },
+        sample: (u, v) => transform(
+            frame.a0 + (u * 2 - 1) * media.width * 0.5,
+            frame.b0 - (v * 2 - 1) * media.height * 0.5
+        )
+    });
+
+    uploadForwardMesh(renderer, mesh);
     renderer.forwardMeshKey = meshKey;
-    uploadForwardMesh(renderer, dimensions);
 }
 
 export function setImageUniforms(gl, locs, planeParams, isWP, currentShape) {

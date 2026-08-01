@@ -25,12 +25,17 @@ import {
   createDomainPaletteGlslSource,
   getDomainPaletteShaderId
 } from '../constants/domain-palettes.js';
+import {
+  DOMAIN_DYNAMICS_GLSL,
+  DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
+  normalizeDomainDynamicsChainCount
+} from '../constants/domain-dynamics.js';
 
 const DEFAULT_CAMERA = Object.freeze({ rotX: -0.82, rotY: 0.62, distance: 3.8 });
 
 const LIMITS = Object.freeze({
   minStage: 1,
-  maxStage: 512,
+  maxStage: DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
   minResolution: 42,
   // WebGL1 UINT16 element indices top out at a 254x254 grid; renderers with
   // OES_element_index_uint lift the surface to a much denser 1024x1024 lattice.
@@ -569,7 +574,7 @@ ${buildAlgebraicBranchBody(appState)}
 ) {
   if (chainMode == 2) {
     mapped = vec2(0.0);
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
       if (i >= stage) break;
       bool seedOk = evaluateSurfaceBase(
         mapped, c, functionId, branchIndex, branchCutWidth, mA, mB, mC, mD,
@@ -587,7 +592,7 @@ ${buildAlgebraicBranchBody(appState)}
     useTaylor, taylorCenter, taylorOrder, taylorCoefficients, mapped
   );
   if (!ok) return false;
-  for (int i = 1; i < 512; i++) {
+  for (int i = 1; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
     if (i >= stage) break;
     ok = evaluateSurfaceBase(
       mapped, c, functionId, branchIndex, branchCutWidth, mA, mB, mC, mD,
@@ -622,7 +627,7 @@ const VERTEX_SURFACE_GLSL = Object.freeze({
     source: `vec3 surfaceColor(vec2 value) {
   float phase = atan(value.y, value.x);
   float hue = fract(phase / TWO_PI + u_sheetTint);
-  float logMagnitude = log(1.0 + length(value));
+  float logMagnitude = domainDynamicsLogMagnitude(value);
   float detail = max(0.05, u_domainLightnessCycles);
   float tone = atan(logMagnitude * (0.72 + detail * 0.28)) / 1.5707963267948966;
   float magnitudeLightness = u_domainLightnessCycles <= 0.0001
@@ -819,7 +824,7 @@ vec4 dynamicsPhaseEventColor(vec2 value, float intensity, float brightnessFactor
 
 vec4 dynamicsValueColor(vec2 value, float brightnessFactor) {
   float phase = atan(value.y, value.x);
-  float logMagnitude = log(1.0 + length(value));
+  float logMagnitude = domainDynamicsLogMagnitude(value);
   float detail = max(0.05, u_domainLightnessCycles);
   float tone = atan(logMagnitude * (0.72 + detail * 0.28)) / 1.5707963267948966;
   float lightnessBase = u_domainLightnessCycles <= 0.0001
@@ -842,15 +847,13 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   vec2 current = chainMode == 2 ? vec2(0.0) : parameterValue;
   vec2 lastFinite = current;
   vec2 eventValue = current;
-  float escapeRadius = 64.0;
-  float escapeRadiusSq = escapeRadius * escapeRadius;
   float convergenceEpsilonSq = 1.0e-14;
   float smoothIteration = float(u_chainCount);
   float eventIteration = float(u_chainCount);
   bool escaped = false;
   bool converged = false;
 
-  for (int i = 0; i < 512; i++) {
+  for (int i = 0; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
     if (i >= u_chainCount) break;
 
     vec2 nextValue = vec2(0.0);
@@ -863,17 +866,13 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
 
     float magSq = dot(nextValue, nextValue);
 
-    if (!ok || !isFiniteVec2Compat(nextValue) || magSq > escapeRadiusSq || max(abs(nextValue.x), abs(nextValue.y)) >= 1.0e18) {
-      float magnitude = sqrt(max(magSq, escapeRadius));
-      smoothIteration = float(i) + 1.0;
-
-      if (ok && isFiniteFloatCompat(magnitude) && magnitude > 1.0001) {
-        float smoothAdjust = log(max(log(magnitude) / log(escapeRadius), 1.0e-6)) / LOG_TWO;
-        smoothIteration = clamp(smoothIteration - smoothAdjust, 0.0, float(u_chainCount));
-      }
+    if (!ok || domainDynamicsEscapes(nextValue)) {
+      smoothIteration = ok && isFiniteDomainDynamicsValue(nextValue)
+        ? domainDynamicsSmoothIteration(float(i), float(u_chainCount), nextValue)
+        : float(i) + 1.0;
 
       escaped = true;
-      eventValue = ok && isFiniteVec2Compat(nextValue) ? nextValue : lastFinite;
+      eventValue = ok && isFiniteDomainDynamicsValue(nextValue) ? nextValue : lastFinite;
       eventIteration = float(i) + 1.0;
       break;
     }
@@ -952,6 +951,7 @@ function buildRiemannSurfaceMathLibraryUncached(appState) {
   const dynamicSource = dynamic.source || EMPTY_DYNAMIC_AGGREGATE_GLSL;
   return `${GLSL_COMPLEX_MATH_LIBRARY_BASE}
 ${GLSL_EXPRESSION_HELPERS}
+${DOMAIN_DYNAMICS_GLSL}
 ${buildAlgebraicUniformDeclarations(appState)}
 ${dynamicSource}
 ${assembleGlslModules(SURFACE_MATH_GLSL, ['evaluateSurfaceStage'], { appState })}
@@ -1742,7 +1742,7 @@ function setCommonUniforms(renderer, options) {
   let saturation = +state.domainSaturation;
   let lightnessCycles = +state.domainLightnessCycles;
   const chainingEnabled = !!state.chainingEnabled;
-  const chainCount = chainingEnabled ? (state.chainCount | 0 || 1) : 1;
+  const chainCount = chainingEnabled ? normalizeDomainDynamicsChainCount(state.chainCount) : 1;
   const chainMode = chainingEnabled ? (CHAIN_MODE_IDS[state.chainingMode] || 1) : 0;
   const orbitMode = chainingEnabled
     ? orbitColoringModeId(state.orbitColoringMode)

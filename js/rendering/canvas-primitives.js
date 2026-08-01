@@ -82,7 +82,10 @@ function drawGridLines(ctx, params, stepX = 1, stepY = 1, color = COLOR_GRID_LIN
 
     const xStart = Math.ceil(xRange[0] / stepX) * stepX;
     const xEnd = Math.floor(xRange[1] / stepX) * stepX;
-    for (let x = xStart; x <= xEnd + 1e-6; x += stepX) {
+    // The tolerance must scale with the grid spacing; a fixed world-unit
+    // tolerance turns deep-zoom grids into long phantom loops.
+    const xTolerance = Math.abs(stepX) * 1e-6;
+    for (let x = xStart; x <= xEnd + xTolerance; x += stepX) {
         if (Math.abs(x) > Math.max(Math.abs(xRange[0]), Math.abs(xRange[1])) + stepX && x !== 0) continue;
         const canvasX = mapToCanvasCoords(x, 0, params).x;
         ctx.moveTo(canvasX, 0);
@@ -91,7 +94,8 @@ function drawGridLines(ctx, params, stepX = 1, stepY = 1, color = COLOR_GRID_LIN
 
     const yStart = Math.ceil(yRange[0] / stepY) * stepY;
     const yEnd = Math.floor(yRange[1] / stepY) * stepY;
-    for (let y = yStart; y <= yEnd + 1e-6; y += stepY) {
+    const yTolerance = Math.abs(stepY) * 1e-6;
+    for (let y = yStart; y <= yEnd + yTolerance; y += stepY) {
         if (Math.abs(y) > Math.max(Math.abs(yRange[0]), Math.abs(yRange[1])) + stepY && y !== 0) continue;
         const canvasY = mapToCanvasCoords(0, y, params).y;
         ctx.moveTo(0, canvasY);
@@ -274,8 +278,9 @@ export function drawAxes(ctx, params, labelOrOptions, maybeYLabel) {
         const xStart = Math.ceil(xRange[0] / stepX) * stepX;
         const xEnd = Math.floor(xRange[1] / stepX) * stepX;
         const precisionX = getPrecision(stepX);
+        const xTolerance = Math.abs(stepX) * 1e-6;
 
-        for (let x = xStart; x <= xEnd + 1e-6; x += stepX) {
+        for (let x = xStart; x <= xEnd + xTolerance; x += stepX) {
             const tick = mapToCanvasCoords(x, 0, params);
             const label = formatLabel(x, precisionX, stepX);
             if (options.showTickLabels) {
@@ -295,8 +300,9 @@ export function drawAxes(ctx, params, labelOrOptions, maybeYLabel) {
         const yStart = Math.ceil(yRange[0] / stepY) * stepY;
         const yEnd = Math.floor(yRange[1] / stepY) * stepY;
         const precisionY = getPrecision(stepY);
+        const yTolerance = Math.abs(stepY) * 1e-6;
 
-        for (let y = yStart; y <= yEnd + 1e-6; y += stepY) {
+        for (let y = yStart; y <= yEnd + yTolerance; y += stepY) {
             const tick = mapToCanvasCoords(0, y, params);
             let label = formatLabel(y, precisionY, stepY);
             if (Math.abs(y) < 1e-3 && Math.abs(origin.x - tick.x) < params.width - 10 && label !== '0') {

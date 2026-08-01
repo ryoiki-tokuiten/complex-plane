@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { state } from '../js/store/state.js';
+import { DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE } from '../js/constants/domain-dynamics.js';
 import {
     evaluateDomainColoringMappedTransform,
     evaluateAlgebraicChaining,
@@ -506,11 +507,11 @@ test('escaped quadratic recursion returns the deterministic domain-coloring bail
             getEffectiveBaseTransformFunction('algebraic_chaining')
         );
         const actual = evaluateDomainColoringMappedTransform(baseProfile, c.re, c.im, 'algebraic_chaining');
-        const expected = iterateQuadraticParameter(c, state.chainCount, 1e18);
+        const expected = iterateQuadraticParameter(c, state.chainCount, DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE);
 
         assert.ok(Number.isFinite(actual.re));
         assert.ok(Number.isFinite(actual.im));
-        assert.ok(Math.max(Math.abs(actual.re), Math.abs(actual.im)) >= 1e18);
+        assert.ok(Math.max(Math.abs(actual.re), Math.abs(actual.im)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE);
         approxComplex(actual, expected);
     } finally {
         restoreState(before);

@@ -9,6 +9,7 @@ import {
     generateCurrentMappedInputShapePointSets
 } from '../js/rendering/shape-generators.js';
 import { state } from '../js/store/state.js';
+import { drawAxes, drawGrid } from '../js/rendering/canvas-primitives.js';
 
 test('Cartesian grid lines are evenly distributed across the visible range', () => {
     const config = {
@@ -212,4 +213,34 @@ test('Zeta continuation Cartesian grid is not split at the continuation boundary
         assert.equal(set.points[0].re, planeParams.currentVisXRange[0]);
         assert.equal(set.points[set.points.length - 1].re, planeParams.currentVisXRange[1]);
     }
+});
+
+test('canvas grid and tick loops stay bounded at deep zoom', () => {
+    const calls = { moveTo: 0 };
+    const ctx = {
+        save() {},
+        restore() {},
+        beginPath() {},
+        moveTo() { calls.moveTo += 1; },
+        lineTo() {},
+        stroke() {},
+        fillText() {},
+        arc() {},
+        fill() {}
+    };
+    const zoom = 1e12;
+    const span = 7 / zoom;
+    const params = {
+        width: 800,
+        height: 600,
+        scale: { x: 800 / span, y: 600 / span },
+        origin: { x: 400, y: 300 },
+        currentVisXRange: [-span / 2, span / 2],
+        currentVisYRange: [-span / 2, span / 2]
+    };
+
+    drawGrid(ctx, params, { targetCount: 10 });
+    drawAxes(ctx, params, { labels: false, ticks: true, tickLabels: false });
+
+    assert.ok(calls.moveTo < 500, `deep-zoom grid emitted ${calls.moveTo} segments`);
 });

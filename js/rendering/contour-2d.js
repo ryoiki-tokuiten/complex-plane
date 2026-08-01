@@ -185,8 +185,7 @@ function sampleRealPlotHeightField(width, height) {
         getChainedTransformFunction(state.currentFunction),
         {
             segments: side - 1,
-            valuesOnly: true,
-            invalidAsNaN: true
+            valuesOnly: true
         }
     );
 

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { sampleRealPlotSurface } from '../js/rendering/real-plots-renderer.js';
+import {
+    sampleRealPlotSurface,
+    validateRealPlotExpression
+} from '../js/rendering/real-plots-renderer.js';
 import { transformFunctions } from '../js/math-utils.js';
 
 function allFinite(values) {
@@ -33,6 +36,13 @@ test('real 3D plot sampling produces finite heightfield buffers for singular fun
     assert.ok(allFinite(sampled.normals));
     assert.ok(allFinite(sampled.colors));
     assert.ok(Math.max(...sampled.positions.filter((_value, index) => index % 3 === 1)) <= 2);
+    assert.equal(sampled.indices.length, (10 * 10 - 4) * 6);
+});
+
+test('real-plot expressions are rejected before render state can use them', () => {
+    assert.equal(validateRealPlotExpression('sin(x) + y'), null);
+    assert.match(validateRealPlotExpression('sin('), /Expected|expression/i);
+    assert.match(validateRealPlotExpression(''), /empty/i);
 });
 
 test('real 3D plot sampling preserves the selected real component range', () => {
@@ -74,8 +84,7 @@ test('real 3D plot kernels are explicit and preserve singular samples', () => {
             inputExpr: 'x',
             imagExpr: 'y',
             outputComponent: 'magnitude',
-            valuesOnly: true,
-            invalidAsNaN: true
+            valuesOnly: true
         }
     );
 
@@ -92,14 +101,42 @@ test('real 3D plot kernels are explicit and preserve singular samples', () => {
             inputExpr: 'x',
             imagExpr: '0',
             outputComponent: 'real',
-            valuesOnly: true,
-            invalidAsNaN: true
+            valuesOnly: true
         }
     );
 
-    assert.equal(nearPole.values[0], 10000);
+    assert.equal(nearPole.values[0], -10000);
     assert.equal(Number.isNaN(nearPole.values[1]), true);
     assert.equal(nearPole.values[2], 10000);
+
+    const tinyComplex = sampleRealPlotSurface(
+        transformFunctions.reciprocal,
+        {
+            segments: 1,
+            xRange: [Number.MIN_VALUE, Number.MIN_VALUE],
+            yRange: [Number.MIN_VALUE, Number.MIN_VALUE],
+            inputExpr: 'x',
+            imagExpr: 'y',
+            outputComponent: 'real',
+            valuesOnly: true
+        }
+    );
+    const expectedDirection = 10000 / Math.sqrt(2);
+    assert.ok(Math.abs(tinyComplex.values[0] - expectedDirection) < 1e-9);
+
+    const tinyImaginary = sampleRealPlotSurface(
+        transformFunctions.reciprocal,
+        {
+            segments: 1,
+            xRange: [Number.MIN_VALUE, Number.MIN_VALUE],
+            yRange: [Number.MIN_VALUE, Number.MIN_VALUE],
+            inputExpr: 'x',
+            imagExpr: 'y',
+            outputComponent: 'imag',
+            valuesOnly: true
+        }
+    );
+    assert.ok(Math.abs(tinyImaginary.values[0] + expectedDirection) < 1e-9);
 });
 
 test('real 3D plot sampling can use declared kernels without calling the transform', () => {

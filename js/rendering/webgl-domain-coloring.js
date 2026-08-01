@@ -27,6 +27,10 @@ import {
   createDomainPaletteGlslSource,
   getDomainPaletteShaderId
 } from '../constants/domain-palettes.js';
+import {
+  DOMAIN_DYNAMICS_GLSL,
+  normalizeDomainDynamicsChainCount
+} from '../constants/domain-dynamics.js';
 
 const { webglDomainColorSupport } = context;
 
@@ -36,8 +40,7 @@ const CFG = Object.freeze({
   maxRenderScale: 3,
   maxDprBoost: 1.35,
   dprScaleFactor: 0.92,
-  polyCoeffCount: 11,
-  maxChainStepsGlsl: 512
+  polyCoeffCount: 11
 });
 
 const EMPTY_OPTIONS = Object.freeze({});
@@ -199,32 +202,26 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   vec2 current = chainMode == 2 ? vec2(0.0) : parameterValue;
   vec2 lastFinite = current;
   vec2 eventValue = current;
-  float escapeRadius = 64.0;
-  float escapeRadiusSq = escapeRadius * escapeRadius;
   float convergenceEpsilonSq = 1.0e-14;
   float smoothIteration = float(u_chainCount);
   float eventIteration = float(u_chainCount);
   bool escaped = false;
   bool converged = false;
 
-  for (int i = 0; i < ${CFG.maxChainStepsGlsl}; i++) {
+  for (int i = 0; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
     if (i >= u_chainCount) break;
 
     vec2 nextValue = vec2(0.0);
     bool ok = mapDomainValue(current, parameterValue, nextValue);
     float magSq = dot(nextValue, nextValue);
 
-    if (!ok || !isFiniteVec2Compat(nextValue) || magSq > escapeRadiusSq || shouldStopDomainChain(nextValue)) {
-      float magnitude = sqrt(max(magSq, escapeRadius));
-      smoothIteration = float(i) + 1.0;
-
-      if (ok && isFiniteFloatCompat(magnitude) && magnitude > 1.0001) {
-        float smoothAdjust = log(max(log(magnitude) / log(escapeRadius), 1.0e-6)) / LOG_TWO;
-        smoothIteration = clamp(smoothIteration - smoothAdjust, 0.0, float(u_chainCount));
-      }
+    if (!ok || domainDynamicsEscapes(nextValue)) {
+      smoothIteration = ok && isFiniteDomainDynamicsValue(nextValue)
+        ? domainDynamicsSmoothIteration(float(i), float(u_chainCount), nextValue)
+        : float(i) + 1.0;
 
       escaped = true;
-      eventValue = ok && isFiniteVec2Compat(nextValue) ? nextValue : lastFinite;
+      eventValue = ok && isFiniteDomainDynamicsValue(nextValue) ? nextValue : lastFinite;
       eventIteration = float(i) + 1.0;
       break;
     }
@@ -298,17 +295,11 @@ float magnitudeLightness(float logMod, float cycles) {
 }
 
 float complexLogMagnitude(vec2 value) {
-  float scale = max(abs(value.x), abs(value.y));
-  if (scale <= 0.0) return 0.0;
-  return log(scale) + log(length(value / scale));
+  return domainDynamicsLogMagnitude(value);
 }
 
 vec4 invalidDomainColor() {
   return vec4(0.0, 0.0, 0.0, u_useSphere > 0.5 ? 0.0 : 1.0);
-}
-
-bool shouldStopDomainChain(vec2 value) {
-  return max(abs(value.x), abs(value.y)) >= 1.0e18;
 }
 
 bool mapDomainValue(vec2 inputValue, vec2 parameterValue, out vec2 outputValue) {
@@ -385,9 +376,9 @@ bool projectPixelToDomain(vec2 pixel, vec2 resolutionSafe, out vec2 zInput, out 
 bool applyConfiguredChain(inout vec2 mappedValue, vec2 parameterValue) {
   if (u_isWPlaneColoring >= 0.5 || u_chainCount <= 1) return true;
 
-  if (shouldStopDomainChain(mappedValue)) return true;
+  if (domainDynamicsChainBailsOut(mappedValue)) return true;
 
-  for (int i = 1; i < ${CFG.maxChainStepsGlsl}; i++) {
+  for (int i = 1; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
     if (i >= u_chainCount) break;
 
     vec2 nextValue = mappedValue;
@@ -395,7 +386,7 @@ bool applyConfiguredChain(inout vec2 mappedValue, vec2 parameterValue) {
     if (!isFiniteVec2Compat(nextValue)) return true;
 
     mappedValue = nextValue;
-    if (shouldStopDomainChain(mappedValue)) return true;
+    if (domainDynamicsChainBailsOut(mappedValue)) return true;
   }
 
   return true;
@@ -406,7 +397,7 @@ bool evaluateZeroSeedChain(vec2 parameterValue, out vec2 mappedValue) {
   vec2 lastFinite = vec2(0.0);
   bool hasLastFinite = false;
 
-  for (int i = 0; i < ${CFG.maxChainStepsGlsl}; i++) {
+  for (int i = 0; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
     if (i >= u_chainCount) break;
     vec2 nextValue = vec2(0.0);
     if (!mapDomainValue(current, parameterValue, nextValue)) {
@@ -427,7 +418,7 @@ bool evaluateZeroSeedChain(vec2 parameterValue, out vec2 mappedValue) {
     current = nextValue;
     lastFinite = current;
     hasLastFinite = true;
-    if (shouldStopDomainChain(current)) {
+    if (domainDynamicsChainBailsOut(current)) {
       mappedValue = current;
       return true;
     }
@@ -587,6 +578,7 @@ function createFragmentSource() {
     FRAGMENT_UNIFORMS,
     '',
     getGLSLComplexMathLibrary(state),
+    DOMAIN_DYNAMICS_GLSL,
     '',
     FRAGMENT_HELPERS,
     '',
@@ -1327,7 +1319,7 @@ function uploadLightingUniforms(uniformGL, renderer) {
 function uploadChainingUniforms(uniformGL, renderer) {
   const enabled = !!state?.chainingEnabled;
   const chainCount = enabled
-    ? Math.max(1, Math.min(CFG.maxChainStepsGlsl, uniformInt(state.chainCount, 1)))
+    ? normalizeDomainDynamicsChainCount(uniformInt(state.chainCount, 1))
     : 1;
   const chainMode = enabled ? enumId(CHAIN_MODE_IDS, state.chainingMode, 1) : 0;
 

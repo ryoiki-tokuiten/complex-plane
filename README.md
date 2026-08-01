@@ -4,6 +4,8 @@
 
 ![Example](./Example2.png)
 
+![Example](./Example3.png)
+
 
 This repository contains a full-client-side web application for the interactive visualization of complex-valued functions, mappings, and related mathematical transformations. It aims to build an intuitive understanding of complex analysis through dynamic rendering.
 

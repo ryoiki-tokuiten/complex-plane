@@ -1,6 +1,11 @@
 import { state } from '../store/state.js';
 import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
+  DOMAIN_DYNAMICS_EXPONENT_MAX,
+  DOMAIN_DYNAMICS_EXPONENT_MIN,
+  DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE
+} from '../constants/domain-dynamics.js';
+import {
     buildDynamicAggregateGLSL,
     dynamicAggregateGLSLSignature,
     isDynamicAggregateGLSLActive,
@@ -17,10 +22,10 @@ const float TWO_PI = 6.283185307179586476925286766559;
 const float LOG_TWO = 0.6931471805599453094172321214582;
 const int ZETA_GPU_TERMS = 72;
 
-float safeExp(float x) { return exp(clamp(x, -60.0, 60.0)); }
+float safeExp(float x) { return exp(clamp(x, ${DOMAIN_DYNAMICS_EXPONENT_MIN}.0, ${DOMAIN_DYNAMICS_EXPONENT_MAX})); }
 float coshCompat(float x) { return 0.5 * (safeExp(x) + safeExp(-x)); }
 float sinhCompat(float x) { return 0.5 * (safeExp(x) - safeExp(-x)); }
-bool isFiniteFloatCompat(float value) { return (value == value) && abs(value) < 1.0e30; }
+bool isFiniteFloatCompat(float value) { return (value == value) && abs(value) < ${DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE.toExponential(1)}; }
 bool isFiniteVec2Compat(vec2 value) { return isFiniteFloatCompat(value.x) && isFiniteFloatCompat(value.y); }
 vec2 complexAdd(vec2 a, vec2 b) { return a + b; }
 vec2 complexMul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
@@ -109,7 +114,11 @@ bool evaluateInverseFunction(vec2 w, float functionId, vec2 mA, vec2 mB, vec2 mC
   if (abs(fId - 3.0) < 0.5) { z = complexArctan(w); return isFiniteVec2Compat(z); }
   if (abs(fId - 4.0) < 0.5) { if (dot(w,w) < 1.0e-18) return false; z = complexArccos(complexDiv(vec2(1.0,0.0), w)); return isFiniteVec2Compat(z); }
   if (abs(fId - 5.0) < 0.5) { if (dot(w,w) < 1.0e-20) return false; z = complexLn(w); return isFiniteVec2Compat(z); }
-  if (abs(fId - 6.0) < 0.5) { z = complexExp(w); return isFiniteVec2Compat(z); }
+  if (abs(fId - 6.0) < 0.5) {
+    if (w.y <= -PI || w.y > PI) return false;
+    z = complexExp(w);
+    return isFiniteVec2Compat(z);
+  }
   if (abs(fId - 7.0) < 0.5) { if (dot(w,w) < 1.0e-18) return false; z = complexDiv(vec2(1.0,0.0), w); return isFiniteVec2Compat(z); }
   if (abs(fId - 8.0) < 0.5) { vec2 num = complexAdd(complexMul(mD, w), -mB); vec2 den = complexAdd(-complexMul(mC, w), mA); if (dot(den,den) < 1.0e-18) return false; z = complexDiv(num, den); return isFiniteVec2Compat(z); }
   if (abs(fId - 9.0) < 0.5) {
@@ -117,7 +126,7 @@ bool evaluateInverseFunction(vec2 w, float functionId, vec2 mA, vec2 mB, vec2 mC
     if (polyDeg == 2) { vec2 a=polyCoeffs[2]; vec2 b=polyCoeffs[1]; vec2 c=polyCoeffs[0]-w; vec2 disc=complexMul(b,b)-4.0*complexMul(a,c); vec2 sd=complexSqrt(disc); vec2 den=2.0*a; if(dot(den,den)<1.0e-18) return false; z=complexDiv(-b+sd,den); return isFiniteVec2Compat(z); }
     return false;
   }
-  if (abs(fId - 10.0) < 0.5) { float wY = w.y; if (wY == 0.0) return false; z = vec2(w.x * w.y, w.y * w.y); return isFiniteVec2Compat(z); }
+  if (abs(fId - 10.0) < 0.5) { float wY = w.y; if (wY <= 1.0e-9) return false; z = vec2(w.x * w.y, w.y * w.y); return isFiniteVec2Compat(z); }
   if (abs(fId - 12.0) < 0.5) { z = complexArcsinh(w); return isFiniteVec2Compat(z); }
   if (abs(fId - 13.0) < 0.5) { z = complexArccosh(w); return isFiniteVec2Compat(z); }
   if (abs(fId - 14.0) < 0.5) { z = complexArctanh(w); return isFiniteVec2Compat(z); }

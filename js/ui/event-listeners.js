@@ -41,7 +41,7 @@ import {
     selectStableTissotIndicatrices,
     getTissotViewportBounds
 } from '../analysis/tissot.js';
-import { disposeRealPlotsRenderer } from '../rendering/real-plots-renderer.js';
+import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
 
@@ -2500,18 +2500,48 @@ function toggleGraphFullscreen() {
     }, state.isGraphFullScreen ? 150 : 100);
 }
 
-function bindRealPlotsExpressionControls({ preset, input, expressionKey, customKey, fallback }) {
+function bindRealPlotsExpressionControls({ preset, input, expressionKey, customKey }) {
+    const showValidation = (field, message) => {
+        if (!field) return;
+        field.setCustomValidity?.(message || '');
+        const display = field.parentElement?.querySelector('.compact-formula-preview');
+        if (!display) return;
+        if (message) {
+            display.textContent = message;
+            display.classList.add('dynamic-math-error');
+        } else {
+            updateCustomFormulaPreview(field, display);
+        }
+    };
+
+    const commit = (source, custom) => {
+        const value = String(source ?? '').trim();
+        const error = validateRealPlotExpression(value);
+        const field = controls[input];
+        if (error) {
+            showValidation(field, error);
+            return false;
+        }
+        if (custom) {
+            showValidation(field, null);
+        } else {
+            field?.setCustomValidity?.('');
+            const display = field?.parentElement?.querySelector('.compact-formula-preview');
+            display?.classList.remove('dynamic-math-error');
+        }
+        state[expressionKey] = value;
+        state[customKey] = custom;
+        requestUiRedraw();
+        return true;
+    };
+
     bindControlListener(preset, 'change', (_event, selector) => {
         const custom = selector.value === 'custom';
-        state[customKey] = custom;
-        state[expressionKey] = custom ? controls[input]?.value || fallback : selector.value;
-        requestUiRedraw();
+        commit(custom ? controls[input]?.value : selector.value, custom);
     });
 
     bindControlListener(input, 'input', (_event, field) => {
-        state[expressionKey] = field.value || fallback;
-        state[customKey] = true;
-        requestUiRedraw();
+        commit(field.value, true);
     });
 }
 
@@ -2562,15 +2592,13 @@ function bindRealPlotsControls() {
         preset: 'realPlotsInputPreset',
         input: 'realPlotsCustomInput',
         expressionKey: 'realPlotsInputExpr',
-        customKey: 'realPlotsInputIsCustom',
-        fallback: 'x'
+        customKey: 'realPlotsInputIsCustom'
     });
     bindRealPlotsExpressionControls({
         preset: 'realPlotsImagPreset',
         input: 'realPlotsCustomImag',
         expressionKey: 'realPlotsImagExpr',
-        customKey: 'realPlotsImagIsCustom',
-        fallback: '0'
+        customKey: 'realPlotsImagIsCustom'
     });
 
     bindSelector('realPlotsOutputComponent', 'realPlotsOutputComponent', (event, val) => {

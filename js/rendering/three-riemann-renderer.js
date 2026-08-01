@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
 import { requestRedrawAll } from './redraw-scheduler.js';
 import { getChainedTransformFunction } from '../math-utils.js';
+import { normalizeDomainDynamicsChainCount } from '../constants/domain-dynamics.js';
 
 
 const COLOR_BACKGROUND = 0x0b0914;
@@ -232,7 +233,7 @@ export class ThreeRiemannRenderer {
 
     setTransform(transformFunction, chainCount = 1) {
         this.transformFunction = typeof transformFunction === 'function' ? transformFunction : null;
-        this.chainCount = Math.max(1, Math.min(512, Math.floor(chainCount) || 1));
+        this.chainCount = normalizeDomainDynamicsChainCount(chainCount);
     }
 
     buildGridFromPointSets(pointSets, progressOverride = undefined) {

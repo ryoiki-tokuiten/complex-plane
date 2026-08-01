@@ -19,6 +19,16 @@ import {
     evaluateDomainDynamicsValue,
     renderDomainDynamicsTile
 } from '../js/rendering/domain-dynamics-core.js';
+import {
+    DYNAMICS_ESCAPE_RADIUS,
+    DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE,
+    DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
+    domainDynamicsEscapes,
+    domainDynamicsLogMagnitude,
+    domainDynamicsSmoothIteration,
+    isFiniteDomainDynamicsValue,
+    normalizeDomainDynamicsChainCount
+} from '../js/constants/domain-dynamics.js';
 
 const STATE_KEYS = [
     'currentFunction',
@@ -349,6 +359,71 @@ test('mutable algebraic AST edits never reuse a stale accelerator', () => {
     evaluateDomainDynamicsValue(otherSnapshot, 2, 0);
     snapshot.algebraicChainingZExpr.right.value = 2;
     approxComplex(evaluateDomainDynamicsValue(snapshot, 2, 0), { re: 4, im: 0 });
+});
+
+test('accelerated algebraic z expressions preserve parser unary-power precedence', () => {
+    const base = {
+        algebraicChainingTerms: [{
+            coeff: { re: 1, im: 0 },
+            factors: [algebraicFactor('polynomial')]
+        }]
+    };
+    const negatedPower = makeAlgebraicDynamicsSnapshot({ ...base, algebraicChainingZExpr: '-z^2' });
+    const parenthesizedNegation = makeAlgebraicDynamicsSnapshot({ ...base, algebraicChainingZExpr: '(-z)^2' });
+
+    approxComplex(evaluateDomainDynamicsValue(negatedPower, 2, 0), { re: -4, im: 0 });
+    approxComplex(evaluateDomainDynamicsValue(parenthesizedNegation, 2, 0), { re: 4, im: 0 });
+
+    const nestedPower = makeAlgebraicDynamicsSnapshot({ ...base, algebraicChainingZExpr: 'z^2^3' });
+    const groupedPower = makeAlgebraicDynamicsSnapshot({ ...base, algebraicChainingZExpr: '(z^2)^3' });
+    approxComplex(evaluateDomainDynamicsValue(nestedPower, 2, 0), { re: 256, im: 0 });
+    approxComplex(evaluateDomainDynamicsValue(groupedPower, 2, 0), { re: 64, im: 0 });
+});
+
+test('domain dynamics use the shared escape boundaries and explicit chain limit', () => {
+    assert.equal(domainDynamicsEscapes(DYNAMICS_ESCAPE_RADIUS, 0), false);
+    assert.equal(domainDynamicsEscapes(DYNAMICS_ESCAPE_RADIUS + 1, 0), true);
+    assert.equal(domainDynamicsEscapes(DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE, 0), true);
+    assert.equal(domainDynamicsEscapes(NaN, 0), true);
+    assert.equal(domainDynamicsEscapes(Infinity, 0), true);
+    assert.equal(normalizeDomainDynamicsChainCount(DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH + 100), DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH);
+
+    const snapshot = makeAlgebraicDynamicsSnapshot({
+        chainingEnabled: true,
+        chainCount: DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH + 100,
+        algebraicChainingTerms: [
+            { coeff: { re: 1, im: 0 }, factors: [algebraicFactor('polynomial')] },
+            { coeff: { re: 1, im: 0 }, factors: [] }
+        ]
+    });
+    approxComplex(evaluateDomainDynamicsValue(snapshot, 0, 0), { re: DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH, im: 0 });
+});
+
+test('domain dynamics shared helpers cover boundary, overflow, and smoothing fixtures', () => {
+    const fixtures = [
+        { re: 1e4, im: 0, escapes: false },
+        { re: 10001, im: 0, escapes: true },
+        { re: 1e8, im: 0, escapes: true },
+        { re: 1e30, im: 0, escapes: true },
+        { re: 3, im: 4, escapes: false }
+    ];
+
+    for (const fixture of fixtures) {
+        assert.equal(domainDynamicsEscapes(fixture.re, fixture.im), fixture.escapes);
+        assert.equal(
+            domainDynamicsLogMagnitude(fixture.re, fixture.im),
+            Math.log1p(Math.hypot(fixture.re, fixture.im))
+        );
+    }
+
+    assert.equal(isFiniteDomainDynamicsValue(1e30 * 0.999, 0), true);
+    assert.equal(isFiniteDomainDynamicsValue(1e30, 0), false);
+    assert.equal(isFiniteDomainDynamicsValue(NaN, 0), false);
+
+    const smooth = domainDynamicsSmoothIteration(3, 17, 20000, 0);
+    assert.ok(smooth >= 0 && smooth <= 17);
+    assert.equal(domainDynamicsSmoothIteration(3, 17, NaN, 0), 4);
+    assert.equal(domainDynamicsSmoothIteration(3, 17, 1e30, 0), 4);
 });
 
 test('orbit coloring modes distinguish escape and attractor observables', () => {

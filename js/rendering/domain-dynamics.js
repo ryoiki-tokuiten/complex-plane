@@ -12,6 +12,7 @@ import {
 import {
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
+import { normalizeDomainDynamicsChainCount } from '../constants/domain-dynamics.js';
 
 const PASS_SCALES = Object.freeze([16, 4, 1]);
 const TILE_SIZE = 64;
@@ -105,7 +106,7 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         functionKey,
         chainingEnabled: !!runtimeState.chainingEnabled,
         chainMode: normalizeChainMode(runtimeState.chainingMode),
-        chainCount: Math.max(1, Math.floor(Number(runtimeState.chainCount) || 1)),
+        chainCount: normalizeDomainDynamicsChainCount(runtimeState.chainCount),
         orbitColoringMode,
         algebraicChainingEnabled: !!runtimeState.algebraicChainingEnabled,
         algebraicChainingTerms: cloneAlgebraicTerms(runtimeState.algebraicChainingTerms),
@@ -504,7 +505,7 @@ export function getCurrentFuncSignature(isWPlane = false) {
         functionKey: state.currentFunction,
         chainingEnabled: !!state.chainingEnabled,
         chainMode: normalizeChainMode(state.chainingMode),
-        chainCount: Math.max(1, Math.floor(Number(state.chainCount) || 1)),
+        chainCount: normalizeDomainDynamicsChainCount(state.chainCount),
         orbitColoringMode: normalizeOrbitColoringMode(state.orbitColoringMode),
         algebraicChainingEnabled: !!state.algebraicChainingEnabled,
         algebraicChainingTerms: state.algebraicChainingTerms,

@@ -10,14 +10,24 @@ const DOMAIN_LIGHTNESS_DETAIL_SCALE = 0.28;
 // preserves overflow behavior before taking that fast path.
 const HYPOT_FAST_OVERFLOW_GUARD = Math.sqrt(Number.MAX_VALUE / 2);
 import { compileExpression } from '../math/expression/evaluator.js';
+import { parseExpression } from '../math/expression/parser.js';
+import {
+    DYNAMICS_ESCAPE_RADIUS_SQ,
+    DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE,
+    DOMAIN_DYNAMICS_EXPONENT_MAX,
+    DOMAIN_DYNAMICS_EXPONENT_MIN,
+    DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE,
+    domainDynamicsChainBailsOut,
+    domainDynamicsLogMagnitude,
+    domainDynamicsSmoothIteration,
+    isFiniteDomainDynamicsValue,
+    normalizeDomainDynamicsChainCount
+} from '../constants/domain-dynamics.js';
 import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
 
-const DYNAMICS_ESCAPE_RADIUS = 1e4;
-const DYNAMICS_ESCAPE_RADIUS_SQ = DYNAMICS_ESCAPE_RADIUS * DYNAMICS_ESCAPE_RADIUS;
-const DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE = 1e8;
 const ORBIT_ATTRACTOR_CONVERGENCE_EPSILON = 1e-7;
 const ORBIT_ATTRACTOR_CONVERGENCE_EPSILON_SQ =
     ORBIT_ATTRACTOR_CONVERGENCE_EPSILON * ORBIT_ATTRACTOR_CONVERGENCE_EPSILON;
@@ -91,7 +101,7 @@ function scalarIm(value) {
 }
 
 function validComplex(value) {
-    return !!value && finite(value.re) && finite(value.im);
+    return !!value && isFiniteDomainDynamicsValue(value.re, value.im);
 }
 
 function complexAdd(a, b) {
@@ -147,8 +157,8 @@ function complexDivide(a, b) {
 }
 
 function expSafe(x) {
-    if (x > 700) return Math.exp(700);
-    if (x < -745) return 0;
+    if (x > DOMAIN_DYNAMICS_EXPONENT_MAX) return Math.exp(DOMAIN_DYNAMICS_EXPONENT_MAX);
+    if (x < DOMAIN_DYNAMICS_EXPONENT_MIN) return 0;
     return Math.exp(x);
 }
 
@@ -500,7 +510,7 @@ function evaluateAlgebraicChaining(z, snapshot, context = null) {
             if (typeof result === 'number') {
                 point = { re: result, im: 0 };
             } else if (result && typeof result === 'object' && 're' in result) {
-                point = { re: result.re, im: result.im || 0 };
+                point = { re: result.re, im: result.im };
             } else {
                 return { re: NaN, im: NaN };
             }
@@ -942,61 +952,6 @@ function compilePrimitiveAlgebraicBlock(factor, ops, args) {
     return true;
 }
 
-function tokenizePrimitiveExpression(expr) {
-    const tokens = [];
-    const text = String(expr || '').trim();
-    let i = 0;
-    while (i < text.length) {
-        const ch = text.charCodeAt(i);
-        if (ch <= 32) { i += 1; continue; }
-        const c = text[i];
-        if ((ch >= 48 && ch <= 57) || c === '.') {
-            const start = i;
-            i += 1;
-            while (i < text.length) {
-                const code = text.charCodeAt(i);
-                if ((code >= 48 && code <= 57) || text[i] === '.') { i += 1; continue; }
-                if ((text[i] === 'e' || text[i] === 'E') && i + 1 < text.length) {
-                    let j = i + 1;
-                    if (text[j] === '+' || text[j] === '-') j += 1;
-                    if (j < text.length && text.charCodeAt(j) >= 48 && text.charCodeAt(j) <= 57) {
-                        i = j + 1;
-                        while (i < text.length && text.charCodeAt(i) >= 48 && text.charCodeAt(i) <= 57) i += 1;
-                        continue;
-                    }
-                }
-                break;
-            }
-            const value = Number(text.slice(start, i));
-            if (!Number.isFinite(value)) return null;
-            tokens.push({ type: 'number', value });
-            continue;
-        }
-        if ((ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || c === '_') {
-            const start = i;
-            i += 1;
-            while (i < text.length) {
-                const code = text.charCodeAt(i);
-                if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
-                    (code >= 48 && code <= 57) || text[i] === '_') {
-                    i += 1;
-                } else {
-                    break;
-                }
-            }
-            tokens.push({ type: 'ident', value: text.slice(start, i).toLowerCase() });
-            continue;
-        }
-        if (c === '+' || c === '-' || c === '*' || c === '/' || c === '^' || c === '(' || c === ')' || c === ',') {
-            tokens.push({ type: c, value: c });
-            i += 1;
-            continue;
-        }
-        return null;
-    }
-    return tokens;
-}
-
 function expressionFunctionCode(name) {
     return vmFunctionCode(name === 'sqrt' ? 'power' : name);
 }
@@ -1004,139 +959,11 @@ function expressionFunctionCode(name) {
 function compilePrimitiveExpression(expr) {
     if (!expr || expr === 'z') return null;
     if (expr && typeof expr === 'object') return compilePrimitiveExpressionAst(expr);
-
-    const tokens = tokenizePrimitiveExpression(expr);
-    if (!tokens || tokens.length === 0) return null;
-
-    const output = [];
-    const ops = [];
-    const constants = [];
-    let prevValue = false;
-    const precedence = { '+': 1, '-': 1, '*': 2, '/': 2, '^': 3, 'neg': 4 };
-    const rightAssoc = { '^': true, 'neg': true };
-
-    function pushOperator(op) {
-        while (ops.length) {
-            const top = ops[ops.length - 1];
-            if (top === '(' || top.type === 'func') break;
-            const tp = precedence[top];
-            const opPrec = precedence[op];
-            if (tp > opPrec || (tp === opPrec && !rightAssoc[op])) output.push({ type: 'op', value: ops.pop() });
-            else break;
-        }
-        ops.push(op);
-    }
-
-    for (let i = 0; i < tokens.length; i += 1) {
-        const token = tokens[i];
-        if (token.type === 'number') {
-            output.push({ type: 'const', value: token.value, im: 0 });
-            prevValue = true;
-            continue;
-        }
-        if (token.type === 'ident') {
-            const name = token.value;
-            const next = tokens[i + 1];
-            if (next && next.type === '(') {
-                ops.push({ type: 'func', value: name });
-                prevValue = false;
-                continue;
-            }
-            if (name === 'z' || name === 'c') output.push({ type: name });
-            else if (name === 'i') output.push({ type: 'const', value: 0, im: 1 });
-            else if (name === 'pi') output.push({ type: 'const', value: Math.PI, im: 0 });
-            else if (name === 'e') output.push({ type: 'const', value: Math.E, im: 0 });
-            else return null;
-            prevValue = true;
-            continue;
-        }
-        if (token.type === '(') {
-            ops.push('(');
-            prevValue = false;
-            continue;
-        }
-        if (token.type === ')') {
-            while (ops.length && ops[ops.length - 1] !== '(') output.push({ type: 'op', value: ops.pop() });
-            if (!ops.length) return null;
-            ops.pop();
-            if (ops.length && ops[ops.length - 1].type === 'func') output.push(ops.pop());
-            prevValue = true;
-            continue;
-        }
-        if (token.type === ',') {
-            while (ops.length && ops[ops.length - 1] !== '(') output.push({ type: 'op', value: ops.pop() });
-            if (!ops.length) return null;
-            prevValue = false;
-            continue;
-        }
-        if (token.type === '+' || token.type === '-' || token.type === '*' || token.type === '/' || token.type === '^') {
-            const op = token.type === '-' && !prevValue ? 'neg' : token.type;
-            if (token.type === '+' && !prevValue) continue;
-            pushOperator(op);
-            prevValue = false;
-            continue;
-        }
+    try {
+        return compilePrimitiveExpressionAst(parseExpression(String(expr)));
+    } catch {
         return null;
     }
-    while (ops.length) {
-        const op = ops.pop();
-        if (op === '(') return null;
-        output.push(op.type === 'func' ? op : { type: 'op', value: op });
-    }
-
-    const opcodes = [];
-    const opcodeArgs = [];
-    for (let i = 0; i < output.length; i += 1) {
-        const item = output[i];
-        switch (item.type) {
-            case 'z': opcodes.push(EXPR_PUSH_Z); opcodeArgs.push(0); break;
-            case 'c': opcodes.push(EXPR_PUSH_C); opcodeArgs.push(0); break;
-            case 'const':
-                opcodes.push(EXPR_PUSH_CONST);
-                opcodeArgs.push(constants.length);
-                constants.push(item.value, item.im || 0);
-                break;
-            case 'op':
-                switch (item.value) {
-                    case 'neg': opcodes.push(EXPR_NEG); break;
-                    case '+': opcodes.push(EXPR_ADD); break;
-                    case '-': opcodes.push(EXPR_SUB); break;
-                    case '*': opcodes.push(EXPR_MUL); break;
-                    case '/': opcodes.push(EXPR_DIV); break;
-                    case '^': opcodes.push(EXPR_POW); break;
-                    default: return null;
-                }
-                opcodeArgs.push(0);
-                break;
-            case 'func': {
-                let code;
-                if (item.value === 'sqrt') {
-                    code = VMF_APPLY_POWER;
-                    opcodes.push(EXPR_FUNC);
-                    opcodeArgs.push(code);
-                    constants.push(0.5, 0);
-                } else {
-                    code = expressionFunctionCode(item.value);
-                    if (code < 0 || code === VMF_IDENTITY || code === VMF_C || code === VMF_POLYNOMIAL ||
-                        code === VMF_MOBIUS || code === VMF_POINCARE || code === VMF_ZETA) return null;
-                    opcodes.push(EXPR_FUNC);
-                    opcodeArgs.push(code);
-                }
-                break;
-            }
-            default: return null;
-        }
-    }
-
-    const stackCapacity = Math.max(4, output.length + 1);
-    return {
-        opcodes: Int16Array.from(opcodes),
-        args: Float64Array.from(opcodeArgs),
-        constants: Float64Array.from(constants),
-        stackRe: new Float64Array(stackCapacity),
-        stackIm: new Float64Array(stackCapacity),
-        scratch: new Float64Array(2)
-    };
 }
 
 function compilePrimitiveExpressionAst(node) {
@@ -1145,19 +972,41 @@ function compilePrimitiveExpressionAst(node) {
         if (n === null || n === undefined) return false;
         if (typeof n === 'number') { output.push({ type: 'const', value: n, im: 0 }); return true; }
         if (typeof n === 'string') {
-            if (n === 'z' || n === 'c') { output.push({ type: n }); return true; }
+            const name = n.toLowerCase();
+            if (name === 'z' || name === 'c') { output.push({ type: name }); return true; }
+            if (name === 'i') { output.push({ type: 'const', value: 0, im: 1 }); return true; }
+            if (name === 'pi') { output.push({ type: 'const', value: Math.PI, im: 0 }); return true; }
+            if (name === 'e') { output.push({ type: 'const', value: Math.E, im: 0 }); return true; }
             return false;
         }
         if (typeof n !== 'object') return false;
         const kind = n.type || n.kind;
-        if (kind === 'number' || kind === 'literal' || 'value' in n && typeof n.value === 'number') {
-            output.push({ type: 'const', value: Number(n.value), im: Number(n.im ?? n.imag ?? 0) });
+        if (kind === 'number' || kind === 'literal' || ('value' in n && typeof n.value === 'number')) {
+            const literal = n.value && typeof n.value === 'object' ? n.value : n;
+            output.push({
+                type: 'const',
+                value: Number(literal.re ?? literal.real ?? literal.value),
+                im: Number(literal.im ?? literal.imag ?? n.im ?? n.imag ?? 0)
+            });
             return true;
         }
         if (kind === 'variable' || kind === 'identifier') {
             const name = String(n.name || n.value || '').toLowerCase();
-            if (name !== 'z' && name !== 'c') return false;
-            output.push({ type: name });
+            return walk(name);
+        }
+        if (kind === 'group') return walk(n.expression);
+        if (kind === 'unary') {
+            if (n.op === '+') return walk(n.argument);
+            if (n.op !== '-') return false;
+            if (!walk(n.argument)) return false;
+            output.push({ type: 'op', value: 'neg' });
+            return true;
+        }
+        if (kind === 'postfix') return false;
+        if (kind === 'binary') {
+            if (!['+', '-', '*', '/', '^'].includes(n.op)) return false;
+            if (!walk(n.left) || !walk(n.right)) return false;
+            output.push({ type: 'op', value: n.op });
             return true;
         }
         const op = n.op || n.operator;
@@ -1167,14 +1016,15 @@ function compilePrimitiveExpressionAst(node) {
                 output.push({ type: 'op', value: 'neg' });
                 return true;
             }
+            if (!['+', '-', '*', '/', '^'].includes(op)) return false;
             if (!walk(n.left) || !walk(n.right)) return false;
             output.push({ type: 'op', value: op });
             return true;
         }
-        const fn = n.func || n.name || (kind === 'call' ? n.callee : null);
+        const fn = kind === 'call' ? (n.name || n.callee) : (n.func || n.name);
         if (fn) {
             const args = n.args || n.arguments || (n.argument !== undefined ? [n.argument] : []);
-            if (!args.length || !walk(args[0])) return false;
+            if (args.length !== 1 || !walk(args[0])) return false;
             output.push({ type: 'func', value: String(fn).toLowerCase() });
             return true;
         }
@@ -1780,7 +1630,7 @@ function evaluateCompiledAlgebraicInto(accelerator, zr, zi, cr, ci, out) {
         evaluatePrimitiveExpressionInto(accelerator.zExpr, zr, zi, cr, ci, scratch);
         pointRe = scratch[0];
         pointIm = scratch[1];
-        if (!(pointRe === pointRe && pointIm === pointIm && finite(pointRe) && finite(pointIm))) {
+        if (!isFiniteDomainDynamicsValue(pointRe, pointIm)) {
             out[0] = NaN;
             out[1] = NaN;
             return out;
@@ -1950,7 +1800,7 @@ function evaluateBase(snapshot, value, c, accelerator = NO_ACCELERATOR) {
 }
 
 function exceedsChainBailout(value) {
-    return Math.max(Math.abs(value?.re ?? 0), Math.abs(value?.im ?? 0)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE;
+    return !!value && domainDynamicsChainBailsOut(value.re, value.im);
 }
 
 function validOrNull(value) {
@@ -1958,7 +1808,7 @@ function validOrNull(value) {
 }
 
 function snapshotChainCount(snapshot) {
-    return Math.max(1, Math.floor(Number(snapshot.chainCount) || 1));
+    return normalizeDomainDynamicsChainCount(snapshot.chainCount);
 }
 
 function snapshotSupportsOrbitTrace(snapshot) {
@@ -2031,7 +1881,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
         if (!evaluateComponentBaseInto(snapshot, accelerator, re, im, re, im, scratch)) return null;
         const vr = scratch[0];
         const vi = scratch[1];
-        return vr === vr && vi === vi && finite(vr) && finite(vi) ? { re: vr, im: vi } : null;
+        return isFiniteDomainDynamicsValue(vr, vi) ? { re: vr, im: vi } : null;
     }
 
     if (mode === 'zero_seed') {
@@ -2046,7 +1896,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
             if (!evaluateComponentBaseInto(snapshot, accelerator, currentRe, currentIm, re, im, scratch)) return null;
             currentRe = scratch[0];
             currentIm = scratch[1];
-            if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) {
+            if (!isFiniteDomainDynamicsValue(currentRe, currentIm)) {
                 return hasLast ? { re: lastRe, im: lastIm } : null;
             }
             lastRe = currentRe;
@@ -2055,8 +1905,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
             if (detectFixedPoint && Object.is(currentRe, previousRe) && Object.is(currentIm, previousIm)) {
                 return { re: currentRe, im: currentIm };
             }
-            if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
+            if (domainDynamicsChainBailsOut(currentRe, currentIm)) {
                 return { re: currentRe, im: currentIm };
             }
         }
@@ -2066,12 +1915,11 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
     if (!evaluateComponentBaseInto(snapshot, accelerator, re, im, re, im, scratch)) return null;
     let currentRe = scratch[0];
     let currentIm = scratch[1];
-    if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) return null;
+    if (!isFiniteDomainDynamicsValue(currentRe, currentIm)) return null;
     let lastRe = currentRe;
     let lastIm = currentIm;
     if (detectFixedPoint && Object.is(currentRe, re) && Object.is(currentIm, im)) return { re: currentRe, im: currentIm };
-    if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-        (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
+    if (domainDynamicsChainBailsOut(currentRe, currentIm)) {
         return { re: currentRe, im: currentIm };
     }
 
@@ -2081,7 +1929,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
         }
         currentRe = scratch[0];
         currentIm = scratch[1];
-        if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) {
+        if (!isFiniteDomainDynamicsValue(currentRe, currentIm)) {
             return { re: lastRe, im: lastIm };
         }
         if (detectFixedPoint && Object.is(currentRe, lastRe) && Object.is(currentIm, lastIm)) {
@@ -2089,8 +1937,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
         }
         lastRe = currentRe;
         lastIm = currentIm;
-        if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-            (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
+        if (domainDynamicsChainBailsOut(currentRe, currentIm)) {
             return { re: currentRe, im: currentIm };
         }
     }
@@ -2208,7 +2055,7 @@ export function domainColorForValue(value, snapshot) {
     if (!finite(modValue)) return [0, 0, 0];
 
     const style = snapshot.style || {};
-    const logMod = Math.log1p(modValue);
+    const logMod = domainDynamicsLogMagnitude(value.re, value.im);
     const lightnessBase = magnitudeLightness(logMod, Number(style.lightnessCycles) || 0);
     const contrast = finite(style.contrast) ? style.contrast : 1;
     const brightness = finite(style.brightness) ? style.brightness : 1;
@@ -2256,16 +2103,10 @@ function convergenceIntensity(iteration, count) {
     return 1 - Math.max(0, Math.min(1, (iteration - 1) / Math.max(1, count)));
 }
 
-function escapeSmoothIteration(iteration, count, magSq, next) {
-    const magnitude = Math.sqrt(Math.max(magSq, DYNAMICS_ESCAPE_RADIUS));
-    let smoothIteration = iteration + 1;
-    if (next && finite(magnitude) && magnitude > 1.0001) {
-        const smoothAdjust = Math.log(
-            Math.max(Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS), 1e-6)
-        ) / Math.LN2;
-        smoothIteration = Math.max(0, Math.min(count, smoothIteration - smoothAdjust));
-    }
-    return smoothIteration;
+function escapeSmoothIteration(iteration, count, next) {
+    return next
+        ? domainDynamicsSmoothIteration(iteration, count, next.re, next.im)
+        : iteration + 1;
 }
 
 function byteFromUnit(value) {
@@ -2508,15 +2349,16 @@ function writeStyledColorComponents(data, idx, baseR, baseG, baseB, lightness, s
 }
 
 function writeDomainColorWithContext(data, idx, re, im, context) {
-    if (!finite(re) || !finite(im)) {
+    const absRe = re < 0 ? -re : re;
+    const absIm = im < 0 ? -im : im;
+    if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+        !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) {
         writeBlack(data, idx);
         return;
     }
 
     let lightnessBase = 0.5;
     if (context.needsMagnitudeDetail) {
-        const absRe = re < 0 ? -re : re;
-        const absIm = im < 0 ? -im : im;
         const modValue = absRe <= HYPOT_FAST_OVERFLOW_GUARD && absIm <= HYPOT_FAST_OVERFLOW_GUARD
             ? Math.sqrt(re * re + im * im)
             : Math.hypot(re, im);
@@ -2524,7 +2366,7 @@ function writeDomainColorWithContext(data, idx, re, im, context) {
             writeBlack(data, idx);
             return;
         }
-        lightnessBase = magnitudeLightness(Math.log1p(modValue), context.lightnessCycles);
+        lightnessBase = magnitudeLightness(domainDynamicsLogMagnitude(re, im), context.lightnessCycles);
     } else if ((re < 0 ? -re : re) > HYPOT_FAST_OVERFLOW_GUARD ||
         (im < 0 ? -im : im) > HYPOT_FAST_OVERFLOW_GUARD) {
         if (!finite(Math.hypot(re, im))) {
@@ -2573,7 +2415,8 @@ function writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, 
 }
 
 export function writeDomainColor(data, idx, re, im, snapshot) {
-    if (!finite(re) || !finite(im)) {
+    if (!((re < 0 ? -re : re) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+        !((im < 0 ? -im : im) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) {
         writeBlack(data, idx);
         return;
     }
@@ -2586,7 +2429,7 @@ export function writeDomainColor(data, idx, re, im, snapshot) {
 
     const style = styleValues(snapshot);
     const phase = Math.atan2(im, re);
-    const logMod = Math.log1p(modValue);
+    const logMod = domainDynamicsLogMagnitude(re, im);
     const lightnessBase = magnitudeLightness(logMod, style.lightnessCycles);
     const lightness = Math.min(0.95, Math.max(0.05, (0.5 + (lightnessBase - 0.5) * style.contrast) * style.brightness));
     let hue = (phase / TWO_PI) % 1;
@@ -2615,14 +2458,15 @@ function traceOrbitForPoint(snapshot, re, im, accelerator = createDynamicsAccele
         const magSq = next ? next.re * next.re + next.im * next.im : DYNAMICS_ESCAPE_RADIUS_SQ;
         const tooLarge = next && (
             magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-            Math.max(Math.abs(next.re), Math.abs(next.im)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE
+            (next.re < 0 ? -next.re : next.re) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+            (next.im < 0 ? -next.im : next.im) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE
         );
 
         if (!next || tooLarge) {
             return {
                 escaped: true,
                 converged: false,
-                smoothIteration: escapeSmoothIteration(i, count, magSq, next),
+                smoothIteration: escapeSmoothIteration(i, count, next),
                 iteration: i + 1,
                 value: next || lastFinite,
                 count
@@ -2754,19 +2598,12 @@ function renderPolynomialParameterOrbitTile(snapshot, tile, accelerator) {
                 const magSq = nr * nr + ni * ni;
                 const absRe = nr < 0 ? -nr : nr;
                 const absIm = ni < 0 ? -ni : ni;
-                const tooLarge = magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE;
+                const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
 
-                if (nr !== nr || ni !== ni || tooLarge) {
-                    const magnitude = Math.sqrt(Math.max(magSq, DYNAMICS_ESCAPE_RADIUS));
-                    smoothIteration = i + 1;
-                    if (finite(magnitude) && magnitude > 1.0001) {
-                        const smoothAdjust = Math.log(
-                            Math.max(Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS), 1e-6)
-                        ) / Math.LN2;
-                        smoothIteration = Math.max(0, Math.min(count, smoothIteration - smoothAdjust));
-                    }
+                if (tooLarge) {
+                    smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
                     escaped = true;
                     break;
                 }
@@ -2835,14 +2672,17 @@ function renderPolynomialParameterValueTile(snapshot, tile, accelerator) {
                     ni += cCoeffRe * ci + cCoeffIm * cr;
                 }
 
-                if (!finite(nr) || !finite(ni)) break;
+                const absRe = nr < 0 ? -nr : nr;
+                const absIm = ni < 0 ? -ni : ni;
+                if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                    !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
 
                 zr = nr;
                 zi = ni;
                 lastRe = nr;
                 lastIm = ni;
-                if ((nr < 0 ? -nr : nr) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    (ni < 0 ? -ni : ni) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
             }
 
             writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
@@ -2902,19 +2742,12 @@ function renderQuadraticPolynomialParameterOrbitTile(snapshot, tile, accelerator
                 const magSq = nr * nr + ni * ni;
                 const absRe = nr < 0 ? -nr : nr;
                 const absIm = ni < 0 ? -ni : ni;
-                const tooLarge = magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE;
+                const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
 
-                if (nr !== nr || ni !== ni || tooLarge) {
-                    const magnitude = Math.sqrt(Math.max(magSq, DYNAMICS_ESCAPE_RADIUS));
-                    smoothIteration = i + 1;
-                    if (finite(magnitude) && magnitude > 1.0001) {
-                        const smoothAdjust = Math.log(
-                            Math.max(Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS), 1e-6)
-                        ) / Math.LN2;
-                        smoothIteration = Math.max(0, Math.min(count, smoothIteration - smoothAdjust));
-                    }
+                if (tooLarge) {
+                    smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
                     escaped = true;
                     break;
                 }
@@ -2977,14 +2810,17 @@ function renderQuadraticPolynomialParameterValueTile(snapshot, tile, accelerator
                 const z2i = 2 * zr * zi;
                 const nr = a2r * z2r - a2i * z2i + a1r * zr - a1i * zi + a0r + paramRe;
                 const ni = a2r * z2i + a2i * z2r + a1r * zi + a1i * zr + a0i + paramIm;
-                if (!finite(nr) || !finite(ni)) break;
+                const absRe = nr < 0 ? -nr : nr;
+                const absIm = ni < 0 ? -ni : ni;
+                if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                    !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
 
                 zr = nr;
                 zi = ni;
                 lastRe = nr;
                 lastIm = ni;
-                if ((nr < 0 ? -nr : nr) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    (ni < 0 ? -ni : ni) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
             }
 
             writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
@@ -3051,19 +2887,12 @@ function renderQuadraticMonomialParameterOrbitTile(snapshot, tile, accelerator) 
                 const magSq = nr * nr + ni * ni;
                 const absRe = nr < 0 ? -nr : nr;
                 const absIm = ni < 0 ? -ni : ni;
-                const tooLarge = magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE;
+                const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
 
-                if (nr !== nr || ni !== ni || tooLarge) {
-                    const magnitude = Math.sqrt(Math.max(magSq, DYNAMICS_ESCAPE_RADIUS));
-                    smoothIteration = i + 1;
-                    if (finite(magnitude) && magnitude > 1.0001) {
-                        const smoothAdjust = Math.log(
-                            Math.max(Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS), 1e-6)
-                        ) / Math.LN2;
-                        smoothIteration = Math.max(0, Math.min(count, smoothIteration - smoothAdjust));
-                    }
+                if (tooLarge) {
+                    smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
                     escaped = true;
                     break;
                 }
@@ -3121,14 +2950,17 @@ function renderQuadraticMonomialParameterValueTile(snapshot, tile, accelerator) 
                 const z2i = 2 * zr * zi;
                 const nr = ar * z2r - ai * z2i + paramRe;
                 const ni = ar * z2i + ai * z2r + paramIm;
-                if (!finite(nr) || !finite(ni)) break;
+                const absRe = nr < 0 ? -nr : nr;
+                const absIm = ni < 0 ? -ni : ni;
+                if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                    !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
 
                 zr = nr;
                 zi = ni;
                 lastRe = nr;
                 lastIm = ni;
-                if ((nr < 0 ? -nr : nr) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    (ni < 0 ? -ni : ni) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
             }
 
             writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
@@ -3204,19 +3036,12 @@ function renderPositiveMonomialParameterOrbitTile(snapshot, tile, accelerator) {
                 const magSq = nr * nr + ni * ni;
                 const absRe = nr < 0 ? -nr : nr;
                 const absIm = ni < 0 ? -ni : ni;
-                const tooLarge = magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE;
+                const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
 
-                if (nr !== nr || ni !== ni || tooLarge) {
-                    const magnitude = Math.sqrt(Math.max(magSq, DYNAMICS_ESCAPE_RADIUS));
-                    smoothIteration = i + 1;
-                    if (finite(magnitude) && magnitude > 1.0001) {
-                        const smoothAdjust = Math.log(
-                            Math.max(Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS), 1e-6)
-                        ) / Math.LN2;
-                        smoothIteration = Math.max(0, Math.min(count, smoothIteration - smoothAdjust));
-                    }
+                if (tooLarge) {
+                    smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
                     escaped = true;
                     break;
                 }
@@ -3297,14 +3122,17 @@ function renderPositiveMonomialParameterValueTile(snapshot, tile, accelerator) {
 
                 const nr = ar * pr - ai * pi + paramRe;
                 const ni = ar * pi + ai * pr + paramIm;
-                if (!finite(nr) || !finite(ni)) break;
+                const absRe = nr < 0 ? -nr : nr;
+                const absIm = ni < 0 ? -ni : ni;
+                if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                    !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
 
                 zr = nr;
                 zi = ni;
                 lastRe = nr;
                 lastIm = ni;
-                if ((nr < 0 ? -nr : nr) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    (ni < 0 ? -ni : ni) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
             }
 
             writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
@@ -3345,19 +3173,12 @@ function renderLaurentParameterOrbitTile(snapshot, tile, accelerator) {
                 const magSq = nr * nr + ni * ni;
                 const absRe = nr < 0 ? -nr : nr;
                 const absIm = ni < 0 ? -ni : ni;
-                const tooLarge = magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE;
+                const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
 
-                if (nr !== nr || ni !== ni || tooLarge) {
-                    const magnitude = Math.sqrt(Math.max(magSq, DYNAMICS_ESCAPE_RADIUS));
-                    smoothIteration = i + 1;
-                    if (finite(magnitude) && magnitude > 1.0001) {
-                        const smoothAdjust = Math.log(
-                            Math.max(Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS), 1e-6)
-                        ) / Math.LN2;
-                        smoothIteration = Math.max(0, Math.min(count, smoothIteration - smoothAdjust));
-                    }
+                if (tooLarge) {
+                    smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
                     escaped = true;
                     break;
                 }
@@ -3411,14 +3232,17 @@ function renderLaurentParameterValueTile(snapshot, tile, accelerator) {
                 const nr = scratch[0];
                 const ni = scratch[1];
 
-                if (!finite(nr) || !finite(ni)) break;
+                const absRe = nr < 0 ? -nr : nr;
+                const absIm = ni < 0 ? -ni : ni;
+                if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                    !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
 
                 zr = nr;
                 zi = ni;
                 lastRe = nr;
                 lastIm = ni;
-                if ((nr < 0 ? -nr : nr) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    (ni < 0 ? -ni : ni) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
             }
 
             writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
@@ -3646,7 +3470,8 @@ function renderCompiledAlgebraicValueTile(snapshot, tile, accelerator) {
                 evaluateCompiledAlgebraicInto(accelerator, cr, ci, cr, ci, scratch);
                 currentRe = scratch[0];
                 currentIm = scratch[1];
-                if (currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm)) {
+                if ((currentRe < 0 ? -currentRe : currentRe) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE &&
+                    (currentIm < 0 ? -currentIm : currentIm) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) {
                     lastRe = currentRe;
                     lastIm = currentIm;
                 }
@@ -3659,36 +3484,45 @@ function renderCompiledAlgebraicValueTile(snapshot, tile, accelerator) {
                     evaluateCompiledAlgebraicInto(accelerator, currentRe, currentIm, cr, ci, scratch);
                     currentRe = scratch[0];
                     currentIm = scratch[1];
-                    if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
+                    const absRe = currentRe < 0 ? -currentRe : currentRe;
+                    const absIm = currentIm < 0 ? -currentIm : currentIm;
+                    if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                        !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
                     lastRe = currentRe;
                     lastIm = currentIm;
                     if (detectFixedPoint && Object.is(currentRe, previousRe) && Object.is(currentIm, previousIm)) break;
-                    if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                        (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                    if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                        absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
                 }
             } else {
                 evaluateCompiledAlgebraicInto(accelerator, cr, ci, cr, ci, scratch);
                 currentRe = scratch[0];
                 currentIm = scratch[1];
-                if (currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm)) {
+                let absRe = currentRe < 0 ? -currentRe : currentRe;
+                let absIm = currentIm < 0 ? -currentIm : currentIm;
+                if (absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE &&
+                    absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) {
                     lastRe = currentRe;
                     lastIm = currentIm;
                     if (detectFixedPoint && Object.is(currentRe, cr) && Object.is(currentIm, ci)) {
                         writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
                         continue;
                     }
-                    if (!((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                        (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE)) {
+                    if (absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE &&
+                        absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
                         for (let i = 1; i < count; i += 1) {
                             evaluateCompiledAlgebraicInto(accelerator, currentRe, currentIm, cr, ci, scratch);
                             currentRe = scratch[0];
                             currentIm = scratch[1];
-                            if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
+                            absRe = currentRe < 0 ? -currentRe : currentRe;
+                            absIm = currentIm < 0 ? -currentIm : currentIm;
+                            if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                                !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
                             if (detectFixedPoint && Object.is(currentRe, lastRe) && Object.is(currentIm, lastIm)) break;
                             lastRe = currentRe;
                             lastIm = currentIm;
-                            if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                                (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                            if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                                absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
                         }
                     }
                 }
@@ -3736,19 +3570,12 @@ function renderCompiledAlgebraicOrbitTile(snapshot, tile, accelerator) {
                 const magSq = nr * nr + ni * ni;
                 const absRe = nr < 0 ? -nr : nr;
                 const absIm = ni < 0 ? -ni : ni;
-                const tooLarge = magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE;
+                const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
 
-                if (nr !== nr || ni !== ni || tooLarge) {
-                    const magnitude = Math.sqrt(Math.max(magSq, DYNAMICS_ESCAPE_RADIUS));
-                    smoothIteration = i + 1;
-                    if (finite(magnitude) && magnitude > 1.0001) {
-                        const smoothAdjust = Math.log(
-                            Math.max(Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS), 1e-6)
-                        ) / Math.LN2;
-                        smoothIteration = Math.max(0, Math.min(count, smoothIteration - smoothAdjust));
-                    }
+                if (tooLarge) {
+                    smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
                     escaped = true;
                     break;
                 }
@@ -3834,13 +3661,16 @@ function renderDirectPolynomialValueTile(snapshot, tile, accelerator) {
                     nr = tr;
                 }
 
-                if (!(nr === nr && ni === ni && finite(nr) && finite(ni))) break;
+                const absRe = nr < 0 ? -nr : nr;
+                const absIm = ni < 0 ? -ni : ni;
+                if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                    !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
                 zr = nr;
                 zi = ni;
                 lastRe = nr;
                 lastIm = ni;
-                if ((nr < 0 ? -nr : nr) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    (ni < 0 ? -ni : ni) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
             }
 
             writeDomainColorWithContext(data, idx, lastRe, lastIm, colors);
@@ -3896,11 +3726,14 @@ function renderDirectMobiusValueTile(snapshot, tile, accelerator) {
                 divideComponents(nr, ni, denRe, denIm, scratch);
                 zr = scratch[0];
                 zi = scratch[1];
-                if (!(zr === zr && zi === zi && finite(zr) && finite(zi))) break;
+                const absRe = zr < 0 ? -zr : zr;
+                const absIm = zi < 0 ? -zi : zi;
+                if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                    !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
                 lastRe = zr;
                 lastIm = zi;
-                if ((zr < 0 ? -zr : zr) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    (zi < 0 ? -zi : zi) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
             }
             writeDomainColorWithContext(data, idx, lastRe, lastIm, colors);
         }
@@ -4057,7 +3890,8 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
                 evaluateBuiltinComponents(snapshot.functionKey, cr, ci, snapshot, scratch);
                 currentRe = scratch[0];
                 currentIm = scratch[1];
-                if (currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm)) {
+                if ((currentRe < 0 ? -currentRe : currentRe) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE &&
+                    (currentIm < 0 ? -currentIm : currentIm) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) {
                     lastRe = currentRe;
                     lastIm = currentIm;
                 }
@@ -4070,36 +3904,45 @@ function renderBuiltinValueTile(snapshot, tile, accelerator) {
                     evaluateBuiltinComponents(snapshot.functionKey, currentRe, currentIm, snapshot, scratch);
                     currentRe = scratch[0];
                     currentIm = scratch[1];
-                    if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
+                    const absRe = currentRe < 0 ? -currentRe : currentRe;
+                    const absIm = currentIm < 0 ? -currentIm : currentIm;
+                    if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                        !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
                     lastRe = currentRe;
                     lastIm = currentIm;
                     if (detectFixedPoint && Object.is(currentRe, previousRe) && Object.is(currentIm, previousIm)) break;
-                    if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                        (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                    if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                        absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
                 }
             } else {
                 evaluateBuiltinComponents(snapshot.functionKey, cr, ci, snapshot, scratch);
                 currentRe = scratch[0];
                 currentIm = scratch[1];
-                if (currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm)) {
+                let absRe = currentRe < 0 ? -currentRe : currentRe;
+                let absIm = currentIm < 0 ? -currentIm : currentIm;
+                if (absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE &&
+                    absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) {
                     lastRe = currentRe;
                     lastIm = currentIm;
                     if (detectFixedPoint && Object.is(currentRe, cr) && Object.is(currentIm, ci)) {
                         writeDomainColorWithContext(data, (y * tile.width + x) * 4, lastRe, lastIm, colors);
                         continue;
                     }
-                    if (!((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                        (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE)) {
+                    if (absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE &&
+                        absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
                         for (let i = 1; i < count; i += 1) {
                             evaluateBuiltinComponents(snapshot.functionKey, currentRe, currentIm, snapshot, scratch);
                             currentRe = scratch[0];
                             currentIm = scratch[1];
-                            if (!(currentRe === currentRe && currentIm === currentIm && finite(currentRe) && finite(currentIm))) break;
+                            absRe = currentRe < 0 ? -currentRe : currentRe;
+                            absIm = currentIm < 0 ? -currentIm : currentIm;
+                            if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
+                                !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
                             if (detectFixedPoint && Object.is(currentRe, lastRe) && Object.is(currentIm, lastIm)) break;
                             lastRe = currentRe;
                             lastIm = currentIm;
-                            if ((currentRe < 0 ? -currentRe : currentRe) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                                (currentIm < 0 ? -currentIm : currentIm) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                            if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                                absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
                         }
                     }
                 }

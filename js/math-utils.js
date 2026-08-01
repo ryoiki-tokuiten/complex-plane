@@ -1,6 +1,12 @@
 import { state, subscribeState } from './store/state.js';
 import { runtime } from './store/runtime.js';
 import { compileExpression } from './math/expression/evaluator.js';
+import {
+    DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE,
+    DOMAIN_DYNAMICS_EXPONENT_MAX,
+    DOMAIN_DYNAMICS_EXPONENT_MIN,
+    normalizeDomainDynamicsChainCount
+} from './constants/domain-dynamics.js';
 
 let cachesDirty = true;
 const mappedProfileCache = new Map();
@@ -474,8 +480,8 @@ export function complexSec(a, b) {
 }
 
 export function expSafe(x) {
-    if (x > 700) return Math.exp(700);
-    if (x < -745) return 0;
+    if (x > DOMAIN_DYNAMICS_EXPONENT_MAX) return Math.exp(DOMAIN_DYNAMICS_EXPONENT_MAX);
+    if (x < DOMAIN_DYNAMICS_EXPONENT_MIN) return 0;
     return Math.exp(x);
 }
 
@@ -1645,7 +1651,7 @@ export function evaluateAlgebraicChaining(z_re, z_im, context = null) {
             if (typeof result === 'number') {
                 z = { re: result, im: 0 };
             } else if (result && typeof result === 'object' && 're' in result) {
-                z = { re: result.re, im: result.im || 0 };
+                z = { re: result.re, im: result.im };
             } else {
                 return NAN_COMPLEX;
             }
@@ -1705,7 +1711,6 @@ const MAPPED_TRANSFORM_ABS_EPSILON = 1e-5;
 const MAPPED_TRANSFORM_REL_EPSILON = 1e-7;
 const MAPPED_TRANSFORM_MIN_AGREEMENT_RATIO = 0.9;
 const MAPPED_TRANSFORM_MIN_CONSTANT_SAMPLES = 9;
-const DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE = 1e18;
 const MAPPED_TRANSFORM_DIAGNOSTIC_STENCIL = Object.freeze([
     Object.freeze({ re: 0, im: 0 }),
     Object.freeze({ re: 1, im: 0 }),
@@ -1984,7 +1989,7 @@ function validOrNull(value) {
 }
 
 function chainStageIndex(value) {
-    return Math.max(0, Math.floor(Number(value) || 0));
+    return normalizeDomainDynamicsChainCount(Math.floor(Number(value)) + 1) - 1;
 }
 
 function evaluateChainBase(profileOrTransform, value, functionKey, c) {
@@ -2103,7 +2108,8 @@ function evaluateMappedChainStage(profileOrTransform, re, im, functionKey, stage
 }
 
 export function evaluateDomainColoringMappedTransform(profileOrTransform, re, im, functionKey = state.currentFunction) {
-    if (!state.chainingEnabled || (state.chainCount <= 1 && state.chainingMode !== 'zero_seed')) {
+    const chainCount = normalizeDomainDynamicsChainCount(state.chainCount);
+    if (!state.chainingEnabled || (chainCount <= 1 && state.chainingMode !== 'zero_seed')) {
         return evaluateMappedTransform(profileOrTransform, re, im, functionKey, { c: { re, im } });
     }
 
@@ -2112,7 +2118,7 @@ export function evaluateDomainColoringMappedTransform(profileOrTransform, re, im
         re,
         im,
         functionKey,
-        Math.floor(Number(state.chainCount) || 1) - 1,
+        chainCount - 1,
         { returnLastFinite: true }
     );
 }
@@ -2206,11 +2212,11 @@ export function getChainedTransformFunction(funcKey = state.currentFunction) {
     const baseFunc = getEffectiveBaseTransformFunction(funcKey);
 
     let resultFunc;
-    if (!state.chainingEnabled || (state.chainCount <= 1 && state.chainingMode !== 'zero_seed')) {
+    const chainCount = normalizeDomainDynamicsChainCount(state.chainCount);
+    if (!state.chainingEnabled || (chainCount <= 1 && state.chainingMode !== 'zero_seed')) {
         resultFunc = baseFunc;
     } else {
-        const stageIndex = Math.max(0, Math.floor(Number(state.chainCount) || 1) - 1);
-        resultFunc = createChainedTransformForStage(funcKey, stageIndex, baseFunc);
+        resultFunc = createChainedTransformForStage(funcKey, chainCount - 1, baseFunc);
     }
 
     chainedFuncCache.set(funcKey, resultFunc);

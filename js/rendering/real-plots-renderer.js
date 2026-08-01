@@ -19,6 +19,7 @@ const PALETTE_LUT_SIZE = 1024;
 const PALETTE_LUT_MASK = PALETTE_LUT_SIZE - 1;
 const COMPLEX_ZERO_EPSILON = 1e-15;
 const RECIPROCAL_POLE_CAP = POLE_MAGNITUDE_THRESHOLD * 2;
+const HYPOT_FAST_OVERFLOW_GUARD = Math.sqrt(Number.MAX_VALUE / 2);
 
 const INPUT_PRESET = Object.freeze({
     GENERIC: 0,
@@ -160,7 +161,7 @@ function disposeObject(object) {
 }
 
 function canonicalExpression(expression) {
-    return String(expression || 'x')
+    return String(expression ?? '')
         .toLowerCase()
         .replace(/[\s_]+/g, '')
         .replace(/−/g, '-')
@@ -201,7 +202,7 @@ class InputEvaluator {
     static #cache = new Map();
 
     static for(expression) {
-        const key = expression || 'x';
+        const key = expression === undefined || expression === null ? 'x' : String(expression);
         let evaluator = this.#cache.get(key);
         if (!evaluator) {
             evaluator = new InputEvaluator(key);
@@ -211,7 +212,7 @@ class InputEvaluator {
     }
 
     constructor(expression) {
-        this.expression = expression || 'x';
+        this.expression = expression === undefined || expression === null ? 'x' : String(expression);
         this.type = presetType(this.expression);
         this.compiled = this.type === INPUT_PRESET.GENERIC ? getCompiledPreset(this.expression) : null;
         this.scope = {
@@ -248,8 +249,8 @@ class InputEvaluator {
     writeCompiled(x, y, out) {
         const compiled = this.compiled;
         if (!compiled) {
-            out[0] = x;
-            out[1] = 0;
+            out[0] = NaN;
+            out[1] = NaN;
             return;
         }
 
@@ -262,21 +263,42 @@ class InputEvaluator {
         try {
             const result = compiled(scope);
             if (typeof result === 'number') {
-                out[0] = isFiniteNumber(result) ? result : 0;
+                if (!isFiniteNumber(result)) {
+                    out[0] = NaN;
+                    out[1] = NaN;
+                    return;
+                }
+                out[0] = result;
                 out[1] = 0;
             } else if (result && typeof result === 'object') {
                 const re = result.re;
-                const im = result.im || 0;
-                out[0] = isFiniteNumber(re) ? re : 0;
-                out[1] = isFiniteNumber(im) ? im : 0;
+                const im = result.im;
+                if (!isFiniteNumber(re) || !isFiniteNumber(im)) {
+                    out[0] = NaN;
+                    out[1] = NaN;
+                    return;
+                }
+                out[0] = re;
+                out[1] = im;
             } else {
-                out[0] = 0;
-                out[1] = 0;
+                out[0] = NaN;
+                out[1] = NaN;
             }
         } catch {
-            out[0] = 0;
-            out[1] = 0;
+            out[0] = NaN;
+            out[1] = NaN;
         }
+    }
+}
+
+export function validateRealPlotExpression(expression) {
+    const source = String(expression ?? '').trim();
+    if (!source) return 'Expression cannot be empty';
+    try {
+        compileExpression(source, { allowedVariables: ['x', 'y'] });
+        return null;
+    } catch (error) {
+        return error instanceof Error ? error.message : 'Invalid expression';
     }
 }
 
@@ -346,6 +368,7 @@ class SurfaceMeshStore {
         this.topology = topologyFor(segments);
         this.segments = this.topology.segments;
         this.vertexCount = this.topology.vertexCount;
+        this.indices = this.topology.indices;
         this.positions = new Float32Array(this.vertexCount * 3);
         this.normals = new Float32Array(this.vertexCount * 3);
         this.colors = new Float32Array(this.vertexCount * 3);
@@ -386,7 +409,7 @@ class SurfaceMeshStore {
         geometry.setAttribute('normal', normal);
         geometry.setAttribute('color', color);
         geometry.setAttribute('rawValue', rawValue);
-        geometry.setIndex(new THREE.BufferAttribute(this.topology.indices, 1));
+        geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
         return geometry;
     }
 
@@ -460,6 +483,12 @@ class SurfaceMeshStore {
             depthWrite: false,
             wireframe: true
         });
+    }
+
+    setIndices(indices) {
+        if (!indices || indices === this.indices) return;
+        this.indices = indices;
+        this.geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     }
 
     markDirty() {
@@ -567,8 +596,14 @@ function writeReciprocalKernel(re, im, out) {
     const scale = Math.max(absRe, absIm);
 
     if (scale < COMPLEX_ZERO_EPSILON) {
-        out[0] = RECIPROCAL_POLE_CAP;
-        out[1] = 0;
+        const normalizedMagnitude = Math.hypot(re / scale, im / scale);
+        if (!(normalizedMagnitude > 0)) {
+            out[0] = NaN;
+            out[1] = NaN;
+            return out;
+        }
+        out[0] = (re / scale / normalizedMagnitude) * RECIPROCAL_POLE_CAP;
+        out[1] = (-im / scale / normalizedMagnitude) * RECIPROCAL_POLE_CAP;
         return out;
     }
 
@@ -634,8 +669,42 @@ function writeHeightfieldNormals(positions, normals, segments, gridStep) {
 
 function selectRawValue(re, im, outputMode) {
     if (outputMode === OUTPUT_COMPONENT.IMAG) return im;
-    if (outputMode === OUTPUT_COMPONENT.MAGNITUDE) return Math.sqrt(re * re + im * im);
+    if (outputMode === OUTPUT_COMPONENT.MAGNITUDE) {
+        const magnitude = Math.abs(re) <= HYPOT_FAST_OVERFLOW_GUARD && Math.abs(im) <= HYPOT_FAST_OVERFLOW_GUARD
+            ? Math.sqrt(re * re + im * im)
+            : Math.hypot(re, im);
+        return magnitude < Infinity ? magnitude : NaN;
+    }
     return re;
+}
+
+function validSurfaceIndices(topology, values, finiteResultCount) {
+    if (finiteResultCount === topology.vertexCount) return topology.indices;
+
+    const segments = topology.segments;
+    const stride = segments + 1;
+    const IndexArray = topology.indices instanceof Uint32Array ? Uint32Array : Uint16Array;
+    const indices = new IndexArray(topology.indices.length);
+    let write = 0;
+    for (let j = 0; j < segments; j += 1) {
+        const row = j * stride;
+        const next = row + stride;
+        for (let i = 0; i < segments; i += 1) {
+            const a = row + i;
+            const b = a + 1;
+            const c = next + i;
+            const d = c + 1;
+            if (!isFiniteNumber(values[a]) || !isFiniteNumber(values[b]) ||
+                !isFiniteNumber(values[c]) || !isFiniteNumber(values[d])) continue;
+            indices[write++] = a;
+            indices[write++] = c;
+            indices[write++] = b;
+            indices[write++] = b;
+            indices[write++] = c;
+            indices[write++] = d;
+        }
+    }
+    return indices.subarray(0, write);
 }
 
 function finishSampleGeometry({ segments, vertexCount, topology, positions, normals, colors, rawValues, values, phases, minZ, maxZ, usePhaseColor, paletteLut, heightFactor }) {
@@ -645,8 +714,12 @@ function finishSampleGeometry({ segments, vertexCount, topology, positions, norm
         const rawValue = values[index];
         rawValues[index] = rawValue;
         positions[offset] = topology.gridX[index];
-        positions[offset + 1] = softClampHeight(rawValue) * heightFactor;
         positions[offset + 2] = topology.gridZ[index];
+        if (!isFiniteNumber(rawValue)) {
+            positions[offset + 1] = 0;
+            continue;
+        }
+        positions[offset + 1] = softClampHeight(rawValue) * heightFactor;
         writePaletteColor(
             paletteLut,
             usePhaseColor ? phases[index] : (rawValue - minZ) * inverseSpanZ,
@@ -660,7 +733,7 @@ function finishSampleGeometry({ segments, vertexCount, topology, positions, norm
 function sampleValuesPass(transformFunc, config, catchPerVertex) {
     const {
         segments, values, phases, u, v, xMin, yMin, xScale, yScale,
-        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode, invalidValue,
+        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
         usePhaseColor, kernelKind
     } = config;
     let minZ = Infinity;
@@ -669,6 +742,9 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
     let vertex = 0;
     const fastXY = scalarInputs && inputUType === INPUT_PRESET.X && inputVType === INPUT_PRESET.Y;
     const fastX0 = scalarInputs && inputUType === INPUT_PRESET.X && inputVType === INPUT_PRESET.ZERO;
+    const fastInputFinite = (fastXY || fastX0) &&
+        isFiniteNumber(xMin) && isFiniteNumber(yMin) &&
+        isFiniteNumber(xScale) && isFiniteNumber(yScale);
     const hasKernel = kernelKind !== TRANSFORM_KERNEL.CALL;
     const kernelOut = hasKernel ? (config.kernelOut || (config.kernelOut = new Float64Array(2))) : null;
 
@@ -694,9 +770,10 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
                 zInIm = u[1] + v[0];
             }
 
-            let rawValue = invalidValue;
+            let rawValue = NaN;
             let phase = 0.5;
-            if (hasKernel) {
+            const inputValid = fastInputFinite || (isFiniteNumber(zInRe) && isFiniteNumber(zInIm));
+            if (inputValid && hasKernel) {
                 let outRe;
                 let outIm;
                 switch (kernelKind) {
@@ -722,34 +799,40 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
                         outRe = 0; outIm = 0;
                 }
                 if (isFiniteNumber(outRe) && isFiniteNumber(outIm)) {
-                    finiteResultCount += 1;
                     rawValue = selectRawValue(outRe, outIm, outputMode);
-                    if (usePhaseColor) phase = (Math.atan2(outIm, outRe) + Math.PI) * INV_TWO_PI;
+                    if (rawValue === rawValue) {
+                        finiteResultCount += 1;
+                        if (usePhaseColor) phase = (Math.atan2(outIm, outRe) + Math.PI) * INV_TWO_PI;
+                    }
                 }
-            } else if (catchPerVertex) {
+            } else if (inputValid && catchPerVertex) {
                 try {
                     const result = transformFunc(zInRe, zInIm);
                     if (result && isFiniteNumber(result.re) && isFiniteNumber(result.im)) {
-                        finiteResultCount += 1;
                         rawValue = selectRawValue(result.re, result.im, outputMode);
-                        if (usePhaseColor) phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
+                        if (rawValue === rawValue) {
+                            finiteResultCount += 1;
+                            if (usePhaseColor) phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
+                        }
                     }
                 } catch {
-                    rawValue = invalidValue;
+                    rawValue = NaN;
                     phase = 0.5;
                 }
-            } else {
+            } else if (inputValid) {
                 const result = transformFunc(zInRe, zInIm);
                 if (result && isFiniteNumber(result.re) && isFiniteNumber(result.im)) {
-                    finiteResultCount += 1;
                     rawValue = selectRawValue(result.re, result.im, outputMode);
-                    if (usePhaseColor) phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
+                    if (rawValue === rawValue) {
+                        finiteResultCount += 1;
+                        if (usePhaseColor) phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
+                    }
                 }
             }
 
             values[vertex] = rawValue;
             if (phases) phases[vertex] = phase;
-            if (isFiniteNumber(rawValue)) {
+            if (rawValue === rawValue) {
                 if (rawValue < minZ) minZ = rawValue;
                 if (rawValue > maxZ) maxZ = rawValue;
             }
@@ -787,7 +870,6 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
     const inputVType = inputV.type;
     const scalarInputs = isScalarInputType(inputUType) && isScalarInputType(inputVType);
     const outputMode = outputComponentMode(options.outputComponent ?? state.realPlotsOutputComponent);
-    const invalidValue = options.invalidAsNaN === true ? NaN : 0;
     const heightScale = options.heightScale !== undefined
         ? options.heightScale
         : state.realPlotsHeightScale !== undefined ? state.realPlotsHeightScale : 1.0;
@@ -798,7 +880,7 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
 
     const config = {
         segments, values, phases, u, v, xMin, yMin, xScale, yScale,
-        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode, invalidValue,
+        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
         usePhaseColor, kernelKind
     };
 
@@ -823,6 +905,7 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
         };
     }
 
+    const indices = validSurfaceIndices(topology, values, sample.finiteResultCount);
     finishSampleGeometry({
         segments,
         vertexCount,
@@ -849,6 +932,7 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
         values,
         rawValues,
         phases,
+        indices,
         minValue,
         maxValue,
         finiteResultCount: sample.finiteResultCount
@@ -1145,6 +1229,7 @@ class RealPlots3DRenderer {
             u: store.u,
             v: store.v
         });
+        store.setIndices(result.indices);
         store.minValue = result.minValue;
         store.maxValue = result.maxValue;
     }
