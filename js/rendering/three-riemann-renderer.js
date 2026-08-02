@@ -35,6 +35,11 @@ export class ThreeRiemannRenderer {
         this.transformFunction = null;
         this.transformKey = null;
         this.chainCount = 1;
+        this.rasterSurfaceMesh = null;
+        this.rasterSurfaceData = null;
+        this.rasterSurfaceSource = null;
+        this.rasterSurfaceActive = false;
+        this.rasterSurfaceKey = null;
         this.pointerRect = { left: 0, top: 0, width: 1, height: 1 };
         this.pointerRectValid = false;
 
@@ -58,6 +63,7 @@ export class ThreeRiemannRenderer {
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.setClearColor(COLOR_BACKGROUND);
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         
         // Clear old children if any
         this.container.replaceChildren();
@@ -126,6 +132,10 @@ export class ThreeRiemannRenderer {
         this.dynamicOverlayGroup = new THREE.Group();
         this.dynamicOverlayGroup.renderOrder = 20;
         this.scene.add(this.dynamicOverlayGroup);
+
+        this.rasterSurfaceGroup = new THREE.Group();
+        this.rasterSurfaceGroup.visible = false;
+        this.scene.add(this.rasterSurfaceGroup);
 
         this.markersGroup = new THREE.Group();
         this.scene.add(this.markersGroup);
@@ -251,8 +261,134 @@ export class ThreeRiemannRenderer {
         return changed;
     }
 
+    setSphereMode() {
+        const changed = this.rasterSurfaceActive || this.rasterSurfaceGroup.visible;
+        this.rasterSurfaceActive = false;
+        this.rasterSurfaceGroup.visible = false;
+        this.rasterSurfaceKey = null;
+        this.staticGrid.visible = true;
+        this.ghostSphere.visible = true;
+        this.wireframeSphere.visible = true;
+        this.northPole.visible = true;
+        this.linesGroup.visible = true;
+        this.dynamicOverlayGroup.visible = true;
+        this.markersGroup.visible = Boolean(this.probePoint);
+        if (this.dragPlane) this.dragPlane.visible = true;
+        if (changed) {
+            this.controls.target.set(0, SPHERE_RADIUS * 0.5, 0);
+            this.controls.update();
+            this.renderDirty = true;
+        }
+        return changed;
+    }
+
+    setRasterSurface(data, source, opacity = 1) {
+        if (!data?.indices?.length || !source) return false;
+
+        const modeChanged = !this.rasterSurfaceActive;
+        this.rasterSurfaceActive = true;
+        this.rasterSurfaceGroup.visible = true;
+        this.ghostSphere.visible = false;
+        this.wireframeSphere.visible = false;
+        this.northPole.visible = false;
+        this.linesGroup.visible = false;
+        this.dynamicOverlayGroup.visible = false;
+        this.markersGroup.visible = false;
+        if (this.dragPlane) this.dragPlane.visible = false;
+        if (modeChanged) {
+            this.controls.target.set(0, 0, 0);
+            this.controls.update();
+        }
+
+        if (!this.rasterSurfaceMesh) {
+            this.rasterSurfaceMesh = new THREE.Mesh(
+                new THREE.BufferGeometry(),
+                new THREE.MeshBasicMaterial({
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    alphaTest: 0.05,
+                    depthWrite: true,
+                    fog: false
+                })
+            );
+            this.rasterSurfaceGroup.add(this.rasterSurfaceMesh);
+        }
+
+        if (this.rasterSurfaceData !== data) {
+            const { bounds, sourceCenter, sourceSize, vertices, mappedPositions, indices } = data;
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            for (let i = 0; i < mappedPositions.length; i += 2) {
+                const x = bounds.x0 + (mappedPositions[i] + 1) * bounds.xSpan * 0.5;
+                const y = bounds.y0 + (mappedPositions[i + 1] + 1) * bounds.ySpan * 0.5;
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
+            }
+
+            const outputSpan = Math.max(maxX - minX, maxY - minY, sourceSize.width, 1e-6);
+            const scale = (2 * SPHERE_RADIUS) / outputSpan;
+            const centerX = (minX + maxX) * 0.5;
+            const centerY = (minY + maxY) * 0.5;
+            const positions = new Float32Array(vertices.length / 2 * 3);
+            const uvs = new Float32Array(vertices.length);
+
+            for (let i = 0; i < vertices.length; i += 2) {
+                const vertexIndex = (i / 2) * 3;
+                const mappedX = bounds.x0 + (mappedPositions[i] + 1) * bounds.xSpan * 0.5;
+                const mappedY = bounds.y0 + (mappedPositions[i + 1] + 1) * bounds.ySpan * 0.5;
+                const sourceRe = sourceCenter.re + (vertices[i] * 2 - 1) * sourceSize.width * 0.5;
+                positions[vertexIndex] = (mappedX - centerX) * scale;
+                positions[vertexIndex + 1] = (sourceRe - sourceCenter.re) * scale;
+                positions[vertexIndex + 2] = (mappedY - centerY) * scale;
+                uvs[i] = vertices[i];
+                uvs[i + 1] = 1 - vertices[i + 1];
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+            geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+            geometry.computeBoundingSphere();
+            this.rasterSurfaceMesh.geometry.dispose();
+            this.rasterSurfaceMesh.geometry = geometry;
+            this.rasterSurfaceData = data;
+        }
+
+        const material = this.rasterSurfaceMesh.material;
+        if (this.rasterSurfaceSource !== source) {
+            material.map?.dispose();
+            const isVideo = typeof HTMLVideoElement !== 'undefined' && source instanceof HTMLVideoElement;
+            const texture = isVideo ? new THREE.VideoTexture(source) : new THREE.Texture(source);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.flipY = true;
+            texture.wrapS = THREE.ClampToEdgeWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            texture.generateMipmaps = false;
+            texture.needsUpdate = true;
+            material.map = texture;
+            this.rasterSurfaceSource = source;
+            material.needsUpdate = true;
+        }
+
+        const nextOpacity = Math.max(0, Math.min(1, Number(opacity) || 0));
+        if (material.opacity !== nextOpacity) {
+            material.opacity = nextOpacity;
+            material.needsUpdate = true;
+        }
+        this.renderDirty = true;
+        return true;
+    }
+
     buildGridFromPointSets(pointSets, progressOverride = undefined) {
         this.resize();
+        this.setSphereMode();
 
         // Clear lines
         while(this.linesGroup.children.length > 0) {
@@ -611,6 +747,7 @@ export class ThreeRiemannRenderer {
         this.scene.traverse((object) => {
             if (object.geometry) object.geometry.dispose();
             if (object.material) {
+                if (object.material.map) object.material.map.dispose();
                 if (Array.isArray(object.material)) {
                     object.material.forEach(mat => mat.dispose());
                 } else {

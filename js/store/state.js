@@ -87,6 +87,7 @@ const rawState = {
     imageOpacity: 1.0,
     imageAspectRatio: 1.0,
     imageContentVersion: 0,
+    rasterSurface3dEnabled: false,
 
     videoProcessingFps: 60,
     videoSize: 2.0,

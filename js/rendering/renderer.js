@@ -20,6 +20,14 @@ import {
     drawPlanarTransformedShapeHybrid,
     drawPlanarInputShapeHybrid
 } from './webgl-planar.js';
+import { buildRasterSurfaceMesh } from './draw-image-webgl.js';
+import {
+    getRasterSourceForShape,
+    getRasterSizeForShape,
+    getRasterAspectRatioForShape,
+    getRasterOpacityForShape,
+    isRasterInputShape
+} from '../utils/raster-media.js';
 import { drawWindingVisualization, drawTimeDomainSignal } from './draw-fourier-winding.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
 import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
@@ -1172,6 +1180,8 @@ function renderThreeWPlane(map, stageIndex) {
         wStaticThreeRenderers.set(container, threeRenderer);
     }
 
+    threeRenderer.setSphereMode();
+
     const stage = state.chainingEnabled && state.chainCount > 25
         ? Math.max(0, state.chainCount - 1)
         : stageIndex;
@@ -1219,6 +1229,62 @@ function renderThreeWPlane(map, stageIndex) {
     if (transformChanged || geometryChanged || overlayChanged || probeChanged) {
         threeRenderer.render();
     }
+}
+
+function renderThreeWRasterSurface(map, stageIndex) {
+    const container = controls.wPlaneThreeContainer;
+    const rasterShape = state.currentInputShape;
+    const source = getRasterSourceForShape(rasterShape);
+
+    if (!container || !source) {
+        showCanvas(wCanvas);
+        hideThreeContainer();
+        return;
+    }
+
+    hideCanvas(wCanvas);
+    showThreeContainer();
+    setThreeContainerSize();
+
+    let threeRenderer = wStaticThreeRenderers.get(container);
+    if (!threeRenderer) {
+        threeRenderer = new ThreeRiemannRenderer(container, 'w');
+        wStaticThreeRenderers.set(container, threeRenderer);
+    }
+
+    const xRange = wPlaneParams.currentVisXRange || wPlaneParams.xRange;
+    const yRange = wPlaneParams.currentVisYRange || wPlaneParams.yRange;
+    const rasterSize = getRasterSizeForShape(rasterShape);
+    const rasterAspectRatio = getRasterAspectRatioForShape(rasterShape);
+    const rasterContentVersion = rasterShape === 'image' ? state.imageContentVersion : 0;
+    const surfaceKey = [
+        stageIndex,
+        map?.signature || '',
+        rasterShape,
+        rasterContentVersion,
+        state.a0,
+        state.b0,
+        rasterSize,
+        rasterAspectRatio,
+        xRange[0], xRange[1], yRange[0], yRange[1]
+    ].join('|');
+
+    let surface = threeRenderer.rasterSurfaceKey === surfaceKey
+        ? threeRenderer.rasterSurfaceData
+        : null;
+    if (!surface) {
+        surface = buildRasterSurfaceMesh(wPlaneParams, map);
+        if (surface) threeRenderer.rasterSurfaceKey = surfaceKey;
+    }
+
+    if (!threeRenderer.setRasterSurface(surface, source, getRasterOpacityForShape(rasterShape))) {
+        threeRenderer.rasterSurfaceKey = null;
+        showCanvas(wCanvas);
+        hideThreeContainer();
+        return;
+    }
+
+    threeRenderer.render();
 }
 
 function shouldDrawWReferenceGrid() {
@@ -1404,6 +1470,11 @@ function renderNormalWPlane(index, map, options) {
     if (state.riemannTransformationEnabled) {
         hideCanvas(wCanvas);
         hideThreeContainer();
+        return;
+    }
+
+    if (state.rasterSurface3dEnabled && isRasterInputShape(state.currentInputShape)) {
+        renderThreeWRasterSurface(map, index);
         return;
     }
 

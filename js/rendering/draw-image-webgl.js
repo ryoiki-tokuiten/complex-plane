@@ -1182,6 +1182,31 @@ export function buildAdaptiveImageMesh({
     };
 }
 
+export function buildRasterSurfaceMesh(planeParams, map = null) {
+    const snapshot = readRenderState();
+    const media = getRasterDisplayDimensions(snapshot.currentInputShape);
+    const bounds = { ...getViewBounds(planeParams) };
+    if (!hasUsableBounds(bounds) || media.width <= 0 || media.height <= 0) return null;
+
+    const transform = getForwardTransform(true, map);
+    const mesh = buildAdaptiveImageMesh({
+        bounds,
+        pixelWidth: planeParams.width,
+        pixelHeight: planeParams.height,
+        sample: (u, v) => transform(
+            snapshot.a0 + (u * 2 - 1) * media.width * 0.5,
+            snapshot.b0 - (v * 2 - 1) * media.height * 0.5
+        )
+    });
+
+    return {
+        ...mesh,
+        bounds,
+        sourceCenter: { re: snapshot.a0, im: snapshot.b0 },
+        sourceSize: media
+    };
+}
+
 function getMeshKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight) {
     const bounds = getViewBounds(planeParams);
     const media = getRasterDisplayDimensions(currentShape);

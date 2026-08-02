@@ -2,7 +2,7 @@ import { state, context, subscribeState, zPlaneParams, wPlaneParams, wPlaneIniti
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
-import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, processUploadedVideoFrame } from '../utils/raster-media.js';
+import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, processUploadedVideoFrame, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
 import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
@@ -831,6 +831,7 @@ function bindImageControls() {
 
     bindSlider('imageSizeSlider', 'imageSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('imageOpacitySlider', 'imageOpacity', parseFloat, () => requestDomainRedraw(true));
+    bindRasterSurfaceControl('imageSurface3dCb');
 }
 
 function bindVideoControls() {
@@ -848,6 +849,7 @@ function bindVideoControls() {
     });
     bindSlider('videoSizeSlider', 'videoSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('videoOpacitySlider', 'videoOpacity', parseFloat, () => requestDomainRedraw(true));
+    bindRasterSurfaceControl('videoSurface3dCb');
 }
 
 function syncPalette(selectors) {
@@ -990,6 +992,44 @@ function disableRiemannSurface() {
     hidden(controls.riemannSurfaceOptionsDiv, true);
 }
 
+function syncRasterSurfaceControls() {
+    checked('imageSurface3dCb', state.rasterSurface3dEnabled);
+    checked('videoSurface3dCb', state.rasterSurface3dEnabled);
+}
+
+function enableRasterSurface3d() {
+    disableRiemannSurface();
+    Object.assign(state, {
+        riemannSphereViewEnabled: false,
+        riemannTransformationEnabled: false,
+        splitViewEnabled: false,
+        threeSphereEnabled: false
+    });
+    [
+        'enableRiemannSphereCb',
+        'enableRiemannTransformationCb',
+        'enableSplitViewCb',
+        'enableThreeSphereCb'
+    ].forEach(key => checked(key, false));
+    hidden(controls.riemannSphereOptionsDiv, true);
+    hidden(controls.threeSphereOptionsDiv, true);
+    call(syncRiemannTransformationUI);
+    call(updateChainingTitles);
+}
+
+function bindRasterSurfaceControl(controlKey) {
+    bindCheckbox(controlKey, 'rasterSurface3dEnabled', () => {
+        if (state.rasterSurface3dEnabled) enableRasterSurface3d();
+        syncRasterSurfaceControls();
+        requestDomainRedraw(true);
+    });
+}
+
+function disableRasterSurface3d() {
+    state.rasterSurface3dEnabled = false;
+    syncRasterSurfaceControls();
+}
+
 function bindViewControls() {
     bindCheckbox('enableSplitViewCb', 'splitViewEnabled', () => {
         if (state.splitViewEnabled) {
@@ -1014,6 +1054,7 @@ function bindViewControls() {
 
     bindCheckbox('enableRiemannSphereCb', 'riemannSphereViewEnabled', () => {
         if (state.riemannSphereViewEnabled) {
+            disableRasterSurface3d();
             if (state.riemannSurfaceEnabled) disableRiemannSurface();
 
             if (state.domainColoringEnabled) {
@@ -1047,6 +1088,7 @@ function bindViewControls() {
 
     bindCheckbox('enableThreeSphereCb', 'threeSphereEnabled', () => {
         if (state.threeSphereEnabled) {
+            disableRasterSurface3d();
             if (state.riemannTransformationEnabled) {
                 state.riemannTransformationEnabled = false;
                 checked('enableRiemannTransformationCb', false);
@@ -1060,6 +1102,7 @@ function bindViewControls() {
 
     bindCheckbox('enableRiemannTransformationCb', 'riemannTransformationEnabled', () => {
         if (state.riemannTransformationEnabled) {
+            disableRasterSurface3d();
             if (!state.riemannSphereViewEnabled) {
                 state.riemannSphereViewEnabled = true;
                 checked('enableRiemannSphereCb', true);
@@ -1091,6 +1134,7 @@ function bindViewControls() {
 
     bindCheckbox('enableRiemannSurfaceCb', 'riemannSurfaceEnabled', () => {
         if (state.riemannSurfaceEnabled) {
+            disableRasterSurface3d();
             disableRealPlots();
             Object.assign(state, { riemannSphereViewEnabled: false, riemannTransformationEnabled: false, splitViewEnabled: false, threeSphereEnabled: false });
             ['enableRiemannSphereCb', 'enableRiemannTransformationCb', 'enableSplitViewCb', 'enableThreeSphereCb'].forEach(key => checked(key, false));
@@ -1987,7 +2031,11 @@ function fullscreenTarget(planeType, index = 0) {
     const card = index === 0 ? controls.wCanvasCard : document.getElementById(`w_plane_column_${index}`);
     const threeContainer = (context.wPlaneThreeContainersList && context.wPlaneThreeContainersList[index]) || controls.wPlaneThreeContainer;
     const surface = state.riemannSurfaceEnabled ? getRiemannSurfaceCanvas(canvas) : null;
-    const isThree = state.threeSphereEnabled && state.riemannSphereViewEnabled && threeContainer;
+    const isThree = threeContainer && (
+        (state.threeSphereEnabled && state.riemannSphereViewEnabled) ||
+        (state.rasterSurface3dEnabled && isRasterInputShape(state.currentInputShape)
+            && getRasterSourceForShape(state.currentInputShape))
+    );
 
     let element = surface || (isThree ? threeContainer : canvas);
     if (!surface && !isThree) {
