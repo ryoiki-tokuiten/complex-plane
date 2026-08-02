@@ -275,15 +275,6 @@ class WorkerCpuDomainDynamicsBackend {
         }
     }
 
-    dispose() {
-        this.cancel();
-        this.workers.forEach(entry => {
-            entry.worker.postMessage({ type: 'dispose' });
-            entry.worker.terminate();
-        });
-        this.workers = [];
-    }
-
     ensureWorkers() {
         if (!canUseWorker() || this.failed || this.workers.length) return;
         try {
@@ -666,17 +657,6 @@ export function cancelPlanarDomainDynamics() {
         pendingJobTimeout = null;
     }
     if (activeBackend) activeBackend.cancel(activeJobId);
-    activeSignature = null;
-    activeJobId = 0;
-}
-
-export function disposePlanarDomainDynamics() {
-    if (pendingJobTimeout) {
-        clearTimeout(pendingJobTimeout);
-        pendingJobTimeout = null;
-    }
-    workerBackend.dispose();
-    activeBackend = null;
     activeSignature = null;
     activeJobId = 0;
 }

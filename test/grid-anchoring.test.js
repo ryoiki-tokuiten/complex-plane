@@ -6,7 +6,7 @@ import {
     generatePolarGridPointSets,
     generateLogPolarGridPointSets,
     generateLogCartesianGridPointSets,
-    generateCurrentMappedInputShapePointSets
+    generateCurrentInputShapePointSets
 } from '../js/rendering/shape-generators.js';
 import { state } from '../js/store/state.js';
 import { drawAxes, drawGrid } from '../js/rendering/canvas-primitives.js';
@@ -194,7 +194,7 @@ test('Zeta continuation Cartesian grid is not split at the continuation boundary
         currentVisYRange: [-1, 1]
     };
 
-    const pointSets = generateCurrentMappedInputShapePointSets(planeParams, {
+    const pointSets = generateCurrentInputShapePointSets(planeParams, {
         currentInputShape: 'grid_cartesian',
         currentFunction: 'zeta',
         zetaContinuationEnabled: true,

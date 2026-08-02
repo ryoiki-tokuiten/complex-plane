@@ -12,7 +12,6 @@ export {
     asBoolean,
     asComplex,
     compileExpression,
-    evaluateExpression,
     finiteComplex,
     isPrimeInteger
 } from './evaluator.js';

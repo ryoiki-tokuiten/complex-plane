@@ -308,12 +308,6 @@ function powRawInto(baseRe, baseIm, expRe, expIm, out, offset = 0) {
     return expRawInto(expRe * lnRe - expIm * lnIm, expRe * lnIm + expIm * lnRe, out, offset);
 }
 
-function positiveRealPowComponents(logBase, expRe, expIm) {
-    const magnitude = expSafe(expRe * logBase);
-    const angle = expIm * logBase;
-    return { re: magnitude * Math.cos(angle), im: magnitude * Math.sin(angle) };
-}
-
 function zetaEtaDenominator(a, b) {
     const magnitude = expSafe((1 - a) * LN_2);
     const angle = -b * LN_2;
@@ -380,14 +374,6 @@ function invalidateHotPathCaches() {
     algebraicKernel = null;
 }
 
-export function withMaxMag(res) {
-    return res;
-}
-
-export function isNumericallyStable() {
-    return true;
-}
-
 export function complexAdd(z1, z2) {
     const z1Obj = z1 !== null && typeof z1 === 'object';
     const z2Obj = z2 !== null && typeof z2 === 'object';
@@ -418,10 +404,6 @@ export function complexMul(z1, z2) {
     return { re: aRe * bRe - aIm * bIm, im: aRe * bIm + aIm * bRe };
 }
 
-export function complexScalarMul(s, z) {
-    return { re: s * argRe(z), im: s * argIm(z) };
-}
-
 export function complexDivide(num, den) {
     const nObj = num !== null && typeof num === 'object';
     const dObj = den !== null && typeof den === 'object';
@@ -441,8 +423,8 @@ export function complexArg(z) {
     return Math.atan2(argIm(z), argRe(z));
 }
 
-export function _cosh(x) { return Math.cosh(x); }
-export function _sinh(x) { return Math.sinh(x); }
+function _cosh(x) { return Math.cosh(x); }
+function _sinh(x) { return Math.sinh(x); }
 
 export function complexCos(a, b) {
     const obj = isObject(a);
@@ -574,27 +556,26 @@ export function C(re, im) {
     const obj = {
         re: value.re,
         im: value.im,
-        _maxMag: input?._maxMag ?? Math.hypot(value.re, value.im),
         get real() { return this.re; },
         get imag() { return this.im; },
         add(other) {
             const result = complexAdd(this, other);
-            return withMaxMag(C(result), this, other);
+            return C(result);
         },
         subtract(other) {
             const result = complexSub(this, other);
-            return withMaxMag(C(result), this, other);
+            return C(result);
         },
         multiply(other) {
             const result = complexMul(this, other);
-            return withMaxMag(C(result), this, other);
+            return C(result);
         },
         divide(other) {
             const o = toComplex(other);
             const magSq = o.re * o.re + o.im * o.im;
             if (magSq < COMPLEX_ZERO_MAG_SQ) return C(NaN, NaN);
             const result = complexDivide(this, o);
-            return withMaxMag(C(result), this, other);
+            return C(result);
         },
         abs() {
             return Math.hypot(this.re, this.im);
@@ -603,9 +584,7 @@ export function C(re, im) {
             return Math.atan2(this.im, this.re);
         },
         clone() {
-            const result = C(this.re, this.im);
-            result._maxMag = this._maxMag;
-            return result;
+            return C(this.re, this.im);
         },
         equals(other, tolerance) {
             const tol = tolerance ?? 1e-12;
@@ -616,14 +595,10 @@ export function C(re, im) {
             return finite(this.re) && finite(this.im);
         },
         conjugate() {
-            const result = C(this.re, -this.im);
-            result._maxMag = this._maxMag;
-            return result;
+            return C(this.re, -this.im);
         },
         negate() {
-            const result = C(-this.re, -this.im);
-            result._maxMag = this._maxMag;
-            return result;
+            return C(-this.re, -this.im);
         }
     };
     return obj;
@@ -659,10 +634,6 @@ export function ensureZetaLogIntegerCache(maxN) {
     for (let n = zetaLogIntegerCache.length; n <= target; n++) {
         zetaLogIntegerCache[n] = Math.log(n);
     }
-}
-
-export function complexPositiveRealPowFromLog(logBase, expRe, expIm) {
-    return positiveRealPowComponents(logBase, expRe, expIm);
 }
 
 export function getZetaEvalCacheKey(a, b, continuationEnabled) {
@@ -785,22 +756,6 @@ export function complexRiemannZeta_EtaSeries(a, b, numTerms) {
     return divideRaw(etaRe, etaIm, denominator.re, denominator.im);
 }
 
-const zetaHasseBinomialRowsCache = {};
-
-export function getZetaHasseBinomialRows(maxLevel) {
-    if (zetaHasseBinomialRowsCache[maxLevel]) return zetaHasseBinomialRowsCache[maxLevel];
-
-    const rows = Array.from({ length: maxLevel }, (_, n) => {
-        const row = new Array(n + 1);
-        row[0] = 1;
-        for (let k = 1; k <= n; k++) row[k] = row[k - 1] * (n - k + 1) / k;
-        return row;
-    });
-
-    zetaHasseBinomialRowsCache[maxLevel] = rows;
-    return rows;
-}
-
 const zetaHasseCombinedCoefficientsCache = new Map();
 
 function getZetaHasseCombinedCoefficients(maxLevel) {
@@ -836,8 +791,6 @@ export function complexRiemannZeta_HasseSeries(a, b, numLevels) {
 
     let sumRe = 0;
     let sumIm = 0;
-    let maxTermMag = 0;
-
     for (let n = 1; n <= numLevels; n++) {
         const coeff = coeffs[n];
         const logN = zetaLogIntegerCache[n];
@@ -847,10 +800,9 @@ export function complexRiemannZeta_HasseSeries(a, b, numLevels) {
         const termIm = magnitude * Math.sin(angle);
         sumRe += coeff * termRe;
         sumIm += coeff * termIm;
-        maxTermMag = Math.max(maxTermMag, Math.abs(coeff) * Math.hypot(termRe, termIm));
     }
 
-    return withMaxMag(divideRaw(sumRe, sumIm, denominator.re, denominator.im), maxTermMag, denominator);
+    return divideRaw(sumRe, sumIm, denominator.re, denominator.im);
 }
 
 export function complexRiemannZeta(a, b) {
@@ -1804,8 +1756,7 @@ export function isValidMappedTransformValue(value) {
         typeof value.re === 'number' &&
         typeof value.im === 'number' &&
         finite(value.re) &&
-        finite(value.im) &&
-        isNumericallyStable(value)
+        finite(value.im)
     );
 }
 

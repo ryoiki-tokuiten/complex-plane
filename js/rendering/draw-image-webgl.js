@@ -3,7 +3,6 @@ import {
     createWebGLProgramShared,
     getWebGLDomainColorFunctionIdShared,
     GLSL_COMPLEX_INVERSE_LIBRARY,
-    setComplexFunctionUniformsShared,
     getGLSLComplexMathLibrary,
     collectAlgebraicUniformLocationsShared,
     getAlgebraicStructureSignatureShared
@@ -53,23 +52,12 @@ const CHAIN_MODE = Object.freeze({
     zero_seed: 2
 });
 
-const VECTOR_MODE = Object.freeze({
-    'f(z)': 0,
-    '1/f(z)': 1
-});
-
 const webglImageSupport = {
     available: false,
     reason: 'not-initialized',
     renderer: null,
-    lastAlgHash: '',
-    lastVFAlgHash: ''
+    lastAlgHash: ''
 };
-
-let _vfProgram = null;
-let _vfLocs = null;
-let _vfShaderHash = '';
-let _vfGl = null;
 
 const glsl = (...lines) => lines.join('\n');
 
@@ -110,10 +98,6 @@ const RENDER_SNAPSHOT = {
     navigationModeEnabled: false,
     zetaContinuationEnabled: false,
     gridDensity: 10,
-    vectorFieldScale: 1,
-    vectorArrowThickness: 1.5,
-    vectorArrowHeadSize: 8,
-    vectorFieldFunction: null,
     domainBrightness: 1
 };
 
@@ -194,10 +178,6 @@ function readRenderState() {
     snapshot.zetaContinuationEnabled = Boolean(state.zetaContinuationEnabled);
 
     snapshot.gridDensity = finiteOr(state.gridDensity, 10);
-    snapshot.vectorFieldScale = finiteOr(state.vectorFieldScale, 1);
-    snapshot.vectorArrowThickness = finiteOr(state.vectorArrowThickness, 1.5);
-    snapshot.vectorArrowHeadSize = finiteOr(state.vectorArrowHeadSize, 8);
-    snapshot.vectorFieldFunction = state.vectorFieldFunction;
     snapshot.domainBrightness = finiteOr(state.domainBrightness, 1);
 
     return snapshot;
@@ -210,13 +190,6 @@ function getAlgebraicHash(snapshot) {
 function markSupportUnavailable(reason) {
     webglImageSupport.available = false;
     webglImageSupport.reason = reason;
-}
-
-function clearVectorProgramState() {
-    _vfProgram = null;
-    _vfLocs = null;
-    _vfShaderHash = '';
-    _vfGl = null;
 }
 
 function deleteImagePrograms(gl, programs) {
@@ -276,16 +249,6 @@ function invalidateImageRendererForDynamicAlgebra(snapshot) {
     if (!webglImageSupport.renderer) webglImageSupport.lastAlgHash = hash;
 
     markSupportUnavailable('algebraic_shader_recompile_failed');
-}
-
-function invalidateVectorProgramForDynamicAlgebra(snapshot) {
-    if (snapshot.currentFunction !== 'algebraic_chaining') return;
-
-    const hash = getAlgebraicHash(snapshot);
-    if (webglImageSupport.lastVFAlgHash === hash) return;
-
-    webglImageSupport.lastVFAlgHash = hash;
-    clearVectorProgramState();
 }
 
 function createRenderCanvas() {
@@ -420,7 +383,6 @@ function attachContextLifecycle(renderer) {
 
         markSupportUnavailable('context_lost');
         renderer.contextLost = true;
-        clearVectorProgramState();
     };
 
     renderer.onContextRestored = () => {
@@ -475,11 +437,6 @@ function clearTransparent(gl) {
 function enablePremultipliedAlphaBlend(gl) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-}
-
-function enableStraightAlphaBlend(gl) {
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 }
 
 function bindTextureUnit0(gl, texture) {
@@ -1582,221 +1539,6 @@ function getDrawableRasterSource(snapshot) {
     return { currentShape, source };
 }
 
-function createVectorVertexShader() {
-    return 'attribute vec2 a_position;varying vec2 v_uv;void main(){v_uv=(a_position+1.0)*0.5;gl_Position=vec4(a_position,0.0,1.0);}';
-}
-
-function createVectorFragmentShader(snapshot) {
-    return glsl(
-        '#ifdef GL_FRAGMENT_PRECISION_HIGH',
-        'precision highp float;',
-        '#else',
-        'precision mediump float;',
-        '#endif',
-        'varying vec2 v_uv;',
-        'uniform vec4 u_viewBounds;',
-        'uniform float u_density;',
-        'uniform float u_arrowScale;',
-        'uniform float u_thickness;',
-        'uniform float u_headSize;',
-        'uniform float u_vectorMode;',
-        'uniform float u_functionId;',
-        'uniform vec2 u_mobiusA, u_mobiusB, u_mobiusC, u_mobiusD;',
-        'uniform int u_polyDegree;',
-        'uniform vec2 u_polyCoeffs[11];',
-        'uniform float u_zetaContinuationEnabled;',
-        'uniform float u_zetaReflectionBoundary;',
-        'uniform float u_fracPower;',
-        'uniform float u_brightness;',
-        '',
-        getGLSLComplexMathLibrary(snapshot),
-        '',
-        'vec3 hsl2rgb(float h, float s, float l) {',
-        '  float c = (1.0 - abs(2.0 * l - 1.0)) * s;',
-        '  float x = c * (1.0 - abs(mod(h * 6.0, 2.0) - 1.0));',
-        '  float m = l - c * 0.5;',
-        '  vec3 r;',
-        '  float hh = h * 6.0;',
-        '  if (hh < 1.0) r = vec3(c, x, 0);',
-        '  else if (hh < 2.0) r = vec3(x, c, 0);',
-        '  else if (hh < 3.0) r = vec3(0, c, x);',
-        '  else if (hh < 4.0) r = vec3(0, x, c);',
-        '  else if (hh < 5.0) r = vec3(x, 0, c);',
-        '  else r = vec3(c, 0, x);',
-        '  return r + m;',
-        '}',
-        '',
-        'float sdfSeg(vec2 p, vec2 a, vec2 b) {',
-        '  vec2 ab = b - a;',
-        '  vec2 ap = p - a;',
-        '  float t = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);',
-        '  return length(ap - ab * t);',
-        '}',
-        '',
-        'bool inTri(vec2 p, vec2 a, vec2 b, vec2 c) {',
-        '  float d1 = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);',
-        '  float d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y);',
-        '  float d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y);',
-        '  return (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0);',
-        '}',
-        '',
-        'bool evaluateVector(vec2 cc, out vec2 fz) {',
-        '  bool ok = evaluateMappedValueBase(',
-        '    cc,',
-        '    cc,',
-        '    0.0,',
-        '    u_functionId,',
-        '    u_mobiusA,',
-        '    u_mobiusB,',
-        '    u_mobiusC,',
-        '    u_mobiusD,',
-        '    u_polyDegree,',
-        '    u_polyCoeffs,',
-        '    u_zetaContinuationEnabled,',
-        '    u_zetaReflectionBoundary,',
-        '    u_fracPower,',
-        '    fz',
-        '  );',
-        '',
-        '  if (!ok) return false;',
-        '',
-        '  if (u_vectorMode > 0.5 && u_vectorMode < 1.5) {',
-        '    float m2 = dot(fz, fz);',
-        '    if (m2 < 1e-12) return false;',
-        '    fz = vec2(fz.x / m2, -fz.y / m2);',
-        '  }',
-        '',
-        '  return true;',
-        '}',
-        '',
-        'void main() {',
-        '  vec2 w = vec2(',
-        '    mix(u_viewBounds.x, u_viewBounds.y, v_uv.x),',
-        '    mix(u_viewBounds.w, u_viewBounds.z, 1.0 - v_uv.y)',
-        '  );',
-        '',
-        '  float cellW = (u_viewBounds.y - u_viewBounds.x) / u_density;',
-        '  float cellH = (u_viewBounds.w - u_viewBounds.z) / u_density;',
-        '  float cell = min(cellW, cellH);',
-        '  vec2 cc = vec2(floor(w.x / cellW + 0.5) * cellW, floor(w.y / cellH + 0.5) * cellH);',
-        '',
-        '  vec2 fz;',
-        '  if (!evaluateVector(cc, fz)) discard;',
-        '',
-        '  float mag = length(fz);',
-        '  if (mag < 1e-9) discard;',
-        '',
-        '  vec2 dir = fz / mag;',
-        '  vec2 canvasDir = normalize(vec2(dir.x, -dir.y));',
-        '  vec2 canvasPerp = vec2(-canvasDir.y, canvasDir.x);',
-        '  vec2 planeDir = vec2(canvasDir.x, -canvasDir.y);',
-        '  vec2 planePerp = vec2(canvasPerp.x, -canvasPerp.y);',
-        '  float aLen = cell * 0.38 * u_arrowScale;',
-        '  float aW = cell * u_thickness * 0.015;',
-        '  float hSz = cell * u_headSize * 0.04;',
-        '  vec2 tip = cc + planeDir * aLen;',
-        '',
-        '  float dShaft = sdfSeg(w, cc, tip - planeDir * hSz * 1.5);',
-        '  bool onHead = inTri(w, tip, tip - planeDir * hSz * 2.5 + planePerp * hSz, tip - planeDir * hSz * 2.5 - planePerp * hSz);',
-        '  if (dShaft > aW && !onHead) discard;',
-        '',
-        '  float phase = atan(fz.y, fz.x) / (2.0 * PI);',
-        '  if (phase < 0.0) phase += 1.0;',
-        '',
-        '  float lm = log(1.0 + mag);',
-        '  float lit = clamp(0.35 + lm * 0.08 * u_brightness, 0.2, 0.85);',
-        '  vec3 col = hsl2rgb(phase, 0.85, lit);',
-        '  float aa = onHead ? 1.0 : 1.0 - smoothstep(aW * 0.6, aW, dShaft);',
-        '  gl_FragColor = vec4(col * aa, aa);',
-        '}'
-    );
-}
-
-function getVectorLocs(gl, program, snapshot) {
-    const locs = {
-        aPos: gl.getAttribLocation(program, 'a_position'),
-        uViewBounds: gl.getUniformLocation(program, 'u_viewBounds'),
-        uDensity: gl.getUniformLocation(program, 'u_density'),
-        uArrowScale: gl.getUniformLocation(program, 'u_arrowScale'),
-        uThickness: gl.getUniformLocation(program, 'u_thickness'),
-        uHeadSize: gl.getUniformLocation(program, 'u_headSize'),
-        uVectorMode: gl.getUniformLocation(program, 'u_vectorMode'),
-        uFunctionId: gl.getUniformLocation(program, 'u_functionId'),
-        uMobiusA: gl.getUniformLocation(program, 'u_mobiusA'),
-        uMobiusB: gl.getUniformLocation(program, 'u_mobiusB'),
-        uMobiusC: gl.getUniformLocation(program, 'u_mobiusC'),
-        uMobiusD: gl.getUniformLocation(program, 'u_mobiusD'),
-        uPolyDegree: gl.getUniformLocation(program, 'u_polyDegree'),
-        uPolyCoeffs: [],
-        uZetaCont: gl.getUniformLocation(program, 'u_zetaContinuationEnabled'),
-        uZetaRefl: gl.getUniformLocation(program, 'u_zetaReflectionBoundary'),
-        uFracPower: gl.getUniformLocation(program, 'u_fracPower'),
-        uBrightness: gl.getUniformLocation(program, 'u_brightness')
-    };
-
-    for (let i = 0; i <= MAX_POLY_DEGREE; i++) {
-        locs.uPolyCoeffs.push(gl.getUniformLocation(program, `u_polyCoeffs[${i}]`));
-    }
-
-    collectAlgebraicUniformLocationsShared(gl, program, snapshot, locs);
-    return locs;
-}
-
-function getVectorShaderHash(snapshot) {
-    return snapshot.currentFunction === 'algebraic_chaining'
-        ? `algebraic:${getAlgebraicHash(snapshot)}`
-        : String(snapshot.currentFunction);
-}
-
-function ensureVectorProgram(renderer, snapshot) {
-    if (!isContextUsable(renderer)) return false;
-
-    const gl = renderer.gl;
-    const shaderHash = getVectorShaderHash(snapshot);
-
-    if (_vfProgram && _vfLocs && _vfGl === gl && _vfShaderHash === shaderHash) return true;
-
-    deleteRendererVao(renderer, 'vectorVao');
-
-    const program = createWebGLProgramShared(gl, createVectorVertexShader(), createVectorFragmentShader(snapshot));
-
-    if (!program) {
-        clearVectorProgramState();
-        return false;
-    }
-
-    _vfProgram = program;
-    _vfLocs = getVectorLocs(gl, program, snapshot);
-    _vfShaderHash = shaderHash;
-    _vfGl = gl;
-    return true;
-}
-
-function bindVectorGeometry(renderer) {
-    const gl = renderer.gl;
-
-    const vaoBound = bindOrCreateVao(renderer, 'vectorVao', () => {
-        return configureAttribute(gl, _vfLocs.aPos, 2, renderer.quadBuffer);
-    });
-
-    return vaoBound || configureAttribute(gl, _vfLocs.aPos, 2, renderer.quadBuffer);
-}
-
-function bindVectorFieldUniforms(gl, locs, planeParams, snapshot) {
-    const bounds = getViewBounds(planeParams);
-    const density = Math.max(5, Math.min(25, Math.floor(snapshot.gridDensity * 0.75)));
-
-    gl.uniform4f(locs.uViewBounds, bounds.x0, bounds.x1, bounds.y0, bounds.y1);
-    gl.uniform1f(locs.uDensity, density);
-    gl.uniform1f(locs.uArrowScale, snapshot.vectorFieldScale);
-    gl.uniform1f(locs.uThickness, snapshot.vectorArrowThickness);
-    gl.uniform1f(locs.uHeadSize, snapshot.vectorArrowHeadSize);
-    gl.uniform1f(locs.uBrightness, snapshot.domainBrightness);
-    gl.uniform1f(locs.uVectorMode, VECTOR_MODE[snapshot.vectorFieldFunction] || 0);
-
-    setComplexFunctionUniformsShared(gl, locs, snapshot);
-}
-
 export function createWebGLImageRenderer() {
     const snapshot = readRenderState();
     const context = createRenderCanvas();
@@ -1833,8 +1575,6 @@ export function createWebGLImageRenderer() {
         forwardMappedMesh: null,
         forwardGpuVao: null,
         forwardCpuVao: null,
-
-        vectorVao: null,
 
         uploadedSource: null,
         uploadedSourceToken: -1,
@@ -1875,7 +1615,6 @@ export function disposeWebGLRenderer(renderer) {
         deleteRendererVao(renderer, 'inverseVao');
         deleteRendererVao(renderer, 'forwardGpuVao');
         deleteRendererVao(renderer, 'forwardCpuVao');
-        deleteRendererVao(renderer, 'vectorVao');
 
         if (renderer.texture) gl.deleteTexture(renderer.texture);
         if (renderer.quadBuffer) gl.deleteBuffer(renderer.quadBuffer);
@@ -1884,10 +1623,7 @@ export function disposeWebGLRenderer(renderer) {
         if (renderer.forwardMappedBuffer) gl.deleteBuffer(renderer.forwardMappedBuffer);
         if (renderer.inverseProgram) gl.deleteProgram(renderer.inverseProgram);
         if (renderer.forwardProgram) gl.deleteProgram(renderer.forwardProgram);
-        if (_vfGl === gl && _vfProgram) gl.deleteProgram(_vfProgram);
     }
-
-    if (_vfGl === gl) clearVectorProgramState();
 
     renderer.texture = null;
     renderer.quadBuffer = null;
@@ -2047,39 +1783,5 @@ export function drawImageWithWebGL(targetCtx, planeParams, isWP, chainIndex, map
     if (!rendered) return false;
 
     compositeRendererCanvas(targetCtx, renderer);
-    return true;
-}
-
-export function drawVectorFieldWithWebGL(ctx, planeParams) {
-    const snapshot = readRenderState();
-
-    if (snapshot.chainingEnabled && snapshot.chainCount > 1) return false;
-
-    invalidateVectorProgramForDynamicAlgebra(snapshot);
-
-    const funcId = getWebGLDomainColorFunctionIdShared(snapshot.currentFunction);
-    if (funcId === 0) return false;
-
-    initWebGLImageSupportIfNeeded();
-    if (!webglImageSupport.available || !hasDrawableTargetContext(ctx)) return false;
-
-    const renderer = webglImageSupport.renderer;
-    if (!isContextUsable(renderer) || !ensureVectorProgram(renderer, snapshot)) return false;
-
-    const gl = renderer.gl;
-
-    if (!resizeRendererCanvas(renderer, ctx.canvas.width, ctx.canvas.height)) return false;
-
-    clearTransparent(gl);
-    enableStraightAlphaBlend(gl);
-
-    gl.useProgram(_vfProgram);
-    if (!bindVectorGeometry(renderer)) return false;
-
-    bindVectorFieldUniforms(gl, _vfLocs, planeParams, snapshot);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, QUAD_VERTEX_COUNT);
-
-    unbindVao(renderer);
-    compositeRendererCanvas(ctx, renderer);
     return true;
 }

@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
@@ -101,4 +102,48 @@ test('controls visual contract remains stable', async ({ page }) => {
         animations: 'disabled',
         maxDiffPixelRatio: 0.01
     });
+});
+
+test('raster fold view stays connected and chain depth settles safely', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+        if (message.type() === 'error') errors.push(message.text());
+    });
+
+    await page.locator('#input_shape_selector').selectOption('image');
+    await page.locator('#image_upload_input').setInputFiles(resolve('Example1.png'));
+    await page.waitForFunction(() => {
+        return import('./js/store/state.js').then(({ state }) => state.imageContentVersion > 0);
+    });
+
+    await page.locator('label[for="image_surface_3d_cb"]').click();
+    await expect(page.locator('#image_surface_3d_cb')).toBeChecked();
+    await expect(page.locator('#w_plane_canvas')).toHaveClass(/hidden/);
+    await expect(page.locator('#w_plane_three_container')).not.toHaveClass(/hidden/);
+
+    await page.locator('#input_shape_selector').selectOption('grid_cartesian');
+    await page.locator('label[for="enable_chaining_cb"]').click();
+
+    const chainSlider = page.locator('#chain_count_slider');
+    const maxColumnsDuringDrag = await chainSlider.evaluate(element => {
+        let maxColumns = document.querySelectorAll('[id^="w_plane_column"]').length;
+        for (let value = 2; value <= 512; value += 1) {
+            element.value = String(value);
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            maxColumns = Math.max(
+                maxColumns,
+                document.querySelectorAll('[id^="w_plane_column"]').length
+            );
+        }
+        return maxColumns;
+    });
+    await chainSlider.dispatchEvent('change');
+
+    expect(maxColumnsDuringDrag).toBe(1);
+    await expect(chainSlider).toHaveValue('512');
+    await expect(page.locator('[id^="w_plane_column"]')).toHaveCount(1);
+    await page.waitForTimeout(400);
+    await expect(page.locator('#w-plane-title')).toContainText('Chain 511');
+    expect(errors).toEqual([]);
 });

@@ -675,7 +675,6 @@ export function syncDynamicPlottingUI() {
     setValue('dynamic_point_expression', dynamic.pointExpression);
     setValue('dynamic_term_kind', dynamic.term.kind);
     setValue('dynamic_term_expression', dynamic.term.expression);
-    setValue('dynamic_reduction_kind', dynamic.reduction.kind);
     setValue('dynamic_invalid_policy', dynamic.reduction.invalidPolicy);
     setValue('dynamic_s_re', dynamic.aggregateParameter.re);
     setValue('dynamic_s_im', dynamic.aggregateParameter.im);
@@ -862,10 +861,6 @@ function bindControls() {
     bindFormula('dynamic_point_expression', (dynamic, value) => { dynamic.pointExpression = value; });
     bindText('dynamic_term_kind', (dynamic, value) => { dynamic.term.kind = value; });
     bindFormula('dynamic_term_expression', (dynamic, value) => { dynamic.term.expression = value; });
-    bindText('dynamic_reduction_kind', (dynamic, value) => {
-        dynamic.reduction.kind = value;
-        dynamic.mode = value === 'none' ? 'map' : 'aggregate';
-    });
     bindText('dynamic_invalid_policy', (dynamic, value) => { dynamic.reduction.invalidPolicy = value; });
     bindNumber('dynamic_s_re', (dynamic, value) => { dynamic.aggregateParameter.re = value; });
     bindNumber('dynamic_s_im', (dynamic, value) => { dynamic.aggregateParameter.im = value; });
@@ -908,10 +903,4 @@ export function initializeDynamicPlottingUI(options = {}) {
     initialized = true;
     bindControls();
     syncDynamicPlottingUI();
-}
-
-export function disposeDynamicPlottingUI() {
-    stopAnimation();
-    if (formulaTimer) clearTimeout(formulaTimer);
-    formulaTimer = null;
 }

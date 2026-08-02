@@ -152,15 +152,6 @@ export function domainColorForValue(re, im, runtimeState) {
     return applyLightnessAndSaturation(baseColor, lFinal, sFinal);
 }
 
-export function renderConstantPlanarDomainColoring(tCtx, pP, value) {
-    const rgb = domainColorForValue(value.re, value.im, state);
-    tCtx.save();
-    tCtx.setTransform(1, 0, 0, 1, 0, 0);
-    tCtx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
-    tCtx.fillRect(0, 0, pP.width, pP.height);
-    tCtx.restore();
-}
-
 export function renderPlanarDomainColoringCPU(tCtx, pP, isWPC, map) {
     const targetW = pP.width;
     const targetH = pP.height;
@@ -207,4 +198,3 @@ export function renderPlanarDomainColoringCPU(tCtx, pP, isWPC, map) {
     tCtx.drawImage(tempCanvas, 0, 0, w, h, 0, 0, targetW, targetH);
     tCtx.restore();
 }
-

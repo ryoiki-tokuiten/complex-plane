@@ -1,9 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
-import { COLOR_TEXT_ON_CANVAS, COLOR_CANVAS_BACKGROUND } from '../constants/colors.js';
-import { mapToCanvasCoords } from '../utils/canvas-utils.js';
-import { drawAxes } from './canvas-primitives.js';
 
 const BACKGROUND = 0x0b0914;
 const CAMERA_HOME = Object.freeze({ x: 7.8, y: 6.3, z: 8.6 });
@@ -397,37 +394,4 @@ export function resizeLaplace3DSurface(container = document.getElementById('lapl
 
 export function updateLaplace3DSurface() {
     if (state.laplaceModeEnabled) drawLaplace3DSurface('laplace_3d_container');
-}
-
-/** A lightweight 2D fallback used by consumers that do not mount the 3D view. */
-export function drawLaplaceMagnitudePlot(ctx, planeParams) {
-    if (!state.laplaceSurface?.length) {
-        ctx.save();
-        ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
-        ctx.font = '16px "SF Pro Text", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Computing…', planeParams.width / 2, planeParams.height / 2);
-        ctx.restore();
-        return;
-    }
-
-    ctx.save();
-    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
-    ctx.fillRect(0, 0, planeParams.width, planeParams.height);
-    drawAxes(ctx, planeParams, 'σ (Real)', '|F(s)|');
-    const omega = state.laplaceOmega || 1;
-    const clip = Math.max(0.001, finite(state.laplaceClipHeight, 10));
-    const slice = state.laplaceSurface
-        .filter(point => Math.abs(point.omega - omega) < 0.2)
-        .sort((a, b) => a.sigma - b.sigma);
-    ctx.beginPath();
-    slice.forEach((point, index) => {
-        const canvas = mapToCanvasCoords(point.sigma, Math.min(finite(point.magnitude), clip), planeParams);
-        if (index) ctx.lineTo(canvas.x, canvas.y);
-        else ctx.moveTo(canvas.x, canvas.y);
-    });
-    ctx.strokeStyle = 'rgba(100, 200, 255, 0.9)';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-    ctx.restore();
 }

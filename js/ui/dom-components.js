@@ -15,20 +15,6 @@ export function createElement(tag, props = {}, children = []) {
     return node;
 }
 
-export function createSelect(options, value, onChange, className = '') {
-    const select = createElement('select', { className });
-    for (const option of options) {
-        const optionValue = option.value ?? option.id;
-        const item = createElement('option', { text: option.label });
-        item.value = optionValue;
-        item.selected = optionValue === value;
-        select.appendChild(item);
-    }
-    select.value = value;
-    select.addEventListener('change', onChange);
-    return select;
-}
-
 const SAFE_MARKUP_ELEMENTS = new Set(['B', 'BR', 'CODE', 'I', 'STRONG', 'SUB', 'SUP', 'SPAN']);
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;

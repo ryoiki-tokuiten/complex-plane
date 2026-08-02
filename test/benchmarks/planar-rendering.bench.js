@@ -7,7 +7,7 @@ import {
     getChainedTransformFunction,
     getMappedTransformProfile
 } from '../../js/math-utils.js';
-import { generateCurrentMappedInputShapePointSets } from '../../js/rendering/shape-generators.js';
+import { generateCurrentInputShapePointSets } from '../../js/rendering/shape-generators.js';
 import {
     calculateDynamicPointsForSegment,
     preparePointSetForMappedPlane
@@ -40,7 +40,7 @@ export async function runPlanarRenderingBenchmarks() {
                 currentVisXRange: [-Math.PI, Math.PI],
                 currentVisYRange: [-Math.PI, Math.PI]
             };
-            const pointSets = generateCurrentMappedInputShapePointSets(planeParams, {
+            const pointSets = generateCurrentInputShapePointSets(planeParams, {
                 currentInputShape: 'grid_cartesian',
                 currentFunction: 'exp',
                 zetaContinuationEnabled: false,

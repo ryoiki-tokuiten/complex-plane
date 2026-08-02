@@ -16,7 +16,7 @@ import {
 import { LINE_WIDTH_NORMAL, PARTICLE_RADIUS } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import {
-    getMappedTransformProfile, evaluateMappedTransform, isNumericallyStable,
+    getMappedTransformProfile, evaluateMappedTransform,
     transformFunctions
 } from '../math-utils.js';
 import {
@@ -32,7 +32,6 @@ import {
 import { drawImageWithWebGL } from './draw-image-webgl.js';
 import {
     generateCurrentInputShapePointSets,
-    generateCurrentMappedInputShapePointSets,
     generateRadialDiscreteStepPointSets
 } from './shape-generators.js';
 
@@ -76,9 +75,7 @@ const LINEAR_SOURCE_POINT_SET_ROLES = new Set([
 
 const CANVAS_PATH_CACHE = new WeakMap();
 const TRANSFORMED_PATH_CACHE = new WeakMap();
-const PREPARED_POINT_SET_CACHE = new WeakMap();
 
-const PREPARED_POINT_SET_CACHE_ASSOCIATIVITY = 12;
 const PATH_CACHE_MIN_POINTS = 64;
 const PATH_CACHE_ASSOCIATIVITY = 4;
 const TRANSFORM_SAMPLE_PROBES = 9;
@@ -473,7 +470,9 @@ function getAdaptiveTransformRenderTuning() {
     return {
         toleranceSq: interacting ? INTERACTION_CURVE_TOLERANCE_PX_SQ : STATIC_CURVE_TOLERANCE_PX_SQ,
         maxSegmentSq: interacting ? INTERACTION_MAX_SEGMENT_PX_SQ : STATIC_MAX_SEGMENT_PX_SQ,
-        maxDepth: MAX_TRANSFORM_SUBDIVISION_DEPTH
+        maxDepth: appState.chainingEnabled && appState.chainCount > 25
+            ? 0
+            : MAX_TRANSFORM_SUBDIVISION_DEPTH
     };
 }
 
@@ -845,10 +844,6 @@ function drawWorldCircle(ctx, planeParams, center, radius, segments) {
     }
 }
 
-function isStableRenderableComplexPoint(point) {
-    return isRenderableComplexPoint(point) && isNumericallyStable(point);
-}
-
 function isWithinComplexLimit(point, limit) {
     return isRenderableComplexPoint(point) &&
         Math.abs(point.re) <= limit &&
@@ -1049,13 +1044,9 @@ function transformProbeEndpoint(point, transformFunc, shouldTransform) {
     return shouldTransform ? transformFunc(point.re, point.im) : point;
 }
 
-function drawProbeSegment(ctx, planeParams, startWorld, endWorld, color, requireStability) {
-    const startIsValid = requireStability
-        ? isStableRenderableComplexPoint(startWorld)
-        : isRenderableComplexPoint(startWorld);
-    const endIsValid = requireStability
-        ? isStableRenderableComplexPoint(endWorld)
-        : isRenderableComplexPoint(endWorld);
+function drawProbeSegment(ctx, planeParams, startWorld, endWorld, color) {
+    const startIsValid = isRenderableComplexPoint(startWorld);
+    const endIsValid = isRenderableComplexPoint(endWorld);
 
     if (!startIsValid || !endIsValid) {
         return;
@@ -1204,6 +1195,8 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
     const transformFunc = options.transformFunc || null;
     const mappedTransform = options.transformProfile ||
         (transformFunc ? getMappedTransformProfile(appState.currentFunction, transformFunc) : null);
+    const startIndex = clamp(Math.floor(finiteOr(options.startIndex, 0)), 0, pointSets.length);
+    const endIndex = clamp(Math.floor(finiteOr(options.endIndex, pointSets.length)), startIndex, pointSets.length);
 
     withSavedContext(ctx, () => {
         configureRoundStroke(ctx);
@@ -1219,7 +1212,7 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
             return;
         }
 
-        for (let i = 0, length = pointSets.length; i < length; i++) {
+        for (let i = startIndex; i < endIndex; i++) {
             const preparedPointSet = preparePointSet(pointSets[i], transformFunc, planeParams);
 
             if (!preparedPointSet || !Array.isArray(preparedPointSet.points)) {
@@ -1531,8 +1524,8 @@ export function drawConformalityProbeSegments(ctx, planeParams, center_world, tf
         const verticalStart = transformProbeEndpoint(endpoints.vertical[0], tf, isWPlane);
         const verticalEnd = transformProbeEndpoint(endpoints.vertical[1], tf, isWPlane);
 
-        drawProbeSegment(ctx, planeParams, horizontalStart, horizontalEnd, horizontalColor, isWPlane);
-        drawProbeSegment(ctx, planeParams, verticalStart, verticalEnd, verticalColor, isWPlane);
+        drawProbeSegment(ctx, planeParams, horizontalStart, horizontalEnd, horizontalColor);
+        drawProbeSegment(ctx, planeParams, verticalStart, verticalEnd, verticalColor);
     });
 }
 
@@ -1689,7 +1682,7 @@ export function calculateDynamicPointsForSegment(p1_world, p2_world, tf, planePa
         } catch {
             mapped = null;
         }
-        return isStableRenderableComplexPoint(mapped)
+        return isRenderableComplexPoint(mapped)
             ? { mapped, projected: project(mapped), t: safeT }
             : null;
     };
@@ -1796,47 +1789,12 @@ export function preparePointSetForMappedPlane(pointSet, transformFunc, options =
         ? options.sampleCountResolver(pointSet, endpoints, transformFunc, options.planeParams)
         : DEFAULT_POINTS_PER_LINE;
     const normalizedSampleCount = Math.max(2, sampleCount);
-    let preparedCache = PREPARED_POINT_SET_CACHE.get(pointSet);
-    if (!preparedCache) {
-        preparedCache = new Map();
-        PREPARED_POINT_SET_CACHE.set(pointSet, preparedCache);
-    }
-
-    const cached = preparedCache.get(normalizedSampleCount);
-    if (cached &&
-        cached.start === endpoints.start &&
-        cached.end === endpoints.end &&
-        cached.startRe === endpoints.start.re &&
-        cached.startIm === endpoints.start.im &&
-        cached.endRe === endpoints.end.re &&
-        cached.endIm === endpoints.end.im) {
-        preparedCache.delete(normalizedSampleCount);
-        preparedCache.set(normalizedSampleCount, cached);
-        return cached.preparedPointSet;
-    }
-
     const preparedPointSet = Object.assign({}, pointSet, {
         points: generateLinearSegmentPoints(
             endpoints.start,
             endpoints.end,
             normalizedSampleCount
         )
-    });
-
-    if (!preparedCache.has(normalizedSampleCount) && preparedCache.size >= PREPARED_POINT_SET_CACHE_ASSOCIATIVITY) {
-        preparedCache.delete(preparedCache.keys().next().value);
-    } else {
-        preparedCache.delete(normalizedSampleCount);
-    }
-
-    preparedCache.set(normalizedSampleCount, {
-        start: endpoints.start,
-        end: endpoints.end,
-        startRe: endpoints.start.re,
-        startIm: endpoints.start.im,
-        endRe: endpoints.end.re,
-        endIm: endpoints.end.im,
-        preparedPointSet
     });
 
     return preparedPointSet;
@@ -1888,30 +1846,29 @@ export function drawPlanarInputOverlays(ctx, planeParams) {
 export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
     const includeGeometry = options.includeGeometry !== false;
     const includeOverlays = options.includeOverlays !== false;
-    const inputShape = appState.currentInputShape;
-    const highlightContour = appState.cauchyIntegralModeEnabled &&
-        (inputShape === 'circle' || inputShape === 'ellipse');
+    const renderJob = options.renderJob || createPlanarTransformedShapeRenderJob(tf);
+    const inputShape = renderJob.inputShape;
 
     if (includeGeometry) {
         if (isRasterInputShape(inputShape)) {
             drawImageWithWebGL(ctx, planeParams, true, options.index || 0, options.map || null);
         } else {
-            const pointSets = generateCurrentMappedInputShapePointSets(zPlaneParams, {
-                currentFunction: appState.currentFunction,
-                zetaContinuationEnabled: appState.zetaContinuationEnabled
-            });
-            const transformProfile = getMappedTransformProfile(appState.currentFunction, tf);
+            const pointSets = renderJob.pointSets;
+            const startIndex = clamp(Math.floor(finiteOr(options.startIndex, 0)), 0, pointSets.length);
+            const endIndex = clamp(Math.floor(finiteOr(options.endIndex, pointSets.length)), startIndex, pointSets.length);
 
             drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, {
-                transformFunc: tf,
-                transformProfile,
-                colorResolver: pointSet => highlightContour && pointSet.role === 'shape-curve'
+                transformFunc: renderJob.transformFunc,
+                transformProfile: renderJob.transformProfile,
+                startIndex,
+                endIndex,
+                colorResolver: pointSet => renderJob.highlightContour && pointSet.role === 'shape-curve'
                     ? COLOR_CAUCHY_CONTOUR_W
                     : pointSet.color,
-                lineWidthResolver: pointSet => highlightContour && pointSet.role === 'shape-curve'
+                lineWidthResolver: pointSet => renderJob.highlightContour && pointSet.role === 'shape-curve'
                     ? 3.5
                     : (pointSet.lineWidth || LINE_WIDTH_NORMAL),
-                preparePointSet: pointSet => preparePointSetForMappedPlane(pointSet, tf, {
+                preparePointSet: pointSet => preparePointSetForMappedPlane(pointSet, renderJob.transformFunc, {
                     planeParams,
                     sampleCountResolver: (currentPointSet, endpoints, transformFunc) => appState.currentFunction === 'zeta'
                         ? calculateDynamicPointsForSegment(endpoints.start, endpoints.end, transformFunc, planeParams)
@@ -1924,6 +1881,29 @@ export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
     if (includeOverlays && shouldDrawPlanarFunctionFociOverlay()) {
         drawFunctionFociOverlay(ctx, planeParams);
     }
+
+    return true;
+}
+
+export function createPlanarTransformedShapeRenderJob(tf) {
+    const inputShape = appState.currentInputShape;
+    const pointSets = isRasterInputShape(inputShape)
+        ? null
+        : generateCurrentInputShapePointSets(zPlaneParams, {
+            currentFunction: appState.currentFunction,
+            zetaContinuationEnabled: appState.zetaContinuationEnabled
+        });
+
+    return {
+        inputShape,
+        pointSets,
+        transformFunc: tf,
+        transformProfile: pointSets
+            ? getMappedTransformProfile(appState.currentFunction, tf)
+            : null,
+        highlightContour: appState.cauchyIntegralModeEnabled &&
+            (inputShape === 'circle' || inputShape === 'ellipse')
+    };
 }
 
 
@@ -1935,7 +1915,7 @@ export function drawPlanarTransformedProbe(ctx, planeParams, map) {
         if (typeof transform !== 'function') return;
         const probeWorldPoint = transform(appState.probeZ.re, appState.probeZ.im);
 
-        if (isStableRenderableComplexPoint(probeWorldPoint)) {
+        if (isRenderableComplexPoint(probeWorldPoint)) {
             const probeCanvasPoint = mapToCanvasCoords(probeWorldPoint.re, probeWorldPoint.im, planeParams);
             drawCircleMarker(ctx, probeCanvasPoint, PROBE_MARKER_RADIUS, COLOR_PROBE_MARKER);
         }

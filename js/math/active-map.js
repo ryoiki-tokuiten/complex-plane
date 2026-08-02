@@ -83,11 +83,3 @@ export function resolveActiveMap(stageIndex = getFinalMapStageIndex()) {
         signature: `${presentation}:${stage}:${sourceSignature()}`
     });
 }
-
-export function isDerivativePresentation(runtimeState = state) {
-    return runtimeState?.mapPresentation === MAP_PRESENTATION.derivative;
-}
-
-export function getDerivativeStepForPoint(re, im) {
-    return derivativeStep(re, im);
-}

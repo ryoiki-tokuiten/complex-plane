@@ -133,8 +133,6 @@ const rawState = {
     particleSpeed: 0.04,
     particleMaxLifetime: 300,
 
-    vectorFlowOptionsEnabled: false, 
-    globalViewOptionsEnabled: false,
     threeSphereEnabled: false,
     threeSphereOpacity: 0.10,
     sphereGridOpacity: 0.0,
@@ -183,7 +181,6 @@ const rawState = {
     laplaceSurface: [],
     laplacePoles: [],
     laplaceZeros: [],
-    laplaceStability: null,
     laplaceCurrentValue: null,
     laplaceROC: null,
     isLaplace3DFullScreen: false,
@@ -300,9 +297,7 @@ const store = createObservableStore(rawState, {
 });
 
 export const state = store.state;
-export const setState = store.set;
 export const mutateState = store.mutate;
-export const batchStateChanges = store.transaction;
 export const subscribeState = store.subscribe;
 export const getStateSignal = store.getSignal;
 

@@ -5,6 +5,7 @@ import {
     getWebGLBackendInfoShared
 } from './webgl-shared.js';
 import {
+    createPlanarTransformedShapeRenderJob,
     drawPlanarTransformedShape,
     drawPlanarInputShape,
     shouldDrawPlanarFunctionFociOverlay
@@ -1046,8 +1047,10 @@ export function drawWithWebGLCapture(ctx, planeParams, planeKey, drawCallback) {
 
 export function drawPlanarTransformedShapeHybrid(ctx, planeParams, tf, planeKey, map = null, options = null) {
     const drawOptions = {
+        ...options,
         map,
-        index: options?.index
+        index: options?.index,
+        renderJob: options?.renderJob || createPlanarTransformedShapeRenderJob(tf)
     };
 
     const geometryRendered = drawWithWebGLCapture(ctx, planeParams, planeKey, (captureCtx) => {
@@ -1058,7 +1061,7 @@ export function drawPlanarTransformedShapeHybrid(ctx, planeParams, tf, planeKey,
         drawPlanarTransformedShape(ctx, planeParams, tf, { ...drawOptions, includeOverlays: false });
     }
 
-    if (shouldDrawPlanarFunctionFociOverlay()) {
+    if (options?.includeOverlays !== false && shouldDrawPlanarFunctionFociOverlay()) {
         drawPlanarTransformedShape(ctx, planeParams, tf, { ...drawOptions, includeGeometry: false });
     }
 

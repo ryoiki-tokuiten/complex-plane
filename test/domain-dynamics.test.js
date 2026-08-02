@@ -10,7 +10,7 @@ import {
 } from '../js/math-utils.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
-    disposePlanarDomainDynamics,
+    cancelPlanarDomainDynamics,
     renderPlanarDomainDynamics,
     selectDomainDynamicsBackend
 } from '../js/rendering/domain-dynamics.js';
@@ -20,10 +20,7 @@ import {
     renderDomainDynamicsTile
 } from '../js/rendering/domain-dynamics-core.js';
 import {
-    DYNAMICS_ESCAPE_RADIUS,
-    DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE,
     DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
-    domainDynamicsEscapes,
     domainDynamicsLogMagnitude,
     domainDynamicsSmoothIteration,
     isFiniteDomainDynamicsValue,
@@ -380,12 +377,7 @@ test('accelerated algebraic z expressions preserve parser unary-power precedence
     approxComplex(evaluateDomainDynamicsValue(groupedPower, 2, 0), { re: 64, im: 0 });
 });
 
-test('domain dynamics use the shared escape boundaries and explicit chain limit', () => {
-    assert.equal(domainDynamicsEscapes(DYNAMICS_ESCAPE_RADIUS, 0), false);
-    assert.equal(domainDynamicsEscapes(DYNAMICS_ESCAPE_RADIUS + 1, 0), true);
-    assert.equal(domainDynamicsEscapes(DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE, 0), true);
-    assert.equal(domainDynamicsEscapes(NaN, 0), true);
-    assert.equal(domainDynamicsEscapes(Infinity, 0), true);
+test('domain dynamics enforce the explicit chain limit', () => {
     assert.equal(normalizeDomainDynamicsChainCount(DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH + 100), DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH);
 
     const snapshot = makeAlgebraicDynamicsSnapshot({
@@ -401,15 +393,14 @@ test('domain dynamics use the shared escape boundaries and explicit chain limit'
 
 test('domain dynamics shared helpers cover boundary, overflow, and smoothing fixtures', () => {
     const fixtures = [
-        { re: 1e4, im: 0, escapes: false },
-        { re: 10001, im: 0, escapes: true },
-        { re: 1e8, im: 0, escapes: true },
-        { re: 1e30, im: 0, escapes: true },
-        { re: 3, im: 4, escapes: false }
+        { re: 1e4, im: 0 },
+        { re: 10001, im: 0 },
+        { re: 1e8, im: 0 },
+        { re: 1e30, im: 0 },
+        { re: 3, im: 4 }
     ];
 
     for (const fixture of fixtures) {
-        assert.equal(domainDynamicsEscapes(fixture.re, fixture.im), fixture.escapes);
         assert.equal(
             domainDynamicsLogMagnitude(fixture.re, fixture.im),
             Math.log1p(Math.hypot(fixture.re, fixture.im))
@@ -542,7 +533,7 @@ test('async renderer reaches final scale one without another redraw trigger', as
     const restoreGlobals = makeFakeCanvasEnvironment(targetCtx);
 
     try {
-        disposePlanarDomainDynamics();
+        cancelPlanarDomainDynamics();
         configureDynamics({ currentFunction: 'sin', chainCount: 2 });
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
 
@@ -552,7 +543,7 @@ test('async renderer reaches final scale one without another redraw trigger', as
         assert.equal(selectDomainDynamicsBackend().queue.length, 0);
         assert.equal(selectDomainDynamicsBackend().queueIndex, 0);
     } finally {
-        disposePlanarDomainDynamics();
+        cancelPlanarDomainDynamics();
         restoreGlobals();
         restoreState(before);
     }
@@ -566,7 +557,7 @@ test('async renderer ignores canceled old final tiles after viewport changes', a
     const nextPlane = { ...PLANE, width: 11 };
 
     try {
-        disposePlanarDomainDynamics();
+        cancelPlanarDomainDynamics();
         configureDynamics({ currentFunction: 'sin', chainCount: 2 });
         const oldSnapshot = buildPlanarDomainDynamicsSnapshot(state, oldPlane, { isWPlaneColoring: false });
         const nextSnapshot = buildPlanarDomainDynamicsSnapshot(state, nextPlane, { isWPlaneColoring: false });
@@ -577,7 +568,7 @@ test('async renderer ignores canceled old final tiles after viewport changes', a
         await waitFor(() => targetCtx.draws.some(draw => draw.width === nextPlane.width && draw.height === nextPlane.height));
         assert.equal(targetCtx.draws.some(draw => draw.width === oldPlane.width), false);
     } finally {
-        disposePlanarDomainDynamics();
+        cancelPlanarDomainDynamics();
         restoreGlobals();
         restoreState(before);
     }

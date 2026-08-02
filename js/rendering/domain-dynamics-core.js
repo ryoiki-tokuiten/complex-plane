@@ -2206,62 +2206,6 @@ function createOpaqueBlackBuffer(pixelCount) {
     return data;
 }
 
-function paletteComponents(stops, h) {
-    const palette = Array.isArray(stops) && stops.length >= 2 ? stops : DEFAULT_PALETTE_STOPS;
-    const hue = Math.min(0.999999, Math.max(0, h));
-    const value = hue * (palette.length - 1);
-    const idx = Math.min(palette.length - 2, Math.floor(value));
-    const t = value - idx;
-    const a = palette[idx];
-    const b = palette[idx + 1];
-    return {
-        r: a[0] * (1 - t) + b[0] * t,
-        g: a[1] * (1 - t) + b[1] * t,
-        b: a[2] * (1 - t) + b[2] * t
-    };
-}
-
-function writeStyledColor(data, idx, baseR, baseG, baseB, lightness, saturation) {
-    let r = baseR;
-    let g = baseG;
-    let b = baseB;
-
-    if (lightness < 0.5) {
-        const t = lightness / 0.5;
-        r *= t;
-        g *= t;
-        b *= t;
-    } else {
-        const t = (lightness - 0.5) / 0.5;
-        r = r * (1 - t) + t;
-        g = g * (1 - t) + t;
-        b = b * (1 - t) + t;
-    }
-
-    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-    r = gray * (1 - saturation) + r * saturation;
-    g = gray * (1 - saturation) + g * saturation;
-    b = gray * (1 - saturation) + b * saturation;
-
-    writeRgb(
-        data,
-        idx,
-        Math.min(255, Math.max(0, Math.round(r * 255))),
-        Math.min(255, Math.max(0, Math.round(g * 255))),
-        Math.min(255, Math.max(0, Math.round(b * 255)))
-    );
-}
-
-function styleValues(snapshot) {
-    const style = snapshot.style || {};
-    return {
-        brightness: finite(style.brightness) ? style.brightness : 1,
-        contrast: finite(style.contrast) ? style.contrast : 1,
-        saturation: Math.min(1, Math.max(0, finite(style.saturation) ? style.saturation : 1)),
-        lightnessCycles: Number(style.lightnessCycles) || 0
-    };
-}
-
 function colorContext(snapshot) {
     const style = snapshot.style || {};
     const palette = Array.isArray(snapshot.paletteStops) && snapshot.paletteStops.length >= 2
@@ -2412,39 +2356,6 @@ function writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, 
         lightness,
         context.saturation
     );
-}
-
-export function writeDomainColor(data, idx, re, im, snapshot) {
-    if (!((re < 0 ? -re : re) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) ||
-        !((im < 0 ? -im : im) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) {
-        writeBlack(data, idx);
-        return;
-    }
-
-    const modValue = Math.hypot(re, im);
-    if (!finite(modValue)) {
-        writeBlack(data, idx);
-        return;
-    }
-
-    const style = styleValues(snapshot);
-    const phase = Math.atan2(im, re);
-    const logMod = domainDynamicsLogMagnitude(re, im);
-    const lightnessBase = magnitudeLightness(logMod, style.lightnessCycles);
-    const lightness = Math.min(0.95, Math.max(0.05, (0.5 + (lightnessBase - 0.5) * style.contrast) * style.brightness));
-    let hue = (phase / TWO_PI) % 1;
-    if (hue < 0) hue += 1;
-    const base = paletteComponents(snapshot.paletteStops, hue);
-    writeStyledColor(data, idx, base.r, base.g, base.b, lightness, style.saturation);
-}
-
-export function writeDynamicsEscapeColor(data, idx, smoothIteration, count, snapshot) {
-    const style = styleValues(snapshot);
-    const t = Math.max(0, Math.min(1, smoothIteration / Math.max(1, count)));
-    const base = paletteComponents(snapshot.paletteStops, Math.min(t, 0.9999));
-    const lightnessBase = 0.22 + 0.58 * Math.pow(t, 0.65);
-    const lightness = Math.min(0.95, Math.max(0.05, (0.5 + (lightnessBase - 0.5) * style.contrast) * style.brightness));
-    writeStyledColor(data, idx, base.r, base.g, base.b, lightness, style.saturation);
 }
 
 function traceOrbitForPoint(snapshot, re, im, accelerator = createDynamicsAccelerator(snapshot), detectConvergence = true) {

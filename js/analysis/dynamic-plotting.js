@@ -1,9 +1,5 @@
 import { context, state, mutateState } from '../store/state.js';
-import {
-    complexAbs,
-    setActiveTransformProvider,
-    transformFunctions
-} from '../math-utils.js';
+import { setActiveTransformProvider, transformFunctions } from '../math-utils.js';
 import {
     asComplex,
     compileExpression,
@@ -228,9 +224,7 @@ function cache() {
             compiled: null,
             sourceSignature: null,
             source: null,
-            results: new Map(),
-            diagnostics: [],
-            hover: { z: null, w: null }
+            results: new Map()
         };
     }
     return context.dynamicPlotting;
@@ -352,7 +346,6 @@ function getSource() {
     });
     runtime.sourceSignature = signature;
     runtime.source = source;
-    runtime.diagnostics = [...source.diagnostics];
     runtime.results.clear();
     return source;
 }
@@ -692,16 +685,6 @@ export function invalidateDynamicPlotting() {
     runtime.activeTransformSignature = null;
     runtime.activeTransform = null;
     runtime.results.clear();
-    runtime.diagnostics = [];
-}
-
-export function getDynamicPlottingDiagnostics() {
-    try {
-        const result = getDynamicPlotResult();
-        return result?.diagnostics || [];
-    } catch (error) {
-        return [error?.message || String(error)];
-    }
 }
 
 export function getDynamicPlottingPresets() {
@@ -762,10 +745,6 @@ export function formatDynamicValue(value, digits = 6) {
     if (im === 0) return `${re}`;
     if (re === 0) return `${im}i`;
     return `${re}${im >= 0 ? '+' : ''}${im}i`;
-}
-
-export function dynamicResultMagnitude(result) {
-    return result?.reduction?.finalValue ? complexAbs(result.reduction.finalValue) : NaN;
 }
 
 export function getDynamicPlottingCacheKey() {

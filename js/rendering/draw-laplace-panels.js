@@ -279,26 +279,3 @@ export function drawPolesAndZerosOverlay(ctx, planeParams) {
 
     ctx.restore();
 }
-
-// drawLaplaceInfoOverlay removed — clean research-tool aesthetic
-
-/**
- * Get display text for Laplace function type
- */
-export function getLaplaceFunctionText(funcType) {
-    const funcMap = {
-        'step': 'Step function',
-        'exponential': 'e^(-at)',
-        'sine': 'sin(ωt)',
-        'cosine': 'cos(ωt)',
-        'damped_sine': 'Damped sine: e^(-σt)·sin(ωt)',
-        'damped_cosine': 'Damped cosine: e^(-σt)·cos(ωt)',
-        'ramp': 'Ramp: t',
-        'impulse': 'Impulse δ(t)',
-        'exponential_sine': 'Growing sine: e^(at)·sin(ωt)',
-        'underdamped': 'Underdamped oscillation',
-        'critically_damped': 'Critically damped',
-        'overdamped': 'Overdamped'
-    };
-    return funcMap[funcType] || funcType;
-}

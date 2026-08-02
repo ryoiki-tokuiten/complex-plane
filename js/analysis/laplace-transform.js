@@ -421,48 +421,6 @@ export function findPolesZeros(funcType, params) {
 }
 
 /**
- * Analyze system stability based on pole locations
- * @param {Array} poles - Array of pole objects
- * @returns {Object} {stable, message, marginally_stable}
- */
-export function analyzeStability(poles) {
-    if (!poles || poles.length === 0) {
-        return { stable: true, message: 'No poles detected', marginally_stable: false };
-    }
-    
-    let maxRealPart = -Infinity;
-    
-    for (const pole of poles) {
-        if (pole.sigma > maxRealPart) {
-            maxRealPart = pole.sigma;
-        }
-    }
-    
-    if (maxRealPart < -0.01) {
-        return {
-            stable: true,
-            message: '✓ STABLE: All poles in left-half plane',
-            marginally_stable: false,
-            color: 'rgba(100, 255, 150, 1)'
-        };
-    } else if (maxRealPart > 0.01) {
-        return {
-            stable: false,
-            message: '✗ UNSTABLE: Poles in right-half plane',
-            marginally_stable: false,
-            color: 'rgba(255, 100, 100, 1)'
-        };
-    } else {
-        return {
-            stable: false,
-            message: '⚠ MARGINALLY STABLE: Poles on jω axis',
-            marginally_stable: true,
-            color: 'rgba(255, 220, 100, 1)'
-        };
-    }
-}
-
-/**
  * Compute Region of Convergence (ROC) boundaries
  * @param {Array} poles - Array of poles
  * @returns {Object} {rocType, boundary, description}
@@ -535,9 +493,6 @@ export function updateLaplaceTransform() {
     
     // Compute ROC
     state.laplaceROC = computeROC(pz.poles);
-    
-    // Analyze stability
-    state.laplaceStability = analyzeStability(pz.poles);
     
     // Dynamically calculate grid boundaries based on poles
     let minSigma = -3, maxSigma = 2;

@@ -351,23 +351,6 @@ export function drawArrowHead(ctx, x, y, angle, size, color) {
     ctx.fill();
 }
 
-export function drawArrow(ctx, fromX, fromY, toX, toY, color = 'white', headLength = 8, lineWidth = LINE_WIDTH_NORMAL) {
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = lineWidth;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-
-    const angle = Math.atan2(toY - fromY, toX - fromX);
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.lineTo(toX, toY);
-    ctx.stroke();
-    drawArrowHead(ctx, toX, toY, angle, headLength, color);
-    ctx.restore();
-}
-
 export function drawTipToTailVectors(ctx, windingData, params, options = {}) {
     const {
         numVectors = 12,

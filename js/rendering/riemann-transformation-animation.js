@@ -1,6 +1,6 @@
 import { state, zPlaneParams } from '../store/state.js';
 import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
-import { generateCurrentInputShapePointSets, generateCurrentMappedInputShapePointSets } from './shape-generators.js';
+import { generateCurrentInputShapePointSets } from './shape-generators.js';
 import { resolveActiveMap } from '../math/active-map.js';
 
 /**
@@ -55,7 +55,7 @@ const PLANE_CONFIGS = {
         buttonId: 'w_transformation_play_pause_btn',
         progressKey: 'riemannTransformationProgressW',
         playingKey: 'riemannTransformationPlayingW',
-        generator: generateCurrentMappedInputShapePointSets
+        generator: generateCurrentInputShapePointSets
     }
 };
 
@@ -286,20 +286,6 @@ export function toggleRiemannTransformationAnimationW() {
     }
 }
 
-export function resetRiemannTransformationAnimation() {
-    stopRiemannTransformationAnimation();
-    state.riemannTransformationProgressZ = 0.0;
-    state.riemannTransformationProgressW = 0.0;
-    
-    for (let i = 0; i < controllers.length; i++) {
-        controllers[i].resetTemporalState();
-        controllers[i].render(0);
-    }
-
-    syncRiemannSliders();
-    syncRiemannTransformationPlayPauseButton();
-}
-
 export function syncRiemannSliders() {
     for (let i = 0; i < controllers.length; i++) controllers[i].syncUI();
 }
@@ -314,10 +300,4 @@ export function disposeThreeJSRenderers() {
         animationHandle = null;
     }
     for (let i = 0; i < controllers.length; i++) controllers[i].dispose();
-}
-
-export function renderThreeJSFrame() {
-    for (let i = 0; i < controllers.length; i++) {
-        controllers[i].render(state[controllers[i].config.progressKey]);
-    }
 }

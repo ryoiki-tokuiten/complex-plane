@@ -2,7 +2,6 @@
 
 export const DEFAULT_CANVAS_WIDTH = 600;
 export const DEFAULT_CANVAS_HEIGHT = 450;
-export const DEFAULT_CANVAS_ASPECT_RATIO = DEFAULT_CANVAS_HEIGHT / DEFAULT_CANVAS_WIDTH;
 export const ORIGIN_GLOW_DURATION_MS = 500;
 
 export const WEBGL_LINE_BATCH_LIMIT = 3500000;
@@ -48,15 +47,11 @@ export function orbitColoringModeId(mode) {
 export const SPHERE_VIEW_RADIUS_FACTOR = 0.85;
 export const SPHERE_INITIAL_ROT_X = 0.4;
 export const SPHERE_INITIAL_ROT_Y = -0.6;
-export const SPHERE_GRID_LINES = 20;
 export const SPHERE_SENSITIVITY = 0.01;
 export const SPHERE_TEXTURE_AMBIENT_INTENSITY = 0.3;
 export const SPHERE_TEXTURE_DIFFUSE_INTENSITY = 0.7;
 export const SPHERE_TEXTURE_SPECULAR_INTENSITY = 0.6;
 export const SPHERE_TEXTURE_SHININESS_FACTOR = 32;
-export const SPHERE_BASE_SHADING_AMBIENT = 0.2;
-export const SPHERE_BASE_SHADING_DIFFUSE = 0.8;
-export const SPHERE_BASE_SHADING_COLOR = { r: 50, g: 60, b: 80 };
 export const SPHERE_LIGHT_DIRECTION_CAMERA = { x: 0.5, y: 0.5, z: 0.707 };
 export const SPHERE_GRID_LINE_MAX_WIDTH_W = 1.5;
 export const SPHERE_GRID_LINE_MAX_WIDTH_Z = 1.0;
@@ -65,6 +60,5 @@ export const SPHERE_GRID_LINE_DEPTH_EFFECT = true;
 export const PARTICLE_RADIUS = 1.5;
 
 export const LINE_WIDTH_NORMAL = 1.5;
-export const LINE_WIDTH_MEDIUM = 2.0;
 export const LINE_WIDTH_THIN = 1.0;
 export const LINE_WIDTH_THICK = 2.5;

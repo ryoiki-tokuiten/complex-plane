@@ -31,7 +31,7 @@ import {
 import { drawWindingVisualization, drawTimeDomainSignal } from './draw-fourier-winding.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
 import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
-import { generateCurrentMappedInputShapePointSets, buildInputShapeGeometryConfig } from './shape-generators.js';
+import { generateCurrentInputShapePointSets, buildInputShapeGeometryConfig } from './shape-generators.js';
 import { drawGraphSelectionOverlay } from './transformation-graph.js';
 import { hideRiemannSurface, renderRiemannSurface } from './webgl-riemann-surface.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
@@ -41,6 +41,7 @@ import {
 } from './draw-primitives.js';
 import {
     drawPlanarTransformedShape,
+    createPlanarTransformedShapeRenderJob,
     drawPlanarProbe,
     drawPlanarTransformedProbe,
     drawConformalIndicatrices,
@@ -49,6 +50,7 @@ import {
     drawPlanarInputOverlays,
     drawZPlaneVectorField
 } from './draw-planar.js';
+import { requestRedrawAll } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
 import { renderPlanarDomainColoring } from './domain-coloring.js';
@@ -85,6 +87,10 @@ let wPlaneParams = defaultWPlaneParams;
 
 let wPlanarTransformedLayerCache;
 let wPlanarTransformedLayerCacheList = [];
+let wPlanarRenderDeadline = Infinity;
+let wPlanarWorkPerformed = false;
+
+const W_PLANAR_FRAME_BUDGET_MS = 8;
 
 const zPlanarInputLayerCache = createLayerCache();
 const zFlowLayerCache = createLayerCache();
@@ -173,7 +179,9 @@ function createLayerCache() {
         key: null,
         pendingKey: null,
         canvas: null,
-        ctx: null
+        ctx: null,
+        renderJob: null,
+        nextPointSet: 0
     };
 }
 
@@ -193,6 +201,8 @@ function invalidateCache(cache) {
     if (cache) {
         cache.key = null;
         cache.pendingKey = null;
+        cache.renderJob = null;
+        cache.nextPointSet = 0;
     }
 }
 
@@ -283,8 +293,7 @@ function ensurePlanarLayerCacheCanvas(cache, width, height) {
     if (cache.canvas.width !== width || cache.canvas.height !== height) {
         cache.canvas.width = width;
         cache.canvas.height = height;
-        cache.key = null;
-        cache.pendingKey = null;
+        invalidateCache(cache);
     }
 
     return cache.canvas;
@@ -300,13 +309,13 @@ function renderThroughCache({
     renderDirect = render
 }) {
     if (!targetCtx || !planeParams || typeof render !== 'function') {
-        return;
+        return true;
     }
 
     if (!enabled) {
         invalidateCache(cache);
         renderDirect(targetCtx, { cacheKey, fresh: true, direct: true });
-        return;
+        return true;
     }
 
     const cacheCanvas = ensurePlanarLayerCacheCanvas(cache, planeParams.width, planeParams.height);
@@ -314,9 +323,10 @@ function renderThroughCache({
 
     if (!cacheCanvas || !cacheCtx) {
         renderDirect(targetCtx, { cacheKey, fresh: true, direct: true });
-        return;
+        return true;
     }
 
+    let complete = true;
     if (cache.key !== cacheKey) {
         const fresh = cache.pendingKey !== cacheKey;
 
@@ -325,7 +335,7 @@ function renderThroughCache({
             cache.pendingKey = cacheKey;
         }
 
-        const complete = render(cacheCtx, { cacheKey, fresh }) !== false;
+        complete = render(cacheCtx, { cacheKey, fresh }) !== false;
 
         if (complete) {
             cache.key = cacheKey;
@@ -336,6 +346,7 @@ function renderThroughCache({
     }
 
     targetCtx.drawImage(cacheCanvas, 0, 0);
+    return complete;
 }
 
 function toCacheKeyNumber(value) {
@@ -1040,7 +1051,7 @@ function ensureWPlaneCache(index) {
     return wPlanarTransformedLayerCacheList[index];
 }
 
-// Multi-W-plane rendering temporarily rebinds legacy module variables; finally restores them.
+// Multi-W-plane rendering temporarily rebinds module-scoped variables; finally restores them.
 function withWPlaneScope(index, render) {
     const previous = {
         canvas: wCanvas,
@@ -1201,7 +1212,7 @@ function renderThreeWPlane(map, stageIndex) {
         } else {
             threeRenderer.lastGridConfigKey = gridConfigKey;
 
-            const wPointSets = generateCurrentMappedInputShapePointSets(zPlaneParams, {
+            const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
                 currentFunction: state.currentFunction,
                 zetaContinuationEnabled: state.zetaContinuationEnabled,
                 curvePoints: 250,
@@ -1355,15 +1366,58 @@ function renderWCanvasRiemannSphere(map, index) {
     }, 'capture');
 }
 
-function drawWTransformedShape(index, map, targetCtx) {
+function drawWTransformedShape(index, map, targetCtx, options = null) {
     const stageIndex = Number.isFinite(map?.stage) ? map.stage : index;
+    const drawOptions = { ...options, index: stageIndex, map };
 
     if (index === 0) {
-        drawPlanarTransformedShapeHybrid(targetCtx, wPlaneParams, map.evaluate, 'w', map, { index: stageIndex });
-        return;
+        return drawPlanarTransformedShapeHybrid(targetCtx, wPlaneParams, map.evaluate, 'w', map, drawOptions);
     }
 
-    drawPlanarTransformedShape(targetCtx, wPlaneParams, map.evaluate, { index: stageIndex, map });
+    return drawPlanarTransformedShape(targetCtx, wPlaneParams, map.evaluate, drawOptions);
+}
+
+function drawWTransformedShapeChunk(index, map, targetCtx, cacheMeta) {
+    const cache = wPlanarTransformedLayerCache;
+
+    if (cacheMeta.fresh || !cache.renderJob) {
+        cache.renderJob = createPlanarTransformedShapeRenderJob(map.evaluate);
+        cache.nextPointSet = 0;
+    }
+
+    const renderJob = cache.renderJob;
+    const pointSets = renderJob.pointSets;
+
+    if (!Array.isArray(pointSets) || pointSets.length === 0 || renderJob.transformProfile?.isConstant) {
+        drawWTransformedShape(index, map, targetCtx, { renderJob });
+        cache.renderJob = null;
+        cache.nextPointSet = 0;
+        return true;
+    }
+
+    while (cache.nextPointSet < pointSets.length &&
+        (!wPlanarWorkPerformed || performance.now() < wPlanarRenderDeadline)) {
+        const startIndex = cache.nextPointSet;
+        const endIndex = startIndex + 1;
+
+        drawWTransformedShape(index, map, targetCtx, {
+            renderJob,
+            startIndex,
+            endIndex,
+            includeOverlays: endIndex === pointSets.length
+        });
+
+        cache.nextPointSet = endIndex;
+        wPlanarWorkPerformed = true;
+    }
+
+    if (cache.nextPointSet < pointSets.length) {
+        return false;
+    }
+
+    cache.renderJob = null;
+    cache.nextPointSet = 0;
+    return true;
 }
 
 function renderWPlanarTransformedShape(index, map) {
@@ -1373,14 +1427,17 @@ function renderWPlanarTransformedShape(index, map) {
         return;
     }
 
-    renderThroughCache({
+    const complete = renderThroughCache({
         cache: wPlanarTransformedLayerCache,
         targetCtx: wCtx,
         planeParams: wPlaneParams,
         cacheKey: buildPlanarLayerCacheKey(true),
         enabled: shouldUseWPlanarTransformedLayerCache(),
-        render: cacheCtx => drawWTransformedShape(index, map, cacheCtx)
+        render: (cacheCtx, cacheMeta) => drawWTransformedShapeChunk(index, map, cacheCtx, cacheMeta),
+        renderDirect: targetCtx => drawWTransformedShape(index, map, targetCtx)
     });
+
+    if (!complete) requestRedrawAll();
 }
 
 function renderWPrimaryContent(index, map, isRiemannW) {
@@ -1514,17 +1571,24 @@ function _renderSingleWPlaneMode(index, curFunc, isSpecialMode, options) {
 export function drawWPlaneContent(options = {}) {
     syncRenderContext();
     context.riemannSurfaceContourPipeline = null;
+    wPlanarRenderDeadline = performance.now() + W_PLANAR_FRAME_BUDGET_MS;
+    wPlanarWorkPerformed = false;
 
-    if (!hasWPlaneTargets()) {
-        return;
-    }
+    try {
+        if (!hasWPlaneTargets()) {
+            return;
+        }
 
-    if (state.fourierModeEnabled || state.laplaceModeEnabled) {
-        _renderSingleWPlaneMode(0, null, true, options);
-        return;
-    }
+        if (state.fourierModeEnabled || state.laplaceModeEnabled) {
+            _renderSingleWPlaneMode(0, null, true, options);
+            return;
+        }
 
-    for (const [index, transform] of iterWPlaneTransforms()) {
-        _renderSingleWPlaneMode(index, transform, false, options);
+        for (const [index, transform] of iterWPlaneTransforms()) {
+            _renderSingleWPlaneMode(index, transform, false, options);
+        }
+    } finally {
+        wPlanarRenderDeadline = Infinity;
+        wPlanarWorkPerformed = false;
     }
 }

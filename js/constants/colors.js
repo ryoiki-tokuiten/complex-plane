@@ -8,18 +8,12 @@ export const COLOR_TEXT_ON_CANVAS = '#d0d7e2';
 export const COLOR_AXES = 'rgba(130, 130, 180, 0.8)';
 export const COLOR_Z_GRID_HORZ = 'rgba(200, 150, 255, 0.7)';
 export const COLOR_Z_GRID_VERT = 'rgba(255, 150, 100, 0.7)';
-export const COLOR_Z_GRID_HORZ_FUNCTIONAL_EQ = 'rgba(128, 137, 255, 0.5)';
-export const COLOR_Z_GRID_VERT_FUNCTIONAL_EQ = 'rgba(128, 137, 255, 0.5)';
 export const COLOR_Z_GRID_ZETA_UNDEFINED_SUM_REGION = 'rgba(160, 168, 216, 0.25)';
 
 // Input Shapes
 export const COLOR_INPUT_SHAPE_Z = 'rgb(100,150,255)';
 export const COLOR_INPUT_LINE_IM_Z = 'rgb(100,255,150)';
 export const COLOR_FOCI = 'rgb(255,100,100)';
-export const COLOR_POLAR_RADIAL = 'rgba(255, 150, 100, 0.7)';
-export const COLOR_POLAR_ANGULAR = 'rgba(200, 150, 255, 0.7)';
-export const COLOR_LOGPOLAR_EXP_R = 'rgba(255, 150, 100, 0.7)';
-export const COLOR_LOGPOLAR_ANGULAR = 'rgba(200, 150, 255, 0.7)';
 
 // Markers and Points
 export const COLOR_ZERO_MARKER = 'rgba(255, 60, 60, 0.9)';

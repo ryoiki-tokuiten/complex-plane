@@ -391,14 +391,6 @@ function getCachedFastEvaluator(ast) {
     return evaluator;
 }
 
-export function evaluateExpression(ast, environment = {}) {
-    if (ast && typeof ast === 'object' && ast.type !== 'literal') {
-        const evaluator = getCachedFastEvaluator(ast);
-        if (evaluator !== null) return evaluator(environment);
-    }
-    return evaluateExpressionInterpreted(ast, environment);
-}
-
 let generatedHelpersCache = null;
 
 function getGeneratedHelpers() {

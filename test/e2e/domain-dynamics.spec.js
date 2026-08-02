@@ -8,7 +8,6 @@ test('GPU domain-dynamics helpers match the CPU contract fixtures', async ({ pag
         const moduleUrl = new URL('js/constants/domain-dynamics.js', location.href).href;
         const {
             DOMAIN_DYNAMICS_GLSL,
-            domainDynamicsEscapes,
             domainDynamicsLogMagnitude,
             domainDynamicsSmoothIteration,
             isFiniteDomainDynamicsValue
@@ -90,26 +89,26 @@ test('GPU domain-dynamics helpers match the CPU contract fixtures', async ({ pag
         const modeLocation = gl.getUniformLocation(program, 'u_mode');
 
         const fixtures = [
-            [0, 0, 0, 17],
-            [3, 4, 2, 17],
-            [10000, 0, 3, 17],
-            [10001, 0, 3, 17],
-            [1e5, 1e5, 4, 17],
-            [1e30, 0, 5, 17],
-            [-1e30, 0, 6, 17]
+            [0, 0, 0, 17, false],
+            [3, 4, 2, 17, false],
+            [10000, 0, 3, 17, false],
+            [10001, 0, 3, 17, true],
+            [1e5, 1e5, 4, 17, true],
+            [1e30, 0, 5, 17, true],
+            [-1e30, 0, 6, 17, true]
         ];
         const pixels = new Uint8Array(4);
         const values = [];
 
-        for (const [re, im, iteration, chainCount] of fixtures) {
+        for (const [re, im, iteration, chainCount, expectedEscaped] of fixtures) {
             gl.uniform1f(modeLocation, 0);
             gl.uniform4f(fixtureLocation, re, im, iteration, chainCount);
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
             gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
             values.push({
-                cpuEscapes: domainDynamicsEscapes(re, im),
-                gpuEscapes: pixels[0] >= 128,
+                expectedEscaped,
+                gpuEscaped: pixels[0] >= 128,
                 cpuFinite: isFiniteDomainDynamicsValue(re, im),
                 gpuFinite: pixels[3] >= 128,
                 cpuLogMagnitude: domainDynamicsLogMagnitude(re, im),
@@ -134,7 +133,7 @@ test('GPU domain-dynamics helpers match the CPU contract fixtures', async ({ pag
 
     test.skip(!result.supported, 'WebGL is unavailable in this browser');
     for (const fixture of result.values) {
-        expect(fixture.gpuEscapes).toBe(fixture.cpuEscapes);
+        expect(fixture.gpuEscaped).toBe(fixture.expectedEscaped);
         expect(fixture.gpuFinite).toBe(fixture.cpuFinite);
         expect(Math.abs(fixture.gpuLogMagnitude - fixture.cpuLogMagnitude)).toBeLessThan(0.5);
         expect(Math.abs(fixture.gpuSmoothIteration - fixture.cpuSmoothIteration)).toBeLessThan(2.5);

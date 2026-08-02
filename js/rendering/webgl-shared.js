@@ -215,99 +215,6 @@ export function getWebGLBackendInfoShared(gl) {
     return info;
 }
 
-export function generateDirectEvaluationGLSL(funcName, valVar, outVar, isSheet = false) {
-    if (!funcName || funcName === 'none') return '';
-
-    switch (funcName) {
-        case 'cos':
-            return `        ${outVar} = complexCos(${valVar});\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'sin':
-            return `        ${outVar} = complexSin(${valVar});\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'tan':
-            return `        {\n` +
-                `          vec2 den = complexCos(${valVar});\n` +
-                `          if (dot(den, den) < 1.0e-18) return false;\n` +
-                `          ${outVar} = complexDiv(complexSin(${valVar}), den);\n` +
-                `          if (!isFiniteVec2Compat(${outVar})) return false;\n` +
-                `        }\n`;
-        case 'sec':
-            return `        {\n` +
-                `          vec2 den = complexCos(${valVar});\n` +
-                `          if (dot(den, den) < 1.0e-18) return false;\n` +
-                `          ${outVar} = complexDiv(vec2(1.0, 0.0), den);\n` +
-                `          if (!isFiniteVec2Compat(${outVar})) return false;\n` +
-                `        }\n`;
-        case 'exp':
-            return `        ${outVar} = complexExp(${valVar});\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'ln':
-            if (isSheet) {
-                return `        if (!complexLnOnSheet(${valVar}, branchIndex, branchCutWidth, ${outVar})) return false;\n`;
-            } else {
-                return `        if (dot(${valVar}, ${valVar}) < 1.0e-20) return false;\n` +
-                    `        ${outVar} = complexLn(${valVar});\n` +
-                    `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-            }
-        case 'reciprocal':
-            return `        if (dot(${valVar}, ${valVar}) < 1.0e-18) return false;\n` +
-                `        ${outVar} = complexDiv(vec2(1.0, 0.0), ${valVar});\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'mobius':
-            return `        {\n` +
-                `          vec2 num = complexAdd(complexMul(mA, ${valVar}), mB);\n` +
-                `          vec2 den = complexAdd(complexMul(mC, ${valVar}), mD);\n` +
-                `          if (dot(den, den) < 1.0e-18) return false;\n` +
-                `          ${outVar} = complexDiv(num, den);\n` +
-                `          if (!isFiniteVec2Compat(${outVar})) return false;\n` +
-                `        }\n`;
-        case 'polynomial':
-            return `        ${outVar} = evalPolynomial(${valVar}, polyDeg, polyCoeffs);\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'poincare':
-            return `        {\n` +
-                `          if (${valVar}.y <= 1.0e-9) return false;\n` +
-                `          float rootY = sqrt(max(${valVar}.y, 0.0));\n` +
-                `          if (!isFiniteFloatCompat(rootY) || rootY <= 1.0e-8) return false;\n` +
-                `          ${outVar} = vec2(${valVar}.x / rootY, rootY);\n` +
-                `          if (!isFiniteVec2Compat(${outVar})) return false;\n` +
-                `        }\n`;
-        case 'zeta':
-            return `        if (!evaluateZeta(${valVar}, zetaCont, zetaRefl, ${outVar})) return false;\n`;
-        case 'sinh':
-            return `        ${outVar} = complexSinh(${valVar});\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'cosh':
-            return `        ${outVar} = complexCosh(${valVar});\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'tanh':
-            return `        ${outVar} = complexTanh(${valVar});\n` +
-                `        if (!isFiniteVec2Compat(${outVar})) return false;\n`;
-        case 'power':
-            if (isSheet) {
-                return `        {\n` +
-                    `          float nearestInteger = floor(fracPower + 0.5);\n` +
-                    `          bool isIntegerPower = abs(fracPower - nearestInteger) < 1.0e-5;\n` +
-                    `          if (!complexPowRealOnSheet(${valVar}, fracPower, isIntegerPower ? 0.0 : branchIndex, isIntegerPower ? 0.0 : branchCutWidth, ${outVar})) return false;\n` +
-                    `        }\n`;
-            } else {
-                return `        {\n` +
-                    `          if (dot(${valVar}, ${valVar}) < 1.0e-20) {\n` +
-                    `            ${outVar} = vec2(0.0);\n` +
-                    `          } else {\n` +
-                    `            vec2 lnZ = complexLn(${valVar});\n` +
-                    `            ${outVar} = complexExp(vec2(fracPower * lnZ.x, fracPower * lnZ.y));\n` +
-                    `          }\n` +
-                    `          if (!isFiniteVec2Compat(${outVar})) return false;\n` +
-                    `        }\n`;
-            }
-        default:
-            return '';
-    }
-}
-
-
 const ALGEBRAIC_GLSL_MACROS = `#define EVAL_COS(V,O) O = complexCos(V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_SIN(V,O) O = complexSin(V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_TAN(V,O) { vec2 den = complexCos(V); if (dot(den, den) < 1.0e-18) return false; O = complexDiv(complexSin(V), den); if (!isFiniteVec2Compat(O)) return false; }
@@ -688,7 +595,7 @@ export function getGLSLComplexMathLibrary(appState) {
                 return memo.source;
             }
         } catch {
-            // The legacy path handled malformed state by falling through to an uncached build.
+            // Malformed state falls through to an uncached build.
         }
     }
 

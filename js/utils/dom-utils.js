@@ -287,6 +287,15 @@ export function updateChainingColumns(count) {
     const canvasesRow = document.querySelector('.canvas-row.two-column-layout');
     if (!canvasesRow) return;
 
+    if (wCanvasList.length === displayCount) {
+        context.wCanvasList = wCanvasList;
+        context.wCtxList = wCtxList;
+        context.wPlaneParamsList = wPlaneParamsList;
+        context.wPlaneThreeContainersList = wPlaneThreeContainersList;
+        context.sphereViewWParamsList = sphereViewWParamsList;
+        return;
+    }
+
     // Create more planes if needed
     while (wCanvasList.length < displayCount) {
         const i = wCanvasList.length;
@@ -376,6 +385,7 @@ export function updateChainingColumns(count) {
         wPlaneParamsList.pop();
         wPlaneThreeContainersList.pop();
         sphereViewWParamsList.pop();
+        context.wPlanarTransformedLayerCacheList?.pop();
     }
     
     // Update the original w_plane title if needed

@@ -38,14 +38,14 @@ const TRANSFORM_MODE_PARAMETER_GROUPS = Object.freeze([
     'polynomialParamsSliders',
     'fractionalPowerParamsSliders',
     'shapeParamsSliders',
-    'chainingParamsBlock',
-    'algebraicChainingParamsBlock',
+    'chainingParams',
+    'algebraicChainingParams',
     'dynamicPlottingParams'
 ]);
 
 const TRANSFORM_MODE_VISUALIZATION_PANELS = Object.freeze([
     'visualizationOptionsPanel',
-    'zetaSpecificControlsDiv',
+    'zetaSpecificControls',
     'riemannSphereOptionsDiv',
     'riemannSurfaceOptionsDiv',
     'sphereViewControlsDiv',
@@ -461,8 +461,8 @@ function syncComplexParameterControls() {
         return;
     }
 
-    setHidden('chainingParamsBlock', false);
-    setHidden('algebraicChainingParamsBlock', false);
+    setHidden('chainingParams', false);
+    setHidden('algebraicChainingParams', false);
     setHidden('dynamicPlottingParams', false);
 
     const shape = state.currentInputShape;
@@ -545,12 +545,6 @@ function syncRiemannAndTransformDisplays() {
     syncValueBindings(RIEMANN_VIEW_VALUE_BINDINGS);
     syncValueBindings(FOURIER_VALUE_BINDINGS);
     syncValueBindings(LAPLACE_VALUE_BINDINGS);
-
-    const stability = state.laplaceStability;
-    if (control('laplaceStabilityDisplay') && stability) {
-        setText('laplaceStabilityDisplay', stability.message || 'Analyzing…');
-        setStyleColor('laplaceStabilityDisplay', stability.color);
-    }
 }
 
 export function updateSliderLabelsAndDisplay() {
@@ -1198,15 +1192,6 @@ function syncDomainColoringControls() {
     setHidden('domainColoringOptionsDiv', !state.domainColoringEnabled);
     setHidden('orbitColoringModeGroup', !(state.domainColoringEnabled && state.chainingEnabled));
 
-    for (const selector of [
-        control('domainPaletteSelect'),
-        control('riemannSurfacePaletteSelect')
-    ]) {
-        if (selector) {
-            selector.value = state.domainPalette || 'analytic-base';
-        }
-    }
-
     const orbitSelector = control('orbitColoringModeSelect');
     if (orbitSelector) {
         const normalized = normalizeOrbitColoringMode(state.orbitColoringMode);
@@ -1214,14 +1199,14 @@ function syncDomainColoringControls() {
         orbitSelector.value = normalized;
     }
 
-    setHidden('domainColoringKeyDiv', !state.domainColoringEnabled);
-    if (control('domainColoringKeyDiv')) {
+    setHidden('domainColoringKey', !state.domainColoringEnabled);
+    if (control('domainColoringKey')) {
         updateDomainColoringKey();
     }
 }
 
 function syncZetaControls() {
-    const container = control('zetaSpecificControlsDiv');
+    const container = control('zetaSpecificControls');
     if (!container) {
         return;
     }
@@ -1299,7 +1284,7 @@ export function updateTitlesAndGlobalUI() {
 }
 
 export function updateDomainColoringKey() {
-    const keyDiv = control('domainColoringKeyDiv');
+    const keyDiv = control('domainColoringKey');
     if (!keyDiv) {
         return;
     }
@@ -1478,18 +1463,18 @@ export function sync2DContourUI() {
 
     if (state.realPlotsEnabled) {
         // Real plots active: z_plane and w_plane are hidden, real_plots is visible
-        const zCard = control('zCanvasCard');
-        const wCard = control('wCanvasCard');
+        const zCard = control('zPlaneColumn');
+        const wCard = control('wPlaneColumn');
         const rpCol = control('realPlotsColumn');
         if (zCard) zCard.classList.add('hidden');
         if (wCard) wCard.classList.add('hidden');
         if (rpCol) rpCol.classList.remove('hidden');
     } else if (state.riemannSurfaceEnabled) {
         // Riemann surface active:
-        // If showContour is true, we hide zCanvasCard so we only have wCanvasCard (3D Riemann) and contour2DColumn (2D contour) side-by-side!
-        // If showContour is false, we restore zCanvasCard and wCanvasCard.
-        const zCard = control('zCanvasCard');
-        const wCard = control('wCanvasCard');
+        // If showContour is true, hide the z-plane column so the 3D Riemann and 2D contour views sit side by side.
+        // If showContour is false, restore both plane columns.
+        const zCard = control('zPlaneColumn');
+        const wCard = control('wPlaneColumn');
         const rpCol = control('realPlotsColumn');
         if (rpCol) rpCol.classList.add('hidden');
         if (zCard) {

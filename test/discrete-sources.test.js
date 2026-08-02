@@ -2,15 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    firstPrimes,
     generateDiscreteSource,
     generateGeometricValues,
     generateGaussianPrimeValues,
     generateHarmonicValues,
     generateIntegerValues,
     isGaussianPrime,
-    parseCustomPointText,
-    sievePrimes
+    parseCustomPointText
 } from '../js/analysis/discrete-sources.js';
 
 test('integer sources preserve explicit and symmetric ordering', () => {
@@ -64,8 +62,6 @@ test('progressions omit undefined and overflowing values with diagnostics', () =
 });
 
 test('prime generation matches known values and bounded ranges', () => {
-    assert.deepEqual(sievePrimes(30), [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]);
-    assert.deepEqual(firstPrimes(6), [2, 3, 5, 7, 11, 13]);
     assert.deepEqual(
         generateDiscreteSource({ kind: 'primes', count: 4, min: 10, max: 30 })
             .records.map(record => record.domainValue.re),

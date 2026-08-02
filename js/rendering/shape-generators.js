@@ -218,20 +218,6 @@ export function buildInputShapeGeometryConfig(planeParams, options = {}) {
     };
 }
 
-export function generateCirclePoints(cx, cy, radius, numPoints) {
-    return makeCirclePoints(cx, cy, radius, numPoints);
-}
-
-
-
-export function generateLinePoints(xMin, xMax, y, numPoints) {
-    return cartesianSegment(xMin, y, xMax, y, numPoints);
-}
-
-export function generateVerticalLinePoints(x, yMin, yMax, numPoints) {
-    return cartesianSegment(x, yMin, x, yMax, numPoints);
-}
-
 export function generateCartesianGridPointSets(config) {
     const palette = currentGridPalette();
     const sampleCount = integerAtLeast(config.curvePoints / 2, 2);
@@ -449,15 +435,6 @@ export function generateInputShapePointSets(config) {
 
 export function generateCurrentInputShapePointSets(planeParams, options = {}) {
     return generateInputShapePointSets(buildInputShapeGeometryConfig(planeParams, options));
-}
-
-export function generateCurrentMappedInputShapePointSets(planeParams, options = {}) {
-    return generateCurrentInputShapePointSets(planeParams, options);
-}
-
-export function getRadialDiscreteStepDomain(functionKey) {
-    const domain = RADIAL_STEP_DOMAINS[functionKey] ?? RADIAL_STEP_DOMAIN_DEFAULT;
-    return { min: domain.min, max: domain.max };
 }
 
 export function generateRadialDiscreteStepPointSets(functionKey, transformFunc, stepsCount, options = {}) {

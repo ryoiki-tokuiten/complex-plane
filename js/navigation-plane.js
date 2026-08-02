@@ -81,8 +81,8 @@ export function initializeNavigationStateFromControls() {
 
 export function syncNavigationControls() {
     const inSpecialMode = state.fourierModeEnabled || state.laplaceModeEnabled;
-    if (controls.navigationParamsBlock) {
-        controls.navigationParamsBlock.classList.toggle('hidden', inSpecialMode);
+    if (controls.navigationParams) {
+        controls.navigationParams.classList.toggle('hidden', inSpecialMode);
     }
     if (controls.enableNavigationModeCb) {
         controls.enableNavigationModeCb.checked = state.navigationModeEnabled && !inSpecialMode;
@@ -362,9 +362,4 @@ export function drawNavigationLayer(ctx, planeParams, planeKey, transformFunc = 
     } finally {
         restoreNavigationImageState();
     }
-}
-
-// Alias kept for any renderer.js call sites that use this name directly.
-export function drawNavigationVehicle(ctx, planeParams, transformFunc = null) {
-    drawNavigationLayer(ctx, planeParams, null, transformFunc);
 }

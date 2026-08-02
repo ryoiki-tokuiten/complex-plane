@@ -15,11 +15,6 @@ self.onmessage = event => {
         return;
     }
 
-    if (message.type === 'dispose') {
-        renderers.clear();
-        return;
-    }
-
     if (message.type !== 'tile') return;
 
     try {

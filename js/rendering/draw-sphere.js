@@ -6,10 +6,10 @@ import {
 } from '../constants/colors.js';
 import { NUM_POINTS_CURVE, PROBE_CROSSHAIR_SIZE_FACTOR } from '../constants/numerical.js';
 import { SPHERE_GRID_LINE_DEPTH_EFFECT, SPHERE_GRID_LINE_MAX_WIDTH_W, SPHERE_GRID_LINE_MAX_WIDTH_Z } from '../constants/rendering.js';
-import { evaluateMappedTransform, getMappedTransformProfile, isNumericallyStable } from '../math-utils.js';
+import { evaluateMappedTransform, getMappedTransformProfile } from '../math-utils.js';
 import { complexToSphere, rotate3D, projectSphereToCanvas2D } from '../utils/canvas-utils.js';
 import { isRasterInputShape } from '../utils/raster-media.js';
-import { generateCurrentInputShapePointSets, generateCurrentMappedInputShapePointSets } from './shape-generators.js';
+import { generateCurrentInputShapePointSets } from './shape-generators.js';
 
 const SPHERE_MAX_SEGMENT_CHORD = 0.75;
 const SPHERE_MAX_SEGMENT_CHORD_SQ = SPHERE_MAX_SEGMENT_CHORD * SPHERE_MAX_SEGMENT_CHORD;
@@ -307,7 +307,7 @@ export function drawSphereGridAndShape(ctx, cSP, isWP, tf = null) {
         : null;
 
     const sourcePointSets = isWP
-        ? generateCurrentMappedInputShapePointSets(zPlaneParams, {
+        ? generateCurrentInputShapePointSets(zPlaneParams, {
             currentFunction: state.currentFunction,
             zetaContinuationEnabled: state.zetaContinuationEnabled,
             curvePoints: NUM_POINTS_CURVE
@@ -349,7 +349,7 @@ export function drawSphereProbeAndNeighborhood(ctx, cSP, sourceProbeZ, neighborh
         )
         : sourceProbeZ;
 
-    if (!centerToDisplayOnSphere || isNaN(centerToDisplayOnSphere.re) || isNaN(centerToDisplayOnSphere.im) || !isFinite(centerToDisplayOnSphere.re) || !isFinite(centerToDisplayOnSphere.im) || !isNumericallyStable(centerToDisplayOnSphere)) {
+    if (!centerToDisplayOnSphere || isNaN(centerToDisplayOnSphere.re) || isNaN(centerToDisplayOnSphere.im) || !isFinite(centerToDisplayOnSphere.re) || !isFinite(centerToDisplayOnSphere.im)) {
         return; 
     }
 

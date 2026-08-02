@@ -112,45 +112,6 @@ export function generateHarmonicValues(config = {}) {
     return values;
 }
 
-export function sievePrimes(limit) {
-    const upper = Math.max(1, Math.floor(Number(limit) || 1));
-    if (upper < 2) return [];
-
-    const composite = new Uint8Array(upper + 1);
-    const primes = [];
-
-    for (let candidate = 2; candidate <= upper; candidate += 1) {
-        if (composite[candidate]) continue;
-        primes.push(candidate);
-
-        if (candidate * candidate <= upper) {
-            for (let multiple = candidate * candidate; multiple <= upper; multiple += candidate) {
-                composite[multiple] = 1;
-            }
-        }
-    }
-
-    return primes;
-}
-
-function nthPrimeUpperBound(count) {
-    if (count < 6) return 15;
-    return Math.ceil(count * (Math.log(count) + Math.log(Math.log(count)))) + 3;
-}
-
-export function firstPrimes(count) {
-    const target = normalizeCount(count);
-    if (target === 0) return [];
-
-    let limit = nthPrimeUpperBound(target);
-    let primes = sievePrimes(limit);
-    while (primes.length < target) {
-        limit *= 2;
-        primes = sievePrimes(limit);
-    }
-    return primes.slice(0, target);
-}
-
 export function generatePrimeValues(config = {}) {
     const count = normalizeCount(config.count);
     if (count === 0) return [];

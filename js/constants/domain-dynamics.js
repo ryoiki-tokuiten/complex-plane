@@ -22,12 +22,6 @@ export function isFiniteDomainDynamicsValue(re, im) {
         Math.abs(im) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE;
 }
 
-export function domainDynamicsEscapes(re, im) {
-    if (!(Math.abs(re) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
-        !(Math.abs(im) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE)) return true;
-    return re * re + im * im > DYNAMICS_ESCAPE_RADIUS_SQ;
-}
-
 export function domainDynamicsChainBailsOut(re, im) {
     return !(Math.abs(re) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
         !(Math.abs(im) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE);

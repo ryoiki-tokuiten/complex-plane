@@ -121,8 +121,8 @@ export function findPolynomialRoots_DurandKerner(inputCoeffs) {
  * @param {function(Complex): Complex} func - The complex function f(z).
  * @param {{xMin: number, xMax: number, yMin: number, yMax: number}} bounds -
  *   The search rectangle { xMin, xMax, yMin, yMax }.
- * @param {number} N_initial_grid_search_points - Number of points for initial
- *   estimation of zero/pole count (currently unused in placeholder).
+ * @param {number} N_initial_grid_search_points - Number of points per
+ *   subdivision side.
  * @returns {Complex[]} Array of complex numbers representing the found zeros.
  */
 export function findGeneralRoots_Subdivision(func, bounds, N_initial_grid_search_points) {
@@ -287,5 +287,4 @@ export function calculateWindingNumber(func, rectBounds, numIntegrationPointsPer
 
     return totalArgChange / (2 * Math.PI);
 }
-
 

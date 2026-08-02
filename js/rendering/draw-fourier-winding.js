@@ -344,31 +344,3 @@ export function drawTimeDomainSignal(ctx, signal, planeParams) {
 
     ctx.restore();
 }
-
-/**
- * Get display text for Fourier function type
- */
-export function getFourierFunctionText(funcType) {
-    const funcMap = {
-        // Basic waves
-        'sine': 'f(t) = A·sin(ωt)',
-        'cosine': 'f(t) = A·cos(ωt)',
-        'square': 'f(t) = Square Wave',
-        'sawtooth': 'f(t) = Sawtooth Wave',
-        'triangle': 'f(t) = Triangle Wave',
-        // Modulated signals
-        'am': 'f(t) = AM Signal',
-        'fm': 'f(t) = FM Signal',
-        'chirp': 'f(t) = Chirp (Sweep)',
-        // Transient signals
-        'damped_sine': 'f(t) = Damped Sine',
-        'exponential': 'f(t) = Exponential Decay',
-        'gaussian': 'f(t) = Gaussian Pulse',
-        'pulse': 'f(t) = Rect. Pulse',
-        // Complex waveforms
-        'harmonics': 'f(t) = Harmonic Series',
-        'beat': 'f(t) = Beat Frequency',
-        'noise': 'f(t) = White Noise'
-    };
-    return funcMap[funcType] || 'f(t) = ' + funcType;
-}

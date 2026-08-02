@@ -70,31 +70,6 @@ function isIndexLike(symbol) {
     return code === 110 || code === 107 || code === 109 || code === 114;
 }
 
-export function createDefaultSequenceBinding(symbol) {
-    const normalized = normalizedSymbol(symbol);
-    const indexLike = isIndexLike(normalized);
-    return {
-        id: `binding-${normalized || 'value'}`,
-        symbol: normalized,
-        kind: normalized.toLowerCase() === 'x' ? 'parameter' : indexLike ? 'naturals' : 'constant',
-        value: { re: 1, im: 0 },
-        start: indexLike ? 0 : 1,
-        step: 1,
-        ratio: 2,
-        ordering: 'ascending',
-        includeZero: false,
-        includeNegative: false,
-        min: 2,
-        max: '',
-        bound: 12,
-        boundType: 'norm',
-        associatePolicy: 'all',
-        includeConjugates: true,
-        generatorExpression: 'j + 1',
-        pointsText: '1; 2; 3'
-    };
-}
-
 export function normalizeSequenceBinding(binding, symbol = binding?.symbol) {
     const normalized = normalizedSymbol(symbol || binding?.symbol);
     const indexLike = isIndexLike(normalized);

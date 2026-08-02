@@ -6,7 +6,6 @@ export const PI = TWO_PI / 2;
 export const NUM_POINTS_CURVE = 1000;
 export const NUM_ZETA_TERMS_DIRECT_SUM = 100;
 export const NUM_ZETA_TERMS_ETA_SERIES = 500;
-export const NUM_ZETA_TERMS_FOR_FE = 500;
 export const NUM_ZETA_HASSE_LEVELS = 32;
 export const MAX_POLY_DEGREE = 10;
 export const ZERO_POLE_EPSILON = 1e-4;
@@ -31,9 +30,6 @@ export const RESIDUE_CALC_EPSILON_RADIUS = 0.02;
 export const NUM_RESIDUE_INTEGRAL_STEPS = 100;
 export const RESIDUE_BOUNDARY_CHECK_FACTOR = 1.5;
 export const PROBE_CROSSHAIR_SIZE_FACTOR = 3.5;
-export const RADIAL_STEPS_MIN = 0;
-export const RADIAL_STEPS_MAX = 800;
-export const DEFAULT_RADIAL_STEPS = 200;
 export const DEFAULT_TAYLOR_SERIES_CENTER = Object.freeze({ re: 0, im: 0 });
 export const TAYLOR_CENTER_PRESET_GROUPS = Object.freeze([
     Object.freeze({

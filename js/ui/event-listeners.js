@@ -2,11 +2,11 @@ import { state, context, subscribeState, zPlaneParams, wPlaneParams, wPlaneIniti
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
-import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, processUploadedVideoFrame, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
+import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
 import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
-import { updateLaplaceTransform, updateLaplaceEvaluationPoint, analyzeStability, findPolesZeros } from '../analysis/laplace-transform.js';
+import { updateLaplaceTransform, updateLaplaceEvaluationPoint } from '../analysis/laplace-transform.js';
 import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
 import {
     SPHERE_SENSITIVITY,
@@ -154,7 +154,7 @@ const BASIC_CHECKBOX_BINDINGS = [
     ['enableRiemannTransformationCb', 'riemannTransformationEnabled'],
     ['enableTaylorSeriesCb', 'taylorSeriesEnabled'],
     ['enableTaylorSeriesCustomCenterCb', 'taylorSeriesCustomCenterEnabled'],
-    ['laplaceShowROCCb', 'laplaceShowROC'],
+    ['laplaceShowRocCb', 'laplaceShowROC'],
     ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
     ['laplaceShowFourierLineCb', 'laplaceShowFourierLine'],
     ['laplaceAnimationLoopCb', 'laplaceAnimationLoop'],
@@ -191,7 +191,7 @@ const SPECIAL_CHECKBOXES = new Set([
     'enableSplitViewCb', 'enableVectorFieldCb', 'enableStreamlineFlowCb',
     'enableRadialDiscreteStepsCb', 'enableRiemannSphereCb', 'enableRiemannSurfaceCb',
     'enableThreeSphereCb', 'enableTaylorSeriesCb', 'enableTaylorSeriesCustomCenterCb',
-    'laplaceShowROCCb', 'laplaceShowPolesZerosCb',
+    'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
     'laplaceShowFourierLineCb', 'laplaceAnimationLoopCb', 'enableParticleAnimationCb',
     'enableDomainColoringCb'
 ]);
@@ -467,8 +467,8 @@ export function setActiveFunctionButton(activeKey) {
 }
 
 function updateModePanels() {
-    hidden(controls.fourierSpecificControlsDiv, !state.fourierModeEnabled);
-    hidden(controls.laplaceSpecificControlsDiv, !state.laplaceModeEnabled);
+    hidden(controls.fourierSpecificControls, !state.fourierModeEnabled);
+    hidden(controls.laplaceSpecificControls, !state.laplaceModeEnabled);
     syncLaplacePlayPauseButton();
 }
 
@@ -505,8 +505,8 @@ function disableRealPlots() {
         dynamicParams.parentNode.insertBefore(algParams, dynamicParams);
     }
 
-    if (controls.zCanvasCard) controls.zCanvasCard.classList.remove('hidden');
-    if (controls.wCanvasCard) controls.wCanvasCard.classList.remove('hidden');
+    if (controls.zPlaneColumn) controls.zPlaneColumn.classList.remove('hidden');
+    if (controls.wPlaneColumn) controls.wPlaneColumn.classList.remove('hidden');
     const refreshPlanes = () => {
         setupVisualParameters(false, false);
         requestUiRedraw();
@@ -549,8 +549,7 @@ function syncAlgebraicControlsFromState() {
 function syncDomainControlsFromState() {
     checked('enableDomainColoringCb', state.domainColoringEnabled);
     hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
-    hidden(controls.domainColoringKeyDiv, !state.domainColoringEnabled);
-    if (controls.domainPaletteSelect) controls.domainPaletteSelect.value = state.domainPalette;
+    hidden(controls.domainColoringKey, !state.domainColoringEnabled);
     syncOrbitColoringModeControl();
     call(updateDomainColoringKey);
 }
@@ -831,7 +830,7 @@ function bindImageControls() {
 
     bindSlider('imageSizeSlider', 'imageSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('imageOpacitySlider', 'imageOpacity', parseFloat, () => requestDomainRedraw(true));
-    bindRasterSurfaceControl('imageSurface3dCb');
+    bindRasterSurfaceControl('imageSurface3DCb');
 }
 
 function bindVideoControls() {
@@ -849,15 +848,7 @@ function bindVideoControls() {
     });
     bindSlider('videoSizeSlider', 'videoSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('videoOpacitySlider', 'videoOpacity', parseFloat, () => requestDomainRedraw(true));
-    bindRasterSurfaceControl('videoSurface3dCb');
-}
-
-function syncPalette(selectors) {
-    selectors.forEach(selector => {
-        selector.value = state.domainPalette;
-    });
-    call(updateDomainColoringKey);
-    requestDomainRedraw(true);
+    bindRasterSurfaceControl('videoSurface3DCb');
 }
 
 function bindDomainColoringControls() {
@@ -887,25 +878,9 @@ function bindDomainColoringControls() {
             }
         }
         hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
-        hidden(controls.domainColoringKeyDiv, !state.domainColoringEnabled);
+        hidden(controls.domainColoringKey, !state.domainColoringEnabled);
         syncOrbitColoringModeControl();
         requestDomainRedraw(true);
-    });
-
-    const selectors = [controls.riemannSurfacePaletteSelect].filter(Boolean);
-    selectors.forEach(selector => {
-        selector.replaceChildren();
-        domainPalettes.forEach(palette => {
-            const option = document.createElement('option');
-            option.textContent = palette.name;
-            option.value = palette.id;
-            selector.appendChild(option);
-        });
-        selector.value = state.domainPalette;
-        bindElementListener(selector, 'change', event => {
-            state.domainPalette = event.target.value;
-            syncPalette(selectors);
-        });
     });
 
     syncOrbitColoringModeControl();
@@ -993,8 +968,8 @@ function disableRiemannSurface() {
 }
 
 function syncRasterSurfaceControls() {
-    checked('imageSurface3dCb', state.rasterSurface3dEnabled);
-    checked('videoSurface3dCb', state.rasterSurface3dEnabled);
+    checked('imageSurface3DCb', state.rasterSurface3dEnabled);
+    checked('videoSurface3DCb', state.rasterSurface3dEnabled);
 }
 
 function enableRasterSurface3d() {
@@ -1061,7 +1036,7 @@ function bindViewControls() {
                 state.domainColoringEnabled = false;
                 checked('enableDomainColoringCb', false);
                 hidden(controls.domainColoringOptionsDiv, true);
-                hidden(controls.domainColoringKeyDiv, true);
+                hidden(controls.domainColoringKey, true);
                 state.currentInputShape = 'grid_cartesian';
                 if (controls.inputShapeSelector) controls.inputShapeSelector.value = 'grid_cartesian';
             }
@@ -1115,7 +1090,7 @@ function bindViewControls() {
                 state.domainColoringEnabled = false;
                 checked('enableDomainColoringCb', false);
                 hidden(controls.domainColoringOptionsDiv, true);
-                hidden(controls.domainColoringKeyDiv, true);
+                hidden(controls.domainColoringKey, true);
             }
             if (state.splitViewEnabled) {
                 state.splitViewEnabled = false;
@@ -1333,7 +1308,7 @@ function bindLaplaceControls() {
     });
 
     [
-        ['laplaceShowROCCb', 'laplaceShowROC'],
+        ['laplaceShowRocCb', 'laplaceShowROC'],
         ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
         ['laplaceShowFourierLineCb', 'laplaceShowFourierLine'],
         ['laplaceAnimationLoopCb', 'laplaceAnimationLoop']
@@ -1354,26 +1329,6 @@ function bindLaplaceControls() {
         call(fn);
         frame(syncLaplacePlayPauseButton);
     }));
-
-    bindControlListener('laplaceFindPolesZerosBtn', 'click', () => {
-        if (!state.laplaceModeEnabled) return;
-
-        const result = findPolesZeros(state.laplaceFunction || 'exponential', {
-            frequency: state.laplaceFrequency || 2.0,
-            damping: state.laplaceDamping || 0.5,
-            amplitude: state.laplaceAmplitude || 1.0
-        });
-
-        state.laplacePoles = result.poles;
-        state.laplaceZeros = result.zeros;
-        requestUiRedraw();
-    });
-
-    bindControlListener('laplaceStabilityAnalysisBtn', 'click', () => {
-        if (!state.laplaceModeEnabled || !state.laplacePoles) return;
-        state.laplaceStability = analyzeStability(state.laplacePoles);
-        requestUiRedraw();
-    });
 
 }
 
@@ -1870,8 +1825,8 @@ function triggerPlaneLayoutRefresh() {
 
 function bindCollapseControls() {
     [
-        ['collapseZBtn', 'expandZBtn', controls.zCanvasCard],
-        ['collapseWBtn', 'expandWBtn', controls.wCanvasCard]
+        ['collapseZBtn', 'expandZBtn', controls.zPlaneColumn],
+        ['collapseWBtn', 'expandWBtn', controls.wPlaneColumn]
     ].forEach(([collapseKey, expandKey, column]) => {
         bindControlListener(collapseKey, 'click', () => {
             if (!column) return;
@@ -1914,7 +1869,10 @@ function bindChainingControls() {
 
     bindSlider('chainCountSlider', 'chainCount', parseInteger, value => {
         if (controls.chainCountValueDisplay) controls.chainCountValueDisplay.textContent = value;
-        call(updateChainingColumns, state.chainingEnabled ? value : 1);
+    });
+
+    bindElementListener(controls.chainCountSlider, 'change', () => {
+        call(updateChainingColumns, state.chainingEnabled ? state.chainCount : 1);
         requestUiRedraw();
     });
 
@@ -2022,13 +1980,13 @@ function fullscreenTarget(planeType, index = 0) {
         return {
             isZ: true,
             isThree: false,
-            element: controls.zCanvasWrapper || zCanvas,
-            card: controls.zCanvasCard
+            element: controls.zPlaneCanvasWrapper || zCanvas,
+            card: controls.zPlaneColumn
         };
     }
 
     const canvas = (context.wCanvasList && context.wCanvasList[index]) || wCanvas;
-    const card = index === 0 ? controls.wCanvasCard : document.getElementById(`w_plane_column_${index}`);
+    const card = index === 0 ? controls.wPlaneColumn : document.getElementById(`w_plane_column_${index}`);
     const threeContainer = (context.wPlaneThreeContainersList && context.wPlaneThreeContainersList[index]) || controls.wPlaneThreeContainer;
     const surface = state.riemannSurfaceEnabled ? getRiemannSurfaceCanvas(canvas) : null;
     const isThree = threeContainer && (
@@ -2039,8 +1997,8 @@ function fullscreenTarget(planeType, index = 0) {
 
     let element = surface || (isThree ? threeContainer : canvas);
     if (!surface && !isThree) {
-        if (index === 0 && controls.wCanvasWrapper) {
-            element = controls.wCanvasWrapper;
+        if (index === 0 && controls.wPlaneCanvasWrapper) {
+            element = controls.wPlaneCanvasWrapper;
         } else if (canvas && canvas.parentElement) {
             element = canvas.parentElement;
         }
@@ -2590,8 +2548,8 @@ function bindRealPlotsControls() {
                 rpContainer.appendChild(chainParams);
             }
 
-            if (controls.zCanvasCard) controls.zCanvasCard.classList.add('hidden');
-            if (controls.wCanvasCard) controls.wCanvasCard.classList.add('hidden');
+            if (controls.zPlaneColumn) controls.zPlaneColumn.classList.add('hidden');
+            if (controls.wPlaneColumn) controls.wPlaneColumn.classList.add('hidden');
         } else {
             const dynamicParams = document.getElementById('dynamic_plotting_params');
             const algParams = document.getElementById('algebraic_chaining_params');
@@ -2601,8 +2559,8 @@ function bindRealPlotsControls() {
                 dynamicParams.parentNode.insertBefore(algParams, dynamicParams);
             }
 
-            if (controls.zCanvasCard) controls.zCanvasCard.classList.remove('hidden');
-            if (controls.wCanvasCard) controls.wCanvasCard.classList.remove('hidden');
+            if (controls.zPlaneColumn) controls.zPlaneColumn.classList.remove('hidden');
+            if (controls.wPlaneColumn) controls.wPlaneColumn.classList.remove('hidden');
             disposeRealPlotsRenderer();
         }
 

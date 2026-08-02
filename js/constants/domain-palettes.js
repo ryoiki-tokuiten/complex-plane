@@ -194,13 +194,8 @@ export const DOMAIN_PALETTE_IDS = Object.freeze(Object.fromEntries(
     DOMAIN_PALETTES.map(palette => [palette.id, palette.shaderId])
 ));
 
-export const DOMAIN_PALETTE_STOPS_BY_ID = Object.freeze(Object.fromEntries(
-    DOMAIN_PALETTES.map(palette => [palette.shaderId, palette.stopsUnit])
-));
-
 export const DEFAULT_DOMAIN_PALETTE_ID = 'arctic-frost';
 export const FALLBACK_DOMAIN_PALETTE_SHADER_ID = DOMAIN_PALETTE_IDS[DEFAULT_DOMAIN_PALETTE_ID];
-export const FALLBACK_DOMAIN_PALETTE_STOPS = DOMAIN_PALETTE_STOPS_BY_ID[FALLBACK_DOMAIN_PALETTE_SHADER_ID];
 
 export function getDomainPalette(id) {
     return DOMAIN_PALETTES.find(palette => palette.id === id) ||
