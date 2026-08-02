@@ -17,6 +17,7 @@ import { normalizeDomainDynamicsChainCount } from '../constants/domain-dynamics.
 const PASS_SCALES = Object.freeze([16, 4, 1]);
 const TILE_SIZE = 64;
 const MAX_WORKERS = 16;
+const MAX_TILE_RETRIES = 2;
 const SUPPORTED_FUNCTIONS = new Set([
     'cos',
     'sin',
@@ -167,13 +168,13 @@ function createTileList(passWidth, passHeight, scale) {
     return tiles;
 }
 
+function tileKey(tile) {
+    return `${tile.x}:${tile.y}:${tile.width}:${tile.height}:${tile.scale}`;
+}
+
 function createImageDataFromPixels(pixels, width, height) {
     if (typeof ImageData !== 'undefined') return new ImageData(pixels, width, height);
     return null;
-}
-
-function passSampleStep(passScale) {
-    return passScale;
 }
 
 function drawPassToTarget(job, pass) {
@@ -182,7 +183,7 @@ function drawPassToTarget(job, pass) {
     try {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, job.snapshot.viewport.width, job.snapshot.viewport.height);
-        ctx.imageSmoothingEnabled = pass.sampleStep !== 1;
+        ctx.imageSmoothingEnabled = pass.scale !== 1;
         if (ctx.imageSmoothingQuality !== undefined) ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(
             pass.canvas,
@@ -347,9 +348,8 @@ class WorkerCpuDomainDynamicsBackend {
         }
 
         const scale = PASS_SCALES[job.passIndex];
-        const sampleStep = passSampleStep(scale);
-        const passWidth = Math.max(1, Math.ceil(job.snapshot.viewport.width / sampleStep));
-        const passHeight = Math.max(1, Math.ceil(job.snapshot.viewport.height / sampleStep));
+        const passWidth = Math.max(1, Math.ceil(job.snapshot.viewport.width / scale));
+        const passHeight = Math.max(1, Math.ceil(job.snapshot.viewport.height / scale));
         const canvas = document.createElement('canvas');
         canvas.width = passWidth;
         canvas.height = passHeight;
@@ -358,14 +358,14 @@ class WorkerCpuDomainDynamicsBackend {
         this.pass = {
             id: `${job.id}:${scale}`,
             scale,
-            sampleStep,
             width: passWidth,
             height: passHeight,
             canvas,
             ctx,
-            remaining: 0
+            remaining: 0,
+            tileRetries: new Map()
         };
-        this.queue = createTileList(passWidth, passHeight, sampleStep);
+        this.queue = createTileList(passWidth, passHeight, scale);
         this.queueIndex = 0;
         this.pass.remaining = this.queue.length;
 
@@ -411,7 +411,25 @@ class WorkerCpuDomainDynamicsBackend {
 
         if (message.type === 'error') {
             console.warn('Domain dynamics tile failed:', message.message);
-            pass.remaining -= 1;
+            const key = tileKey(message.tile);
+            const retries = pass.tileRetries.get(key) || 0;
+            if (retries < MAX_TILE_RETRIES) {
+                pass.tileRetries.set(key, retries + 1);
+                this.queue.push(message.tile);
+                return;
+            }
+
+            console.warn('Domain dynamics render invalidated after repeated tile failure.');
+            this.cancel(job.id);
+            if (pendingJobTimeout) {
+                clearTimeout(pendingJobTimeout);
+                pendingJobTimeout = null;
+            }
+            if (activeJobId === job.id) {
+                activeSignature = null;
+                activeJobId = 0;
+            }
+            return;
         } else if (message.type === 'tile') {
             const image = createImageDataFromPixels(message.pixels, message.tile.width, message.tile.height);
             if (image) {
@@ -422,7 +440,6 @@ class WorkerCpuDomainDynamicsBackend {
 
         if (pass.remaining <= 0) {
             drawPassToTarget(job, pass);
-            eventBus.emit('redraw:all');
             if (job.passIndex === PASS_SCALES.length - 1) {
                 lastCompletedSnapshot[job.snapshot.isWPlaneColoring ? 'w' : 'z'] = job.snapshot;
                 setDomainProcessing(job.snapshot.isWPlaneColoring, false);
@@ -447,16 +464,26 @@ class WorkerCpuDomainDynamicsBackend {
             if (!tile) return;
             this.queueIndex += 1;
 
-            const pixels = currentJob.renderTile
-                ? currentJob.renderTile(tile)
-                : renderDomainDynamicsTile(currentJob.snapshot, tile);
-            this.handleTileMessage({
-                type: 'tile',
-                jobId: currentJob.id,
-                passId: currentPass.id,
-                tile,
-                pixels
-            });
+            try {
+                const pixels = currentJob.renderTile
+                    ? currentJob.renderTile(tile)
+                    : renderDomainDynamicsTile(currentJob.snapshot, tile);
+                this.handleTileMessage({
+                    type: 'tile',
+                    jobId: currentJob.id,
+                    passId: currentPass.id,
+                    tile,
+                    pixels
+                });
+            } catch (error) {
+                this.handleTileMessage({
+                    type: 'error',
+                    jobId: currentJob.id,
+                    passId: currentPass.id,
+                    tile,
+                    message: error?.message || String(error)
+                });
+            }
 
             if (this.queueIndex < this.queue.length && this.pass === currentPass && !currentJob.cancelled) {
                 this.inlineTimer = setTimeout(runOne, 0);

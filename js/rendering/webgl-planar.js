@@ -23,7 +23,6 @@ const CFG = Object.freeze({
     interactionSupersample: 1,
     qualitySupersample: 1.06,
     maxDprBoost: 1.04,
-    textureStride: 16
 });
 
 const WEBGL_CONTEXT_ATTRIBUTES = Object.freeze({
@@ -58,38 +57,13 @@ const LINE_FRAGMENT_SOURCE = lines(
     '}'
 );
 
-const TEXTURE_VERTEX_SOURCE = lines(
-    'attribute vec2 a_pos;',
-    'attribute vec2 a_uv;',
-    'varying vec2 v_uv;',
-    'void main() {',
-    '  gl_Position = vec4(a_pos, 0.0, 1.0);',
-    '  v_uv = a_uv;',
-    '}'
-);
-
-const TEXTURE_FRAGMENT_SOURCE = lines(
-    'precision mediump float;',
-    'uniform sampler2D u_texture;',
-    'varying vec2 v_uv;',
-    'void main() {',
-    '  gl_FragColor = texture2D(u_texture, v_uv);',
-    '}'
-);
-
-const TEXTURE_QUAD = new Float32Array([
-    -1, -1, 0, 0,
-    1, -1, 1, 0,
-    -1, 1, 0, 1,
-    1, 1, 1, 1
-]);
-
 const CAPTURE_STATE_KEYS = Object.freeze([
     'strokeStyle',
     'fillStyle',
     'lineWidth',
     'lineJoin',
     'lineCap',
+    'miterLimit',
     'globalAlpha',
     'font',
     'textAlign',
@@ -134,8 +108,7 @@ function createWebGLContext(canvas) {
 function createGpuResourceTracker(gl) {
     const resources = {
         programs: [],
-        buffers: [],
-        textures: []
+        buffers: []
     };
 
     return {
@@ -147,29 +120,11 @@ function createGpuResourceTracker(gl) {
             if (buffer) resources.buffers.push(buffer);
             return buffer;
         },
-        texture(texture) {
-            if (texture) resources.textures.push(texture);
-            return texture;
-        },
         release() {
-            resources.textures.forEach(texture => gl.deleteTexture(texture));
             resources.buffers.forEach(buffer => gl.deleteBuffer(buffer));
             resources.programs.forEach(program => gl.deleteProgram(program));
         }
     };
-}
-
-function configureTexture(gl, texture) {
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-}
-
-function createStaticQuadBuffer(gl, buffer) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, TEXTURE_QUAD, gl.STATIC_DRAW);
 }
 
 function hasMissingLineLocations(locations) {
@@ -177,12 +132,6 @@ function hasMissingLineLocations(locations) {
         locations.uResolution === null ||
         locations.uScale === null ||
         locations.uColor === null;
-}
-
-function hasMissingTextureLocations(locations) {
-    return locations.aTexPos < 0 ||
-        locations.aTexUv < 0 ||
-        locations.uTexture === null;
 }
 
 function getLineLocations(gl, program) {
@@ -194,21 +143,10 @@ function getLineLocations(gl, program) {
     };
 }
 
-function getTextureLocations(gl, program) {
-    return {
-        aTexPos: gl.getAttribLocation(program, 'a_pos'),
-        aTexUv: gl.getAttribLocation(program, 'a_uv'),
-        uTexture: gl.getUniformLocation(program, 'u_texture')
-    };
-}
-
 function destroyWebGLLineRenderer(renderer) {
     if (!renderer || !renderer.gl) return;
     const gl = renderer.gl;
-    if (renderer.texture) gl.deleteTexture(renderer.texture);
-    if (renderer.textureQuadBuffer) gl.deleteBuffer(renderer.textureQuadBuffer);
     if (renderer.positionBuffer) gl.deleteBuffer(renderer.positionBuffer);
-    if (renderer.textureProgram) gl.deleteProgram(renderer.textureProgram);
     if (renderer.program) gl.deleteProgram(renderer.program);
 }
 
@@ -224,46 +162,31 @@ export function createWebGLLineRenderer() {
     };
 
     const program = tracker.program(createWebGLProgramShared(gl, LINE_VERTEX_SOURCE, LINE_FRAGMENT_SOURCE));
-    const textureProgram = tracker.program(createWebGLProgramShared(gl, TEXTURE_VERTEX_SOURCE, TEXTURE_FRAGMENT_SOURCE));
     const positionBuffer = tracker.buffer(gl.createBuffer());
-    const textureQuadBuffer = tracker.buffer(gl.createBuffer());
-    const texture = tracker.texture(gl.createTexture());
 
-    if (!program || !textureProgram || !positionBuffer || !textureQuadBuffer || !texture) {
+    if (!program || !positionBuffer) {
         return fail();
     }
 
     const lineLocations = getLineLocations(gl, program);
-    const textureLocations = getTextureLocations(gl, textureProgram);
-    if (hasMissingLineLocations(lineLocations) || hasMissingTextureLocations(textureLocations)) {
+    if (hasMissingLineLocations(lineLocations)) {
         return fail();
     }
-
-    configureTexture(gl, texture);
-    createStaticQuadBuffer(gl, textureQuadBuffer);
 
     return {
         canvas,
         gl,
         backendInfo: getWebGLBackendInfoShared(gl),
         program,
-        textureProgram,
         positionBuffer,
-        textureQuadBuffer,
-        texture,
         aPosition: lineLocations.aPosition,
-        aTexPos: textureLocations.aTexPos,
-        aTexUv: textureLocations.aTexUv,
         uResolution: lineLocations.uResolution,
         uScale: lineLocations.uScale,
         uColor: lineLocations.uColor,
-        uTexture: textureLocations.uTexture,
         colorCache: new Map(),
         renderScale: 1,
         viewWidth: 0,
-        viewHeight: 0,
-        rasterCanvas: createCanvasElement(),
-        rasterCtx: null
+        viewHeight: 0
     };
 }
 
@@ -465,6 +388,7 @@ export class PolylineCaptureContext {
         this.lineWidth = 1;
         this.lineJoin = 'miter';
         this.lineCap = 'butt';
+        this.miterLimit = 10;
         this.globalAlpha = 1;
         this.globalCompositeOperation = 'source-over';
         this.font = '10px sans-serif';
@@ -506,7 +430,12 @@ export class PolylineCaptureContext {
             points: new Float32Array(pointsArray),
             color: colorString,
             lineWidth,
-            alphaMultiplier
+            alphaMultiplier,
+            lineJoin: this.lineJoin,
+            lineCap: this.lineCap,
+            miterLimit: this.miterLimit,
+            globalCompositeOperation: this.globalCompositeOperation,
+            closed: false
         });
     }
 
@@ -557,15 +486,65 @@ export class PolylineCaptureContext {
             return;
         }
 
+        if (this.globalCompositeOperation !== 'source-over') {
+            this._markUnsupported('globalCompositeOperation');
+            return;
+        }
+
+        if (!Number.isFinite(this.lineWidth) || this.lineWidth <= 0 ||
+            !Number.isFinite(this.globalAlpha) || this.globalAlpha < 0 || this.globalAlpha > 1) {
+            this._markUnsupported('strokeState');
+            return;
+        }
+
+        if (typeof this.strokeStyle !== 'string') {
+            this._markUnsupported('strokeStyle');
+            return;
+        }
+
+        if (!['butt', 'round', 'square'].includes(this.lineCap)) {
+            this._markUnsupported('lineCap');
+            return;
+        }
+
+        if (!['miter', 'round', 'bevel'].includes(this.lineJoin)) {
+            this._markUnsupported('lineJoin');
+            return;
+        }
+        if (!Number.isFinite(this.miterLimit) || this.miterLimit <= 0) {
+            this._markUnsupported('miterLimit');
+            return;
+        }
+
         for (const subpath of this._subpaths) {
             if (subpath && subpath.points.length >= 4) {
                 this._pushBatch(LINE_MODE, subpath.points, this.strokeStyle, this.lineWidth, this.globalAlpha);
+                this._batches[this._batches.length - 1].closed = subpath.closed;
             }
         }
     }
 
     strokeRect(x, y, width, height) {
         if (!isFinitePoint(x, y) || !isFinitePoint(width, height)) return;
+        if (this.globalCompositeOperation !== 'source-over') {
+            this._markUnsupported('globalCompositeOperation');
+            return;
+        }
+        if (!Number.isFinite(this.lineWidth) || this.lineWidth <= 0 ||
+            !Number.isFinite(this.globalAlpha) || this.globalAlpha < 0 || this.globalAlpha > 1) {
+            this._markUnsupported('strokeState');
+            return;
+        }
+        if (typeof this.strokeStyle !== 'string') {
+            this._markUnsupported('strokeStyle');
+            return;
+        }
+        if (!['butt', 'round', 'square'].includes(this.lineCap) ||
+            !['miter', 'round', 'bevel'].includes(this.lineJoin) ||
+            !Number.isFinite(this.miterLimit) || this.miterLimit <= 0) {
+            this._markUnsupported('strokeRectStyle');
+            return;
+        }
         this._pushBatch(
             LINE_MODE,
             [x, y, x + width, y, x + width, y + height, x, y + height, x, y],
@@ -573,6 +552,7 @@ export class PolylineCaptureContext {
             this.lineWidth,
             this.globalAlpha
         );
+        this._batches[this._batches.length - 1].closed = true;
     }
 
     setLineDash(value) {
@@ -683,6 +663,164 @@ export function buildPolylineTriangles(points, halfWidth) {
     return output;
 }
 
+function appendRoundDiskTriangles(output, centerX, centerY, radius) {
+    const segments = 12;
+    for (let i = 0; i < segments; i += 1) {
+        const angle0 = (i / segments) * Math.PI * 2;
+        const angle1 = ((i + 1) / segments) * Math.PI * 2;
+        output.push(
+            centerX, centerY,
+            centerX + Math.cos(angle0) * radius, centerY + Math.sin(angle0) * radius,
+            centerX + Math.cos(angle1) * radius, centerY + Math.sin(angle1) * radius
+        );
+    }
+}
+
+function appendSegmentTriangleVertices(output, x0, y0, x1, y1, halfWidth) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const length = Math.hypot(dx, dy);
+    if (length < CFG.minSegmentLength) return;
+
+    const ox = -dy / length * halfWidth;
+    const oy = dx / length * halfWidth;
+    output.push(
+        x0 + ox, y0 + oy, x0 - ox, y0 - oy, x1 + ox, y1 + oy,
+        x1 + ox, y1 + oy, x0 - ox, y0 - oy, x1 - ox, y1 - oy
+    );
+}
+
+function appendJoinTriangles(output, points, index, lastIndex, halfWidth, lineJoin, miterLimit, closed) {
+    if (!closed && (index === 0 || index === lastIndex)) return;
+
+    const closedVertexCount = lastIndex + 1;
+    const previousIndex = closed ? (index + lastIndex) % closedVertexCount : index - 1;
+    const nextIndex = closed ? (index + 1) % closedVertexCount : index + 1;
+    const px = points[index * 2];
+    const py = points[index * 2 + 1];
+    const previousX = points[previousIndex * 2];
+    const previousY = points[previousIndex * 2 + 1];
+    const nextX = points[nextIndex * 2];
+    const nextY = points[nextIndex * 2 + 1];
+    const incomingLength = Math.hypot(px - previousX, py - previousY);
+    const outgoingLength = Math.hypot(nextX - px, nextY - py);
+    if (incomingLength < CFG.minSegmentLength || outgoingLength < CFG.minSegmentLength) return;
+
+    const incomingX = (px - previousX) / incomingLength;
+    const incomingY = (py - previousY) / incomingLength;
+    const outgoingX = (nextX - px) / outgoingLength;
+    const outgoingY = (nextY - py) / outgoingLength;
+    const incomingNormalX = -incomingY;
+    const incomingNormalY = incomingX;
+    const outgoingNormalX = -outgoingY;
+    const outgoingNormalY = outgoingX;
+    const turn = incomingX * outgoingY - incomingY * outgoingX;
+
+    if (Math.abs(turn) < 1e-6) {
+        if (lineJoin === 'round' && incomingX * outgoingX + incomingY * outgoingY < 0) {
+            appendRoundDiskTriangles(output, px, py, halfWidth);
+        }
+        return;
+    }
+
+    const side = turn > 0 ? 1 : -1;
+    const outer0X = px + side * incomingNormalX * halfWidth;
+    const outer0Y = py + side * incomingNormalY * halfWidth;
+    const outer1X = px + side * outgoingNormalX * halfWidth;
+    const outer1Y = py + side * outgoingNormalY * halfWidth;
+
+    if (lineJoin === 'round') {
+        appendRoundDiskTriangles(output, px, py, halfWidth);
+        return;
+    }
+
+    let joinX = px;
+    let joinY = py;
+    let useMiter = lineJoin === 'miter';
+    if (useMiter) {
+        const miterX = side * (incomingNormalX + outgoingNormalX);
+        const miterY = side * (incomingNormalY + outgoingNormalY);
+        const miterLength = Math.hypot(miterX, miterY);
+        const miterDot = miterX * side * outgoingNormalX + miterY * side * outgoingNormalY;
+        if (miterLength > 0 && miterDot > 1e-6) {
+            const miterScale = halfWidth / miterDot;
+            joinX = px + miterX * miterScale;
+            joinY = py + miterY * miterScale;
+            useMiter = Math.hypot(joinX - px, joinY - py) <= halfWidth * miterLimit;
+        } else {
+            useMiter = false;
+        }
+    }
+
+    output.push(
+        outer0X, outer0Y,
+        useMiter ? joinX : px, useMiter ? joinY : py,
+        outer1X, outer1Y
+    );
+}
+
+function buildStyledPolylineTriangles(points, halfWidth, lineJoin, lineCap, miterLimit, closed) {
+    const segments = buildPolylineTriangles(points, halfWidth);
+    if (!segments) return null;
+
+    const extra = [];
+    const pointCount = points.length / 2;
+    const lastIndex = closed && pointCount > 1 &&
+        Math.abs(points[0] - points[points.length - 2]) <= CFG.closePathEpsilon &&
+        Math.abs(points[1] - points[points.length - 1]) <= CFG.closePathEpsilon
+        ? pointCount - 2
+        : pointCount - 1;
+
+    for (let index = 0; index <= lastIndex; index += 1) {
+        const isEndpoint = !closed && (index === 0 || index === lastIndex);
+        if (isEndpoint && lineCap === 'round') {
+            appendRoundDiskTriangles(extra, points[index * 2], points[index * 2 + 1], halfWidth);
+        } else if (!isEndpoint) {
+            appendJoinTriangles(extra, points, index, lastIndex, halfWidth, lineJoin, miterLimit, closed);
+        }
+    }
+
+    if (!closed && lineCap === 'square') {
+        const firstLength = Math.hypot(points[2] - points[0], points[3] - points[1]);
+        const lastOffset = lastIndex * 2;
+        const previousOffset = (lastIndex - 1) * 2;
+        const lastLength = Math.hypot(
+            points[lastOffset] - points[previousOffset],
+            points[lastOffset + 1] - points[previousOffset + 1]
+        );
+        if (firstLength >= CFG.minSegmentLength) {
+            const dx = (points[2] - points[0]) / firstLength;
+            const dy = (points[3] - points[1]) / firstLength;
+            appendSegmentTriangleVertices(
+                extra,
+                points[0] - dx * halfWidth,
+                points[1] - dy * halfWidth,
+                points[0],
+                points[1],
+                halfWidth
+            );
+        }
+        if (lastLength >= CFG.minSegmentLength) {
+            const dx = (points[lastOffset] - points[previousOffset]) / lastLength;
+            const dy = (points[lastOffset + 1] - points[previousOffset + 1]) / lastLength;
+            appendSegmentTriangleVertices(
+                extra,
+                points[lastOffset],
+                points[lastOffset + 1],
+                points[lastOffset] + dx * halfWidth,
+                points[lastOffset + 1] + dy * halfWidth,
+                halfWidth
+            );
+        }
+    }
+
+    if (extra.length === 0) return segments;
+    const output = new Float32Array(segments.length + extra.length);
+    output.set(segments);
+    output.set(extra, segments.length);
+    return output;
+}
+
 function prepareLinePass(renderer, width, height) {
     if (!renderer.program || !renderer.positionBuffer) return false;
 
@@ -704,8 +842,7 @@ function prepareLinePass(renderer, width, height) {
 }
 
 function getBatchHalfWidth(batch, renderScale) {
-    const lineWidth = Number.isFinite(batch.lineWidth) ? batch.lineWidth : 1;
-    return Math.max(0.5, lineWidth * renderScale * 0.5);
+    return Math.max(0.5, batch.lineWidth * renderScale * 0.5);
 }
 
 function getBatchTriangleLayers(batch, renderScale) {
@@ -714,11 +851,25 @@ function getBatchTriangleLayers(batch, renderScale) {
     const layers = [];
 
     if (featherWidth > 0) {
-        const outer = buildPolylineTriangles(batch.points, halfWidth + featherWidth);
+        const outer = buildStyledPolylineTriangles(
+            batch.points,
+            halfWidth + featherWidth,
+            batch.lineJoin,
+            batch.lineCap,
+            batch.miterLimit,
+            batch.closed
+        );
         if (outer && outer.length >= 6) layers.push({ triangles: outer, alphaScale: 0.16 });
     }
 
-    const inner = buildPolylineTriangles(batch.points, halfWidth);
+    const inner = buildStyledPolylineTriangles(
+        batch.points,
+        halfWidth,
+        batch.lineJoin,
+        batch.lineCap,
+        batch.miterLimit,
+        batch.closed
+    );
     if (inner && inner.length >= 6) layers.push({ triangles: inner, alphaScale: 1 });
 
     return layers;
@@ -735,7 +886,18 @@ function isRenderableLineBatch(batch) {
     return batch &&
         batch.mode === LINE_MODE &&
         batch.points instanceof Float32Array &&
-        batch.points.length >= 4;
+        batch.points.length >= 4 &&
+        typeof batch.color === 'string' &&
+        Number.isFinite(batch.lineWidth) &&
+        batch.lineWidth > 0 &&
+        Number.isFinite(batch.alphaMultiplier) &&
+        batch.alphaMultiplier >= 0 &&
+        batch.alphaMultiplier <= 1 &&
+        batch.globalCompositeOperation === 'source-over' &&
+        Number.isFinite(batch.miterLimit) &&
+        batch.miterLimit > 0 &&
+        ['butt', 'round', 'square'].includes(batch.lineCap) &&
+        ['miter', 'round', 'bevel'].includes(batch.lineJoin);
 }
 
 export function renderWebGLPolylineBatches(renderer, width, height, batches) {
@@ -744,12 +906,12 @@ export function renderWebGLPolylineBatches(renderer, width, height, batches) {
 
     let totalFloatCount = 0;
     for (const batch of batches) {
-        if (!isRenderableLineBatch(batch)) continue;
+        if (!isRenderableLineBatch(batch)) return false;
 
         const rgba = getCachedWebGLColor(
             renderer,
             batch.color,
-            Number.isFinite(batch.alphaMultiplier) ? batch.alphaMultiplier : 1
+            batch.alphaMultiplier
         );
 
         for (const layer of getBatchTriangleLayers(batch, renderer.renderScale)) {
@@ -775,71 +937,6 @@ function copyToTargetCanvas(ctx, sourceCanvas, width, height) {
 export function compositeWebGLToCanvas(ctx, renderer, width, height) {
     if (!renderer) return;
     copyToTargetCanvas(ctx, renderer.canvas, width, height);
-}
-
-export function ensureRasterCanvasSize(renderer, width, height) {
-    if (!renderer || !renderer.rasterCanvas) return null;
-
-    if (!renderer.rasterCtx) {
-        renderer.rasterCtx = renderer.rasterCanvas.getContext('2d');
-        if (!renderer.rasterCtx) return null;
-    }
-
-    if (renderer.rasterCanvas.width !== width) renderer.rasterCanvas.width = width;
-    if (renderer.rasterCanvas.height !== height) renderer.rasterCanvas.height = height;
-
-    renderer.rasterCtx.imageSmoothingEnabled = true;
-    if (renderer.rasterCtx.imageSmoothingQuality !== undefined) {
-        renderer.rasterCtx.imageSmoothingQuality = 'high';
-    }
-
-    return renderer.rasterCtx;
-}
-
-function prepareTexturePass(renderer, sourceCanvas, width, height) {
-    if (!renderer.textureProgram || !renderer.textureQuadBuffer || !renderer.texture) return false;
-    if (!sourceCanvas || sourceCanvas.width <= 0 || sourceCanvas.height <= 0) return false;
-
-    const gl = renderer.gl;
-    ensureWebGLRendererSize(renderer, width, height);
-
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(renderer.textureProgram);
-    gl.bindTexture(gl.TEXTURE_2D, renderer.texture);
-
-    const textureFilter = renderer.renderScale > 1.001 ? gl.LINEAR : gl.NEAREST;
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, textureFilter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, textureFilter);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
-
-    return true;
-}
-
-function drawTextureQuad(renderer) {
-    const gl = renderer.gl;
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, renderer.textureQuadBuffer);
-    gl.enableVertexAttribArray(renderer.aTexPos);
-    gl.vertexAttribPointer(renderer.aTexPos, 2, gl.FLOAT, false, CFG.textureStride, 0);
-    gl.enableVertexAttribArray(renderer.aTexUv);
-    gl.vertexAttribPointer(renderer.aTexUv, 2, gl.FLOAT, false, CFG.textureStride, 8);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, renderer.texture);
-    gl.uniform1i(renderer.uTexture, 0);
-    gl.disable(gl.BLEND);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-}
-
-export function renderCanvasTextureToWebGL(renderer, sourceCanvas, width, height) {
-    if (!renderer || !renderer.gl) return false;
-    if (!prepareTexturePass(renderer, sourceCanvas, width, height)) return false;
-
-    drawTextureQuad(renderer);
-    return true;
 }
 
 function clearWebGLSupportRenderers() {
@@ -947,75 +1044,22 @@ export function drawWithWebGLCapture(ctx, planeParams, planeKey, drawCallback) {
     return true;
 }
 
-function getRasterRenderScale(options) {
-    const override = options &&
-        typeof options === 'object' &&
-        Number.isFinite(options.renderScaleOverride)
-        ? options.renderScaleOverride
-        : null;
-
-    return isPositiveFinite(override) ? override : getWebGLSupersampleScale();
-}
-
-function resetRasterContext(ctx, scale) {
-    ctx.setTransform(...IDENTITY_TRANSFORM);
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-}
-
-export function drawWithWebGLRaster(ctx, planeParams, planeKey, drawCallback, options = null) {
-    if (!canUseWebGLLines(ctx, planeParams, planeKey, drawCallback)) return false;
-
-    const renderer = getWebGLRendererForPlane(planeKey);
-    const requestedRenderScale = getRasterRenderScale(options);
-    const directDrawIfNativeScale = !!(options && typeof options === 'object' && options.directDrawIfNativeScale === true);
-
-    if (directDrawIfNativeScale && requestedRenderScale <= 1.001) {
-        drawCallback(ctx);
-        return true;
-    }
-
-    ensureWebGLRendererSize(renderer, planeParams.width, planeParams.height, requestedRenderScale);
-
-    const rasterCtx = ensureRasterCanvasSize(renderer, renderer.canvas.width, renderer.canvas.height);
-    if (!rasterCtx) return false;
-
-    resetRasterContext(rasterCtx, renderer.renderScale);
-    drawCallback(rasterCtx);
-
-    if (!renderCanvasTextureToWebGL(renderer, renderer.rasterCanvas, planeParams.width, planeParams.height)) {
-        return false;
-    }
-
-    compositeWebGLToCanvas(ctx, renderer, planeParams.width, planeParams.height);
-    return true;
-}
-
 export function drawPlanarTransformedShapeHybrid(ctx, planeParams, tf, planeKey, map = null, options = null) {
     const drawOptions = {
         map,
         index: options?.index
     };
 
-    let geometryRendered = drawWithWebGLCapture(ctx, planeParams, planeKey, (captureCtx) => {
+    const geometryRendered = drawWithWebGLCapture(ctx, planeParams, planeKey, (captureCtx) => {
         drawPlanarTransformedShape(captureCtx, planeParams, tf, { ...drawOptions, includeOverlays: false });
     });
 
     if (!geometryRendered) {
-        geometryRendered = drawWithWebGLRaster(ctx, planeParams, planeKey, (rasterCtx) => {
-            drawPlanarTransformedShape(rasterCtx, planeParams, tf, { ...drawOptions, includeOverlays: false });
-        });
+        drawPlanarTransformedShape(ctx, planeParams, tf, { ...drawOptions, includeOverlays: false });
     }
 
-    if (!geometryRendered) return false;
-
     if (shouldDrawPlanarFunctionFociOverlay()) {
-        drawWithWebGLRaster(ctx, planeParams, planeKey, (rasterCtx) => {
-            drawPlanarTransformedShape(rasterCtx, planeParams, tf, { ...drawOptions, includeGeometry: false });
-        });
+        drawPlanarTransformedShape(ctx, planeParams, tf, { ...drawOptions, includeGeometry: false });
     }
 
     return true;
@@ -1027,7 +1071,6 @@ export function drawPlanarInputShapeHybrid(ctx, planeParams, planeKey) {
     });
     if (renderedByCapture) return true;
 
-    return drawWithWebGLRaster(ctx, planeParams, planeKey, (rasterCtx) => {
-        drawPlanarInputShape(rasterCtx, planeParams);
-    });
+    drawPlanarInputShape(ctx, planeParams);
+    return true;
 }

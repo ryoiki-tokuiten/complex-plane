@@ -177,7 +177,7 @@ class PlaneController {
     render(progress) {
         if (!this.renderer) return;
         this.renderer.updateGeometry(progress);
-        this.renderer.render();
+        if (this.renderer.renderDirty) this.renderer.render();
     }
 
     resetTemporalState() {
@@ -214,7 +214,8 @@ export function buildThreeJSMeshes() {
 }
 
 export function startRiemannTransformationAnimation() {
-    if (animationHandle) return;
+    if (animationHandle || !state.riemannTransformationEnabled ||
+        (!state.riemannTransformationPlayingZ && !state.riemannTransformationPlayingW)) return;
     lastFrameTime = performance.now();
 
     function animateFrame(timestamp) {
@@ -246,10 +247,13 @@ export function startRiemannTransformationAnimation() {
             controllers[i].render(state[controllers[i].config.progressKey]);
         }
 
-        // 4. DOM Sync Pipeline (Gated)
-        if (isAnyPlaneMoving) {
-            syncRiemannSliders();
+        if (!isAnyPlaneMoving) {
+            animationHandle = null;
+            return;
         }
+
+        // 4. DOM Sync Pipeline (Gated)
+        syncRiemannSliders();
 
         animationHandle = requestAnimationFrame(animateFrame);
     }
@@ -257,6 +261,10 @@ export function startRiemannTransformationAnimation() {
 }
 
 export function stopRiemannTransformationAnimation() {
+    if (animationHandle) {
+        cancelAnimationFrame(animationHandle);
+        animationHandle = null;
+    }
     state.riemannTransformationPlayingZ = false;
     state.riemannTransformationPlayingW = false;
     syncRiemannTransformationPlayPauseButton();

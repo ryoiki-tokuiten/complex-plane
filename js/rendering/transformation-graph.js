@@ -44,6 +44,7 @@ const FRUSTUM_MIN_HALF_WIDTH = 5.65;
 const EPSILON = 1e-10;
 
 let activeGraphRenderer = null;
+let graphDataCache = null;
 
 function isFiniteComplex(value) {
     return Number.isFinite(value?.re) && Number.isFinite(value?.im);
@@ -338,9 +339,9 @@ function robustOutputScale(samples) {
     return maxValue <= robust * 1.35 ? Math.max(1, maxValue) : robust;
 }
 
-function makeGraphDataKey(map, lineIndex) {
-    const xRange = zPlaneParams.currentVisXRange || [];
-    const yRange = zPlaneParams.currentVisYRange || [];
+function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
+    const xRange = planeParams.currentVisXRange || planeParams.xRange || [];
+    const yRange = planeParams.currentVisYRange || planeParams.yRange || [];
     return [
         map.signature,
         state.currentInputShape,
@@ -353,7 +354,8 @@ function makeGraphDataKey(map, lineIndex) {
         state.circleR,
         state.ellipseA,
         state.ellipseB,
-        state.graphTraceEnabled ? 1 : 0,
+        planeParams.width,
+        planeParams.height,
         xRange[0],
         xRange[1],
         yRange[0],
@@ -361,18 +363,42 @@ function makeGraphDataKey(map, lineIndex) {
     ].join('|');
 }
 
+function makeGraphDisplayKey(inputKey) {
+    return `${inputKey}|trace:${state.graphTraceEnabled ? 1 : 0}`;
+}
+
+function graphSelectionHint() {
+    return state.graphSelectedShape === state.currentInputShape
+        ? Math.floor(Number(state.graphSelectedLineIndex))
+        : -1;
+}
+
+function cachedGraphData(inputKey) {
+    if (!graphDataCache || graphDataCache.inputKey !== inputKey) return null;
+    graphDataCache.data.key = makeGraphDisplayKey(inputKey);
+    return graphDataCache.data;
+}
+
 export function buildTransformationGraphData(planeParams = zPlaneParams) {
     if (!state.graphViewEnabled || !isGraphViewSupported()) return null;
+
+    const map = resolveActiveMap();
+    const provisionalKey = makeGraphInputKey(map, graphSelectionHint(), planeParams);
+    const cached = cachedGraphData(provisionalKey);
+    if (cached) return cached;
 
     const pointSets = getGraphPointSets(planeParams);
     const lineIndex = selectedLineIndex(pointSets, true);
     const selected = pointSets[lineIndex];
     if (!selected) return null;
 
+    const inputKey = makeGraphInputKey(map, lineIndex, planeParams);
+    const selectedCache = cachedGraphData(inputKey);
+    if (selectedCache) return selectedCache;
+
     const inputSamples = resamplePolyline(selected.points, SAMPLE_COUNT);
     if (inputSamples.length < 2) return null;
 
-    const map = resolveActiveMap();
     const samples = inputSamples.map((input, index) => {
         let output = { re: NaN, im: NaN };
         try {
@@ -386,8 +412,8 @@ export function buildTransformationGraphData(planeParams = zPlaneParams) {
     const outputScale = robustOutputScale(samples);
     const finiteCount = samples.reduce((count, sample) => count + (isFiniteComplex(sample.output) ? 1 : 0), 0);
 
-    return {
-        key: makeGraphDataKey(map, lineIndex),
+    const data = {
+        key: makeGraphDisplayKey(inputKey),
         samples,
         outputScale,
         finiteCount,
@@ -395,6 +421,8 @@ export function buildTransformationGraphData(planeParams = zPlaneParams) {
         pointSetCount: pointSets.length,
         selectedRole: selected.role || ''
     };
+    graphDataCache = { inputKey, data };
+    return data;
 }
 
 function disposeObject(object) {

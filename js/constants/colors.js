@@ -6,7 +6,6 @@ export const COLOR_TEXT_ON_CANVAS = '#d0d7e2';
 
 // Grid and Axes
 export const COLOR_AXES = 'rgba(130, 130, 180, 0.8)';
-export const COLOR_GRID_LINES = 'rgba(128, 137, 255, 0.45)';
 export const COLOR_Z_GRID_HORZ = 'rgba(200, 150, 255, 0.7)';
 export const COLOR_Z_GRID_VERT = 'rgba(255, 150, 100, 0.7)';
 export const COLOR_Z_GRID_HORZ_FUNCTIONAL_EQ = 'rgba(128, 137, 255, 0.5)';

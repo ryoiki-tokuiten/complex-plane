@@ -16,13 +16,13 @@ export function requestRedrawAll() {
         return;
     }
 
-    context.redrawRequest = requestAnimationFrame(() => {
+    context.redrawRequest = requestAnimationFrame(timestamp => {
         context.redrawQueued = false;
         context.domainColoringDirtyQueued = false;
 
         try {
             if (!renderFrame) throw new Error('Redraw scheduler has not been configured');
-            renderFrame();
+            renderFrame(timestamp);
 
             context.domainColoringDirty = context.domainColoringDirtyQueued;
             context.redrawRequest = null;

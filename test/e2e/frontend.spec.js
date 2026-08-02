@@ -3,6 +3,8 @@ import { expect, test } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
     await page.goto('./');
     await page.waitForFunction(() => document.getElementById('preloader')?.style.display === 'none');
+    await expect(page.locator('#image_resolution_slider')).toHaveCount(0);
+    await expect(page.locator('#video_resolution_slider')).toHaveCount(0);
 });
 
 test('Preact controls preserve the public DOM and interaction contract', async ({ page }) => {

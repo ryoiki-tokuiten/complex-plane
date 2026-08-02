@@ -46,6 +46,7 @@ const CFG = Object.freeze({
 const EMPTY_OPTIONS = Object.freeze({});
 const PLANES = Object.freeze(['z', 'w']);
 const PLANE_KEYS = new Set(PLANES);
+const PROGRAM_CACHE_LIMIT = 4;
 
 const QUAD_VERTICES = new Float32Array([
   -1, -1,
@@ -953,15 +954,40 @@ function buildRenderer(canvas, gl, quadBuffer, key, record) {
 }
 
 function ensureRendererProgram(renderer, key, fragmentSource) {
-  if (!renderer || renderer.programKey === key) return !!renderer;
+  if (!renderer) return false;
+  if (renderer.programKey === key) {
+    const record = renderer.programCache.get(key);
+    if (record) {
+      renderer.programCache.delete(key);
+      renderer.programCache.set(key, record);
+    }
+    return Boolean(record);
+  }
 
   let record = renderer.programCache.get(key);
   if (!record) {
     record = createProgramRecord(renderer.gl, fragmentSource);
     if (!record) return false;
+
+    while (renderer.programCache.size >= PROGRAM_CACHE_LIMIT) {
+      const oldestKey = renderer.programCache.keys().next().value;
+      if (oldestKey === renderer.programKey && renderer.programCache.size > 1) {
+        const currentRecord = renderer.programCache.get(oldestKey);
+        renderer.programCache.delete(oldestKey);
+        renderer.programCache.set(oldestKey, currentRecord);
+        continue;
+      }
+      const evicted = renderer.programCache.get(oldestKey);
+      renderer.programCache.delete(oldestKey);
+      if (evicted?.program) renderer.gl.deleteProgram(evicted.program);
+    }
     renderer.programCache.set(key, record);
+    adoptProgramRecord(renderer, key, record);
+    return true;
   }
 
+  renderer.programCache.delete(key);
+  renderer.programCache.set(key, record);
   adoptProgramRecord(renderer, key, record);
   return true;
 }
@@ -1006,11 +1032,27 @@ function resetSupportObject(support) {
 }
 
 function installSupportRenderers(support, renderers, diagnostics) {
-  assignPlaneRecord(ensureRecord(support, 'renderers'), renderers);
-  assignPlaneRecord(ensureRecord(support, 'diagnostics'), diagnostics);
+    assignPlaneRecord(ensureRecord(support, 'renderers'), renderers);
+    assignPlaneRecord(ensureRecord(support, 'diagnostics'), diagnostics);
 
-  support.available = true;
-  support.reason = renderers.z && renderers.w ? 'ready' : 'partial-ready';
+    support.available = Boolean(renderers.z);
+    support.reason = renderers.z && renderers.w ? 'ready' : 'partial-ready';
+}
+
+function ensureDomainColorRenderer(planeKey) {
+    if (!PLANE_KEYS.has(planeKey) || !webglDomainColorSupport?.available) return false;
+
+    const renderers = ensureRecord(webglDomainColorSupport, 'renderers');
+    const existing = renderers[planeKey];
+    if (existing && liveContext(existing.gl)) return true;
+
+    const renderer = createWebGLDomainColorRenderer();
+    if (!renderer) return false;
+
+    renderers[planeKey] = renderer;
+    ensureRecord(webglDomainColorSupport, 'diagnostics')[planeKey] = getWebGLBackendInfoShared(renderer.gl);
+    webglDomainColorSupport.reason = renderers.z && renderers.w ? 'ready' : 'partial-ready';
+    return true;
 }
 
 function backendLabel(diagnostics) {
@@ -1465,17 +1507,6 @@ export function resizeWebGLDomainColorRenderer(renderer, width, height) {
   }
 }
 
-export function getNormalizedSphereLightDirection() {
-  const lx = finiteNumber(SPHERE_LIGHT_DIRECTION_CAMERA?.x, 0);
-  const ly = finiteNumber(SPHERE_LIGHT_DIRECTION_CAMERA?.y, 0);
-  const lz = finiteNumber(SPHERE_LIGHT_DIRECTION_CAMERA?.z, 1);
-  const magnitude = Math.hypot(lx, ly, lz);
-
-  return Number.isFinite(magnitude) && magnitude >= 1e-9
-    ? { x: lx / magnitude, y: ly / magnitude, z: lz / magnitude }
-    : { x: 0, y: 0, z: 1 };
-}
-
 export function initializeWebGLDomainColoringSupport() {
   if (!webglDomainColorSupport) return;
 
@@ -1486,7 +1517,7 @@ export function initializeWebGLDomainColoringSupport() {
     return;
   }
 
-  const renderers = recordFromPlanes(createWebGLDomainColorRenderer);
+  const renderers = { z: createWebGLDomainColorRenderer(), w: null };
   if (!domainRenderersAvailable(renderers)) {
     webglDomainColorSupport.reason = 'context-or-program-init-failed';
     console.info('GPU domain coloring unavailable, using CPU fallback.');
@@ -1526,9 +1557,11 @@ export function warnWebGLDomainFunctionFallback(functionName) {
 }
 
 export function renderDomainColoringWithWebGL(targetCtx, planeParams, options = null) {
-  if (!targetCtx || !planeParams || !webglDomainColorSupport?.available) return false;
-  if (!state?.webglDomainColoringEnabled) return false;
-  if (!refreshMathRendererIfNeeded()) return false;
+    if (!targetCtx || !planeParams || !webglDomainColorSupport?.available) return false;
+    if (!state?.webglDomainColoringEnabled) return false;
+    const planeKey = inferDomainColorPlaneKey(targetCtx, options?.planeKey);
+    if (!ensureDomainColorRenderer(planeKey)) return false;
+    if (!refreshMathRendererIfNeeded()) return false;
 
   const job = resolveRenderJob(targetCtx, planeParams, options);
   if (!job) return false;

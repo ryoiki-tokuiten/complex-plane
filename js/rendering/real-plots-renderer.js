@@ -20,6 +20,8 @@ const PALETTE_LUT_MASK = PALETTE_LUT_SIZE - 1;
 const COMPLEX_ZERO_EPSILON = 1e-15;
 const RECIPROCAL_POLE_CAP = POLE_MAGNITUDE_THRESHOLD * 2;
 const HYPOT_FAST_OVERFLOW_GUARD = Math.sqrt(Number.MAX_VALUE / 2);
+const INPUT_EVALUATOR_CACHE_LIMIT = 64;
+const SCALAR_FIELD_CACHE_LIMIT = 8;
 
 const INPUT_PRESET = Object.freeze({
     GENERIC: 0,
@@ -185,36 +187,35 @@ function presetType(expr) {
     }
 }
 
-const compiledPresetCache = new Map();
-
-function getCompiledPreset(preset) {
-    if (!compiledPresetCache.has(preset)) {
-        try {
-            compiledPresetCache.set(preset, compileExpression(preset, { allowedVariables: ['x', 'y'] }));
-        } catch {
-            compiledPresetCache.set(preset, null);
-        }
-    }
-    return compiledPresetCache.get(preset);
-}
+const inputEvaluatorCache = new Map();
 
 class InputEvaluator {
-    static #cache = new Map();
-
     static for(expression) {
         const key = expression === undefined || expression === null ? 'x' : String(expression);
-        let evaluator = this.#cache.get(key);
+        let evaluator = inputEvaluatorCache.get(key);
         if (!evaluator) {
             evaluator = new InputEvaluator(key);
-            this.#cache.set(key, evaluator);
+            if (inputEvaluatorCache.size >= INPUT_EVALUATOR_CACHE_LIMIT) {
+                inputEvaluatorCache.delete(inputEvaluatorCache.keys().next().value);
+            }
+        } else {
+            inputEvaluatorCache.delete(key);
         }
+        inputEvaluatorCache.set(key, evaluator);
         return evaluator;
     }
 
     constructor(expression) {
         this.expression = expression === undefined || expression === null ? 'x' : String(expression);
         this.type = presetType(this.expression);
-        this.compiled = this.type === INPUT_PRESET.GENERIC ? getCompiledPreset(this.expression) : null;
+        this.compiled = null;
+        if (this.type === INPUT_PRESET.GENERIC) {
+            try {
+                this.compiled = compileExpression(this.expression, { allowedVariables: ['x', 'y'] });
+            } catch {
+                this.compiled = null;
+            }
+        }
         this.scope = {
             x: { re: 0, im: 0 },
             y: { re: 0, im: 0 }
@@ -647,7 +648,6 @@ function transformKernelKind(transformFunc) {
 
 function writeHeightfieldNormals(positions, normals, segments, gridStep) {
     const stride = segments + 1;
-    const inverseCell = 1 / (2 * gridStep);
     for (let j = 0; j <= segments; j += 1) {
         const row = j * stride;
         const prevRow = (j === 0 ? 0 : j - 1) * stride;
@@ -657,9 +657,11 @@ function writeHeightfieldNormals(positions, normals, segments, gridStep) {
             const iNext = i === segments ? segments : i + 1;
             const index = row + i;
             const centerOffset = index * 3;
-            const nx = -(positions[(row + iNext) * 3 + 1] - positions[(row + iPrev) * 3 + 1]) * inverseCell;
-            const nz = -(positions[(nextRow + i) * 3 + 1] - positions[(prevRow + i) * 3 + 1]) * inverseCell;
-            const invLen = 1 / Math.sqrt(nx * nx + nz * nz + 1);
+            const xDivisor = i === 0 || i === segments ? gridStep : 2 * gridStep;
+            const zDivisor = j === 0 || j === segments ? gridStep : 2 * gridStep;
+            const nx = -(positions[(row + iNext) * 3 + 1] - positions[(row + iPrev) * 3 + 1]) / xDivisor;
+            const nz = -(positions[(nextRow + i) * 3 + 1] - positions[(prevRow + i) * 3 + 1]) / zDivisor;
+            const invLen = 1 / Math.hypot(nx, nz, 1);
             normals[centerOffset] = nx * invLen;
             normals[centerOffset + 1] = invLen;
             normals[centerOffset + 2] = nz * invLen;
@@ -734,7 +736,7 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
     const {
         segments, values, phases, u, v, xMin, yMin, xScale, yScale,
         inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
-        usePhaseColor, kernelKind
+        kernelKind
     } = config;
     let minZ = Infinity;
     let maxZ = -Infinity;
@@ -802,7 +804,7 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
                     rawValue = selectRawValue(outRe, outIm, outputMode);
                     if (rawValue === rawValue) {
                         finiteResultCount += 1;
-                        if (usePhaseColor) phase = (Math.atan2(outIm, outRe) + Math.PI) * INV_TWO_PI;
+                        phase = (Math.atan2(outIm, outRe) + Math.PI) * INV_TWO_PI;
                     }
                 }
             } else if (inputValid && catchPerVertex) {
@@ -812,7 +814,7 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
                         rawValue = selectRawValue(result.re, result.im, outputMode);
                         if (rawValue === rawValue) {
                             finiteResultCount += 1;
-                            if (usePhaseColor) phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
+                            phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
                         }
                     }
                 } catch {
@@ -825,7 +827,7 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
                     rawValue = selectRawValue(result.re, result.im, outputMode);
                     if (rawValue === rawValue) {
                         finiteResultCount += 1;
-                        if (usePhaseColor) phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
+                        phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
                     }
                 }
             }
@@ -843,6 +845,138 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
     return { minZ, maxZ, finiteResultCount };
 }
 
+const transformFieldIds = new WeakMap();
+let nextTransformFieldId = 1;
+const scalarFieldCache = new Map();
+
+function transformFieldKey(transformFunc) {
+    if (typeof transformFunc !== 'function') return 'transform:invalid';
+
+    let id = transformFieldIds.get(transformFunc);
+    if (id === undefined) {
+        id = nextTransformFieldId++;
+        transformFieldIds.set(transformFunc, id);
+    }
+
+    let profile = '';
+    try {
+        profile = buildMappedTransformProfileKey(state.currentFunction);
+    } catch {
+        profile = String(state.currentFunction || '');
+    }
+    return `${profile}|transform:${id}`;
+}
+
+function scalarFieldBaseKey(transformFunc, inputExpr, imagExpr, outputMode, xRange, yRange) {
+    return [
+        transformFieldKey(transformFunc),
+        String(inputExpr ?? 'x'),
+        String(imagExpr ?? '0'),
+        outputMode,
+        xRange[0],
+        xRange[1],
+        yRange[0],
+        yRange[1]
+    ].join('|');
+}
+
+function touchScalarField(entry) {
+    scalarFieldCache.delete(entry.key);
+    scalarFieldCache.set(entry.key, entry);
+    return entry;
+}
+
+function rememberScalarField(entry) {
+    const existing = scalarFieldCache.get(entry.key);
+    if (existing) return touchScalarField(existing);
+
+    if (scalarFieldCache.size >= SCALAR_FIELD_CACHE_LIMIT) {
+        scalarFieldCache.delete(scalarFieldCache.keys().next().value);
+    }
+    scalarFieldCache.set(entry.key, entry);
+    return entry;
+}
+
+function copyScalarField(entry, values, phases) {
+    values.set(entry.values);
+    if (phases && entry.phases) phases.set(entry.phases);
+    return {
+        minZ: entry.minValue,
+        maxZ: entry.maxValue,
+        finiteResultCount: entry.finiteResultCount
+    };
+}
+
+function getReusableScalarField(baseKey, segments, values, phases) {
+    const exactKey = `${baseKey}|segments:${segments}`;
+    const exact = scalarFieldCache.get(exactKey);
+    if (exact) return copyScalarField(touchScalarField(exact), values, phases);
+
+    let source = null;
+    for (const entry of scalarFieldCache.values()) {
+        if (entry.baseKey !== baseKey || entry.segments <= segments) continue;
+        if (!source || entry.segments < source.segments) source = entry;
+    }
+    if (!source) return null;
+
+    const sourceStride = source.segments + 1;
+    const targetStride = segments + 1;
+    const derivedValues = new Float64Array(targetStride * targetStride);
+    const derivedPhases = new Float32Array(targetStride * targetStride);
+    for (let row = 0; row < targetStride; row += 1) {
+        const sourceY = row * source.segments / segments;
+        const sourceRow0 = Math.floor(sourceY);
+        const sourceRow1 = Math.min(source.segments, sourceRow0 + 1);
+        const yWeight = sourceY - sourceRow0;
+        for (let column = 0; column < targetStride; column += 1) {
+            const targetIndex = row * targetStride + column;
+            const sourceX = column * source.segments / segments;
+            const sourceColumn0 = Math.floor(sourceX);
+            const sourceColumn1 = Math.min(source.segments, sourceColumn0 + 1);
+            const xWeight = sourceX - sourceColumn0;
+            const topLeft = source.values[sourceRow0 * sourceStride + sourceColumn0];
+            const topRight = source.values[sourceRow0 * sourceStride + sourceColumn1];
+            const bottomLeft = source.values[sourceRow1 * sourceStride + sourceColumn0];
+            const bottomRight = source.values[sourceRow1 * sourceStride + sourceColumn1];
+            if ([topLeft, topRight, bottomLeft, bottomRight].every(isFiniteNumber)) {
+                const top = topLeft + (topRight - topLeft) * xWeight;
+                const bottom = bottomLeft + (bottomRight - bottomLeft) * xWeight;
+                derivedValues[targetIndex] = top + (bottom - top) * yWeight;
+            } else {
+                derivedValues[targetIndex] = NaN;
+            }
+
+            const nearestRow = Math.round(sourceY);
+            const nearestColumn = Math.round(sourceX);
+            derivedPhases[targetIndex] = source.phases[nearestRow * sourceStride + nearestColumn];
+        }
+    }
+
+    const derived = rememberScalarField({
+        key: exactKey,
+        baseKey,
+        segments,
+        values: derivedValues,
+        phases: derivedPhases,
+        minValue: NaN,
+        maxValue: NaN,
+        finiteResultCount: 0
+    });
+    let finiteResultCount = 0;
+    let minValue = Infinity;
+    let maxValue = -Infinity;
+    for (const value of derived.values) {
+        if (!isFiniteNumber(value)) continue;
+        finiteResultCount += 1;
+        minValue = Math.min(minValue, value);
+        maxValue = Math.max(maxValue, value);
+    }
+    derived.finiteResultCount = finiteResultCount;
+    derived.minValue = finiteResultCount ? minValue : NaN;
+    derived.maxValue = finiteResultCount ? maxValue : NaN;
+    return copyScalarField(touchScalarField(derived), values, phases);
+}
+
 
 export function sampleRealPlotSurface(transformFunc, options = {}) {
     const segments = Math.max(1, Math.floor(Number(options.segments) || DEFAULT_SAMPLE_SEGMENTS));
@@ -856,6 +990,7 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
     const rawValues = valuesOnly ? null : options.rawValues || new Float32Array(vertexCount);
     const values = options.values || new Float64Array(vertexCount);
     const phases = valuesOnly ? null : options.phases || new Float32Array(vertexCount);
+    const sampledPhases = phases || new Float32Array(vertexCount);
     const u = options.u || new Float64Array(2);
     const v = options.v || new Float64Array(2);
     const xRange = options.xRange || zPlaneParams.currentVisXRange;
@@ -877,18 +1012,40 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
     const paletteLut = paletteLutFor(options.palette || state.realPlotsPalette || 'sunset');
     const heightFactor = (HALF_HEIGHT * heightScale) / CLAMP_LIMIT;
     const kernelKind = transformKernelKind(transformFunc);
+    const baseScalarKey = scalarFieldBaseKey(
+        transformFunc,
+        options.inputExpr ?? state.realPlotsInputExpr,
+        options.imagExpr ?? state.realPlotsImagExpr,
+        outputMode,
+        xRange,
+        yRange
+    );
+    const cachedSample = getReusableScalarField(baseScalarKey, segments, values, sampledPhases);
 
     const config = {
-        segments, values, phases, u, v, xMin, yMin, xScale, yScale,
+        segments, values, phases: sampledPhases, u, v, xMin, yMin, xScale, yScale,
         inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
-        usePhaseColor, kernelKind
+        kernelKind
     };
 
-    let sample;
-    try {
-        sample = sampleValuesPass(transformFunc, config, false);
-    } catch {
-        sample = sampleValuesPass(transformFunc, config, true);
+    let sample = cachedSample;
+    if (!sample) {
+        try {
+            sample = sampleValuesPass(transformFunc, config, false);
+        } catch {
+            sample = sampleValuesPass(transformFunc, config, true);
+        }
+
+        rememberScalarField({
+            key: `${baseScalarKey}|segments:${segments}`,
+            baseKey: baseScalarKey,
+            segments,
+            values: values.slice(),
+            phases: sampledPhases.slice(),
+            minValue: sample.finiteResultCount > 0 ? sample.minZ : NaN,
+            maxValue: sample.finiteResultCount > 0 ? sample.maxZ : NaN,
+            finiteResultCount: sample.finiteResultCount
+        });
     }
 
     const minValue = sample.finiteResultCount > 0 ? sample.minZ : NaN;
@@ -915,7 +1072,7 @@ export function sampleRealPlotSurface(transformFunc, options = {}) {
         colors,
         rawValues,
         values,
-        phases,
+        phases: sampledPhases,
         minZ: sample.finiteResultCount > 0 ? sample.minZ : 0,
         maxZ: sample.finiteResultCount > 0 ? sample.maxZ : 0,
         usePhaseColor,

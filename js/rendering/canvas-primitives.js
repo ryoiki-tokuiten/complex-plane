@@ -1,4 +1,4 @@
-import { COLOR_GRID_LINES, COLOR_AXES, COLOR_TEXT_ON_CANVAS } from '../constants/colors.js';
+import { COLOR_AXES, COLOR_TEXT_ON_CANVAS } from '../constants/colors.js';
 import { TWO_PI } from '../constants/numerical.js';
 import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_THICK } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
@@ -70,16 +70,16 @@ export function hslToRgb(h, s, l) {
     );
 }
 
-function drawGridLines(ctx, params, stepX = 1, stepY = 1, color = COLOR_GRID_LINES) {
+function drawGridLines(ctx, params, stepX, stepY, verticalColor, horizontalColor) {
     const { xRange, yRange } = getCanvasPlaneRanges(params);
 
     ctx.save();
-    ctx.strokeStyle = color;
     ctx.lineWidth = 0.5;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    ctx.beginPath();
 
+    ctx.strokeStyle = verticalColor;
+    ctx.beginPath();
     const xStart = Math.ceil(xRange[0] / stepX) * stepX;
     const xEnd = Math.floor(xRange[1] / stepX) * stepX;
     // The tolerance must scale with the grid spacing; a fixed world-unit
@@ -91,7 +91,10 @@ function drawGridLines(ctx, params, stepX = 1, stepY = 1, color = COLOR_GRID_LIN
         ctx.moveTo(canvasX, 0);
         ctx.lineTo(canvasX, params.height);
     }
+    ctx.stroke();
 
+    ctx.strokeStyle = horizontalColor;
+    ctx.beginPath();
     const yStart = Math.ceil(yRange[0] / stepY) * stepY;
     const yEnd = Math.floor(yRange[1] / stepY) * stepY;
     const yTolerance = Math.abs(stepY) * 1e-6;
@@ -163,26 +166,36 @@ export function drawGrid(ctx, params, options = {}) {
     }
 
     // Dynamic fade-out based on pixel spacing
-    const scaleX = params.scale?.x ?? 1;
+    const scaleX = Math.abs(params.scale?.x ?? 1);
+    const scaleY = Math.abs(params.scale?.y ?? 1);
     const pixelSpacingX = stepX * scaleX;
+    const pixelSpacingY = stepY * scaleY;
 
     // Smoothly fade out minor grid lines if they get too close (between 45 and 90 pixels)
-    const minorFade = Math.max(0, Math.min(1, (pixelSpacingX - 45) / 45));
-    const finalMinorColor = minorFade > 0 
-        ? minorColor.replace(/[\d\.]+\)$/, `${(minorAlpha * minorFade).toFixed(3)})`) 
+    const minorFadeX = Math.max(0, Math.min(1, (pixelSpacingX - 45) / 45));
+    const minorFadeY = Math.max(0, Math.min(1, (pixelSpacingY - 45) / 45));
+    const finalMinorColorX = minorFadeX > 0
+        ? minorColor.replace(/[\d\.]+\)$/, `${(minorAlpha * minorFadeX).toFixed(3)})`)
+        : 'rgba(0,0,0,0)';
+    const finalMinorColorY = minorFadeY > 0
+        ? minorColor.replace(/[\d\.]+\)$/, `${(minorAlpha * minorFadeY).toFixed(3)})`)
         : 'rgba(0,0,0,0)';
 
     // Smoothly fade out major grid lines if they get extremely close (between 15 and 35 pixels)
-    const majorFade = Math.max(0, Math.min(1, (pixelSpacingX - 15) / 20));
-    const finalMajorColor = majorFade > 0 
-        ? majorColor.replace(/[\d\.]+\)$/, `${(majorAlpha * majorFade).toFixed(3)})`) 
+    const majorFadeX = Math.max(0, Math.min(1, (pixelSpacingX - 15) / 20));
+    const majorFadeY = Math.max(0, Math.min(1, (pixelSpacingY - 15) / 20));
+    const finalMajorColorX = majorFadeX > 0
+        ? majorColor.replace(/[\d\.]+\)$/, `${(majorAlpha * majorFadeX).toFixed(3)})`)
+        : 'rgba(0,0,0,0)';
+    const finalMajorColorY = majorFadeY > 0
+        ? majorColor.replace(/[\d\.]+\)$/, `${(majorAlpha * majorFadeY).toFixed(3)})`)
         : 'rgba(0,0,0,0)';
 
-    if (minorFade > 0) {
-        drawGridLines(ctx, params, minorStepX, minorStepY, finalMinorColor);
+    if (minorFadeX > 0 || minorFadeY > 0) {
+        drawGridLines(ctx, params, minorStepX, minorStepY, finalMinorColorX, finalMinorColorY);
     }
-    if (majorFade > 0) {
-        drawGridLines(ctx, params, stepX, stepY, finalMajorColor);
+    if (majorFadeX > 0 || majorFadeY > 0) {
+        drawGridLines(ctx, params, stepX, stepY, finalMajorColorX, finalMajorColorY);
     }
 }
 

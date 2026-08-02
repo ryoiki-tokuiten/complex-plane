@@ -118,10 +118,8 @@ const BASIC_SLIDER_BINDINGS = [
     ['particleDensitySlider', 'particleDensity', parseInteger],
     ['particleSpeedSlider', 'particleSpeed'],
     ['particleMaxLifetimeSlider', 'particleMaxLifetime', parseInteger],
-    ['imageResolutionSlider', 'imageResolution', parseInteger],
     ['imageSizeSlider', 'imageSize'],
     ['imageOpacitySlider', 'imageOpacity'],
-    ['videoResolutionSlider', 'videoResolution', parseInteger],
     ['videoFpsSlider', 'videoProcessingFps', parseInteger],
     ['videoSizeSlider', 'videoSize'],
     ['videoOpacitySlider', 'videoOpacity'],
@@ -179,8 +177,8 @@ const SPECIAL_SLIDERS = new Set([
     'vectorFieldScaleSlider', 'vectorArrowThicknessSlider', 'vectorArrowHeadSizeSlider',
     'streamlineStepSizeSlider', 'streamlineMaxLengthSlider', 'streamlineThicknessSlider',
     'streamlineSeedDensityFactorSlider', 'particleDensitySlider', 'particleSpeedSlider',
-    'particleMaxLifetimeSlider', 'imageResolutionSlider', 'imageSizeSlider', 'imageOpacitySlider',
-    'videoResolutionSlider', 'videoFpsSlider', 'videoSizeSlider', 'videoOpacitySlider',
+    'particleMaxLifetimeSlider', 'imageSizeSlider', 'imageOpacitySlider',
+    'videoFpsSlider', 'videoSizeSlider', 'videoOpacitySlider',
     'zPlaneZoomSlider', 'wPlaneZoomSlider', 'taylorSeriesOrderSlider',
     'radialDiscreteStepsCountSlider', 'laplaceAnimationSpeedSlider',
     'fourierFrequencySlider', 'fourierAmplitudeSlider', 'fourierTimeWindowSlider',
@@ -739,16 +737,6 @@ function processUploadedImage(img) {
     if (processUploadedImageSource(img)) requestDomainRedraw(true);
 }
 
-function reprocessUploadedImage() {
-    if (runtime.media.image) processUploadedImage(runtime.media.image);
-}
-
-function reprocessUploadedVideo() {
-    if (!runtime.media.video) return;
-    processUploadedVideoFrame(true);
-    requestDomainRedraw(true);
-}
-
 function complexState(key) {
     return state[key] || (state[key] = { re: 0, im: 0 });
 }
@@ -841,10 +829,6 @@ function bindImageControls() {
         if (file) readImageFile(file, processUploadedImage);
     });
 
-    bindSlider('imageResolutionSlider', 'imageResolution', parseInteger, () => {
-        reprocessUploadedImage();
-        requestUiRedraw();
-    });
     bindSlider('imageSizeSlider', 'imageSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('imageOpacitySlider', 'imageOpacity', parseFloat, () => requestDomainRedraw(true));
 }
@@ -857,10 +841,6 @@ function bindVideoControls() {
 
     bindControlListener('videoPlayPauseBtn', 'click', () => toggleUploadedVideoPlayback());
 
-    bindSlider('videoResolutionSlider', 'videoResolution', parseInteger, () => {
-        reprocessUploadedVideo();
-        requestUiRedraw();
-    });
     bindSlider('videoFpsSlider', 'videoProcessingFps', parseInteger, () => {
         syncVideoPlaybackUI();
         if (state.videoIsPlaying && state.currentInputShape === 'video') startVideoProcessingLoop();

@@ -7,7 +7,8 @@ import {
     isPointInsideContour,
     estimateResidue,
     complexAdd,
-    complexMul
+    complexMul,
+    buildMappedTransformProfileKey
 } from '../math-utils.js';
 import {
     NUM_INTEGRAL_STEPS,
@@ -19,24 +20,93 @@ import { createSafeMarkupFragment } from '../ui/dom-components.js';
 
 const { controls } = context;
 
+const cauchyDisplayCache = {
+    element: null,
+    key: null,
+    hidden: null
+};
+let cauchyAnalysisCache = null;
+
+function complexListKey(values) {
+    return Array.isArray(values)
+        ? values.map(value => [value?.re, value?.im, value?.type, value?.order, value?.residue?.re, value?.residue?.im].join(':')).join(';')
+        : '';
+}
+
+function cauchyAnalysisKey(isZPlanar) {
+    return [
+        isZPlanar ? 1 : 0,
+        buildMappedTransformProfileKey(state.currentFunction),
+        state.chainingEnabled ? 1 : 0,
+        state.chainingMode,
+        state.chainCount,
+        state.taylorSeriesEnabled ? 1 : 0,
+        state.taylorSeriesOrder,
+        state.taylorSeriesCenter?.re,
+        state.taylorSeriesCenter?.im,
+        state.currentInputShape,
+        state.a0,
+        state.b0,
+        state.circleR,
+        state.ellipseA,
+        state.ellipseB,
+        state.showZerosPoles ? 1 : 0,
+        complexListKey(state.poles)
+    ].join('|');
+}
+
+function publishCauchyResult(key, { text = null, html = null, hidden = false } = {}) {
+    const element = controls.cauchy_integral_results_info;
+    if (!element) return;
+
+    const elementChanged = cauchyDisplayCache.element !== element;
+    const visibilityChanged = elementChanged || cauchyDisplayCache.hidden !== hidden;
+    const outputChanged = elementChanged || cauchyDisplayCache.key !== key;
+
+    if (visibilityChanged) element.classList.toggle('hidden', hidden);
+    if (!outputChanged) return;
+
+    if (hidden) {
+        element.replaceChildren();
+    } else if (html !== null) {
+        element.replaceChildren(createSafeMarkupFragment(html));
+    } else {
+        element.textContent = text || '';
+    }
+
+    cauchyDisplayCache.element = element;
+    cauchyDisplayCache.key = key;
+    cauchyDisplayCache.hidden = hidden;
+}
+
 export function performCauchyAnalysis() {
     if (!controls.cauchy_integral_results_info) return;
     const isZPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
-
-    if (!state.cauchyIntegralModeEnabled || !isZPlanar) { 
-        controls.cauchy_integral_results_info.replaceChildren();
-        controls.cauchy_integral_results_info.classList.add('hidden');
+    const analysisKey = cauchyAnalysisKey(isZPlanar);
+    const active = state.cauchyIntegralModeEnabled && isZPlanar;
+    const cacheInputKey = `${analysisKey}|active:${active ? 1 : 0}`;
+    if (cauchyAnalysisCache?.inputKey === cacheInputKey) {
+        publishCauchyResult(cauchyAnalysisCache.outputKey, cauchyAnalysisCache.result);
         return;
     }
-    controls.cauchy_integral_results_info.classList.remove('hidden');
+
+    const publish = (outputKey, result) => {
+        cauchyAnalysisCache = { inputKey: cacheInputKey, outputKey, result };
+        publishCauchyResult(outputKey, result);
+    };
+
+    if (!active) {
+        publish(`${analysisKey}|hidden`, { hidden: true });
+        return;
+    }
 
     const func = getChainedTransformFunction(state.currentFunction);
     if (!func) {
-        controls.cauchy_integral_results_info.textContent = 'Error: Current function not found.';
+        publish(`${analysisKey}|missing-function`, { text: 'Error: Current function not found.' });
         return;
     }
     if (state.currentFunction === 'poincare') { 
-        controls.cauchy_integral_results_info.textContent = 'Cauchy/Residue analysis not applicable for Poincare map.';
+        publish(`${analysisKey}|poincare`, { text: 'Cauchy/Residue analysis not applicable for Poincare map.' });
         return;
     }
 
@@ -46,25 +116,25 @@ export function performCauchyAnalysis() {
 
     if (state.currentInputShape === 'circle') {
         if (state.circleR <= 0) {
-            controls.cauchy_integral_results_info.textContent = 'Cauchy mode: Circle radius must be positive.';
+            publish(`${analysisKey}|invalid-circle-radius`, { text: 'Cauchy mode: Circle radius must be positive.' });
             return;
         }
         contourParams = { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR };
         contourC_points = getContourPoints('circle', contourParams, NUM_INTEGRAL_STEPS);
     } else if (state.currentInputShape === 'ellipse') {
         if (state.ellipseA <= 0 || state.ellipseB <= 0) {
-            controls.cauchy_integral_results_info.textContent = 'Cauchy mode: Ellipse axes must be positive.';
+            publish(`${analysisKey}|invalid-ellipse-axes`, { text: 'Cauchy mode: Ellipse axes must be positive.' });
             return;
         }
         contourParams = { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
         contourC_points = getContourPoints('ellipse', contourParams, NUM_INTEGRAL_STEPS);
     } else {
-        controls.cauchy_integral_results_info.textContent = 'Cauchy mode: Select Circle or Ellipse contour C.';
+        publish(`${analysisKey}|unsupported-shape`, { text: 'Cauchy mode: Select Circle or Ellipse contour C.' });
         return;
     }
 
     if (!contourC_points || contourC_points.length === 0) {
-        controls.cauchy_integral_results_info.textContent = 'Error generating contour points for C.';
+        publish(`${analysisKey}|empty-contour`, { text: 'Error generating contour points for C.' });
         return;
     }
 
@@ -177,7 +247,7 @@ export function performCauchyAnalysis() {
         resultsHTML += `<br/>(Enable 'Show Zeros/Poles' for Residue Theorem)`;
     }
 
-    controls.cauchy_integral_results_info.replaceChildren(createSafeMarkupFragment(resultsHTML));
+    publish(analysisKey, { html: resultsHTML });
 }
 
 export function updateWindingNumberDisplay(tf) {

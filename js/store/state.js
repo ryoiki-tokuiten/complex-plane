@@ -83,13 +83,11 @@ const rawState = {
     streamlineThickness: 1.5,
     streamlineSeedDensityFactor: 0.8,
 
-    imageResolution: 300,
     imageSize: 2.0,
     imageOpacity: 1.0,
     imageAspectRatio: 1.0,
     imageContentVersion: 0,
 
-    videoResolution: 300,
     videoProcessingFps: 60,
     videoSize: 2.0,
     videoOpacity: 1.0,

@@ -18,7 +18,6 @@ export const ZP_CP_CHECK_DISTANCE_FACTOR = 1.5;
 
 export const MIN_POINTS_ADAPTIVE = 1200;
 export const MAX_POINTS_ADAPTIVE_DEFAULT = 10000;
-export const ADAPTIVE_ANCHOR_DENSITY = 800;
 export const DEFAULT_POINTS_PER_LINE = 1000;
 
 export const ZETA_POLE = { re: 1, im: 0 };

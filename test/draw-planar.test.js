@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    calculateDynamicPointsForSegment,
     generateLinearSegmentPoints,
     getPointSetEndpoints
 } from '../js/rendering/draw-planar.js';
+import { state } from '../js/store/state.js';
 
 test('linear segment generation returns fresh mutable point arrays', () => {
     const start = { re: 0, im: 0 };
@@ -59,5 +61,49 @@ test('linear segment generation uses affine samples and exact endpoints', () => 
         const t = i / steps;
         assert.ok(Math.abs(points[i].re - (start.re + (end.re - start.re) * t)) < 1e-12);
         assert.ok(Math.abs(points[i].im - (start.im + (end.im - start.im) * t)) < 1e-12);
+    }
+});
+
+test('zeta segment refinement does not follow poles outside the segment', () => {
+    const previousFunction = state.currentFunction;
+    const previousContinuation = state.zetaContinuationEnabled;
+    state.currentFunction = 'zeta';
+    state.zetaContinuationEnabled = true;
+
+    try {
+        const planeParams = {
+            width: 100,
+            height: 100,
+            origin: { x: 50, y: 50 },
+            scale: { x: 10, y: 10 }
+        };
+        const transform = (re, im) => ({ re, im });
+        const offSegment = calculateDynamicPointsForSegment(
+            { re: 2, im: 0 },
+            { re: 3, im: 0 },
+            transform,
+            planeParams
+        );
+        const comparableSegment = calculateDynamicPointsForSegment(
+            { re: 3, im: 0 },
+            { re: 4, im: 0 },
+            transform,
+            planeParams
+        );
+
+        assert.equal(offSegment, comparableSegment);
+        assert.ok(offSegment < 768);
+
+        state.zetaContinuationEnabled = false;
+        const reflectedSegment = calculateDynamicPointsForSegment(
+            { re: -1, im: 0 },
+            { re: 0, im: 0 },
+            transform,
+            planeParams
+        );
+        assert.ok(Number.isFinite(reflectedSegment));
+    } finally {
+        state.currentFunction = previousFunction;
+        state.zetaContinuationEnabled = previousContinuation;
     }
 });

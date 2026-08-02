@@ -161,3 +161,27 @@ test('real 3D plot sampling can use declared kernels without calling the transfo
     assert.equal(sampled.finiteResultCount, 9);
     assert.ok(sampled.values.every(value => Math.abs(value) < 1e-12));
 });
+
+test('real-plot scalar samples are reused for a lower-resolution consumer', () => {
+    let evaluations = 0;
+    const transform = (re, im) => {
+        evaluations += 1;
+        return { re: re + im, im: re - im };
+    };
+    const options = {
+        xRange: [-2, 2],
+        yRange: [-1, 1],
+        inputExpr: 'x',
+        imagExpr: 'y',
+        outputComponent: 'real',
+        valuesOnly: true
+    };
+
+    sampleRealPlotSurface(transform, { ...options, segments: 16 });
+    const highResolutionEvaluations = evaluations;
+    const lowerResolution = sampleRealPlotSurface(transform, { ...options, segments: 8 });
+
+    assert.equal(evaluations, highResolutionEvaluations);
+    assert.equal(lowerResolution.vertexCount, 81);
+    assert.equal(lowerResolution.finiteResultCount, 81);
+});

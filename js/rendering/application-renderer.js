@@ -29,8 +29,11 @@ function runSurfaceRedraw() {
         if (state.riemannSurfaceEnabled && !state.realPlotsEnabled) {
             drawWPlaneContent({ renderRiemannSurface: true });
         }
+        if (state.realPlotsEnabled && state.show2DContourPlot) {
+            draw2DContourPlot(controls.contour2DCanvas);
+        }
         if (state.realPlotsEnabled) drawRealPlot();
-        if (state.show2DContourPlot && (state.realPlotsEnabled || state.riemannSurfaceEnabled)) {
+        if (state.show2DContourPlot && !state.realPlotsEnabled && state.riemannSurfaceEnabled) {
             draw2DContourPlot(controls.contour2DCanvas);
         }
     } catch (error) {
@@ -73,7 +76,7 @@ function syncOptionalColumn(column, shouldHide, onHide) {
     });
 }
 
-export function renderApplicationFrame() {
+export function renderApplicationFrame(timestamp) {
     const zIsPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
     if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar && state.currentFunction !== 'poincare') {
         findZerosAndPoles();
@@ -92,7 +95,7 @@ export function renderApplicationFrame() {
     performCauchyAnalysis();
 
     if (!state.realPlotsEnabled) {
-        drawZPlaneContent();
+        drawZPlaneContent(timestamp);
         drawWPlaneContent({ renderRiemannSurface: !state.riemannSurfaceEnabled });
     }
     updateProbeInfo();

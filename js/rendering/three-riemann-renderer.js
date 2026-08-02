@@ -29,7 +29,11 @@ export class ThreeRiemannRenderer {
         this.isDragging = false;
         this.probePoint = null;
         this.animationHandle = null;
+        this.renderDirty = true;
+        this.lastGeometryProgress = null;
+        this.lastGeometryStateKey = '';
         this.transformFunction = null;
+        this.transformKey = null;
         this.chainCount = 1;
         this.pointerRect = { left: 0, top: 0, width: 1, height: 1 };
         this.pointerRectValid = false;
@@ -64,6 +68,10 @@ export class ThreeRiemannRenderer {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         this.controls.target.set(0, SPHERE_RADIUS * 0.5, 0);
+        this.controls.addEventListener('change', () => {
+            this.renderDirty = true;
+            this.startAnimationLoop();
+        });
 
         // Static Grid
         this.staticGrid = new THREE.GridHelper(60, 40, 0x222233, 0x1a1a25);
@@ -231,9 +239,16 @@ export class ThreeRiemannRenderer {
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     }
 
-    setTransform(transformFunction, chainCount = 1) {
-        this.transformFunction = typeof transformFunction === 'function' ? transformFunction : null;
-        this.chainCount = normalizeDomainDynamicsChainCount(chainCount);
+    setTransform(transformFunction, chainCount = 1, transformKey = null) {
+        const nextTransform = typeof transformFunction === 'function' ? transformFunction : null;
+        const nextChainCount = normalizeDomainDynamicsChainCount(chainCount);
+        const nextTransformKey = transformKey === null ? nextTransform : transformKey;
+        const changed = this.transformKey !== nextTransformKey || this.chainCount !== nextChainCount;
+        this.transformFunction = nextTransform;
+        this.transformKey = nextTransformKey;
+        this.chainCount = nextChainCount;
+        if (changed) this.renderDirty = true;
+        return changed;
     }
 
     buildGridFromPointSets(pointSets, progressOverride = undefined) {
@@ -321,6 +336,8 @@ export class ThreeRiemannRenderer {
         const progress = progressOverride !== undefined 
             ? progressOverride 
             : (this.planeType === 'z' ? state.riemannTransformationProgressZ : state.riemannTransformationProgressW);
+        this.lastGeometryProgress = null;
+        this.lastGeometryStateKey = '';
         this.updateGeometry(progress);
         this.render();
     }
@@ -341,10 +358,13 @@ export class ThreeRiemannRenderer {
     }
 
     setDynamicOverlay(data, cacheKey = null) {
-        if (cacheKey !== null && this.dynamicOverlayCacheKey === cacheKey) return;
+        if (cacheKey !== null && this.dynamicOverlayCacheKey === cacheKey) return false;
         this.clearDynamicOverlay();
         this.dynamicOverlayCacheKey = cacheKey;
-        if (!data) return;
+        if (!data) {
+            this.renderDirty = true;
+            return true;
+        }
 
         const spherePositions = values => {
             const positions = [];
@@ -377,6 +397,7 @@ export class ThreeRiemannRenderer {
             });
             this.dynamicOverlayGroup.add(new THREE.Points(geometry, material));
         }
+        this.renderDirty = true;
 
         const pathPositions = spherePositions(data.path);
         if (pathPositions.length >= 6) {
@@ -411,18 +432,28 @@ export class ThreeRiemannRenderer {
             });
             this.dynamicOverlayGroup.add(new THREE.Points(geometry, material));
         }
+        return true;
     }
 
     updateProbe(probePoint) {
         if (!probePoint || !Number.isFinite(probePoint.re) || !Number.isFinite(probePoint.im)) {
+            const changed = this.markersGroup.visible || this.probePoint !== null;
             this.markersGroup.visible = false;
             this.probePoint = null;
-            return;
+            if (changed) this.renderDirty = true;
+            return changed;
+        }
+
+        if (this.markersGroup.visible && this.probePoint &&
+            this.probePoint.re === probePoint.re && this.probePoint.im === probePoint.im) {
+            return false;
         }
 
         this.markersGroup.visible = true;
-        this.probePoint = probePoint;
+        this.probePoint = { re: probePoint.re, im: probePoint.im };
         this.updateProbeGeometry();
+        this.renderDirty = true;
+        return true;
     }
 
     updateProbeGeometry() {
@@ -451,33 +482,46 @@ export class ThreeRiemannRenderer {
 
     updateGeometry(progress) {
         const easedProgress = -(Math.cos(Math.PI * progress) - 1) / 2;
+        const progressChanged = this.lastGeometryProgress !== progress;
+        let changed = progressChanged;
 
-        this.linesGroup.children.forEach(line => {
-            const positions = line.geometry.attributes.position.array;
-            const start = line.geometry.userData.start;
-            const target = line.geometry.userData.target;
+        if (progressChanged) {
+            this.linesGroup.children.forEach(line => {
+                const positions = line.geometry.attributes.position.array;
+                const start = line.geometry.userData.start;
+                const target = line.geometry.userData.target;
 
-            for (let i = 0; i < positions.length; i++) {
-                positions[i] = start[i] + (target[i] - start[i]) * easedProgress;
-            }
-            line.geometry.attributes.position.needsUpdate = true;
-        });
+                for (let i = 0; i < positions.length; i++) {
+                    positions[i] = start[i] + (target[i] - start[i]) * easedProgress;
+                }
+                line.geometry.attributes.position.needsUpdate = true;
+            });
+        }
 
         this.updateSphereMaterial();
 
-        if (this.ghostSphere.material) {
-            const maxOpacity = state.threeSphereOpacity !== undefined ? state.threeSphereOpacity : 0.15;
+        const maxOpacity = state.threeSphereOpacity !== undefined ? state.threeSphereOpacity : 0.15;
+        const density = state.gridDensity !== undefined ? state.gridDensity : 12;
+        const widthSegments = Math.max(8, density * 2);
+        const heightSegments = Math.max(8, density);
+        const gridOpacity = state.sphereGridOpacity !== undefined ? state.sphereGridOpacity : 0.0;
+        const geometryStateKey = `${easedProgress}|${maxOpacity}|${gridOpacity}|${widthSegments}|${heightSegments}`;
+        const geometryStateChanged = this.lastGeometryStateKey !== geometryStateKey;
+
+        if (geometryStateChanged) {
+            changed = true;
+            this.lastGeometryStateKey = geometryStateKey;
+        }
+
+        if (this.ghostSphere.material && geometryStateChanged) {
             this.ghostSphere.material.opacity = Math.pow(easedProgress, 2) * maxOpacity;
         }
 
         if (this.wireframeSphere) {
             this.wireframeSphere.visible = true;
-            const density = state.gridDensity !== undefined ? state.gridDensity : 12;
-            const widthSegments = Math.max(8, density * 2);
-            const heightSegments = Math.max(8, density);
-            
             if (this.wireframeSphere.userData.widthSegments !== widthSegments || 
                 this.wireframeSphere.userData.heightSegments !== heightSegments) {
+                changed = true;
                 
                 this.wireframeSphere.geometry.dispose();
                 
@@ -487,11 +531,15 @@ export class ThreeRiemannRenderer {
                 this.wireframeSphere.userData = { widthSegments, heightSegments };
             }
 
-            const gridOpacity = state.sphereGridOpacity !== undefined ? state.sphereGridOpacity : 0.0;
-            this.wireframeSphere.material.opacity = Math.pow(easedProgress, 2) * gridOpacity;
+            if (geometryStateChanged) {
+                this.wireframeSphere.material.opacity = Math.pow(easedProgress, 2) * gridOpacity;
+            }
         }
 
-        this.updateProbeGeometry();
+        if (progressChanged) this.updateProbeGeometry();
+        this.lastGeometryProgress = progress;
+        if (changed) this.renderDirty = true;
+        return changed;
     }
 
     updateSphereMaterial() {
@@ -514,8 +562,10 @@ export class ThreeRiemannRenderer {
     startAnimationLoop() {
         if (this.animationHandle) return;
         const animate = () => {
-            this.render();
-            this.animationHandle = requestAnimationFrame(animate);
+            this.animationHandle = null;
+            const controlsChanged = Boolean(this.controls?.update?.());
+            if (controlsChanged || this.renderDirty) this.render();
+            if (controlsChanged) this.startAnimationLoop();
         };
         this.animationHandle = requestAnimationFrame(animate);
     }
@@ -536,24 +586,15 @@ export class ThreeRiemannRenderer {
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h);
         this.pointerRectValid = false;
+        this.renderDirty = true;
+        this.render();
     }
 
     render() {
         if (!this.renderer || !this.scene || !this.camera) return;
         
-        this.updateSphereMaterial();
-
-        if (this.ghostSphere.material) {
-            const maxOpacity = state.threeSphereOpacity !== undefined ? state.threeSphereOpacity : 0.15;
-            this.ghostSphere.material.opacity = maxOpacity;
-        }
-
-        if (this.wireframeSphere) {
-            this.wireframeSphere.visible = true;
-        }
-
-        this.controls.update();
         this.renderer.render(this.scene, this.camera);
+        this.renderDirty = false;
     }
 
     dispose() {

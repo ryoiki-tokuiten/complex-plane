@@ -16,7 +16,6 @@ import {
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import {
-    drawWithWebGLRaster,
     drawWithWebGLCapture,
     drawPlanarTransformedShapeHybrid,
     drawPlanarInputShapeHybrid
@@ -82,12 +81,6 @@ let wPlanarTransformedLayerCacheList = [];
 const zPlanarInputLayerCache = createLayerCache();
 const zFlowLayerCache = createLayerCache();
 const conformalIndicatrixCache = { key: null, value: [] };
-
-// A renderer is a tiny fallback pipeline: prefer capture when requested, degrade to raster.
-const WEBGL_PIPELINES = Object.freeze({
-    raster: Object.freeze([drawWithWebGLRaster]),
-    capture: Object.freeze([drawWithWebGLCapture, drawWithWebGLRaster])
-});
 
 const FACTOR_KEY_BUILDERS = Object.freeze({
     mobius: appendMobiusKey,
@@ -228,23 +221,13 @@ function drawPlaneLayer(ctx, planeParams, planeKey, drawCallback, mode = 'captur
         return true;
     }
 
-    const pipeline = WEBGL_PIPELINES[mode] || WEBGL_PIPELINES.capture;
-    let rendered = false;
-
-    if (state.webglLineRenderingEnabled) {
-        rendered = pipeline.some(renderer => {
-            // Skip the slow WebGL raster fallback
-            if (renderer === drawWithWebGLRaster) return false;
-            return renderer(ctx, planeParams, planeKey, drawCallback);
-        });
+    if (state.webglLineRenderingEnabled &&
+        drawWithWebGLCapture(ctx, planeParams, planeKey, drawCallback)) {
+        return true;
     }
 
-    if (!rendered) {
-        drawCallback(ctx);
-        rendered = true;
-    }
-
-    return rendered;
+    drawCallback(ctx);
+    return true;
 }
 
 function drawLayerWhen(condition, ctx, planeParams, planeKey, drawCallback, mode = 'capture') {
@@ -991,18 +974,21 @@ function renderZProbeOverlay() {
     );
 }
 
-function renderZParticles(map) {
+function renderZParticles(map, timestamp) {
+    if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
+        runtime.particlesLastUpdateTime = null;
+    }
     drawLayerWhen(
         state.particleAnimationEnabled && !state.navigationModeEnabled,
         zCtx,
         zPlaneParams,
         'z',
-        layerCtx => updateAndDrawParticles(layerCtx, zPlaneParams, state, map),
+        layerCtx => updateAndDrawParticles(layerCtx, zPlaneParams, state, map, timestamp),
         'raster'
     );
 }
 
-function renderZPlanar(map) {
+function renderZPlanar(map, timestamp) {
     renderZPlanarBackground(map);
     renderZPrimaryPlanarContent(map);
     drawLayerWhen(
@@ -1018,10 +1004,10 @@ function renderZPlanar(map) {
     renderZConformalIndicatrices(map);
     renderZTaylorOverlay();
     renderZProbeOverlay();
-    renderZParticles(map);
+    renderZParticles(map, timestamp);
 }
 
-export function drawZPlaneContent() {
+export function drawZPlaneContent(timestamp) {
     syncRenderContext();
 
     if (renderFirstSignalMode(Z_SIGNAL_RENDERERS, zCtx, zPlaneParams, 'z')) {
@@ -1035,7 +1021,7 @@ export function drawZPlaneContent() {
         return;
     }
 
-    renderZPlanar(map);
+    renderZPlanar(map, timestamp);
 }
 
 function ensureWPlaneCache(index) {
@@ -1189,7 +1175,7 @@ function renderThreeWPlane(map, stageIndex) {
     const stage = state.chainingEnabled && state.chainCount > 25
         ? Math.max(0, state.chainCount - 1)
         : stageIndex;
-    threeRenderer.setTransform(map.evaluate, stage + 1);
+    const transformChanged = threeRenderer.setTransform(map.evaluate, stage + 1, map.signature);
 
     const gridConfigObj = buildInputShapeGeometryConfig(zPlaneParams, {
         currentFunction: state.currentFunction,
@@ -1216,20 +1202,23 @@ function renderThreeWPlane(map, stageIndex) {
         }
     }
 
-    threeRenderer.updateGeometry(1.0);
-    threeRenderer.setDynamicOverlay(
+    const geometryChanged = threeRenderer.updateGeometry(1.0);
+    const overlayChanged = threeRenderer.setDynamicOverlay(
         getDynamicSphereSceneData({ transform: map.evaluate, stageIndex }),
         `${stageIndex}:${getDynamicPlottingCacheKey()}`
     );
 
+    let probeChanged = false;
     if (state.probeActive && state.probeZ) {
         const wProbe = map.evaluate(state.probeZ.re, state.probeZ.im);
-        threeRenderer.updateProbe(wProbe);
+        probeChanged = threeRenderer.updateProbe(wProbe);
     } else {
-        threeRenderer.updateProbe(null);
+        probeChanged = threeRenderer.updateProbe(null);
     }
 
-    threeRenderer.startAnimationLoop();
+    if (transformChanged || geometryChanged || overlayChanged || probeChanged) {
+        threeRenderer.render();
+    }
 }
 
 function shouldDrawWReferenceGrid() {

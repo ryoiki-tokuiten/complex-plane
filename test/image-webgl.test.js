@@ -159,3 +159,40 @@ test('adaptive image meshes do not bridge finite jump discontinuities', () => {
         assert.equal(Math.min(a, b, c) < 0 && Math.max(a, b, c) > 0, false);
     }
 });
+
+test('adaptive image meshes honor explicit cell, sample, and vertex budgets', () => {
+    const mesh = buildAdaptiveImageMesh({
+        bounds: { x0: -1, x1: 1, y0: -1, y1: 1, xSpan: 2, ySpan: 2 },
+        baseResolution: 8,
+        maxDepth: 4,
+        maxCells: 4,
+        maxSamples: 9,
+        maxVertices: 4,
+        sample: (u, v) => ({ re: u * 2 - 1, im: v * 2 - 1 })
+    });
+
+    assert.ok(mesh.cellCount <= 4);
+    assert.ok(mesh.sampleCount <= 9);
+    assert.ok(mesh.vertices.length / 2 <= 4);
+});
+
+test('adaptive image meshes scale with the render target deterministically', () => {
+    const bounds = { x0: -4, x1: 4, y0: -4, y1: 4, xSpan: 8, ySpan: 8 };
+    const sample = (u, v) => {
+        const x = u * 8 - 4;
+        const y = v * 8 - 4;
+        const magnitude = Math.exp(x * 0.5);
+        return {
+            re: magnitude * Math.cos(y * 0.5),
+            im: magnitude * Math.sin(y * 0.5)
+        };
+    };
+
+    const small = buildAdaptiveImageMesh({ bounds, pixelWidth: 320, pixelHeight: 320, sample });
+    const large = buildAdaptiveImageMesh({ bounds, pixelWidth: 1280, pixelHeight: 1280, sample });
+    const repeat = buildAdaptiveImageMesh({ bounds, pixelWidth: 1280, pixelHeight: 1280, sample });
+
+    assert.ok(large.cellCount > small.cellCount);
+    assert.deepEqual(Array.from(repeat.vertices), Array.from(large.vertices));
+    assert.deepEqual(Array.from(repeat.indices), Array.from(large.indices));
+});

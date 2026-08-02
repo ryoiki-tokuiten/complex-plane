@@ -10,8 +10,7 @@ import {
     STREAMLINE_COLOR_MIN_MAG, STREAMLINE_COLOR_MAX_MAG
 } from '../constants/colors.js';
 import {
-    TWO_PI, MIN_POINTS_ADAPTIVE, MAX_POINTS_ADAPTIVE_DEFAULT,
-    ADAPTIVE_ANCHOR_DENSITY, DEFAULT_POINTS_PER_LINE, ZETA_POLE,
+    TWO_PI, MIN_POINTS_ADAPTIVE, DEFAULT_POINTS_PER_LINE, ZETA_POLE,
     ZETA_REFLECTION_POINT_RE, PROBE_CROSSHAIR_SIZE_FACTOR
 } from '../constants/numerical.js';
 import { LINE_WIDTH_NORMAL, PARTICLE_RADIUS } from '../constants/rendering.js';
@@ -24,7 +23,12 @@ import {
     calculateStreamline, getVectorFieldValueAtPoint,
     getStreamlineColorByMagnitude, getVectorEvaluator
 } from '../analysis/streamline.js';
-import { isRasterInputShape } from '../utils/raster-media.js';
+import {
+    getRasterDisplayDimensions,
+    getRasterOpacityForShape,
+    getRasterSourceForShape,
+    isRasterInputShape
+} from '../utils/raster-media.js';
 import { drawImageWithWebGL } from './draw-image-webgl.js';
 import {
     generateCurrentInputShapePointSets,
@@ -44,6 +48,13 @@ const PROBE_NEIGHBORHOOD_SEGMENTS = 60;
 const PROBE_MARKER_RADIUS = 5;
 const CONSTANT_POINT_RADIUS = 7;
 const FOCI_RADIUS = 4;
+const PARTICLE_REFERENCE_FPS = 60;
+const PARTICLE_MAX_DELTA_SECONDS = 0.05;
+const ZETA_CURVE_MIN_SEGMENTS = 24;
+const ZETA_CURVE_MAX_SEGMENTS = 768;
+const ZETA_CURVE_MAX_DEPTH = 8;
+const ZETA_CURVE_TOLERANCE_SQ = 2.25;
+const ZETA_CURVE_MAX_SEGMENT_LENGTH_SQ = 24 * 24;
 const DEFAULT_VIEW_RANGE = Object.freeze([-1, 1]);
 const INVALID_COMPLEX_POINT = Object.freeze({ re: NaN, im: NaN });
 
@@ -205,14 +216,13 @@ function pushPathCacheEntry(cacheMap, points, entry) {
     cacheMap.set(points, entry);
 }
 
-function getTransformScopedPathCache(points, mappedTransform, createIfMissing) {
+function getTransformScopedPathCache(points, mappedTransform) {
     if (!mappedTransform || (typeof mappedTransform !== 'object' && typeof mappedTransform !== 'function')) {
         return null;
     }
 
     let byTransform = TRANSFORMED_PATH_CACHE.get(points);
     if (!byTransform) {
-        if (!createIfMissing) return null;
         byTransform = new WeakMap();
         TRANSFORMED_PATH_CACHE.set(points, byTransform);
     }
@@ -474,22 +484,21 @@ function isMappedPointUsableForPath(mappedRe, mappedIm, renderLimit) {
         Math.abs(mappedIm) <= renderLimit;
 }
 
-function appendPointToPathObject(path, pathState, x, y) {
-    if (pathState.open) {
-        path.lineTo(x, y);
-    } else {
-        path.moveTo(x, y);
-        pathState.open = true;
+function appendPointToPolyline(polyline, pathState, x, y) {
+    if (!pathState.open && polyline.length > 0) {
+        polyline.push(NaN, NaN);
     }
+    polyline.push(x, y);
+    pathState.open = true;
 }
 
-function breakPathObject(pathState) {
+function breakPolylinePath(pathState) {
     pathState.open = false;
 }
 
-function appendAdaptiveTransformedSegment(path, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
-    z0Re, z0Im, w0Re, w0Im, x0, y0,
-    z1Re, z1Im, w1Re, w1Im, x1, y1,
+function appendAdaptiveTransformedSegment(polyline, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
+    z0Re, z0Im, x0, y0,
+    z1Re, z1Im, x1, y1,
     depth) {
     if (depth < tuning.maxDepth) {
         const midZRe = (z0Re + z1Re) * 0.5;
@@ -500,8 +509,8 @@ function appendAdaptiveTransformedSegment(path, pathState, planeParams, mappedTr
             // A singular or clipped midpoint means the projected curve is not a
             // continuous visible segment. Restart at the far endpoint instead of
             // drawing a false bridge across the discontinuity.
-            breakPathObject(pathState);
-            appendPointToPathObject(path, pathState, x1, y1);
+            breakPolylinePath(pathState);
+            appendPointToPolyline(polyline, pathState, x1, y1);
             return;
         }
 
@@ -517,23 +526,23 @@ function appendAdaptiveTransformedSegment(path, pathState, planeParams, mappedTr
         if (errorX * errorX + errorY * errorY > tuning.toleranceSq ||
             segmentX * segmentX + segmentY * segmentY > tuning.maxSegmentSq) {
             const nextDepth = depth + 1;
-            appendAdaptiveTransformedSegment(path, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
-                z0Re, z0Im, w0Re, w0Im, x0, y0,
-                midZRe, midZIm, midMapped.re, midMapped.im, midX, midY,
+            appendAdaptiveTransformedSegment(polyline, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
+                z0Re, z0Im, x0, y0,
+                midZRe, midZIm, midX, midY,
                 nextDepth);
-            appendAdaptiveTransformedSegment(path, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
-                midZRe, midZIm, midMapped.re, midMapped.im, midX, midY,
-                z1Re, z1Im, w1Re, w1Im, x1, y1,
+            appendAdaptiveTransformedSegment(polyline, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
+                midZRe, midZIm, midX, midY,
+                z1Re, z1Im, x1, y1,
                 nextDepth);
             return;
         }
     }
 
-    appendPointToPathObject(path, pathState, x1, y1);
+    appendPointToPolyline(polyline, pathState, x1, y1);
 }
 
-function buildAdaptiveTransformedPath(PathCtor, planeParams, mappedTransform, points, renderLimit, jumpThresholdSq, tuning) {
-    const path = new PathCtor();
+function buildAdaptiveTransformedPolyline(planeParams, mappedTransform, points, renderLimit, jumpThresholdSq, tuning) {
+    const polyline = [];
     const pathState = { open: false };
     const evalContext = { re: 0, im: 0 };
     let hasPrevious = false;
@@ -549,14 +558,14 @@ function buildAdaptiveTransformedPath(PathCtor, planeParams, mappedTransform, po
 
         if (!isRenderableComplexPoint(zPoint)) {
             hasPrevious = false;
-            breakPathObject(pathState);
+            breakPolylinePath(pathState);
             continue;
         }
 
         const mappedPoint = evaluateProfilePoint(mappedTransform, zPoint.re, zPoint.im, evalContext);
         if (!isRenderableComplexPoint(mappedPoint)) {
             hasPrevious = false;
-            breakPathObject(pathState);
+            breakPolylinePath(pathState);
             continue;
         }
 
@@ -568,13 +577,13 @@ function buildAdaptiveTransformedPath(PathCtor, planeParams, mappedTransform, po
             const deltaIm = mappedIm - previousMappedIm;
             if (deltaRe * deltaRe + deltaIm * deltaIm > jumpThresholdSq) {
                 hasPrevious = false;
-                breakPathObject(pathState);
+                breakPolylinePath(pathState);
             }
         }
 
         if (!isMappedPointUsableForPath(mappedRe, mappedIm, renderLimit)) {
             hasPrevious = false;
-            breakPathObject(pathState);
+            breakPolylinePath(pathState);
             continue;
         }
 
@@ -582,11 +591,11 @@ function buildAdaptiveTransformedPath(PathCtor, planeParams, mappedTransform, po
         const y = canvasYFast(mappedIm, planeParams);
 
         if (!hasPrevious) {
-            appendPointToPathObject(path, pathState, x, y);
+            appendPointToPolyline(polyline, pathState, x, y);
         } else {
-            appendAdaptiveTransformedSegment(path, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
-                previousZRe, previousZIm, previousMappedRe, previousMappedIm, previousX, previousY,
-                zPoint.re, zPoint.im, mappedRe, mappedIm, x, y,
+            appendAdaptiveTransformedSegment(polyline, pathState, planeParams, mappedTransform, renderLimit, tuning, evalContext,
+                previousZRe, previousZIm, previousX, previousY,
+                zPoint.re, zPoint.im, x, y,
                 0);
         }
 
@@ -597,6 +606,29 @@ function buildAdaptiveTransformedPath(PathCtor, planeParams, mappedTransform, po
         previousMappedIm = mappedIm;
         previousX = x;
         previousY = y;
+    }
+
+    return polyline;
+}
+
+function buildPath2DFromTransformedPolyline(PathCtor, polyline) {
+    const path = new PathCtor();
+    let pathOpen = false;
+
+    for (let index = 0; index < polyline.length; index += 2) {
+        const x = polyline[index];
+        const y = polyline[index + 1];
+        if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+            pathOpen = false;
+            continue;
+        }
+
+        if (pathOpen) {
+            path.lineTo(x, y);
+        } else {
+            path.moveTo(x, y);
+            pathOpen = true;
+        }
     }
 
     return path;
@@ -615,15 +647,16 @@ function transformedCacheEntryMatches(entry, planeParams, points, renderLimit, j
         pointSentinelsMatch(entry, points);
 }
 
-function getCachedTransformedPath2D(ctx, planeParams, mappedTransform, points, renderLimit, jumpThresholdSq) {
-    const PathCtor = getPathConstructorForContext(ctx);
-    if (!PathCtor || !Array.isArray(points) || points.length < PATH_CACHE_MIN_POINTS || !hasFastCanvasMapping(planeParams) || !mappedTransform) {
+function getCachedTransformedGeometryEntry(planeParams, mappedTransform, points, renderLimit, jumpThresholdSq) {
+    if (!Array.isArray(points) || !hasFastCanvasMapping(planeParams) || !mappedTransform) {
         return null;
     }
 
     const tuning = getAdaptiveTransformRenderTuning();
     const sampleHash = getTransformSampleHash(mappedTransform, points);
-    const byTransform = getTransformScopedPathCache(points, mappedTransform, true);
+    const byTransform = points.length >= PATH_CACHE_MIN_POINTS
+        ? getTransformScopedPathCache(points, mappedTransform)
+        : null;
     const cacheRoot = byTransform && byTransform.get(mappedTransform);
     const cachedEntry = cacheRoot && findReusableCacheEntry(cacheRoot, entry =>
         transformedCacheEntryMatches(entry, planeParams, points, renderLimit, jumpThresholdSq, sampleHash, tuning)
@@ -633,13 +666,14 @@ function getCachedTransformedPath2D(ctx, planeParams, mappedTransform, points, r
         if (cachedEntry !== cacheRoot) {
             byTransform.set(mappedTransform, cachedEntry);
         }
-        return cachedEntry.path;
+        return cachedEntry;
     }
 
-    const path = buildAdaptiveTransformedPath(PathCtor, planeParams, mappedTransform, points, renderLimit, jumpThresholdSq, tuning);
+    const geometry = buildAdaptiveTransformedPolyline(planeParams, mappedTransform, points, renderLimit, jumpThresholdSq, tuning);
     const entry = {
         kind: 'transformed',
-        path,
+        geometry,
+        path: null,
         next: null,
         renderLimit,
         jumpThresholdSq,
@@ -653,7 +687,7 @@ function getCachedTransformedPath2D(ctx, planeParams, mappedTransform, points, r
     if (byTransform) {
         pushTransformScopedPathCacheEntry(byTransform, mappedTransform, entry);
     }
-    return path;
+    return entry;
 }
 
 function hslToRgbCss(h, s, l) {
@@ -954,17 +988,6 @@ function getBucketIndex(magnitude, minMagnitude, magnitudeRange) {
     return Math.round(normalized * STREAMLINE_COLOR_BUCKETS);
 }
 
-function getRandomPointInView(planeParams) {
-    const xRange = getPlaneXRanges(planeParams);
-    const yRange = getPlaneYRanges(planeParams);
-
-    return {
-        x: xRange[0] + Math.random() * (xRange[1] - xRange[0]),
-        y: yRange[0] + Math.random() * (yRange[1] - yRange[0]),
-        lifetime: 0
-    };
-}
-
 function syncParticlePool(renderState, planeParams) {
     const particles = runtime.particles;
     const targetDensity = Math.max(0, Math.floor(finiteOr(renderState.particleDensity, 0)));
@@ -994,7 +1017,19 @@ function getParticleSpeed(planeParams, renderState) {
     const yRange = getPlaneYRanges(planeParams);
     const viewSpan = Math.max(xRange[1] - xRange[0], yRange[1] - yRange[0]);
 
-    return finiteOr(renderState.particleSpeed, 0) * viewSpan * 0.1;
+    return finiteOr(renderState.particleSpeed, 0) * viewSpan * 0.1 * PARTICLE_REFERENCE_FPS;
+}
+
+function getParticleDeltaSeconds(timestamp) {
+    const now = isFiniteNumber(timestamp) ? timestamp : nowMs();
+    const previous = runtime.particlesLastUpdateTime;
+    runtime.particlesLastUpdateTime = now;
+
+    if (!isFiniteNumber(previous) || now < previous) {
+        return 0;
+    }
+
+    return clamp((now - previous) / 1000, 0, PARTICLE_MAX_DELTA_SECONDS);
 }
 
 function getProbeCrosshairEndpoints(center, radius) {
@@ -1054,22 +1089,6 @@ function isViewportManipulationActive() {
         runtime.interaction.panZ.isPanning ||
         runtime.interaction.panW.isPanning
     );
-}
-
-function getAdaptiveSamplingBounds() {
-    if (isViewportManipulationActive()) {
-        return {
-            minPoints: Math.max(360, Math.floor(MIN_POINTS_ADAPTIVE * 0.3)),
-            maxPoints: Math.max(2800, Math.floor(MAX_POINTS_ADAPTIVE_DEFAULT * 0.38)),
-            anchorDensity: Math.max(260, Math.floor(ADAPTIVE_ANCHOR_DENSITY * 0.36))
-        };
-    }
-
-    return {
-        minPoints: Math.max(1100, Math.floor(MIN_POINTS_ADAPTIVE * 0.92)),
-        maxPoints: Math.max(7800, Math.floor(MAX_POINTS_ADAPTIVE_DEFAULT * 0.92)),
-        anchorDensity: Math.max(780, Math.floor(ADAPTIVE_ANCHOR_DENSITY * 0.92))
-    };
 }
 
 function drawMappedProbeNeighborhood(ctx, planeParams, center, radius, transformFunc, renderLimit) {
@@ -1138,6 +1157,42 @@ export function drawComplexLineSetOnPlane(ctx, planeParams, points) {
     strokeComplexIterableOnPlane(ctx, planeParams, points);
 }
 
+function drawRasterInputOnCanvas(ctx, planeParams) {
+    const source = getRasterSourceForShape(appState.currentInputShape);
+    if (!source || !ctx?.canvas || typeof ctx.drawImage !== 'function') return false;
+
+    const dimensions = getRasterDisplayDimensions(appState.currentInputShape);
+    const topLeft = mapToCanvasCoords(
+        appState.a0 - dimensions.width * 0.5,
+        appState.b0 + dimensions.height * 0.5,
+        planeParams
+    );
+    const bottomRight = mapToCanvasCoords(
+        appState.a0 + dimensions.width * 0.5,
+        appState.b0 - dimensions.height * 0.5,
+        planeParams
+    );
+
+    if (![topLeft.x, topLeft.y, bottomRight.x, bottomRight.y].every(Number.isFinite)) return false;
+
+    ctx.save();
+    try {
+        ctx.globalAlpha = getRasterOpacityForShape(appState.currentInputShape);
+        ctx.drawImage(
+            source,
+            topLeft.x,
+            topLeft.y,
+            bottomRight.x - topLeft.x,
+            bottomRight.y - topLeft.y
+        );
+        return true;
+    } catch {
+        return false;
+    } finally {
+        ctx.restore();
+    }
+}
+
 export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, options = {}) {
     if (!Array.isArray(pointSets) || pointSets.length === 0) {
         return;
@@ -1165,7 +1220,7 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
         }
 
         for (let i = 0, length = pointSets.length; i < length; i++) {
-            const preparedPointSet = preparePointSet(pointSets[i], transformFunc);
+            const preparedPointSet = preparePointSet(pointSets[i], transformFunc, planeParams);
 
             if (!preparedPointSet || !Array.isArray(preparedPointSet.points)) {
                 continue;
@@ -1331,7 +1386,9 @@ export function drawPlanarInputShape(ctx, planeParams) {
     const inputShape = appState.currentInputShape;
 
     if (isRasterInputShape(inputShape)) {
-        drawImageWithWebGL(ctx, planeParams, false);
+        if (!drawImageWithWebGL(ctx, planeParams, false)) {
+            drawRasterInputOnCanvas(ctx, planeParams);
+        }
         return;
     }
 
@@ -1352,13 +1409,10 @@ export function drawPlanarInputShape(ctx, planeParams) {
     });
 }
 
-export function initializeSingleParticle(planeParams) {
-    return getRandomPointInView(planeParams);
-}
-
-export function updateAndDrawParticles(ctx, planeParams, state, map) {
+export function updateAndDrawParticles(ctx, planeParams, state, map, timestamp = null) {
     if (!state.particleAnimationEnabled) {
         runtime.particles.length = 0;
+        runtime.particlesLastUpdateTime = null;
         return;
     }
 
@@ -1368,8 +1422,9 @@ export function updateAndDrawParticles(ctx, planeParams, state, map) {
         ctx.fillStyle = COLOR_PARTICLE;
         ctx.beginPath();
 
-        const speed = getParticleSpeed(planeParams, state);
-        const halfSpeed = speed * 0.5;
+        const deltaSeconds = getParticleDeltaSeconds(timestamp);
+        const distance = getParticleSpeed(planeParams, state) * deltaSeconds;
+        const halfDistance = distance * 0.5;
         const vectorEvaluator = getVectorEvaluator(map, state.vectorFieldFunction);
         const xRange = getPlaneXRanges(planeParams);
         const yRange = getPlaneYRanges(planeParams);
@@ -1379,13 +1434,13 @@ export function updateAndDrawParticles(ctx, planeParams, state, map) {
         const maxY = yRange[1];
         const spawnSpanX = maxX - minX;
         const spawnSpanY = maxY - minY;
-        const maxLifetime = state.particleMaxLifetime;
+        const maxLifetime = Math.max(0, finiteOr(state.particleMaxLifetime, 0)) / PARTICLE_REFERENCE_FPS;
         const fastMap = hasFastCanvasMapping(planeParams);
         const particles = runtime.particles;
 
         for (let i = 0, length = particles.length; i < length; i++) {
             const particle = particles[i];
-            particle.lifetime++;
+            particle.lifetime = finiteOr(particle.lifetime, 0) + deltaSeconds;
 
             let vector = vectorEvaluator ? vectorEvaluator(particle.x, particle.y) : null;
             let alive = !!(vector && isFiniteNumber(vector.vx) && isFiniteNumber(vector.vy));
@@ -1398,23 +1453,23 @@ export function updateAndDrawParticles(ctx, planeParams, state, map) {
                     const inverseMagnitude = 1 / Math.sqrt(magnitudeSq);
                     const firstX = vector.vx * inverseMagnitude;
                     const firstY = vector.vy * inverseMagnitude;
-                    const midpointX = particle.x + firstX * halfSpeed;
-                    const midpointY = particle.y + firstY * halfSpeed;
+                    const midpointX = particle.x + firstX * halfDistance;
+                    const midpointY = particle.y + firstY * halfDistance;
                     vector = vectorEvaluator(midpointX, midpointY);
 
                     if (vector && isFiniteNumber(vector.vx) && isFiniteNumber(vector.vy)) {
                         magnitudeSq = vector.vx * vector.vx + vector.vy * vector.vy;
                         if (magnitudeSq >= EPSILON * EPSILON && Number.isFinite(magnitudeSq)) {
                             const secondInverseMagnitude = 1 / Math.sqrt(magnitudeSq);
-                            particle.x += vector.vx * secondInverseMagnitude * speed;
-                            particle.y += vector.vy * secondInverseMagnitude * speed;
+                            particle.x += vector.vx * secondInverseMagnitude * distance;
+                            particle.y += vector.vy * secondInverseMagnitude * distance;
                         } else {
-                            particle.x += firstX * speed;
-                            particle.y += firstY * speed;
+                            particle.x += firstX * distance;
+                            particle.y += firstY * distance;
                         }
                     } else {
-                        particle.x += firstX * speed;
-                        particle.y += firstY * speed;
+                        particle.x += firstX * distance;
+                        particle.y += firstY * distance;
                     }
                 }
             }
@@ -1541,66 +1596,43 @@ export function drawPlanarTransformedLine(ctx, planeParams, mappedTransform, z_p
 
     const renderLimit = getPlanarTransformRenderLimit(planeParams);
     const jumpThresholdSq = getViewportJumpThresholdSq(planeParams);
-    const cachedPath = getCachedTransformedPath2D(ctx, planeParams, mappedTransform, z_pts, renderLimit, jumpThresholdSq);
-
-    ctx.strokeStyle = col;
-    if (cachedPath) {
-        configureRoundStroke(ctx);
-        ctx.stroke(cachedPath);
-        return;
-    }
-
-    const fastMap = hasFastCanvasMapping(planeParams);
-    const evalContext = { re: 0, im: 0 };
+    const geometryEntry = getCachedTransformedGeometryEntry(
+        planeParams,
+        mappedTransform,
+        z_pts,
+        renderLimit,
+        jumpThresholdSq
+    );
+    if (!geometryEntry) return;
 
     ctx.strokeStyle = col;
     configureRoundStroke(ctx);
+
+    const PathCtor = getPathConstructorForContext(ctx);
+    if (PathCtor) {
+        if (!geometryEntry.path) {
+            geometryEntry.path = buildPath2DFromTransformedPolyline(PathCtor, geometryEntry.geometry);
+        }
+        ctx.stroke(geometryEntry.path);
+        return;
+    }
+
     ctx.beginPath();
-
     let pathOpen = false;
-    let hasLastMappedPoint = false;
-    let lastMappedRe = 0;
-    let lastMappedIm = 0;
-
-    for (let i = 0, length = z_pts.length; i < length; i++) {
-        const zPoint = z_pts[i];
-
-        if (!isRenderableComplexPoint(zPoint)) {
-            pathOpen = strokeOpenPath(ctx, pathOpen);
-            hasLastMappedPoint = false;
+    for (let index = 0; index < geometryEntry.geometry.length; index += 2) {
+        const x = geometryEntry.geometry[index];
+        const y = geometryEntry.geometry[index + 1];
+        if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+            pathOpen = false;
             continue;
         }
 
-        const mappedPoint = evaluateProfilePoint(mappedTransform, zPoint.re, zPoint.im, evalContext);
-
-        if (!isRenderableComplexPoint(mappedPoint)) {
-            pathOpen = strokeOpenPath(ctx, pathOpen);
-            hasLastMappedPoint = false;
-            continue;
+        if (pathOpen) {
+            ctx.lineTo(x, y);
+        } else {
+            ctx.moveTo(x, y);
+            pathOpen = true;
         }
-
-        const mappedRe = mappedPoint.re;
-        const mappedIm = mappedPoint.im;
-
-        if (hasLastMappedPoint) {
-            const deltaRe = mappedRe - lastMappedRe;
-            const deltaIm = mappedIm - lastMappedIm;
-
-            if (deltaRe * deltaRe + deltaIm * deltaIm > jumpThresholdSq) {
-                pathOpen = strokeOpenPath(ctx, pathOpen);
-            }
-        }
-
-        hasLastMappedPoint = true;
-        lastMappedRe = mappedRe;
-        lastMappedIm = mappedIm;
-
-        if (Math.abs(mappedRe) > renderLimit || Math.abs(mappedIm) > renderLimit) {
-            pathOpen = strokeOpenPath(ctx, pathOpen);
-            continue;
-        }
-
-        pathOpen = appendWorldPointToPath(ctx, planeParams, fastMap, pathOpen, mappedRe, mappedIm);
     }
 
     if (pathOpen) {
@@ -1608,41 +1640,7 @@ export function drawPlanarTransformedLine(ctx, planeParams, mappedTransform, z_p
     }
 }
 
-export function findIntersectionWithViewport(p1, p2, planeParams) {
-    if (!isFiniteCanvasPoint(p1) || !isFiniteCanvasPoint(p2)) {
-        return null;
-    }
-
-    const xmin = 0;
-    const xmax = planeParams.width;
-    const ymin = 0;
-    const ymax = planeParams.height;
-    let t = Infinity;
-
-    if (p2.y < ymin && p1.y >= ymin) {
-        t = Math.min(t, (ymin - p1.y) / (p2.y - p1.y));
-    }
-    if (p2.y > ymax && p1.y <= ymax) {
-        t = Math.min(t, (ymax - p1.y) / (p2.y - p1.y));
-    }
-    if (p2.x < xmin && p1.x >= xmin) {
-        t = Math.min(t, (xmin - p1.x) / (p2.x - p1.x));
-    }
-    if (p2.x > xmax && p1.x <= xmax) {
-        t = Math.min(t, (xmax - p1.x) / (p2.x - p1.x));
-    }
-
-    if (Number.isFinite(t) && t >= 0 && t <= 1) {
-        return {
-            x: p1.x + t * (p2.x - p1.x),
-            y: p1.y + t * (p2.y - p1.y)
-        };
-    }
-
-    return null;
-}
-
-export function calculateDynamicPointsForSegment(p1_world, p2_world, tf) {
+export function calculateDynamicPointsForSegment(p1_world, p2_world, tf, planeParams = null) {
     if (!isRenderableComplexPoint(p1_world) ||
         !isRenderableComplexPoint(p2_world) ||
         typeof tf !== 'function') {
@@ -1652,13 +1650,14 @@ export function calculateDynamicPointsForSegment(p1_world, p2_world, tf) {
     const vectorRe = p2_world.re - p1_world.re;
     const vectorIm = p2_world.im - p1_world.im;
     const lengthSq = vectorRe * vectorRe + vectorIm * vectorIm;
+    const pointToTargetRe = p1_world.re - ZETA_POLE.re;
+    const pointToTargetIm = p1_world.im - ZETA_POLE.im;
     let evalRe = p1_world.re;
     let evalIm = p1_world.im;
 
     if (Math.abs(lengthSq) >= DEGENERATE_SEGMENT_EPSILON) {
-        const pointToTargetRe = p1_world.re - ZETA_POLE.re;
-        const pointToTargetIm = p1_world.im - ZETA_POLE.im;
-        const t = -(pointToTargetRe * vectorRe + pointToTargetIm * vectorIm) / lengthSq;
+        const rawT = -(pointToTargetRe * vectorRe + pointToTargetIm * vectorIm) / lengthSq;
+        const t = clamp(rawT, 0, 1);
         evalRe += t * vectorRe;
         evalIm += t * vectorIm;
     }
@@ -1672,21 +1671,70 @@ export function calculateDynamicPointsForSegment(p1_world, p2_world, tf) {
         return Math.max(240, Math.floor(MIN_POINTS_ADAPTIVE * 0.5));
     }
 
-    if (Math.abs(evalRe - ZETA_POLE.re) < EPSILON && Math.abs(evalIm - ZETA_POLE.im) < EPSILON) {
-        evalRe = ZETA_POLE.re + 1e-7;
-        evalIm = ZETA_POLE.im + 1e-7;
+    const viewportActive = isViewportManipulationActive();
+    const minSegments = viewportActive ? ZETA_CURVE_MIN_SEGMENTS : ZETA_CURVE_MIN_SEGMENTS * 2;
+    const maxSegments = viewportActive ? ZETA_CURVE_MAX_SEGMENTS / 2 : ZETA_CURVE_MAX_SEGMENTS;
+    const toleranceSq = viewportActive ? ZETA_CURVE_TOLERANCE_SQ * 2 : ZETA_CURVE_TOLERANCE_SQ;
+
+    const project = point => planeParams
+        ? mapToCanvasCoords(point.re, point.im, planeParams)
+        : { x: point.re, y: point.im };
+    const evaluateAt = t => {
+        const safeT = clamp(t, 0, 1);
+        const re = p1_world.re + (p2_world.re - p1_world.re) * safeT;
+        const im = p1_world.im + (p2_world.im - p1_world.im) * safeT;
+        let mapped = null;
+        try {
+            mapped = tf(re, im);
+        } catch {
+            mapped = null;
+        }
+        return isStableRenderableComplexPoint(mapped)
+            ? { mapped, projected: project(mapped), t: safeT }
+            : null;
+    };
+
+    const start = evaluateAt(0);
+    const end = evaluateAt(1);
+    if (!start || !end) return maxSegments;
+
+    const poleDistanceSq = (evalRe - ZETA_POLE.re) ** 2 + (evalIm - ZETA_POLE.im) ** 2;
+    const rawPoleT = lengthSq >= DEGENERATE_SEGMENT_EPSILON
+        ? -(pointToTargetRe * vectorRe + pointToTargetIm * vectorIm) / lengthSq
+        : NaN;
+    const poleIsOnSegment = Number.isFinite(rawPoleT) && rawPoleT >= 0 && rawPoleT <= 1 && poleDistanceSq < 0.05 ** 2;
+    let segmentCount = 0;
+
+    function countSegment(left, right, depth) {
+        if (segmentCount >= maxSegments) return;
+        const midpointT = (left.t + right.t) * 0.5;
+        const midpoint = evaluateAt(midpointT);
+        if (!midpoint) {
+            segmentCount = maxSegments;
+            return;
+        }
+
+        const chordMidX = (left.projected.x + right.projected.x) * 0.5;
+        const chordMidY = (left.projected.y + right.projected.y) * 0.5;
+        const errorSq = (midpoint.projected.x - chordMidX) ** 2 +
+            (midpoint.projected.y - chordMidY) ** 2;
+        const segmentX = right.projected.x - left.projected.x;
+        const segmentY = right.projected.y - left.projected.y;
+        const poleNeedsSubdivision = poleIsOnSegment && rawPoleT > left.t && rawPoleT < right.t;
+        const needsSubdivision = errorSq > toleranceSq ||
+            segmentX * segmentX + segmentY * segmentY > ZETA_CURVE_MAX_SEGMENT_LENGTH_SQ ||
+            poleNeedsSubdivision;
+
+        if (needsSubdivision && depth < ZETA_CURVE_MAX_DEPTH && segmentCount + 2 <= maxSegments) {
+            countSegment(left, midpoint, depth + 1);
+            countSegment(midpoint, right, depth + 1);
+            return;
+        }
+        segmentCount += 1;
     }
 
-    const mappedEvalPoint = tf(evalRe, evalIm);
-    if (!isStableRenderableComplexPoint(mappedEvalPoint)) {
-        return Math.max(1800, Math.floor(MAX_POINTS_ADAPTIVE_DEFAULT * 0.6));
-    }
-
-    const bounds = getAdaptiveSamplingBounds();
-    const diameterEstimate = Math.sqrt(mappedEvalPoint.re * mappedEvalPoint.re + mappedEvalPoint.im * mappedEvalPoint.im);
-    const sampleCount = Math.round(bounds.anchorDensity * diameterEstimate);
-
-    return clamp(sampleCount, bounds.minPoints, bounds.maxPoints);
+    countSegment(start, end, 0);
+    return clamp(Math.max(minSegments, segmentCount), minSegments, maxSegments);
 }
 
 export function generateLinearSegmentPoints(startPoint, endPoint, sampleCount) {
@@ -1745,7 +1793,7 @@ export function preparePointSetForMappedPlane(pointSet, transformFunc, options =
     }
 
     const sampleCount = options.sampleCountResolver
-        ? options.sampleCountResolver(pointSet, endpoints, transformFunc)
+        ? options.sampleCountResolver(pointSet, endpoints, transformFunc, options.planeParams)
         : DEFAULT_POINTS_PER_LINE;
     const normalizedSampleCount = Math.max(2, sampleCount);
     let preparedCache = PREPARED_POINT_SET_CACHE.get(pointSet);
@@ -1864,8 +1912,9 @@ export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
                     ? 3.5
                     : (pointSet.lineWidth || LINE_WIDTH_NORMAL),
                 preparePointSet: pointSet => preparePointSetForMappedPlane(pointSet, tf, {
+                    planeParams,
                     sampleCountResolver: (currentPointSet, endpoints, transformFunc) => appState.currentFunction === 'zeta'
-                        ? calculateDynamicPointsForSegment(endpoints.start, endpoints.end, transformFunc)
+                        ? calculateDynamicPointsForSegment(endpoints.start, endpoints.end, transformFunc, planeParams)
                         : DEFAULT_POINTS_PER_LINE
                 })
             });
@@ -1957,6 +2006,31 @@ export function drawZPlaneVectorField(ctx, planeParams, map) {
     drawVectorFieldCPU(ctx, planeParams, map);
 }
 
+function getCanvasArrowGeometry(originX, originY, directionX, directionY, arrowLength, arrowHeadSize) {
+    const directionLength = Math.hypot(directionX, directionY);
+    if (!(directionLength > 0) || !Number.isFinite(directionLength)) {
+        return null;
+    }
+
+    const canvasDirectionX = directionX / directionLength;
+    const canvasDirectionY = -directionY / directionLength;
+    const canvasPerpendicularX = -canvasDirectionY;
+    const canvasPerpendicularY = canvasDirectionX;
+    const tipX = originX + canvasDirectionX * arrowLength;
+    const tipY = originY + canvasDirectionY * arrowLength;
+    const baseCenterX = tipX - canvasDirectionX * arrowHeadSize * 2.5;
+    const baseCenterY = tipY - canvasDirectionY * arrowHeadSize * 2.5;
+
+    return {
+        tipX,
+        tipY,
+        leftX: baseCenterX + canvasPerpendicularX * arrowHeadSize,
+        leftY: baseCenterY + canvasPerpendicularY * arrowHeadSize,
+        rightX: baseCenterX - canvasPerpendicularX * arrowHeadSize,
+        rightY: baseCenterY - canvasPerpendicularY * arrowHeadSize
+    };
+}
+
 export function drawVectorFieldCPU(ctx, planeParams, map) {
     const xRange = getPlaneXRanges(planeParams);
     const yRange = getPlaneYRanges(planeParams);
@@ -2002,28 +2076,29 @@ export function drawVectorFieldCPU(ctx, planeParams, map) {
                 const color = getArrowColorFromComponents(vector.re, vector.im, brightness);
                 const originX = fastMap ? canvasXFast(x, planeParams) : mapToCanvasCoords(x, y, planeParams).x;
                 const originY = fastMap ? canvasYFast(y, planeParams) : mapToCanvasCoords(x, y, planeParams).y;
-                const tipX = originX + directionX * arrowLength;
-                const tipY = originY - directionY * arrowLength;
-                const baseCenterX = tipX - directionX * arrowHeadSize * 2.5;
-                const baseCenterY = tipY + directionY * arrowHeadSize * 2.5;
-                const perpendicularX = -directionY;
-                const perpendicularY = -directionX;
-                const leftX = baseCenterX + perpendicularX * arrowHeadSize;
-                const leftY = baseCenterY - perpendicularY * arrowHeadSize;
-                const rightX = baseCenterX - perpendicularX * arrowHeadSize;
-                const rightY = baseCenterY + perpendicularY * arrowHeadSize;
+                const arrow = getCanvasArrowGeometry(
+                    originX,
+                    originY,
+                    directionX,
+                    directionY,
+                    arrowLength,
+                    arrowHeadSize
+                );
+                if (!arrow) {
+                    continue;
+                }
 
                 ctx.strokeStyle = color;
                 ctx.fillStyle = color;
                 ctx.lineWidth = thickness;
                 ctx.beginPath();
                 ctx.moveTo(originX, originY);
-                ctx.lineTo(tipX, tipY);
+                ctx.lineTo(arrow.tipX, arrow.tipY);
                 ctx.stroke();
                 ctx.beginPath();
-                ctx.moveTo(tipX, tipY);
-                ctx.lineTo(leftX, leftY);
-                ctx.lineTo(rightX, rightY);
+                ctx.moveTo(arrow.tipX, arrow.tipY);
+                ctx.lineTo(arrow.leftX, arrow.leftY);
+                ctx.lineTo(arrow.rightX, arrow.rightY);
                 ctx.closePath();
                 ctx.fill();
             }

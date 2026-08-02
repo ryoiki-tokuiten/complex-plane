@@ -1336,21 +1336,6 @@
                             </label>
                             <input type="file" id="image_upload_input" accept="image/*" class="control-file-input">
                         </div>
-                        <!-- Resolution slider: Only affects non-invertible functions (poincaré, zeta, degree>2 poly)
-                             that use the forward mesh fallback. For all other functions, the inverse full-screen quad
-                             renderer in draw-image-webgl.js renders at native screen resolution (pixel-perfect),
-                             making this slider effectively a no-op. -->
-                        <div class="control-group">
-                            <label for="image_resolution_slider">
-                                Resolution (pts):
-                                <output id="image_resolution_value_display">300</output>
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="image_resolution_slider" name="image_resolution_slider" min="50"
-                                    max="2000" step="10" value="300"
-                                    data-tooltip="Set max resolution for image processing. Higher is prettier but slower.">
-                            </div>
-                        </div>
                         <div class="control-group">
                             <label for="image_size_slider">
                                 Image Base Size:
@@ -1392,17 +1377,6 @@
                         <div class="media-status-row">
                             <button id="video_play_pause_btn" type="button" disabled>▶ Play</button>
                             <div id="video_status_display" class="media-status-text">No video loaded.</div>
-                        </div>
-                        <div class="control-group">
-                            <label for="video_resolution_slider">
-                                Resolution (pts):
-                                <output id="video_resolution_value_display">300</output>
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="video_resolution_slider" name="video_resolution_slider" min="50"
-                                    max="2000" step="10" value="300"
-                                    data-tooltip="Set max resolution for video processing. Higher is prettier but slower.">
-                            </div>
                         </div>
                         <div class="control-group">
                             <label for="video_fps_slider">

@@ -25,10 +25,6 @@ export function getRasterSourceForShape(shape = state.currentInputShape) {
 
 
 
-export function getRasterResolutionForShape(shape = state.currentInputShape) {
-    return shape === 'video' ? state.videoResolution : state.imageResolution;
-}
-
 export function getRasterSizeForShape(shape = state.currentInputShape) {
     return shape === 'video' ? state.videoSize : state.imageSize;
 }

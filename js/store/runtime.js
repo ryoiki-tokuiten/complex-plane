@@ -30,5 +30,6 @@ export const runtime = {
         wOriginGlowTime: 0,
         previousWindingNumber: null
     },
-    particles: []
+    particles: [],
+    particlesLastUpdateTime: null
 };
