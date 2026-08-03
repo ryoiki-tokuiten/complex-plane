@@ -21,6 +21,109 @@ function getSphereCoordinate(u, v, radius = SPHERE_RADIUS) {
     return { x, y, z };
 }
 
+function usableRange(range) {
+    return Array.isArray(range) && range.length >= 2 &&
+        Number.isFinite(range[0]) && Number.isFinite(range[1]) && range[1] > range[0]
+        ? range
+        : null;
+}
+
+function isInsideRange(value, range) {
+    return !range || (value >= range[0] && value <= range[1]);
+}
+
+export function buildGridFoldLineData(pointSets, transform, options = {}) {
+    if (!Array.isArray(pointSets) || typeof transform !== 'function') return null;
+
+    const sourceXRange = usableRange(options.sourceXRange);
+    const outputXRange = usableRange(options.outputXRange);
+    const outputYRange = usableRange(options.outputYRange);
+    const rawLines = [];
+    let minMappedX = Infinity;
+    let maxMappedX = -Infinity;
+    let minMappedY = Infinity;
+    let maxMappedY = -Infinity;
+    let minSourceX = Infinity;
+    let maxSourceX = -Infinity;
+
+    for (const pointSet of pointSets) {
+        if (!Array.isArray(pointSet?.points)) continue;
+
+        let line = [];
+        const flushLine = () => {
+            if (line.length >= 2) {
+                rawLines.push({ points: line, color: pointSet.color });
+                for (const point of line) {
+                    minMappedX = Math.min(minMappedX, point.mappedRe);
+                    maxMappedX = Math.max(maxMappedX, point.mappedRe);
+                    minMappedY = Math.min(minMappedY, point.mappedIm);
+                    maxMappedY = Math.max(maxMappedY, point.mappedIm);
+                    minSourceX = Math.min(minSourceX, point.sourceRe);
+                    maxSourceX = Math.max(maxSourceX, point.sourceRe);
+                }
+            }
+            line = [];
+        };
+
+        for (const sourcePoint of pointSet.points) {
+            if (!Number.isFinite(sourcePoint?.re) || !Number.isFinite(sourcePoint?.im)) {
+                flushLine();
+                continue;
+            }
+
+            let mappedPoint = null;
+            try {
+                mappedPoint = transform(sourcePoint.re, sourcePoint.im);
+            } catch {
+                mappedPoint = null;
+            }
+
+            if (!Number.isFinite(mappedPoint?.re) || !Number.isFinite(mappedPoint?.im) ||
+                !isInsideRange(mappedPoint.re, outputXRange) ||
+                !isInsideRange(mappedPoint.im, outputYRange)) {
+                flushLine();
+                continue;
+            }
+
+            line.push({
+                sourceRe: sourcePoint.re,
+                mappedRe: mappedPoint.re,
+                mappedIm: mappedPoint.im
+            });
+        }
+        flushLine();
+    }
+
+    if (rawLines.length === 0) return { lines: [] };
+
+    const sourceMin = sourceXRange?.[0] ?? minSourceX;
+    const sourceMax = sourceXRange?.[1] ?? maxSourceX;
+    const sourceCenter = (sourceMin + sourceMax) * 0.5;
+    const mappedCenterX = (minMappedX + maxMappedX) * 0.5;
+    const mappedCenterY = (minMappedY + maxMappedY) * 0.5;
+    const span = Math.max(
+        maxMappedX - minMappedX,
+        maxMappedY - minMappedY,
+        sourceMax - sourceMin,
+        1e-6
+    );
+    const scale = (2 * SPHERE_RADIUS) / span;
+
+    return {
+        lines: rawLines.map(rawLine => {
+            const positions = new Float32Array(rawLine.points.length * 3);
+            for (let index = 0; index < rawLine.points.length; index += 1) {
+                const point = rawLine.points[index];
+                const offset = index * 3;
+                positions[offset] = (point.mappedRe - mappedCenterX) * scale;
+                positions[offset + 1] = (point.sourceRe - sourceCenter) * scale;
+                positions[offset + 2] = (point.mappedIm - mappedCenterY) * scale;
+            }
+            return { positions, color: rawLine.color };
+        })
+    };
+}
+
 export class ThreeRiemannRenderer {
     constructor(containerElement, planeType = 'z') {
         this.container = containerElement;
@@ -38,8 +141,12 @@ export class ThreeRiemannRenderer {
         this.rasterSurfaceMesh = null;
         this.rasterSurfaceData = null;
         this.rasterSurfaceSource = null;
-        this.rasterSurfaceActive = false;
+        this.rasterSurfaceHeightScale = 1;
         this.rasterSurfaceKey = null;
+        this.gridFoldSurfaceData = null;
+        this.gridFoldSurfaceKey = null;
+        this.gridFoldHeightScale = 1;
+        this.foldSurfaceMode = null;
         this.pointerRect = { left: 0, top: 0, width: 1, height: 1 };
         this.pointerRectValid = false;
 
@@ -136,6 +243,10 @@ export class ThreeRiemannRenderer {
         this.rasterSurfaceGroup = new THREE.Group();
         this.rasterSurfaceGroup.visible = false;
         this.scene.add(this.rasterSurfaceGroup);
+
+        this.gridFoldSurfaceGroup = new THREE.Group();
+        this.gridFoldSurfaceGroup.visible = false;
+        this.scene.add(this.gridFoldSurfaceGroup);
 
         this.markersGroup = new THREE.Group();
         this.scene.add(this.markersGroup);
@@ -261,11 +372,34 @@ export class ThreeRiemannRenderer {
         return changed;
     }
 
+    setFoldSurfaceMode(mode) {
+        const changed = this.foldSurfaceMode !== mode;
+        this.foldSurfaceMode = mode;
+        this.rasterSurfaceGroup.visible = mode === 'raster';
+        this.gridFoldSurfaceGroup.visible = mode === 'grid';
+        this.staticGrid.visible = true;
+        this.ghostSphere.visible = false;
+        this.wireframeSphere.visible = false;
+        this.northPole.visible = false;
+        this.linesGroup.visible = false;
+        this.dynamicOverlayGroup.visible = false;
+        this.markersGroup.visible = false;
+        if (this.dragPlane) this.dragPlane.visible = false;
+        if (changed) {
+            this.controls.target.set(0, 0, 0);
+            this.controls.update();
+            this.renderDirty = true;
+        }
+        return changed;
+    }
+
     setSphereMode() {
-        const changed = this.rasterSurfaceActive || this.rasterSurfaceGroup.visible;
-        this.rasterSurfaceActive = false;
+        const changed = this.foldSurfaceMode !== null;
+        this.foldSurfaceMode = null;
         this.rasterSurfaceGroup.visible = false;
+        this.gridFoldSurfaceGroup.visible = false;
         this.rasterSurfaceKey = null;
+        this.gridFoldSurfaceKey = null;
         this.staticGrid.visible = true;
         this.ghostSphere.visible = true;
         this.wireframeSphere.visible = true;
@@ -282,23 +416,14 @@ export class ThreeRiemannRenderer {
         return changed;
     }
 
-    setRasterSurface(data, source, opacity = 1) {
-        if (!data?.indices?.length || !source) return false;
+    setRasterSurface(data, source, opacity = 1, heightScale = 1) {
+        if (!data || !source) return false;
 
-        const modeChanged = !this.rasterSurfaceActive;
-        this.rasterSurfaceActive = true;
-        this.rasterSurfaceGroup.visible = true;
-        this.ghostSphere.visible = false;
-        this.wireframeSphere.visible = false;
-        this.northPole.visible = false;
-        this.linesGroup.visible = false;
-        this.dynamicOverlayGroup.visible = false;
-        this.markersGroup.visible = false;
-        if (this.dragPlane) this.dragPlane.visible = false;
-        if (modeChanged) {
-            this.controls.target.set(0, 0, 0);
-            this.controls.update();
-        }
+        const hasGeometry = Boolean(data.indices?.length);
+        const nextHeightScale = Number.isFinite(Number(heightScale))
+            ? Math.max(0, Number(heightScale))
+            : 1;
+        this.setFoldSurfaceMode('raster');
 
         if (!this.rasterSurfaceMesh) {
             this.rasterSurfaceMesh = new THREE.Mesh(
@@ -313,8 +438,12 @@ export class ThreeRiemannRenderer {
             );
             this.rasterSurfaceGroup.add(this.rasterSurfaceMesh);
         }
+        this.rasterSurfaceMesh.visible = hasGeometry;
 
-        if (this.rasterSurfaceData !== data) {
+        if (!hasGeometry) {
+            this.rasterSurfaceData = data;
+            this.rasterSurfaceHeightScale = nextHeightScale;
+        } else if (this.rasterSurfaceData !== data || this.rasterSurfaceHeightScale !== nextHeightScale) {
             const { bounds, sourceCenter, sourceSize, vertices, mappedPositions, indices } = data;
             let minX = Infinity;
             let maxX = -Infinity;
@@ -343,7 +472,7 @@ export class ThreeRiemannRenderer {
                 const mappedY = bounds.y0 + (mappedPositions[i + 1] + 1) * bounds.ySpan * 0.5;
                 const sourceRe = sourceCenter.re + (vertices[i] * 2 - 1) * sourceSize.width * 0.5;
                 positions[vertexIndex] = (mappedX - centerX) * scale;
-                positions[vertexIndex + 1] = (sourceRe - sourceCenter.re) * scale;
+                positions[vertexIndex + 1] = (sourceRe - sourceCenter.re) * scale * nextHeightScale;
                 positions[vertexIndex + 2] = (mappedY - centerY) * scale;
                 uvs[i] = vertices[i];
                 uvs[i + 1] = 1 - vertices[i + 1];
@@ -357,6 +486,7 @@ export class ThreeRiemannRenderer {
             this.rasterSurfaceMesh.geometry.dispose();
             this.rasterSurfaceMesh.geometry = geometry;
             this.rasterSurfaceData = data;
+            this.rasterSurfaceHeightScale = nextHeightScale;
         }
 
         const material = this.rasterSurfaceMesh.material;
@@ -382,6 +512,54 @@ export class ThreeRiemannRenderer {
             material.opacity = nextOpacity;
             material.needsUpdate = true;
         }
+        this.renderDirty = true;
+        return true;
+    }
+
+    setGridFoldSurface(data, heightScale = 1) {
+        if (!data) return false;
+
+        this.setFoldSurfaceMode('grid');
+        const nextHeightScale = Number.isFinite(Number(heightScale))
+            ? Math.max(0, Number(heightScale))
+            : 1;
+        if (this.gridFoldSurfaceData === data && this.gridFoldHeightScale === nextHeightScale) return true;
+
+        while (this.gridFoldSurfaceGroup.children.length > 0) {
+            const line = this.gridFoldSurfaceGroup.children[0];
+            this.gridFoldSurfaceGroup.remove(line);
+            line.geometry.dispose();
+            line.material.dispose();
+        }
+
+        for (const lineData of data.lines || []) {
+            if (!(lineData.positions instanceof Float32Array) || lineData.positions.length < 6) continue;
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = lineData.positions.slice();
+            for (let index = 1; index < positions.length; index += 3) {
+                positions[index] *= nextHeightScale;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            let color = 0xa78bfa;
+            if (lineData.color) {
+                try {
+                    color = new THREE.Color(lineData.color);
+                } catch {}
+            }
+
+            const material = new THREE.LineBasicMaterial({
+                color,
+                transparent: true,
+                opacity: 0.82,
+                depthWrite: true
+            });
+            this.gridFoldSurfaceGroup.add(new THREE.Line(geometry, material));
+        }
+
+        this.gridFoldSurfaceData = data;
+        this.gridFoldHeightScale = nextHeightScale;
         this.renderDirty = true;
         return true;
     }

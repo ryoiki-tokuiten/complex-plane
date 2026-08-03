@@ -50,6 +50,8 @@ const rawState = {
     mapPresentation: 'function',
     conformalGridEnabled: false,
     currentInputShape: 'grid_cartesian',
+    foldSurface3dEnabled: false,
+    foldSurfaceHeightScale: 1.0,
     domainColoringEnabled: false,
     gridDensity: 15,
     riemannSurfaceResolution: 50,
@@ -87,8 +89,6 @@ const rawState = {
     imageOpacity: 1.0,
     imageAspectRatio: 1.0,
     imageContentVersion: 0,
-    rasterSurface3dEnabled: false,
-
     videoProcessingFps: 60,
     videoSize: 2.0,
     videoOpacity: 1.0,

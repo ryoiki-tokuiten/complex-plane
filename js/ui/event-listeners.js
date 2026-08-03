@@ -44,6 +44,7 @@ import {
 import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
+import { isGridInputShape } from '../rendering/shape-generators.js';
 
 const { controls = {} } = context;
 
@@ -138,6 +139,9 @@ const BASIC_SLIDER_BINDINGS = [
     ['riemannSurfaceSheetsSlider', 'riemannSurfaceSheets', parseInteger],
     ['riemannSurfaceBranchCenterSlider', 'riemannSurfaceBranchCenter', parseInteger],
     ['riemannSurfaceHeightScaleSlider', 'riemannSurfaceHeightScale'],
+    ['gridSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
+    ['imageSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
+    ['videoSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
     ['riemannSurfaceHeightClipSlider', 'riemannSurfaceHeightClip']
 ].map(([controlKey, stateKey, parser = parseFloat]) => ({ controlKey, stateKey, parser }));
 
@@ -830,7 +834,7 @@ function bindImageControls() {
 
     bindSlider('imageSizeSlider', 'imageSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('imageOpacitySlider', 'imageOpacity', parseFloat, () => requestDomainRedraw(true));
-    bindRasterSurfaceControl('imageSurface3DCb');
+    bindFoldSurfaceControl('imageSurface3DCb');
 }
 
 function bindVideoControls() {
@@ -848,7 +852,7 @@ function bindVideoControls() {
     });
     bindSlider('videoSizeSlider', 'videoSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('videoOpacitySlider', 'videoOpacity', parseFloat, () => requestDomainRedraw(true));
-    bindRasterSurfaceControl('videoSurface3DCb');
+    bindFoldSurfaceControl('videoSurface3DCb');
 }
 
 function bindDomainColoringControls() {
@@ -967,13 +971,41 @@ function disableRiemannSurface() {
     hidden(controls.riemannSurfaceOptionsDiv, true);
 }
 
-function syncRasterSurfaceControls() {
-    checked('imageSurface3DCb', state.rasterSurface3dEnabled);
-    checked('videoSurface3DCb', state.rasterSurface3dEnabled);
+function syncFoldSurfaceControls() {
+    checked('gridSurface3DCb', state.foldSurface3dEnabled);
+    checked('imageSurface3DCb', state.foldSurface3dEnabled);
+    checked('videoSurface3DCb', state.foldSurface3dEnabled);
+    hidden(
+        controls.gridSurface3DOptions,
+        !state.foldSurface3dEnabled || !isGridInputShape(state.currentInputShape)
+    );
+    hidden(
+        controls.imageSurface3DOptions,
+        !state.foldSurface3dEnabled || state.currentInputShape !== 'image'
+    );
+    hidden(
+        controls.videoSurface3DOptions,
+        !state.foldSurface3dEnabled || state.currentInputShape !== 'video'
+    );
 }
 
-function enableRasterSurface3d() {
+function syncGridFoldDensity(useFoldDefault = false) {
+    const slider = controls.gridDensitySlider;
+    if (!slider) return;
+
+    const gridFoldEnabled = state.foldSurface3dEnabled && isGridInputShape(state.currentInputShape);
+    slider.max = gridFoldEnabled ? '250' : '50';
+    if (gridFoldEnabled && useFoldDefault) state.gridDensity = 100;
+    if (!gridFoldEnabled && state.gridDensity > 50) state.gridDensity = 50;
+    slider.value = String(state.gridDensity);
+    if (controls.gridDensityValueDisplay) {
+        controls.gridDensityValueDisplay.textContent = String(state.gridDensity);
+    }
+}
+
+function enableFoldSurface3d() {
     disableRiemannSurface();
+    if (state.navigationModeEnabled) call(setNavigationModeEnabled, false);
     Object.assign(state, {
         riemannSphereViewEnabled: false,
         riemannTransformationEnabled: false,
@@ -992,22 +1024,27 @@ function enableRasterSurface3d() {
     call(updateChainingTitles);
 }
 
-function bindRasterSurfaceControl(controlKey) {
-    bindCheckbox(controlKey, 'rasterSurface3dEnabled', () => {
-        if (state.rasterSurface3dEnabled) enableRasterSurface3d();
-        syncRasterSurfaceControls();
+function bindFoldSurfaceControl(controlKey) {
+    bindCheckbox(controlKey, 'foldSurface3dEnabled', () => {
+        if (state.foldSurface3dEnabled) enableFoldSurface3d();
+        syncGridFoldDensity(controlKey === 'gridSurface3DCb' && state.foldSurface3dEnabled);
+        syncFoldSurfaceControls();
         requestDomainRedraw(true);
     });
 }
 
-function disableRasterSurface3d() {
-    state.rasterSurface3dEnabled = false;
-    syncRasterSurfaceControls();
+function disableFoldSurface3d() {
+    state.foldSurface3dEnabled = false;
+    syncGridFoldDensity();
+    syncFoldSurfaceControls();
 }
 
 function bindViewControls() {
+    bindFoldSurfaceControl('gridSurface3DCb');
+
     bindCheckbox('enableSplitViewCb', 'splitViewEnabled', () => {
         if (state.splitViewEnabled) {
+            disableFoldSurface3d();
             if (state.riemannSurfaceEnabled) disableRiemannSurface();
             if (state.riemannTransformationEnabled) {
                 state.riemannTransformationEnabled = false;
@@ -1029,7 +1066,7 @@ function bindViewControls() {
 
     bindCheckbox('enableRiemannSphereCb', 'riemannSphereViewEnabled', () => {
         if (state.riemannSphereViewEnabled) {
-            disableRasterSurface3d();
+            disableFoldSurface3d();
             if (state.riemannSurfaceEnabled) disableRiemannSurface();
 
             if (state.domainColoringEnabled) {
@@ -1063,7 +1100,7 @@ function bindViewControls() {
 
     bindCheckbox('enableThreeSphereCb', 'threeSphereEnabled', () => {
         if (state.threeSphereEnabled) {
-            disableRasterSurface3d();
+            disableFoldSurface3d();
             if (state.riemannTransformationEnabled) {
                 state.riemannTransformationEnabled = false;
                 checked('enableRiemannTransformationCb', false);
@@ -1077,7 +1114,7 @@ function bindViewControls() {
 
     bindCheckbox('enableRiemannTransformationCb', 'riemannTransformationEnabled', () => {
         if (state.riemannTransformationEnabled) {
-            disableRasterSurface3d();
+            disableFoldSurface3d();
             if (!state.riemannSphereViewEnabled) {
                 state.riemannSphereViewEnabled = true;
                 checked('enableRiemannSphereCb', true);
@@ -1109,7 +1146,7 @@ function bindViewControls() {
 
     bindCheckbox('enableRiemannSurfaceCb', 'riemannSurfaceEnabled', () => {
         if (state.riemannSurfaceEnabled) {
-            disableRasterSurface3d();
+            disableFoldSurface3d();
             disableRealPlots();
             Object.assign(state, { riemannSphereViewEnabled: false, riemannTransformationEnabled: false, splitViewEnabled: false, threeSphereEnabled: false });
             ['enableRiemannSphereCb', 'enableRiemannTransformationCb', 'enableSplitViewCb', 'enableThreeSphereCb'].forEach(key => checked(key, false));
@@ -1170,6 +1207,7 @@ function bindNavigationControls() {
     bindControlListener('enableNavigationModeCb', 'change', (_event, checkbox) => {
         if (typeof setNavigationModeEnabled === 'function') setNavigationModeEnabled(checkbox.checked);
         else state.navigationModeEnabled = checkbox.checked;
+        if (state.navigationModeEnabled) disableFoldSurface3d();
         requestDomainRedraw(true);
     });
 
@@ -1864,6 +1902,7 @@ function bindChainingControls() {
         } else if (value === 'video' && runtime.media.video && state.videoIsPlaying) {
             call(startVideoProcessingLoop);
         }
+        syncGridFoldDensity(state.foldSurface3dEnabled && isGridInputShape(value));
         requestDomainRedraw(true);
     });
 
@@ -1991,8 +2030,10 @@ function fullscreenTarget(planeType, index = 0) {
     const surface = state.riemannSurfaceEnabled ? getRiemannSurfaceCanvas(canvas) : null;
     const isThree = threeContainer && (
         (state.threeSphereEnabled && state.riemannSphereViewEnabled) ||
-        (state.rasterSurface3dEnabled && isRasterInputShape(state.currentInputShape)
-            && getRasterSourceForShape(state.currentInputShape))
+        (state.foldSurface3dEnabled && (
+            isGridInputShape(state.currentInputShape) ||
+            (isRasterInputShape(state.currentInputShape) && getRasterSourceForShape(state.currentInputShape))
+        ))
     );
 
     let element = surface || (isThree ? threeContainer : canvas);

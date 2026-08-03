@@ -1050,22 +1050,22 @@ export function drawPlanarTransformedShapeHybrid(ctx, planeParams, tf, planeKey,
         ...options,
         map,
         index: options?.index,
-        renderJob: options?.renderJob || createPlanarTransformedShapeRenderJob(tf)
+        renderJob: options?.renderJob || createPlanarTransformedShapeRenderJob(tf, map)
     };
 
     const geometryRendered = drawWithWebGLCapture(ctx, planeParams, planeKey, (captureCtx) => {
         drawPlanarTransformedShape(captureCtx, planeParams, tf, { ...drawOptions, includeOverlays: false });
     });
 
-    if (!geometryRendered) {
-        drawPlanarTransformedShape(ctx, planeParams, tf, { ...drawOptions, includeOverlays: false });
-    }
+    const fallbackRendered = geometryRendered
+        ? true
+        : drawPlanarTransformedShape(ctx, planeParams, tf, { ...drawOptions, includeOverlays: false });
 
     if (options?.includeOverlays !== false && shouldDrawPlanarFunctionFociOverlay()) {
         drawPlanarTransformedShape(ctx, planeParams, tf, { ...drawOptions, includeGeometry: false });
     }
 
-    return true;
+    return fallbackRendered;
 }
 
 export function drawPlanarInputShapeHybrid(ctx, planeParams, planeKey) {

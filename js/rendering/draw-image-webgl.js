@@ -14,7 +14,7 @@ import {
     getRasterOpacityForShape,
     isRasterInputShape
 } from '../utils/raster-media.js';
-import { getChainedTransformFunction } from '../math-utils.js';
+import { getChainedStageTransformFunction } from '../math-utils.js';
 import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import { DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE } from '../constants/domain-dynamics.js';
 
@@ -815,6 +815,21 @@ function relativePointError(point, expectedX, expectedY, first, second) {
     return pointError(point, expectedX, expectedY) / mappedSpan;
 }
 
+function isMappedCellOutsideViewport(samples, errorMargin) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const point of samples) {
+        minX = Math.min(minX, point.x);
+        maxX = Math.max(maxX, point.x);
+        minY = Math.min(minY, point.y);
+        maxY = Math.max(maxY, point.y);
+    }
+    return maxX + errorMargin < -1 || minX - errorMargin > 1 ||
+        maxY + errorMargin < -1 || minY - errorMargin > 1;
+}
+
 export function buildAdaptiveImageMesh({
     bounds,
     sample,
@@ -909,14 +924,28 @@ export function buildAdaptiveImageMesh({
         leafCells.push({ u0, v0, u1, v1 });
     }
 
-    const cells = [];
-    function enqueueCell(u0, v0, u1, v1, depth) {
-        cells.push({ u0, v0, u1, v1, depth });
+    let frontier = [];
+    let processedCellCount = 0;
+
+    function appendCell(target, u0, v0, u1, v1, depth) {
+        target.push({ u0, v0, u1, v1, depth });
+    }
+
+    function appendChildren(target, cell) {
+        const { u0, v0, u1, v1, depth } = cell;
+        const centerU = (u0 + u1) * 0.5;
+        const centerV = (v0 + v1) * 0.5;
+        const childDepth = depth + 1;
+        appendCell(target, u0, v0, centerU, centerV, childDepth);
+        appendCell(target, centerU, v0, u1, centerV, childDepth);
+        appendCell(target, u0, centerV, centerU, v1, childDepth);
+        appendCell(target, centerU, centerV, u1, v1, childDepth);
     }
 
     for (let y = 0; y < safeBaseResolution; y += 1) {
         for (let x = 0; x < safeBaseResolution; x += 1) {
-            enqueueCell(
+            appendCell(
+                frontier,
                 x / safeBaseResolution,
                 y / safeBaseResolution,
                 (x + 1) / safeBaseResolution,
@@ -926,95 +955,98 @@ export function buildAdaptiveImageMesh({
         }
     }
 
-    for (let cellIndex = 0; cellIndex < cells.length; cellIndex += 1) {
-        const { u0, v0, u1, v1, depth } = cells[cellIndex];
-        const centerU = (u0 + u1) * 0.5;
-        const centerV = (v0 + v1) * 0.5;
-        const topLeft = sampleAt(u0, v0);
-        const topRight = sampleAt(u1, v0);
-        const bottomLeft = sampleAt(u0, v1);
-        const bottomRight = sampleAt(u1, v1);
-        const top = sampleAt(centerU, v0);
-        const right = sampleAt(u1, centerV);
-        const bottom = sampleAt(centerU, v1);
-        const left = sampleAt(u0, centerV);
-        const center = sampleAt(centerU, centerV);
-        const valid = topLeft.valid && topRight.valid && bottomLeft.valid && bottomRight.valid &&
-            top.valid && right.valid && bottom.valid && left.valid && center.valid;
-        if (!valid) {
-            if (!sampleBudgetExceeded &&
-                depth < safeMaxDepth && cells.length + 4 <= safeMaxCells) {
-                enqueueCell(u0, v0, centerU, centerV, depth + 1);
-                enqueueCell(centerU, v0, u1, centerV, depth + 1);
-                enqueueCell(u0, centerV, centerU, v1, depth + 1);
-                enqueueCell(centerU, centerV, u1, v1, depth + 1);
+    while (frontier.length > 0) {
+        const priorityCandidates = [];
+        const deferredCandidates = [];
+        processedCellCount += frontier.length;
+
+        for (const cell of frontier) {
+            const { u0, v0, u1, v1 } = cell;
+            const centerU = (u0 + u1) * 0.5;
+            const centerV = (v0 + v1) * 0.5;
+            const topLeft = sampleAt(u0, v0);
+            const topRight = sampleAt(u1, v0);
+            const bottomLeft = sampleAt(u0, v1);
+            const bottomRight = sampleAt(u1, v1);
+            const top = sampleAt(centerU, v0);
+            const right = sampleAt(u1, centerV);
+            const bottom = sampleAt(centerU, v1);
+            const left = sampleAt(u0, centerV);
+            const center = sampleAt(centerU, centerV);
+            const samples = [topLeft, topRight, bottomLeft, bottomRight, top, right, bottom, left, center];
+            let validCount = 0;
+            for (const point of samples) {
+                if (point.valid) validCount += 1;
             }
-            continue;
-        }
 
-        const edgeChecks = [
-            [top, topLeft, topRight],
-            [right, topRight, bottomRight],
-            [bottom, bottomLeft, bottomRight],
-            [left, topLeft, bottomLeft]
-        ];
-        let maxError = 0;
-        let maxRelativeError = 0;
-        for (const [midpoint, first, second] of edgeChecks) {
-            const expectedX = (first.x + second.x) * 0.5;
-            const expectedY = (first.y + second.y) * 0.5;
-            const error = pointError(midpoint, expectedX, expectedY);
-            maxError = Math.max(maxError, error);
-            maxRelativeError = Math.max(
-                maxRelativeError,
-                relativePointError(midpoint, expectedX, expectedY, first, second)
+            if (validCount !== samples.length) {
+                const candidate = { cell, maxRelativeError: Infinity };
+                (validCount > 0 ? priorityCandidates : deferredCandidates).push(candidate);
+                continue;
+            }
+
+            const edgeChecks = [
+                [top, topLeft, topRight],
+                [right, topRight, bottomRight],
+                [bottom, bottomLeft, bottomRight],
+                [left, topLeft, bottomLeft]
+            ];
+            let maxError = 0;
+            let maxRelativeError = 0;
+            for (const [midpoint, first, second] of edgeChecks) {
+                const expectedX = (first.x + second.x) * 0.5;
+                const expectedY = (first.y + second.y) * 0.5;
+                const error = pointError(midpoint, expectedX, expectedY);
+                maxError = Math.max(maxError, error);
+                maxRelativeError = Math.max(
+                    maxRelativeError,
+                    relativePointError(midpoint, expectedX, expectedY, first, second)
+                );
+            }
+
+            const expectedCenterX = (topLeft.x + topRight.x + bottomLeft.x + bottomRight.x) * 0.25;
+            const expectedCenterY = (topLeft.y + topRight.y + bottomLeft.y + bottomRight.y) * 0.25;
+            const centerError = pointError(center, expectedCenterX, expectedCenterY);
+            const cornerMappedSpan = Math.max(
+                Math.hypot(topLeft.x - topRight.x, topLeft.y - topRight.y),
+                Math.hypot(topLeft.x - bottomLeft.x, topLeft.y - bottomLeft.y),
+                Math.hypot(topRight.x - bottomRight.x, topRight.y - bottomRight.y),
+                Math.hypot(bottomLeft.x - bottomRight.x, bottomLeft.y - bottomRight.y),
+                Math.hypot(topLeft.x - bottomRight.x, topLeft.y - bottomRight.y),
+                Math.hypot(topRight.x - bottomLeft.x, topRight.y - bottomLeft.y),
+                ADAPTIVE_MIN_MAPPED_SPAN
             );
+            maxError = Math.max(maxError, centerError);
+            maxRelativeError = Math.max(maxRelativeError, centerError / cornerMappedSpan);
+
+            const outsideViewport = isMappedCellOutsideViewport(samples, maxError);
+            const needsSubdivision = maxError > safeEdgeError || maxRelativeError > ADAPTIVE_DISCONTINUITY_RATIO;
+            if (needsSubdivision) {
+                priorityCandidates.push({ cell, maxRelativeError, outsideViewport });
+            } else if (!outsideViewport) {
+                appendLeaf(u0, v0, u1, v1);
+            }
         }
 
-        const expectedCenterX = (topLeft.x + topRight.x + bottomLeft.x + bottomRight.x) * 0.25;
-        const expectedCenterY = (topLeft.y + topRight.y + bottomLeft.y + bottomRight.y) * 0.25;
-        const centerError = pointError(
-            center,
-            expectedCenterX,
-            expectedCenterY
-        );
-        const cornerMappedSpan = Math.max(
-            Math.hypot(topLeft.x - topRight.x, topLeft.y - topRight.y),
-            Math.hypot(topLeft.x - bottomLeft.x, topLeft.y - bottomLeft.y),
-            Math.hypot(topRight.x - bottomRight.x, topRight.y - bottomRight.y),
-            Math.hypot(bottomLeft.x - bottomRight.x, bottomLeft.y - bottomRight.y),
-            Math.hypot(topLeft.x - bottomRight.x, topLeft.y - bottomRight.y),
-            Math.hypot(topRight.x - bottomLeft.x, topRight.y - bottomLeft.y),
-            ADAPTIVE_MIN_MAPPED_SPAN
-        );
-        maxError = Math.max(maxError, centerError);
-        maxRelativeError = Math.max(
-            maxRelativeError,
-            centerError / cornerMappedSpan
-        );
+        const candidates = priorityCandidates.concat(deferredCandidates);
+        const remainingCellBudget = Math.max(0, safeMaxCells - processedCellCount);
+        const expansionCount = !sampleBudgetExceeded && frontier[0].depth < safeMaxDepth
+            ? Math.min(candidates.length, Math.floor(remainingCellBudget / 4))
+            : 0;
+        const nextFrontier = [];
 
-        const needsSubdivision = maxError > safeEdgeError || maxRelativeError > ADAPTIVE_DISCONTINUITY_RATIO;
-        const canSubdivide = !sampleBudgetExceeded &&
-            depth < safeMaxDepth && cells.length + 4 <= safeMaxCells;
-        if (needsSubdivision && canSubdivide) {
-            enqueueCell(u0, v0, centerU, centerV, depth + 1);
-            enqueueCell(centerU, v0, u1, centerV, depth + 1);
-            enqueueCell(u0, centerV, centerU, v1, depth + 1);
-            enqueueCell(centerU, centerV, u1, v1, depth + 1);
-            continue;
+        for (let index = 0; index < expansionCount; index += 1) {
+            appendChildren(nextFrontier, candidates[index].cell);
+        }
+        for (let index = expansionCount; index < priorityCandidates.length; index += 1) {
+            const candidate = priorityCandidates[index];
+            if (!candidate.outsideViewport && candidate.maxRelativeError <= ADAPTIVE_DISCONTINUITY_RATIO) {
+                const { u0, v0, u1, v1 } = candidate.cell;
+                appendLeaf(u0, v0, u1, v1);
+            }
         }
 
-        const minX = Math.min(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x, top.x, right.x, bottom.x, left.x, center.x);
-        const maxX = Math.max(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x, top.x, right.x, bottom.x, left.x, center.x);
-        const minY = Math.min(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y, top.y, right.y, bottom.y, left.y, center.y);
-        const maxY = Math.max(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y, top.y, right.y, bottom.y, left.y, center.y);
-        if (maxX + maxError < -1 || minX - maxError > 1 ||
-            maxY + maxError < -1 || minY - maxError > 1) continue;
-
-        const unresolvedDiscontinuity = maxRelativeError > ADAPTIVE_DISCONTINUITY_RATIO && !canSubdivide;
-        if (!unresolvedDiscontinuity) {
-            appendLeaf(u0, v0, u1, v1);
-        }
+        frontier = nextFrontier;
     }
 
     const gridSize = safeBaseResolution * (2 ** safeMaxDepth);
@@ -1164,11 +1196,13 @@ export function buildRasterSurfaceMesh(planeParams, map = null) {
     };
 }
 
-function getMeshKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight) {
+function getMeshKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight, chainIndex = null) {
     const bounds = getViewBounds(planeParams);
     const media = getRasterDisplayDimensions(currentShape);
+    const renderStage = getRasterRenderStage(map, chainIndex);
     const transformSignature = map?.signature || JSON.stringify({
         function: snapshot.currentFunction,
+        stage: renderStage,
         chainCount: snapshot.chainCount,
         chainMode: snapshot.chainingMode,
         algebraicTerms: snapshot.algebraicChainingTerms,
@@ -1195,9 +1229,10 @@ function getMeshKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, 
     ].join('|');
 }
 
-function getMeshTopologyKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight) {
+function getMeshTopologyKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight, chainIndex = null) {
     const bounds = getViewBounds(planeParams);
     const media = getRasterDisplayDimensions(currentShape);
+    const renderStage = getRasterRenderStage(map, chainIndex);
     const algebraicStructure = Array.isArray(snapshot.algebraicChainingTerms)
         ? snapshot.algebraicChainingTerms.map(term => (
             Array.isArray(term?.factors)
@@ -1229,7 +1264,7 @@ function getMeshTopologyKey(currentShape, planeParams, isWP, snapshot, map, pixe
         snapshot.currentFunction,
         snapshot.zetaContinuationEnabled ? 1 : 0,
         map?.presentation || 'function',
-        map?.stage ?? 0,
+        map?.stage ?? renderStage,
         snapshot.chainingEnabled ? 1 : 0,
         snapshot.chainCount,
         snapshot.chainingMode,
@@ -1329,8 +1364,21 @@ function shouldUseCpuForwardEvaluation(isWP, snapshot, map) {
     ));
 }
 
-function getForwardTransform(isWP, map) {
-    return isWP ? (map?.evaluate || getChainedTransformFunction()) : (re, im) => ({ re, im });
+function getRasterRenderStage(map, chainIndex = null) {
+    if (Number.isFinite(map?.stage) || Number.isFinite(chainIndex)) {
+        return getImageRenderChainIndex(Number.isFinite(chainIndex) ? chainIndex : 0, map);
+    }
+
+    return state.chainingEnabled
+        ? normalizeChainIndex((state.chainCount || 1) - 1)
+        : 0;
+}
+
+function getForwardTransform(isWP, map, chainIndex = null) {
+    if (!isWP) return (re, im) => ({ re, im });
+    if (typeof map?.evaluate === 'function') return map.evaluate;
+
+    return getChainedStageTransformFunction(state.currentFunction, getRasterRenderStage(map, chainIndex));
 }
 
 function configureAttribute(gl, location, size, buffer) {
@@ -1459,12 +1507,13 @@ function drawInverseImagePath(renderer, planeParams, isWP, currentShape, chainIn
     return true;
 }
 
-function drawForwardImagePath(renderer, planeParams, isWP, currentShape, snapshot, map) {
+function drawForwardImagePath(renderer, planeParams, isWP, currentShape, snapshot, map, chainIndex) {
     if (!renderer.forwardProgram || !renderer.forwardLocs) return false;
 
     const useCpuEval = shouldUseCpuForwardEvaluation(isWP, snapshot, map);
-    ensureForwardMesh(renderer, planeParams, isWP, currentShape, snapshot, map, useCpuEval);
-    if (!renderer.forwardIndexCount) return false;
+    const meshReady = ensureForwardMesh(renderer, planeParams, isWP, currentShape, snapshot, map, useCpuEval, chainIndex);
+    if (!meshReady) return false;
+    if (!renderer.forwardIndexCount) return true;
 
     const gl = renderer.gl;
     const locs = renderer.forwardLocs;
@@ -1690,25 +1739,25 @@ export function updateImageTexture(renderer) {
     return true;
 }
 
-export function ensureForwardMesh(renderer, planeParams, isWP, currentShape, snapshot, map, useCpuEval = false) {
-    if (!isContextUsable(renderer)) return;
-    if (!planeParams) return;
+export function ensureForwardMesh(renderer, planeParams, isWP, currentShape, snapshot, map, useCpuEval = false, chainIndex = null) {
+    if (!isContextUsable(renderer)) return false;
+    if (!planeParams) return false;
 
     const frame = snapshot || readRenderState();
     const shape = currentShape ?? frame.currentInputShape;
     const pixelWidth = Math.max(1, renderer.canvas.width || planeParams.width || 1024);
     const pixelHeight = Math.max(1, renderer.canvas.height || planeParams.height || 1024);
-    const meshKey = getMeshKey(shape, planeParams, Boolean(isWP), frame, map, pixelWidth, pixelHeight);
-    const topologyKey = getMeshTopologyKey(shape, planeParams, Boolean(isWP), frame, map, pixelWidth, pixelHeight);
+    const meshKey = getMeshKey(shape, planeParams, Boolean(isWP), frame, map, pixelWidth, pixelHeight, chainIndex);
+    const topologyKey = getMeshTopologyKey(shape, planeParams, Boolean(isWP), frame, map, pixelWidth, pixelHeight, chainIndex);
 
-    if (renderer.forwardMeshKey === meshKey && renderer.forwardMesh) return;
+    if (renderer.forwardMeshKey === meshKey && renderer.forwardMesh) return true;
 
     const bounds = getViewBounds(planeParams);
-    if (!hasUsableBounds(bounds)) return;
+    if (!hasUsableBounds(bounds)) return false;
 
     const edgeError = getAdaptiveEdgeError(pixelWidth, pixelHeight);
     const media = getRasterDisplayDimensions(shape);
-    const transform = getForwardTransform(Boolean(isWP), map);
+    const transform = getForwardTransform(Boolean(isWP), map, chainIndex);
     if (renderer.forwardTopologyKey === topologyKey && renderer.forwardMesh) {
         const reusedMesh = reuseAdaptiveImageMesh(
             renderer.forwardMesh,
@@ -1723,7 +1772,7 @@ export function ensureForwardMesh(renderer, planeParams, isWP, currentShape, sna
         if (reusedMesh) {
             uploadForwardMesh(renderer, reusedMesh, true);
             renderer.forwardMeshKey = meshKey;
-            return;
+            return true;
         }
     }
 
@@ -1742,6 +1791,7 @@ export function ensureForwardMesh(renderer, planeParams, isWP, currentShape, sna
     uploadForwardMesh(renderer, mesh);
     renderer.forwardMeshKey = meshKey;
     renderer.forwardTopologyKey = topologyKey;
+    return true;
 }
 
 export function drawImageWithWebGL(targetCtx, planeParams, isWP, chainIndex, map = null) {
@@ -1778,7 +1828,7 @@ export function drawImageWithWebGL(targetCtx, planeParams, isWP, chainIndex, map
             size.height,
             snapshot
         )
-        : drawForwardImagePath(renderer, planeParams, isWP, raster.currentShape, snapshot, map);
+        : drawForwardImagePath(renderer, planeParams, isWP, raster.currentShape, snapshot, map, effectiveChainIndex);
 
     if (!rendered) return false;
 

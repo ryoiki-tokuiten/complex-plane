@@ -19,6 +19,7 @@ import { startRiemannTransformationAnimation, stopRiemannTransformationAnimation
 import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
 import { createExpressionMathML } from '../math/expression/index.js';
 import { createFormulaFragment } from './dom-components.js';
+import { isGridInputShape } from '../rendering/shape-generators.js';
 
 const { controls = {} } = context;
 
@@ -40,7 +41,8 @@ const TRANSFORM_MODE_PARAMETER_GROUPS = Object.freeze([
     'shapeParamsSliders',
     'chainingParams',
     'algebraicChainingParams',
-    'dynamicPlottingParams'
+    'dynamicPlottingParams',
+    'gridSurface3DControl'
 ]);
 
 const TRANSFORM_MODE_VISUALIZATION_PANELS = Object.freeze([
@@ -164,6 +166,9 @@ const RIEMANN_VIEW_VALUE_BINDINGS = Object.freeze([
     { display: 'riemannSurfaceSheetsValueDisplay', key: 'riemannSurfaceSheets' },
     { display: 'riemannSurfaceBranchCenterValueDisplay', key: 'riemannSurfaceBranchCenter' },
     { display: 'riemannSurfaceHeightScaleValueDisplay', key: 'riemannSurfaceHeightScale', digits: 2 },
+    { display: 'gridSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
+    { display: 'imageSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
+    { display: 'videoSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
     { display: 'riemannSurfaceHeightClipValueDisplay', key: 'riemannSurfaceHeightClip', digits: 1 }
 ]);
 
@@ -472,6 +477,7 @@ function syncComplexParameterControls() {
     const isEllipse = shape === 'ellipse';
     const isImage = shape === 'image';
     const isVideo = shape === 'video';
+    const isGrid = isGridInputShape(shape);
     const showCommonParams = isLine || isCircle || isEllipse;
     const showMediaCenterParams = isImage || isVideo;
     const showShapeSpecificSliders = isCircle || isEllipse;
@@ -485,6 +491,11 @@ function syncComplexParameterControls() {
     setHidden('fractionalPowerParamsSliders', !isPowerFunc);
     setHidden('imageUploadControls', !isImage);
     setHidden('videoUploadControls', !isVideo);
+    setHidden('gridSurface3DControl', !isGrid);
+    setHidden('gridSurface3DOptions', !isGrid || !state.foldSurface3dEnabled);
+    setHidden('imageSurface3DOptions', !isImage || !state.foldSurface3dEnabled);
+    setHidden('videoSurface3DOptions', !isVideo || !state.foldSurface3dEnabled);
+    setChecked('gridSurface3DCb', state.foldSurface3dEnabled);
 
     syncShapeSpecificParameterGroups(shape, showShapeSpecificSliders);
 

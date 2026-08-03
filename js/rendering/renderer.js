@@ -20,7 +20,7 @@ import {
     drawPlanarTransformedShapeHybrid,
     drawPlanarInputShapeHybrid
 } from './webgl-planar.js';
-import { buildRasterSurfaceMesh } from './draw-image-webgl.js';
+import { buildRasterSurfaceMesh, getImageRenderChainIndex } from './draw-image-webgl.js';
 import {
     getRasterSourceForShape,
     getRasterSizeForShape,
@@ -30,8 +30,12 @@ import {
 } from '../utils/raster-media.js';
 import { drawWindingVisualization, drawTimeDomainSignal } from './draw-fourier-winding.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
-import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
-import { generateCurrentInputShapePointSets, buildInputShapeGeometryConfig } from './shape-generators.js';
+import { ThreeRiemannRenderer, buildGridFoldLineData } from './three-riemann-renderer.js';
+import {
+    generateCurrentInputShapePointSets,
+    buildInputShapeGeometryConfig,
+    isGridInputShape
+} from './shape-generators.js';
 import { drawGraphSelectionOverlay } from './transformation-graph.js';
 import { hideRiemannSurface, renderRiemannSurface } from './webgl-riemann-surface.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
@@ -314,16 +318,14 @@ function renderThroughCache({
 
     if (!enabled) {
         invalidateCache(cache);
-        renderDirect(targetCtx, { cacheKey, fresh: true, direct: true });
-        return true;
+        return renderDirect(targetCtx, { cacheKey, fresh: true, direct: true }) !== false;
     }
 
     const cacheCanvas = ensurePlanarLayerCacheCanvas(cache, planeParams.width, planeParams.height);
     const cacheCtx = cache?.ctx;
 
     if (!cacheCanvas || !cacheCtx) {
-        renderDirect(targetCtx, { cacheKey, fresh: true, direct: true });
-        return true;
+        return renderDirect(targetCtx, { cacheKey, fresh: true, direct: true }) !== false;
     }
 
     let complete = true;
@@ -1173,23 +1175,28 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
     return false;
 }
 
-function renderThreeWPlane(map, stageIndex) {
+function prepareThreeWRenderer() {
     const container = controls.wPlaneThreeContainer;
-
     if (!container) {
         showCanvas(wCanvas);
-        return;
+        return null;
     }
 
     hideCanvas(wCanvas);
     showThreeContainer();
     setThreeContainerSize();
 
-    let threeRenderer = wStaticThreeRenderers.get(container);
-    if (!threeRenderer) {
-        threeRenderer = new ThreeRiemannRenderer(container, 'w');
-        wStaticThreeRenderers.set(container, threeRenderer);
+    let renderer = wStaticThreeRenderers.get(container);
+    if (!renderer) {
+        renderer = new ThreeRiemannRenderer(container, 'w');
+        wStaticThreeRenderers.set(container, renderer);
     }
+    return renderer;
+}
+
+function renderThreeWPlane(map, stageIndex) {
+    const threeRenderer = prepareThreeWRenderer();
+    if (!threeRenderer) return;
 
     threeRenderer.setSphereMode();
 
@@ -1243,33 +1250,26 @@ function renderThreeWPlane(map, stageIndex) {
 }
 
 function renderThreeWRasterSurface(map, stageIndex) {
-    const container = controls.wPlaneThreeContainer;
     const rasterShape = state.currentInputShape;
     const source = getRasterSourceForShape(rasterShape);
 
-    if (!container || !source) {
+    if (!source) {
         showCanvas(wCanvas);
         hideThreeContainer();
         return;
     }
 
-    hideCanvas(wCanvas);
-    showThreeContainer();
-    setThreeContainerSize();
-
-    let threeRenderer = wStaticThreeRenderers.get(container);
-    if (!threeRenderer) {
-        threeRenderer = new ThreeRiemannRenderer(container, 'w');
-        wStaticThreeRenderers.set(container, threeRenderer);
-    }
+    const threeRenderer = prepareThreeWRenderer();
+    if (!threeRenderer) return;
 
     const xRange = wPlaneParams.currentVisXRange || wPlaneParams.xRange;
     const yRange = wPlaneParams.currentVisYRange || wPlaneParams.yRange;
+    const rasterStage = getImageRenderChainIndex(stageIndex, map);
     const rasterSize = getRasterSizeForShape(rasterShape);
     const rasterAspectRatio = getRasterAspectRatioForShape(rasterShape);
     const rasterContentVersion = rasterShape === 'image' ? state.imageContentVersion : 0;
     const surfaceKey = [
-        stageIndex,
+        rasterStage,
         map?.signature || '',
         rasterShape,
         rasterContentVersion,
@@ -1288,8 +1288,57 @@ function renderThreeWRasterSurface(map, stageIndex) {
         if (surface) threeRenderer.rasterSurfaceKey = surfaceKey;
     }
 
-    if (!threeRenderer.setRasterSurface(surface, source, getRasterOpacityForShape(rasterShape))) {
+    if (!threeRenderer.setRasterSurface(
+        surface,
+        source,
+        getRasterOpacityForShape(rasterShape),
+        state.foldSurfaceHeightScale
+    )) {
         threeRenderer.rasterSurfaceKey = null;
+        showCanvas(wCanvas);
+        hideThreeContainer();
+        return;
+    }
+
+    threeRenderer.render();
+}
+
+function renderThreeWGridFold(map) {
+    const threeRenderer = prepareThreeWRenderer();
+    if (!threeRenderer) return;
+
+    const geometryConfig = buildInputShapeGeometryConfig(zPlaneParams, {
+        currentFunction: state.currentFunction,
+        zetaContinuationEnabled: state.zetaContinuationEnabled,
+        gridDensity: state.gridDensity,
+        curvePoints: 250
+    });
+    const outputXRange = wPlaneParams.currentVisXRange || wPlaneParams.xRange;
+    const outputYRange = wPlaneParams.currentVisYRange || wPlaneParams.yRange;
+    const surfaceKey = [
+        map.signature,
+        JSON.stringify(geometryConfig),
+        state.gridColor1,
+        state.gridColor2,
+        outputXRange[0], outputXRange[1],
+        outputYRange[0], outputYRange[1]
+    ].join('|');
+
+    let surface = threeRenderer.gridFoldSurfaceKey === surfaceKey
+        ? threeRenderer.gridFoldSurfaceData
+        : null;
+    if (!surface) {
+        const pointSets = generateCurrentInputShapePointSets(zPlaneParams, geometryConfig);
+        surface = buildGridFoldLineData(pointSets, map.evaluate, {
+            sourceXRange: geometryConfig.xRange,
+            outputXRange,
+            outputYRange
+        });
+        if (surface) threeRenderer.gridFoldSurfaceKey = surfaceKey;
+    }
+
+    if (!threeRenderer.setGridFoldSurface(surface, state.foldSurfaceHeightScale)) {
+        threeRenderer.gridFoldSurfaceKey = null;
         showCanvas(wCanvas);
         hideThreeContainer();
         return;
@@ -1381,7 +1430,7 @@ function drawWTransformedShapeChunk(index, map, targetCtx, cacheMeta) {
     const cache = wPlanarTransformedLayerCache;
 
     if (cacheMeta.fresh || !cache.renderJob) {
-        cache.renderJob = createPlanarTransformedShapeRenderJob(map.evaluate);
+        cache.renderJob = createPlanarTransformedShapeRenderJob(map.evaluate, map);
         cache.nextPointSet = 0;
     }
 
@@ -1389,10 +1438,12 @@ function drawWTransformedShapeChunk(index, map, targetCtx, cacheMeta) {
     const pointSets = renderJob.pointSets;
 
     if (!Array.isArray(pointSets) || pointSets.length === 0 || renderJob.transformProfile?.isConstant) {
-        drawWTransformedShape(index, map, targetCtx, { renderJob });
-        cache.renderJob = null;
-        cache.nextPointSet = 0;
-        return true;
+        const rendered = drawWTransformedShape(index, map, targetCtx, { renderJob });
+        if (rendered) {
+            cache.renderJob = null;
+            cache.nextPointSet = 0;
+        }
+        return rendered;
     }
 
     while (cache.nextPointSet < pointSets.length &&
@@ -1530,9 +1581,15 @@ function renderNormalWPlane(index, map, options) {
         return;
     }
 
-    if (state.rasterSurface3dEnabled && isRasterInputShape(state.currentInputShape)) {
-        renderThreeWRasterSurface(map, index);
-        return;
+    if (state.foldSurface3dEnabled) {
+        if (isRasterInputShape(state.currentInputShape)) {
+            renderThreeWRasterSurface(map, index);
+            return;
+        }
+        if (isGridInputShape(state.currentInputShape)) {
+            renderThreeWGridFold(map);
+            return;
+        }
     }
 
     const isRiemannW = state.riemannSphereViewEnabled || state.splitViewEnabled;

@@ -83,6 +83,23 @@ test('adaptive image meshes omit invalid discontinuity cells', () => {
     assert.ok(mesh.mappedPositions.every(Number.isFinite));
 });
 
+test('adaptive image meshes refine mixed-validity regions before wholly invalid regions', () => {
+    const mesh = buildAdaptiveImageMesh({
+        bounds: { x0: -1, x1: 1, y0: -1, y1: 1, xSpan: 2, ySpan: 2 },
+        baseResolution: 2,
+        maxDepth: 1,
+        maxCells: 8,
+        sample(u, v) {
+            if (u <= 0.5 || v >= 0.5) return { re: NaN, im: NaN };
+            return { re: u * 2 - 1, im: v * 2 - 1 };
+        }
+    });
+
+    assert.ok(mesh.indices.length > 0);
+    assert.ok(mesh.vertices.every(Number.isFinite));
+    assert.ok(mesh.mappedPositions.every(Number.isFinite));
+});
+
 test('adaptive image meshes keep deep-zoom linear patches within the work budget', () => {
     const mesh = buildAdaptiveImageMesh({
         bounds: { x0: -3e-11, x1: 3e-11, y0: -3e-11, y1: 3e-11, xSpan: 6e-11, ySpan: 6e-11 },

@@ -1846,12 +1846,14 @@ export function drawPlanarInputOverlays(ctx, planeParams) {
 export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
     const includeGeometry = options.includeGeometry !== false;
     const includeOverlays = options.includeOverlays !== false;
-    const renderJob = options.renderJob || createPlanarTransformedShapeRenderJob(tf);
+    const renderJob = options.renderJob || createPlanarTransformedShapeRenderJob(tf, options.map || null);
     const inputShape = renderJob.inputShape;
+    const map = options.map || renderJob.map || null;
+    let geometryRendered = true;
 
     if (includeGeometry) {
         if (isRasterInputShape(inputShape)) {
-            drawImageWithWebGL(ctx, planeParams, true, options.index || 0, options.map || null);
+            geometryRendered = drawImageWithWebGL(ctx, planeParams, true, options.index || 0, map);
         } else {
             const pointSets = renderJob.pointSets;
             const startIndex = clamp(Math.floor(finiteOr(options.startIndex, 0)), 0, pointSets.length);
@@ -1882,10 +1884,10 @@ export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
         drawFunctionFociOverlay(ctx, planeParams);
     }
 
-    return true;
+    return geometryRendered;
 }
 
-export function createPlanarTransformedShapeRenderJob(tf) {
+export function createPlanarTransformedShapeRenderJob(tf, map = null) {
     const inputShape = appState.currentInputShape;
     const pointSets = isRasterInputShape(inputShape)
         ? null
@@ -1898,6 +1900,7 @@ export function createPlanarTransformedShapeRenderJob(tf) {
         inputShape,
         pointSets,
         transformFunc: tf,
+        map,
         transformProfile: pointSets
             ? getMappedTransformProfile(appState.currentFunction, tf)
             : null,

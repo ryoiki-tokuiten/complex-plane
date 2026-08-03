@@ -428,6 +428,17 @@ const INPUT_SHAPE_GENERATORS = Object.freeze({
     video: emptyPointSets
 });
 
+const GRID_INPUT_SHAPES = new Set([
+    'grid_cartesian',
+    'grid_polar',
+    'grid_logpolar',
+    'grid_logcartesian'
+]);
+
+export function isGridInputShape(shape) {
+    return GRID_INPUT_SHAPES.has(shape);
+}
+
 export function generateInputShapePointSets(config) {
     const generator = INPUT_SHAPE_GENERATORS[config?.currentInputShape];
     return generator === undefined ? [] : generator(config);
