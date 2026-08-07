@@ -4,6 +4,7 @@ import { state } from '../store/state.js';
 import { requestRedrawAll } from './redraw-scheduler.js';
 import { getChainedTransformFunction } from '../math-utils.js';
 import { normalizeDomainDynamicsChainCount } from '../constants/domain-dynamics.js';
+import { disposeThreeObject } from './three-utils.js';
 
 
 const COLOR_BACKGROUND = 0x0b0914;
@@ -525,12 +526,8 @@ export class ThreeRiemannRenderer {
             : 1;
         if (this.gridFoldSurfaceData === data && this.gridFoldHeightScale === nextHeightScale) return true;
 
-        while (this.gridFoldSurfaceGroup.children.length > 0) {
-            const line = this.gridFoldSurfaceGroup.children[0];
-            this.gridFoldSurfaceGroup.remove(line);
-            line.geometry.dispose();
-            line.material.dispose();
-        }
+        disposeThreeObject(this.gridFoldSurfaceGroup);
+        this.gridFoldSurfaceGroup.clear();
 
         for (const lineData of data.lines || []) {
             if (!(lineData.positions instanceof Float32Array) || lineData.positions.length < 6) continue;
@@ -659,16 +656,8 @@ export class ThreeRiemannRenderer {
     clearDynamicOverlay() {
         if (!this.dynamicOverlayGroup) return;
 
-        while (this.dynamicOverlayGroup.children.length > 0) {
-            const child = this.dynamicOverlayGroup.children[0];
-            this.dynamicOverlayGroup.remove(child);
-            child.geometry?.dispose();
-            if (Array.isArray(child.material)) {
-                child.material.forEach(material => material.dispose());
-            } else {
-                child.material?.dispose();
-            }
-        }
+        disposeThreeObject(this.dynamicOverlayGroup);
+        this.dynamicOverlayGroup.clear();
     }
 
     setDynamicOverlay(data, cacheKey = null) {
@@ -812,8 +801,6 @@ export class ThreeRiemannRenderer {
             });
         }
 
-        this.updateSphereMaterial();
-
         const maxOpacity = state.threeSphereOpacity !== undefined ? state.threeSphereOpacity : 0.15;
         const density = state.gridDensity !== undefined ? state.gridDensity : 12;
         const widthSegments = Math.max(8, density * 2);
@@ -854,23 +841,6 @@ export class ThreeRiemannRenderer {
         this.lastGeometryProgress = progress;
         if (changed) this.renderDirty = true;
         return changed;
-    }
-
-    updateSphereMaterial() {
-        if (!this.ghostSphere) return;
-
-        if (this.ghostSphere.material instanceof THREE.ShaderMaterial) {
-            this.ghostSphere.material.dispose();
-            this.ghostSphere.material = null;
-        }
-        if (!this.ghostSphere.material || this.ghostSphere.material.type !== 'MeshBasicMaterial') {
-            this.ghostSphere.material = new THREE.MeshBasicMaterial({ 
-                color: 0x2a254a, 
-                transparent: true, 
-                depthWrite: false, 
-                blending: THREE.AdditiveBlending 
-            });
-        }
     }
 
     startAnimationLoop() {
@@ -922,17 +892,7 @@ export class ThreeRiemannRenderer {
         if (this.controls) {
             this.controls.dispose();
         }
-        this.scene.traverse((object) => {
-            if (object.geometry) object.geometry.dispose();
-            if (object.material) {
-                if (object.material.map) object.material.map.dispose();
-                if (Array.isArray(object.material)) {
-                    object.material.forEach(mat => mat.dispose());
-                } else {
-                    object.material.dispose();
-                }
-            }
-        });
+        disposeThreeObject(this.scene);
         if (this.renderer) {
             this.renderer.dispose();
             if (this.renderer.domElement && this.renderer.domElement.parentNode) {

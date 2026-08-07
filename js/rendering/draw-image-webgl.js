@@ -15,37 +15,23 @@ import {
     isRasterInputShape
 } from '../utils/raster-media.js';
 import { getChainedStageTransformFunction } from '../math-utils.js';
-import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
+import { MAX_POLY_DEGREE, ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import { DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE } from '../constants/domain-dynamics.js';
 
-const MAX_POLY_DEGREE = 10;
 const QUAD_VERTEX_COUNT = 4;
 const DEFAULT_ALPHA_CUTOFF = 0.05;
 const UINT16_VERTEX_LIMIT = 65535;
 const EMPTY_ARRAY = Object.freeze([]);
 const MAX_INVERSE_CHAIN_INDEX = 15;
 
-const inverseMetadata = injectivity => Object.freeze({ injectivity });
-
-const IMAGE_TRANSFORM_INVERSE_METADATA = Object.freeze({
-    cos: inverseMetadata('no'),
-    sin: inverseMetadata('no'),
-    tan: inverseMetadata('no'),
-    sec: inverseMetadata('no'),
-    exp: inverseMetadata('no'),
-    ln: inverseMetadata('yes'),
-    reciprocal: inverseMetadata('yes'),
-    mobius: inverseMetadata('conditional'),
-    polynomial: inverseMetadata('conditional'),
-    poincare: inverseMetadata('yes'),
-    zeta: inverseMetadata('no'),
-    sinh: inverseMetadata('no'),
-    cosh: inverseMetadata('no'),
-    tanh: inverseMetadata('no'),
-    power: inverseMetadata('conditional'),
-    algebraic_chaining: inverseMetadata('no'),
-    dynamic_aggregate: inverseMetadata('no')
-});
+const IMAGE_INVERSE_FUNCTIONS = new Set([
+    'ln',
+    'reciprocal',
+    'mobius',
+    'polynomial',
+    'poincare',
+    'power'
+]);
 
 const CHAIN_MODE = Object.freeze({
     recursion: 1,
@@ -96,9 +82,7 @@ const RENDER_SNAPSHOT = {
     chainCount: 0,
     chainingMode: null,
     navigationModeEnabled: false,
-    zetaContinuationEnabled: false,
-    gridDensity: 10,
-    domainBrightness: 1
+    zetaContinuationEnabled: false
 };
 
 function writeComplex(out, value, fallbackRe, fallbackIm) {
@@ -176,9 +160,6 @@ function readRenderState() {
     snapshot.navigationModeEnabled = Boolean(state.navigationModeEnabled);
 
     snapshot.zetaContinuationEnabled = Boolean(state.zetaContinuationEnabled);
-
-    snapshot.gridDensity = finiteOr(state.gridDensity, 10);
-    snapshot.domainBrightness = finiteOr(state.domainBrightness, 1);
 
     return snapshot;
 }
@@ -1196,7 +1177,7 @@ export function buildRasterSurfaceMesh(planeParams, map = null) {
     };
 }
 
-function getMeshKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight, chainIndex = null) {
+function getMeshKeys(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight, chainIndex = null) {
     const bounds = getViewBounds(planeParams);
     const media = getRasterDisplayDimensions(currentShape);
     const renderStage = getRasterRenderStage(map, chainIndex);
@@ -1211,7 +1192,7 @@ function getMeshKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, 
         polynomial: [snapshot.polynomialN, snapshot.polynomialCoeffs],
         fractionalPower: snapshot.fractionalPowerN
     });
-    return [
+    const common = [
         currentShape,
         isWP ? 1 : 0,
         snapshot.a0,
@@ -1223,16 +1204,14 @@ function getMeshKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, 
         media.width,
         media.height,
         pixelWidth,
-        pixelHeight,
+        pixelHeight
+    ];
+
+    const meshKey = [
+        ...common,
         snapshot.zetaContinuationEnabled ? 1 : 0,
         transformSignature
     ].join('|');
-}
-
-function getMeshTopologyKey(currentShape, planeParams, isWP, snapshot, map, pixelWidth, pixelHeight, chainIndex = null) {
-    const bounds = getViewBounds(planeParams);
-    const media = getRasterDisplayDimensions(currentShape);
-    const renderStage = getRasterRenderStage(map, chainIndex);
     const algebraicStructure = Array.isArray(snapshot.algebraicChainingTerms)
         ? snapshot.algebraicChainingTerms.map(term => (
             Array.isArray(term?.factors)
@@ -1248,19 +1227,8 @@ function getMeshTopologyKey(currentShape, planeParams, isWP, snapshot, map, pixe
         )).join('|')
         : '';
 
-    return [
-        currentShape,
-        isWP ? 1 : 0,
-        snapshot.a0,
-        snapshot.b0,
-        bounds.x0,
-        bounds.x1,
-        bounds.y0,
-        bounds.y1,
-        media.width,
-        media.height,
-        pixelWidth,
-        pixelHeight,
+    const topologyKey = [
+        ...common,
         snapshot.currentFunction,
         snapshot.zetaContinuationEnabled ? 1 : 0,
         map?.presentation || 'function',
@@ -1273,6 +1241,8 @@ function getMeshTopologyKey(currentShape, planeParams, isWP, snapshot, map, pixe
         snapshot.algebraicChainingZExpr,
         algebraicStructure
     ].join('|');
+
+    return { meshKey, topologyKey };
 }
 
 function normalizedImageMappedPoint(value, u, v, bounds) {
@@ -1531,8 +1501,7 @@ function drawForwardImagePath(renderer, planeParams, isWP, currentShape, snapsho
 function isInverseImageRenderSupportedForSnapshot(snapshot) {
     if (!snapshot) return false;
     if (snapshot.chainingMode === 'zero_seed') return false;
-    const metadata = IMAGE_TRANSFORM_INVERSE_METADATA[snapshot.currentFunction];
-    if (!metadata || metadata.injectivity === 'no') return false;
+    if (!IMAGE_INVERSE_FUNCTIONS.has(snapshot.currentFunction)) return false;
 
     if (snapshot.currentFunction === 'mobius') {
         const a = snapshot.mobiusA || {};
@@ -1658,13 +1627,8 @@ export function disposeWebGLRenderer(renderer) {
         deleteRendererVao(renderer, 'forwardGpuVao');
         deleteRendererVao(renderer, 'forwardCpuVao');
 
-        if (renderer.texture) gl.deleteTexture(renderer.texture);
-        if (renderer.quadBuffer) gl.deleteBuffer(renderer.quadBuffer);
-        if (renderer.forwardVertexBuffer) gl.deleteBuffer(renderer.forwardVertexBuffer);
-        if (renderer.forwardIndexBuffer) gl.deleteBuffer(renderer.forwardIndexBuffer);
-        if (renderer.forwardMappedBuffer) gl.deleteBuffer(renderer.forwardMappedBuffer);
-        if (renderer.inverseProgram) gl.deleteProgram(renderer.inverseProgram);
-        if (renderer.forwardProgram) gl.deleteProgram(renderer.forwardProgram);
+        deleteRendererResources(gl, renderer);
+        deleteImagePrograms(gl, renderer);
     }
 
     renderer.texture = null;
@@ -1740,8 +1704,9 @@ export function ensureForwardMesh(renderer, planeParams, isWP, currentShape, sna
     const shape = currentShape ?? frame.currentInputShape;
     const pixelWidth = Math.max(1, renderer.canvas.width || planeParams.width || 1024);
     const pixelHeight = Math.max(1, renderer.canvas.height || planeParams.height || 1024);
-    const meshKey = getMeshKey(shape, planeParams, Boolean(isWP), frame, map, pixelWidth, pixelHeight, chainIndex);
-    const topologyKey = getMeshTopologyKey(shape, planeParams, Boolean(isWP), frame, map, pixelWidth, pixelHeight, chainIndex);
+    const { meshKey, topologyKey } = getMeshKeys(
+        shape, planeParams, Boolean(isWP), frame, map, pixelWidth, pixelHeight, chainIndex
+    );
 
     if (renderer.forwardMeshKey === meshKey && renderer.forwardMesh) return true;
 
@@ -1751,14 +1716,15 @@ export function ensureForwardMesh(renderer, planeParams, isWP, currentShape, sna
     const edgeError = getAdaptiveEdgeError(pixelWidth, pixelHeight);
     const media = getRasterDisplayDimensions(shape);
     const transform = getForwardTransform(Boolean(isWP), map, chainIndex);
+    const sourceSample = (u, v) => transform(
+        frame.a0 + (u * 2 - 1) * media.width * 0.5,
+        frame.b0 - (v * 2 - 1) * media.height * 0.5
+    );
     if (renderer.forwardTopologyKey === topologyKey && renderer.forwardMesh) {
         const reusedMesh = reuseAdaptiveImageMesh(
             renderer.forwardMesh,
             bounds,
-            (u, v) => transform(
-                frame.a0 + (u * 2 - 1) * media.width * 0.5,
-                frame.b0 - (v * 2 - 1) * media.height * 0.5
-            ),
+            sourceSample,
             useCpuEval,
             edgeError
         );
@@ -1775,10 +1741,7 @@ export function ensureForwardMesh(renderer, planeParams, isWP, currentShape, sna
         pixelHeight,
         maxVertices: ADAPTIVE_MAX_VERTICES,
         maxCells: ADAPTIVE_MAX_CELLS,
-        sample: (u, v) => transform(
-            frame.a0 + (u * 2 - 1) * media.width * 0.5,
-            frame.b0 - (v * 2 - 1) * media.height * 0.5
-        )
+        sample: sourceSample
     });
 
     uploadForwardMesh(renderer, mesh);

@@ -1,13 +1,11 @@
 import { eventBus } from '../store/events.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
-import { state, context } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import {
     createDomainDynamicsTileRenderer,
     domainDynamicsSignature,
     freezeDomainDynamicsSnapshot,
-    isDomainDynamicsSnapshot,
-    renderDomainDynamicsTile
+    isDomainDynamicsSnapshot
 } from './domain-dynamics-core.js';
 import {
     normalizeOrbitColoringMode
@@ -239,10 +237,6 @@ class WorkerCpuDomainDynamicsBackend {
         this.failed = false;
     }
 
-    supports() {
-        return true;
-    }
-
     start(job) {
         this.cancel();
         this.activeJob = {
@@ -432,7 +426,6 @@ class WorkerCpuDomainDynamicsBackend {
         if (pass.remaining <= 0) {
             drawPassToTarget(job, pass);
             if (job.passIndex === PASS_SCALES.length - 1) {
-                lastCompletedSnapshot[job.snapshot.isWPlaneColoring ? 'w' : 'z'] = job.snapshot;
                 setDomainProcessing(job.snapshot.isWPlaneColoring, false);
             }
             this.queue = [];
@@ -456,9 +449,7 @@ class WorkerCpuDomainDynamicsBackend {
             this.queueIndex += 1;
 
             try {
-                const pixels = currentJob.renderTile
-                    ? currentJob.renderTile(tile)
-                    : renderDomainDynamicsTile(currentJob.snapshot, tile);
+                const pixels = currentJob.renderTile(tile);
                 this.handleTileMessage({
                     type: 'tile',
                     jobId: currentJob.id,
@@ -491,109 +482,6 @@ export function selectDomainDynamicsBackend() {
     return workerBackend;
 }
 
-export function domainDynamicsFuncSignature(snapshot) {
-    if (!snapshot) return '';
-    return JSON.stringify({
-        isWPlaneColoring: snapshot.isWPlaneColoring,
-        functionKey: snapshot.functionKey,
-        chainingEnabled: snapshot.chainingEnabled,
-        chainMode: snapshot.chainMode,
-        chainCount: snapshot.chainCount,
-        orbitColoringMode: snapshot.orbitColoringMode,
-        algebraicChainingEnabled: snapshot.algebraicChainingEnabled,
-        algebraicChainingTerms: snapshot.algebraicChainingTerms,
-        algebraicChainingZExpr: snapshot.algebraicChainingZExpr,
-        polynomialN: snapshot.polynomialN,
-        polynomialCoeffs: snapshot.polynomialCoeffs,
-        mobiusA: snapshot.mobiusA,
-        mobiusB: snapshot.mobiusB,
-        mobiusC: snapshot.mobiusC,
-        mobiusD: snapshot.mobiusD,
-        fractionalPowerN: snapshot.fractionalPowerN,
-        zetaContinuationEnabled: snapshot.zetaContinuationEnabled,
-        style: snapshot.style,
-        paletteStops: snapshot.paletteStops
-    });
-}
-
-export function getCurrentFuncSignature(isWPlane = false) {
-    if (!state) return '';
-    return JSON.stringify({
-        isWPlaneColoring: isWPlane,
-        functionKey: state.currentFunction,
-        chainingEnabled: !!state.chainingEnabled,
-        chainMode: normalizeChainMode(state.chainingMode),
-        chainCount: normalizeDomainDynamicsChainCount(state.chainCount),
-        orbitColoringMode: normalizeOrbitColoringMode(state.orbitColoringMode),
-        algebraicChainingEnabled: !!state.algebraicChainingEnabled,
-        algebraicChainingTerms: state.algebraicChainingTerms,
-        algebraicChainingZExpr: state.algebraicChainingZExpr || 'z',
-        polynomialN: Math.max(0, Math.floor(Number(state.polynomialN) || 0)),
-        polynomialCoeffs: state.polynomialCoeffs,
-        mobiusA: state.mobiusA,
-        mobiusB: state.mobiusB,
-        mobiusC: state.mobiusC,
-        mobiusD: state.mobiusD,
-        fractionalPowerN: state.fractionalPowerN,
-        zetaContinuationEnabled: !!state.zetaContinuationEnabled,
-        style: {
-            brightness: Number(state.domainBrightness) || 1,
-            contrast: Number(state.domainContrast) || 1,
-            saturation: Number(state.domainSaturation) || 1,
-            lightnessCycles: Number(state.domainLightnessCycles) || 0
-        },
-        paletteStops: state.domainPalette
-    });
-}
-
-const staleDomainCanvas = { z: null, w: null };
-const staleViewport = { z: null, w: null };
-const staleFuncSignature = { z: null, w: null };
-const lastCompletedSnapshot = { z: null, w: null };
-
-export function captureBeforeResize() {
-    const backend = selectDomainDynamicsBackend();
-    
-    // Z plane
-    const zJob = backend?.activeJob;
-    if (zJob && !zJob.snapshot.isWPlaneColoring) {
-        captureStaleDomain(context.zDomainColorCanvas || zJob.targetCtx.canvas, zJob.snapshot, false);
-    } else if (context.zDomainColorCanvas && lastCompletedSnapshot.z) {
-        captureStaleDomain(context.zDomainColorCanvas, lastCompletedSnapshot.z, false);
-    }
-
-    // W plane
-    const wJob = backend?.activeJob;
-    if (wJob && wJob.snapshot.isWPlaneColoring) {
-        captureStaleDomain(context.wDomainColorCanvas || wJob.targetCtx.canvas, wJob.snapshot, true);
-    } else if (context.wDomainColorCanvas && lastCompletedSnapshot.w) {
-        captureStaleDomain(context.wDomainColorCanvas, lastCompletedSnapshot.w, true);
-    }
-}
-
-export function getStaleDomainData(isWPlane = false) {
-    const key = isWPlane ? 'w' : 'z';
-    return {
-        canvas: staleDomainCanvas[key],
-        viewport: staleViewport[key],
-        signature: staleFuncSignature[key]
-    };
-}
-
-function captureStaleDomain(canvas, snapshot, isWPlane = false) {
-    if (!canvas || !snapshot || !snapshot.viewport) return;
-    const key = isWPlane ? 'w' : 'z';
-    if (!staleDomainCanvas[key]) {
-        staleDomainCanvas[key] = document.createElement('canvas');
-    }
-    staleDomainCanvas[key].width = canvas.width;
-    staleDomainCanvas[key].height = canvas.height;
-    const ctx = staleDomainCanvas[key].getContext('2d');
-    ctx.drawImage(canvas, 0, 0);
-    staleViewport[key] = JSON.parse(JSON.stringify(snapshot.viewport));
-    staleFuncSignature[key] = domainDynamicsFuncSignature(snapshot);
-}
-
 let pendingJobTimeout = null;
 
 export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
@@ -608,9 +496,6 @@ export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
     }
 
     if (activeBackend) {
-        if (activeBackend.activeJob && activeBackend.activeJob.snapshot) {
-            captureStaleDomain(targetCtx.canvas, activeBackend.activeJob.snapshot, activeBackend.activeJob.snapshot.isWPlaneColoring);
-        }
         activeBackend.cancel(activeJobId);
     }
 
@@ -623,7 +508,6 @@ export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
     const job = {
         id: activeJobId,
         targetCtx,
-        planeParams,
         snapshot,
         maxAllowedPassIndex: 0 // Only run scale 16 pass instantly!
     };

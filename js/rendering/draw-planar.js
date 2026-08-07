@@ -34,6 +34,7 @@ import {
     generateCurrentInputShapePointSets,
     generateRadialDiscreteStepPointSets
 } from './shape-generators.js';
+import { hslToRgb } from './canvas-primitives.js';
 
 const EPSILON = 1e-9;
 const DEGENERATE_SEGMENT_EPSILON = 1e-12;
@@ -371,8 +372,7 @@ function buildAdaptiveTransformedPolyline(planeParams, mappedTransform, points, 
     return polyline;
 }
 
-function buildPath2DFromTransformedPolyline(PathCtor, polyline) {
-    const path = new PathCtor();
+function appendTransformedPolyline(path, polyline) {
     let pathOpen = false;
 
     for (let index = 0; index < polyline.length; index += 2) {
@@ -391,38 +391,13 @@ function buildPath2DFromTransformedPolyline(PathCtor, polyline) {
         }
     }
 
-    return path;
+    return pathOpen;
 }
 
-function hslToRgbCss(h, s, l) {
-    let r;
-    let g;
-    let b;
-
-    if (s === 0) {
-        r = l;
-        g = l;
-        b = l;
-    } else {
-        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        const p = 2 * l - q;
-        let tr = h + 1 / 3;
-        let tg = h;
-        let tb = h - 1 / 3;
-
-        if (tr < 0) tr += 1;
-        if (tr > 1) tr -= 1;
-        if (tg < 0) tg += 1;
-        if (tg > 1) tg -= 1;
-        if (tb < 0) tb += 1;
-        if (tb > 1) tb -= 1;
-
-        r = tr < 1 / 6 ? p + (q - p) * 6 * tr : tr < 1 / 2 ? q : tr < 2 / 3 ? p + (q - p) * (2 / 3 - tr) * 6 : p;
-        g = tg < 1 / 6 ? p + (q - p) * 6 * tg : tg < 1 / 2 ? q : tg < 2 / 3 ? p + (q - p) * (2 / 3 - tg) * 6 : p;
-        b = tb < 1 / 6 ? p + (q - p) * 6 * tb : tb < 1 / 2 ? q : tb < 2 / 3 ? p + (q - p) * (2 / 3 - tb) * 6 : p;
-    }
-
-    return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+function buildPath2DFromTransformedPolyline(PathCtor, polyline) {
+    const path = new PathCtor();
+    appendTransformedPolyline(path, polyline);
+    return path;
 }
 
 function isFiniteNumber(value) {
@@ -833,7 +808,8 @@ function getArrowColorFromComponents(re, im, brightness) {
     const magnitude = Math.sqrt(re * re + im * im);
     const lightness = clamp(0.35 + Math.log(1.0 + magnitude) * 0.08 * brightness, 0.2, 0.85);
 
-    return hslToRgbCss(hue, 0.85, lightness);
+    const rgb = hslToRgb(hue, 0.85, lightness);
+    return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 }
 
 export function isRenderableComplexPoint(point) {
@@ -1308,26 +1284,7 @@ export function drawPlanarTransformedLine(ctx, planeParams, mappedTransform, z_p
     }
 
     ctx.beginPath();
-    let pathOpen = false;
-    for (let index = 0; index < geometry.length; index += 2) {
-        const x = geometry[index];
-        const y = geometry[index + 1];
-        if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
-            pathOpen = false;
-            continue;
-        }
-
-        if (pathOpen) {
-            ctx.lineTo(x, y);
-        } else {
-            ctx.moveTo(x, y);
-            pathOpen = true;
-        }
-    }
-
-    if (pathOpen) {
-        ctx.stroke();
-    }
+    if (appendTransformedPolyline(ctx, geometry)) ctx.stroke();
 }
 
 export function calculateDynamicPointsForSegment(p1_world, p2_world, tf, planeParams = null) {

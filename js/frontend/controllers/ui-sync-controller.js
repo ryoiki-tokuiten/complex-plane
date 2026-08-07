@@ -12,8 +12,8 @@ const NON_UI_STATE_KEYS = new Set([
     'isRealPlotsFullScreen',
     'isWFullScreen', 'isZFullScreen', 'laplaceAnimationTime', 'laplaceCurrentValue',
     'laplacePoles', 'laplaceROC', 'laplaceSurface', 'laplaceTimeDomainSignal',
-    'laplaceZeros', 'poles', 'polynomialCoeffs', 'probeZ', 'realPlotsCameraNeedsReset',
-    'realPlotsCameraTargetMath', 'riemannTransformationProgressW',
+    'laplaceZeros', 'poles', 'polynomialCoeffs', 'probeZ',
+    'riemannTransformationProgressW',
     'riemannTransformationProgressZ', 'videoFrameVersion', 'zeros'
 ]);
 

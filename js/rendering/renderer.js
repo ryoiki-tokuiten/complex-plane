@@ -69,7 +69,6 @@ import {
     drawDynamicZPlane,
     getDynamicSphereSceneData
 } from './draw-dynamic-plotting.js';
-import { getStaleDomainData, getCurrentFuncSignature } from './domain-dynamics.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices } from '../analysis/tissot.js';
 
 let wCanvas;
@@ -100,83 +99,69 @@ const zPlanarInputLayerCache = createLayerCache();
 const zFlowLayerCache = createLayerCache();
 const conformalIndicatrixCache = { key: null, value: [] };
 
-const FACTOR_KEY_BUILDERS = Object.freeze({
-    mobius: appendMobiusKey,
-    polynomial: appendPolynomialKey,
-    power: appendFractionalPowerKey
-});
-
-const FUNCTION_CACHE_KEY_BUILDERS = Object.freeze({
-    mobius: appendMobiusKey,
-    polynomial: appendPolynomialKey,
-    power: appendFractionalPowerKey,
-    algebraic_chaining: appendAlgebraicChainingKey
-});
-
-const PLANAR_CACHE_FIELDS = Object.freeze([
-    ['f', () => state.currentFunction],
-    ['mapPresentation', () => state.mapPresentation],
-    ['tissot', () => state.conformalGridEnabled ? 1 : 0],
-    ['shape', () => state.currentInputShape],
-    ['grid', () => state.gridDensity],
-    ['zetaC', () => state.zetaContinuationEnabled ? 1 : 0],
-    ['a0', () => toCacheKeyNumber(state.a0)],
-    ['b0', () => toCacheKeyNumber(state.b0)],
-    ['circleR', () => toCacheKeyNumber(state.circleR)],
-    ['ellipseA', () => toCacheKeyNumber(state.ellipseA)],
-    ['ellipseB', () => toCacheKeyNumber(state.ellipseB)],
-    ['theme', () => state.themeId],
-    ['gridCol1', () => state.gridColor1 || ''],
-    ['gridCol2', () => state.gridColor2 || ''],
-    ['imgSize', () => toCacheKeyNumber(state.imageSize)],
-    ['imgOpacity', () => toCacheKeyNumber(state.imageOpacity)],
-    ['imgVer', () => state.imageContentVersion || 0],
-    ['vidFps', () => state.videoProcessingFps || 0],
-    ['vidSize', () => toCacheKeyNumber(state.videoSize)],
-    ['vidOpacity', () => toCacheKeyNumber(state.videoOpacity)],
-    ['vidVer', () => state.videoFrameVersion || 0],
-    ['dynamic', () => getDynamicPlottingCacheKey()],
-    ['dc', () => state.domainColoringEnabled ? `${state.domainPalette}|${toCacheKeyNumber(state.domainBrightness)}|${toCacheKeyNumber(state.domainContrast)}|${toCacheKeyNumber(state.domainSaturation)}|${toCacheKeyNumber(state.domainLightnessCycles)}|${normalizeOrbitColoringMode(state.orbitColoringMode)}` : '0']
+// Snapshot trackers preserve exact cache invalidation while avoiding per-frame key strings and GC churn.
+const planarKeyTrackers = new WeakMap();
+const zFlowKeyTracker = { values: [], cursor: 0, changed: true, key: null };
+const PLANAR_STATE_DEPENDENCIES = Object.freeze([
+    'currentFunction', 'mapPresentation', 'currentInputShape', 'gridDensity',
+    'a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'themeId',
+    'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity',
+    'cauchyIntegralModeEnabled'
+]);
+const DOMAIN_STATE_DEPENDENCIES = Object.freeze([
+    'domainPalette', 'domainBrightness', 'domainContrast',
+    'domainSaturation', 'domainLightnessCycles'
+]);
+const TAYLOR_LAYER_DEPENDENCIES = Object.freeze([
+    'taylorSeriesOrder', 'taylorSeriesConvergenceRadius',
+    'taylorSeriesColorAxisX', 'taylorSeriesColorAxisY'
 ]);
 
-const Z_FLOW_CACHE_FIELDS = Object.freeze([
-    ['flow', () => state.vectorFieldEnabled || state.streamlineFlowEnabled ? 1 : 0],
-    ['vfMode', () => state.vectorFieldFunction],
-    ['stream', () => state.streamlineFlowEnabled ? 1 : 0],
-    ['vfScale', () => toCacheKeyNumber(state.vectorFieldScale)],
-    ['vfThick', () => toCacheKeyNumber(state.vectorArrowThickness)],
-    ['vfHead', () => toCacheKeyNumber(state.vectorArrowHeadSize)],
-    ['sStep', () => toCacheKeyNumber(state.streamlineStepSize)],
-    ['sMax', () => state.streamlineMaxLength],
-    ['sThick', () => toCacheKeyNumber(state.streamlineThickness)],
-    ['sSeed', () => toCacheKeyNumber(state.streamlineSeedDensityFactor)]
-]);
+function beginDependencyScan(tracker) {
+    tracker.cursor = 0;
+    tracker.changed = false;
+}
 
-const Z_SIGNAL_RENDERERS = Object.freeze([
-    {
-        enabled: () => state.fourierModeEnabled,
-        signal: () => state.fourierTimeDomainSignal,
-        draw: drawTimeDomainSignal
-    },
-    {
-        enabled: () => state.laplaceModeEnabled,
-        signal: () => state.laplaceTimeDomainSignal,
-        draw: drawLaplaceTimeDomain
+function captureDependency(tracker, value) {
+    const index = tracker.cursor++;
+    const previous = tracker.values[index];
+    if (previous !== value && !(previous !== previous && value !== value)) {
+        tracker.values[index] = value;
+        tracker.changed = true;
     }
-]);
+}
 
-const W_SIGNAL_RENDERERS = Object.freeze([
-    {
-        enabled: () => state.fourierModeEnabled,
-        signal: () => state.fourierTimeDomainSignal,
-        draw: drawWindingVisualization
-    },
-    {
-        enabled: () => state.laplaceModeEnabled,
-        signal: () => state.laplaceTimeDomainSignal,
-        draw: drawLaplaceWindingVisualization
+function captureComplexDependency(tracker, point) {
+    const exists = Boolean(point);
+    captureDependency(tracker, exists);
+    if (exists) {
+        captureDependency(tracker, point.re);
+        captureDependency(tracker, point.im);
     }
-]);
+}
+
+function captureStateDependencies(tracker, keys) {
+    for (let index = 0; index < keys.length; index += 1) {
+        captureDependency(tracker, state[keys[index]]);
+    }
+}
+
+function endDependencyScan(tracker) {
+    if (tracker.values.length !== tracker.cursor) {
+        tracker.values.length = tracker.cursor;
+        tracker.changed = true;
+    }
+    return tracker.changed;
+}
+
+function getPlanarKeyTracker(params) {
+    let tracker = planarKeyTrackers.get(params);
+    if (!tracker) {
+        tracker = { values: [], cursor: 0, changed: true, key: null };
+        planarKeyTrackers.set(params, tracker);
+    }
+    return tracker;
+}
 
 function createLayerCache() {
     return {
@@ -187,10 +172,6 @@ function createLayerCache() {
         renderJob: null,
         nextPointSet: 0
     };
-}
-
-function asArray(value) {
-    return Array.isArray(value) ? value : [];
 }
 
 function isFiniteComplex(value) {
@@ -210,37 +191,29 @@ function invalidateCache(cache) {
     }
 }
 
-function syncRenderContext() {
-    wCanvas = context.wCanvas;
+function syncZRenderContext() {
     zCtx = context.zCtx;
-    wCtx = context.wCtx;
-
     zDomainColorCanvas = context.zDomainColorCanvas;
     zDomainColorCtx = context.zDomainColorCtx;
+}
 
+function syncWRenderContext() {
+    wCanvas = context.wCanvas;
+    wCtx = context.wCtx;
     wCanvasList = context.wCanvasList;
     wCtxList = context.wCtxList;
     wPlaneParamsList = context.wPlaneParamsList;
     wPlaneThreeContainersList = context.wPlaneThreeContainersList;
     sphereViewWParamsList = context.sphereViewWParamsList;
 
-    if (Array.isArray(context.wPlanarTransformedLayerCacheList)) {
-        wPlanarTransformedLayerCacheList = context.wPlanarTransformedLayerCacheList;
-    } else {
-        context.wPlanarTransformedLayerCacheList = wPlanarTransformedLayerCacheList;
-    }
+    const externalCaches = context.wPlanarTransformedLayerCacheList;
+    if (Array.isArray(externalCaches)) wPlanarTransformedLayerCacheList = externalCaches;
+    else context.wPlanarTransformedLayerCacheList = wPlanarTransformedLayerCacheList;
 }
 
-function drawPlaneLayer(ctx, planeParams, planeKey, drawCallback, mode = 'capture') {
+function drawPlaneLayer(ctx, planeParams, planeKey, drawCallback) {
     if (!ctx || !planeParams || typeof drawCallback !== 'function') {
         return false;
-    }
-
-    // Raster mode is always faster when drawn directly to the canvas 2D context,
-    // avoiding texture uploads and copies.
-    if (mode === 'raster') {
-        drawCallback(ctx);
-        return true;
     }
 
     if (drawWithWebGLCapture(ctx, planeParams, planeKey, drawCallback)) {
@@ -249,10 +222,6 @@ function drawPlaneLayer(ctx, planeParams, planeKey, drawCallback, mode = 'captur
 
     drawCallback(ctx);
     return true;
-}
-
-function drawLayerWhen(condition, ctx, planeParams, planeKey, drawCallback, mode = 'capture') {
-    return Boolean(condition) && drawPlaneLayer(ctx, planeParams, planeKey, drawCallback, mode);
 }
 
 function withCanvasState(ctx, draw) {
@@ -269,240 +238,217 @@ function withCanvasState(ctx, draw) {
     }
 }
 
-function resetCanvasContext(ctx, canvas) {
-    if (!ctx || !canvas) {
-        return;
+// The cache protocol is synchronous and allocation-free on steady-state hits.
+function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, render, renderDirect = render) {
+    if (!targetCtx || !planeParams || typeof render !== 'function') return true;
+
+    if (enabled && cache?.canvas && cache.key === cacheKey) {
+        targetCtx.drawImage(cache.canvas, 0, 0);
+        return true;
     }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-function ensurePlanarLayerCacheCanvas(cache, width, height) {
-    if (!cache || width <= 0 || height <= 0 || typeof document === 'undefined') {
-        return null;
+    if (!enabled) {
+        invalidateCache(cache);
+        return renderDirect(targetCtx, cacheKey, true) !== false;
+    }
+    if (!cache || planeParams.width <= 0 || planeParams.height <= 0 || typeof document === 'undefined') {
+        return renderDirect(targetCtx, cacheKey, true) !== false;
     }
 
     if (!cache.canvas) {
         cache.canvas = document.createElement('canvas');
         cache.ctx = cache.canvas.getContext('2d');
-
         if (!cache.ctx) {
             cache.canvas = null;
-            return null;
+            return renderDirect(targetCtx, cacheKey, true) !== false;
         }
     }
-
-    if (cache.canvas.width !== width || cache.canvas.height !== height) {
-        cache.canvas.width = width;
-        cache.canvas.height = height;
+    if (cache.canvas.width !== planeParams.width || cache.canvas.height !== planeParams.height) {
+        cache.canvas.width = planeParams.width;
+        cache.canvas.height = planeParams.height;
         invalidateCache(cache);
     }
 
-    return cache.canvas;
-}
-
-function renderThroughCache({
-    cache,
-    targetCtx,
-    planeParams,
-    cacheKey,
-    enabled,
-    render,
-    renderDirect = render
-}) {
-    if (!targetCtx || !planeParams || typeof render !== 'function') {
-        return true;
+    const fresh = cache.pendingKey !== cacheKey;
+    if (fresh) {
+        cache.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        cache.ctx.clearRect(0, 0, cache.canvas.width, cache.canvas.height);
+        cache.pendingKey = cacheKey;
     }
 
-    if (!enabled) {
-        invalidateCache(cache);
-        return renderDirect(targetCtx, { cacheKey, fresh: true, direct: true }) !== false;
+    const complete = render(cache.ctx, cacheKey, fresh) !== false;
+    if (complete) {
+        cache.key = cacheKey;
+        cache.pendingKey = null;
+    } else {
+        cache.key = null;
     }
 
-    const cacheCanvas = ensurePlanarLayerCacheCanvas(cache, planeParams.width, planeParams.height);
-    const cacheCtx = cache?.ctx;
-
-    if (!cacheCanvas || !cacheCtx) {
-        return renderDirect(targetCtx, { cacheKey, fresh: true, direct: true }) !== false;
-    }
-
-    let complete = true;
-    if (cache.key !== cacheKey) {
-        const fresh = cache.pendingKey !== cacheKey;
-
-        if (fresh) {
-            resetCanvasContext(cacheCtx, cacheCanvas);
-            cache.pendingKey = cacheKey;
-        }
-
-        complete = render(cacheCtx, { cacheKey, fresh }) !== false;
-
-        if (complete) {
-            cache.key = cacheKey;
-            cache.pendingKey = null;
-        } else {
-            cache.key = null;
-        }
-    }
-
-    targetCtx.drawImage(cacheCanvas, 0, 0);
+    targetCtx.drawImage(cache.canvas, 0, 0);
     return complete;
 }
 
-function toCacheKeyNumber(value) {
-    if (!Number.isFinite(value)) return `${value}`;
-    if (Object.is(value, -0)) return '0';
-    return Number(value).toPrecision(15);
-}
-
-function appendKey(parts, name, value) {
-    parts.push(`${name}:${value}`);
-}
-
-function appendKeyFields(parts, fields) {
-    fields.forEach(([name, read]) => appendKey(parts, name, read()));
-}
-
-function appendPointToCacheKey(parts, prefix, point) {
-    if (!point) {
-        appendKey(parts, prefix, 'none');
-        return;
-    }
-
-    appendKey(parts, `${prefix}r`, toCacheKeyNumber(point.re));
-    appendKey(parts, `${prefix}i`, toCacheKeyNumber(point.im));
-}
-
 function normalizedPolynomialDegree() {
-    const rawDegree = Number.isFinite(state.polynomialN) ? state.polynomialN : 0;
-
-    return Math.max(0, Math.min(MAX_POLY_DEGREE, rawDegree));
+    const degree = Number.isFinite(state.polynomialN) ? state.polynomialN : 0;
+    return Math.max(0, Math.min(MAX_POLY_DEGREE, degree));
 }
 
-function appendMobiusKey(parts, prefix = '') {
-    appendPointToCacheKey(parts, `${prefix}mA`, state.mobiusA);
-    appendPointToCacheKey(parts, `${prefix}mB`, state.mobiusB);
-    appendPointToCacheKey(parts, `${prefix}mC`, state.mobiusC);
-    appendPointToCacheKey(parts, `${prefix}mD`, state.mobiusD);
-}
-
-function appendPolynomialKey(parts, prefix = '') {
-    const degree = normalizedPolynomialDegree();
-    const coeffs = asArray(state.polynomialCoeffs);
-
-    appendKey(parts, `${prefix}polyN`, degree);
-
-    for (let index = 0; index <= degree; index += 1) {
-        appendPointToCacheKey(parts, `${prefix}p${index}`, coeffs[index] || null);
-    }
-}
-
-function appendFractionalPowerKey(parts, prefix = '') {
-    appendKey(parts, `${prefix}fracN`, toCacheKeyNumber(state.fractionalPowerN ?? 0.5));
-}
-
-function appendFactorTransformSpecificKey(parts, factor, prefix) {
-    const functionNames = new Set([factor.func, factor.chainedFunc]);
-
-    functionNames.forEach(name => {
-        FACTOR_KEY_BUILDERS[name]?.(parts, prefix);
-    });
-}
-
-function appendAlgebraicFactorFunctionKey(parts, term, termIndex) {
-    const factors = asArray(term?.factors);
-
-    appendKey(parts, `t${termIndex}`, factors.map(factor => factor?.func).join(','));
-    appendPointToCacheKey(parts, `t${termIndex}c`, term?.coeff);
-
-    factors.forEach((factor, factorIndex) => {
-        if (!factor || factor.func === 'none') {
+function captureNamedTransformDependencies(tracker, name) {
+    switch (name) {
+        case 'mobius':
+            captureComplexDependency(tracker, state.mobiusA);
+            captureComplexDependency(tracker, state.mobiusB);
+            captureComplexDependency(tracker, state.mobiusC);
+            captureComplexDependency(tracker, state.mobiusD);
+            return;
+        case 'polynomial': {
+            const degree = normalizedPolynomialDegree();
+            const coeffs = state.polynomialCoeffs;
+            captureDependency(tracker, degree);
+            for (let index = 0; index <= degree; index += 1) {
+                captureComplexDependency(tracker, Array.isArray(coeffs) ? coeffs[index] || null : null);
+            }
             return;
         }
-
-        const prefix = `t${termIndex}f${factorIndex}`;
-
-        appendKey(parts, `${prefix}chain`, factor.chainedFunc);
-        appendKey(parts, `${prefix}pow`, toCacheKeyNumber(factor.power));
-        appendKey(parts, `${prefix}recip`, factor.reciprocal ? 1 : 0);
-        appendKey(parts, `${prefix}log`, factor.log ? 1 : 0);
-        appendKey(parts, `${prefix}exp`, factor.exp ? 1 : 0);
-        appendFactorTransformSpecificKey(parts, factor, prefix);
-    });
+        case 'power':
+            captureDependency(tracker, state.fractionalPowerN ?? 0.5);
+            return;
+        default:
+            return;
+    }
 }
 
-function appendAlgebraicChainingKey(parts) {
-    const terms = asArray(state.algebraicChainingTerms);
+function captureAlgebraicDependencies(tracker) {
+    const terms = Array.isArray(state.algebraicChainingTerms) ? state.algebraicChainingTerms : [];
+    captureDependency(tracker, Boolean(state.algebraicChainingEnabled));
+    captureDependency(tracker, terms.length);
+    captureDependency(tracker, state.algebraicChainingZExpr || 'z');
 
-    appendKey(parts, 'algTerms', terms.length);
-    appendKey(parts, 'algZExpr', state.algebraicChainingZExpr || 'z');
-    terms.forEach((term, index) => appendAlgebraicFactorFunctionKey(parts, term, index));
+    for (let termIndex = 0; termIndex < terms.length; termIndex += 1) {
+        const term = terms[termIndex];
+        const factors = Array.isArray(term?.factors) ? term.factors : [];
+        captureComplexDependency(tracker, term?.coeff);
+        captureDependency(tracker, factors.length);
+
+        for (let factorIndex = 0; factorIndex < factors.length; factorIndex += 1) {
+            const factor = factors[factorIndex];
+            const exists = Boolean(factor);
+            captureDependency(tracker, exists);
+            if (!exists) continue;
+
+            captureDependency(tracker, factor.func);
+            if (factor.func === 'none') continue;
+
+            captureDependency(tracker, factor.chainedFunc);
+            captureDependency(tracker, factor.power);
+            captureDependency(tracker, Boolean(factor.reciprocal));
+            captureDependency(tracker, Boolean(factor.log));
+            captureDependency(tracker, Boolean(factor.exp));
+            captureNamedTransformDependencies(tracker, factor.func);
+            if (factor.chainedFunc !== factor.func) {
+                captureNamedTransformDependencies(tracker, factor.chainedFunc);
+            }
+        }
+    }
 }
 
-function appendCurrentFunctionStateToCacheKey(parts) {
-    FUNCTION_CACHE_KEY_BUILDERS[state.currentFunction]?.(parts);
-}
+function scanPlanarLayerDependencies(isWPlane, tracker) {
+    const params = isWPlane ? wPlaneParams : zPlaneParams;
+    const taylorEnabled = isWPlane && state.taylorSeriesEnabled;
+    beginDependencyScan(tracker);
+    captureDependency(tracker, isWPlane);
+    captureDependency(tracker, taylorEnabled);
 
-
-function appendPlaneViewportKey(parts, sourceParams, targetParams) {
-    appendKey(parts, 'zX0', toCacheKeyNumber(sourceParams?.currentVisXRange?.[0]));
-    appendKey(parts, 'zX1', toCacheKeyNumber(sourceParams?.currentVisXRange?.[1]));
-    appendKey(parts, 'zY0', toCacheKeyNumber(sourceParams?.currentVisYRange?.[0]));
-    appendKey(parts, 'zY1', toCacheKeyNumber(sourceParams?.currentVisYRange?.[1]));
-    appendKey(parts, 'Ox', toCacheKeyNumber(targetParams?.origin?.x));
-    appendKey(parts, 'Oy', toCacheKeyNumber(targetParams?.origin?.y));
-    appendKey(parts, 'Sx', toCacheKeyNumber(targetParams?.scale?.x));
-    appendKey(parts, 'Sy', toCacheKeyNumber(targetParams?.scale?.y));
-    appendKey(parts, 'W', targetParams?.width);
-    appendKey(parts, 'H', targetParams?.height);
-}
-
-function appendChainingCacheKey(parts) {
-    appendKey(parts, 'chain', state.chainingEnabled ? 1 : 0);
-
-    if (!state.chainingEnabled) {
-        return;
+    if (taylorEnabled) {
+        captureComplexDependency(tracker, state.taylorSeriesCenter);
+        captureStateDependencies(tracker, TAYLOR_LAYER_DEPENDENCIES);
     }
 
-    appendKey(parts, 'cM', state.chainingMode);
-    appendKey(parts, 'cC', state.chainCount);
-    appendKey(parts, 'orbit', normalizeOrbitColoringMode(state.orbitColoringMode));
-}
+    captureStateDependencies(tracker, PLANAR_STATE_DEPENDENCIES);
+    captureDependency(tracker, Boolean(state.conformalGridEnabled));
+    captureDependency(tracker, Boolean(state.zetaContinuationEnabled));
+    captureDependency(tracker, state.gridColor1 || '');
+    captureDependency(tracker, state.gridColor2 || '');
+    captureDependency(tracker, state.imageContentVersion || 0);
+    captureDependency(tracker, state.videoProcessingFps || 0);
+    captureDependency(tracker, state.videoFrameVersion || 0);
+    captureDependency(tracker, getDynamicPlottingCacheKey());
 
-function appendTaylorCacheKey(parts, isWPlane) {
-    appendKey(parts, 'taylor', isWPlane && state.taylorSeriesEnabled ? 1 : 0);
-
-    if (!isWPlane || !state.taylorSeriesEnabled) {
-        return;
+    const domainEnabled = Boolean(state.domainColoringEnabled);
+    captureDependency(tracker, domainEnabled);
+    if (domainEnabled) {
+        captureStateDependencies(tracker, DOMAIN_STATE_DEPENDENCIES);
+        captureDependency(tracker, normalizeOrbitColoringMode(state.orbitColoringMode));
     }
 
-    appendPointToCacheKey(parts, 'tC', state.taylorSeriesCenter);
-    appendKey(parts, 'tO', state.taylorSeriesOrder);
+    const sourceX = zPlaneParams?.currentVisXRange;
+    const sourceY = zPlaneParams?.currentVisYRange;
+    captureDependency(tracker, sourceX?.[0]);
+    captureDependency(tracker, sourceX?.[1]);
+    captureDependency(tracker, sourceY?.[0]);
+    captureDependency(tracker, sourceY?.[1]);
+    captureDependency(tracker, params?.origin?.x);
+    captureDependency(tracker, params?.origin?.y);
+    captureDependency(tracker, params?.scale?.x);
+    captureDependency(tracker, params?.scale?.y);
+    captureDependency(tracker, params?.width);
+    captureDependency(tracker, params?.height);
+
+    if (state.currentFunction === 'algebraic_chaining') {
+        captureAlgebraicDependencies(tracker);
+    } else {
+        captureNamedTransformDependencies(tracker, state.currentFunction);
+    }
+
+    const chainingEnabled = Boolean(state.chainingEnabled);
+    captureDependency(tracker, chainingEnabled);
+    if (chainingEnabled) {
+        captureDependency(tracker, state.chainingMode);
+        captureDependency(tracker, state.chainCount);
+        captureDependency(tracker, normalizeOrbitColoringMode(state.orbitColoringMode));
+    }
+    return endDependencyScan(tracker);
+}
+
+let nextLayerCacheKeyRevision = 1;
+
+function createLayerCacheKey(prefix) {
+    const revision = nextLayerCacheKeyRevision++;
+    return `${prefix}:${revision}`;
 }
 
 function buildPlanarLayerCacheKey(isWPlane) {
     const params = isWPlane ? wPlaneParams : zPlaneParams;
-    const parts = [];
+    const tracker = getPlanarKeyTracker(params);
+    if (scanPlanarLayerDependencies(isWPlane, tracker) || tracker.key === null) {
+        tracker.key = createLayerCacheKey(isWPlane ? 'w' : 'z');
+    }
+    return tracker.key;
+}
 
-    appendTaylorCacheKey(parts, isWPlane);
-    appendKeyFields(parts, PLANAR_CACHE_FIELDS);
-    appendPlaneViewportKey(parts, zPlaneParams, params);
-    appendCurrentFunctionStateToCacheKey(parts);
-    appendChainingCacheKey(parts);
-
-    return parts.join('|');
+function scanZFlowLayerDependencies(tracker) {
+    beginDependencyScan(tracker);
+    captureDependency(tracker, buildPlanarLayerCacheKey(false));
+    captureDependency(tracker, Boolean(state.vectorFieldEnabled || state.streamlineFlowEnabled));
+    captureDependency(tracker, state.vectorFieldFunction);
+    captureDependency(tracker, Boolean(state.streamlineFlowEnabled));
+    captureDependency(tracker, state.vectorFieldScale);
+    captureDependency(tracker, state.vectorArrowThickness);
+    captureDependency(tracker, state.vectorArrowHeadSize);
+    captureDependency(tracker, state.streamlineStepSize);
+    captureDependency(tracker, state.streamlineMaxLength);
+    captureDependency(tracker, state.streamlineThickness);
+    captureDependency(tracker, state.streamlineSeedDensityFactor);
+    if (state.vectorFieldEnabled && !state.streamlineFlowEnabled) {
+        captureDependency(tracker, state.domainBrightness);
+    }
+    return endDependencyScan(tracker);
 }
 
 function buildZFlowLayerCacheKey() {
-    const parts = [buildPlanarLayerCacheKey(false)];
-
-    appendKeyFields(parts, Z_FLOW_CACHE_FIELDS);
-    if (state.vectorFieldEnabled && !state.streamlineFlowEnabled) {
-        appendKey(parts, 'vfDomB', toCacheKeyNumber(state.domainBrightness));
+    if (scanZFlowLayerDependencies(zFlowKeyTracker) || zFlowKeyTracker.key === null) {
+        zFlowKeyTracker.key = createLayerCacheKey('z-flow');
     }
-
-    return parts.join('|');
+    return zFlowKeyTracker.key;
 }
 
 function shouldUseWPlanarTransformedLayerCache() {
@@ -539,58 +485,16 @@ function fillCanvasBackground(ctx, planeParams) {
 
 function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
     if (state.domainColoringEnabled && domainCanvas) {
-        ctx.save();
-        try {
-            const isWPlane = !planeParams.currentVisXRange;
-            const isProcessing = isWPlane
+        withCanvasState(ctx, () => {
+            const isProcessing = !planeParams.currentVisXRange
                 ? runtime.rendering.processingWDomainDynamics
                 : runtime.rendering.processingZDomainDynamics;
             if (isProcessing) {
                 ctx.filter = 'blur(3px)';
             }
-
-            const stale = getStaleDomainData(isWPlane);
-            const curRanges = getPlaneRanges(planeParams);
-            const curW = planeParams.width;
-            const curH = planeParams.height;
-            const curSig = getCurrentFuncSignature(isWPlane);
-            const hasValidStale = !!(stale && stale.canvas && stale.viewport && stale.signature === curSig && curRanges);
-
-            if (hasValidStale) {
-                const oldVp = stale.viewport;
-                const oldX0 = oldVp.xRange[0];
-                const oldX1 = oldVp.xRange[1];
-                const oldY0 = oldVp.yRange[0];
-                const oldY1 = oldVp.yRange[1];
-
-                const curX0 = curRanges.xMin;
-                const curX1 = curRanges.xMax;
-                const curY0 = curRanges.yMin;
-                const curY1 = curRanges.yMax;
-
-                if (Number.isFinite(oldX0) && Number.isFinite(curX0)) {
-                    const destX = ((oldX0 - curX0) / (curX1 - curX0)) * curW;
-                    const destY = ((curY1 - oldY1) / (curY1 - curY0)) * curH;
-                    const destW = ((oldX1 - oldX0) / (curX1 - curX0)) * curW;
-                    const destH = ((oldY1 - oldY0) / (curY1 - curY0)) * curH;
-
-                    ctx.imageSmoothingEnabled = true;
-                    if (ctx.imageSmoothingQuality !== undefined) {
-                        ctx.imageSmoothingQuality = 'high';
-                    }
-                    ctx.drawImage(stale.canvas, destX, destY, destW, destH);
-                }
-            } else {
-                ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
-                ctx.fillRect(0, 0, curW, curH);
-            }
-
-            if (!isProcessing || !hasValidStale) {
-                ctx.drawImage(domainCanvas, 0, 0);
-            }
-        } finally {
-            ctx.restore();
-        }
+            fillCanvasBackground(ctx, planeParams);
+            ctx.drawImage(domainCanvas, 0, 0);
+        });
         return;
     }
 
@@ -739,58 +643,6 @@ function drawWOriginGlowOverlay(ctx, planeParams) {
     });
 }
 
-function renderFirstSignalMode(renderers, ctx, planeParams, planeKey) {
-    const renderer = renderers.find(candidate => candidate.enabled());
-
-    if (!renderer) {
-        return false;
-    }
-
-    drawPlaneLayer(ctx, planeParams, planeKey, layerCtx => {
-        renderer.draw(layerCtx, renderer.signal(), planeParams);
-    }, 'raster');
-
-    return true;
-}
-
-function refreshZPlanarDomainColoring(map) {
-    if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCtx) {
-        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams, false, map);
-    }
-}
-
-function renderZSphere() {
-    const sphereParams = sphereViewParams.z;
-
-    drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
-        fillCanvasBackground(layerCtx, zPlaneParams);
-    }, 'raster');
-
-    drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
-        drawRiemannSphereBase(layerCtx, sphereParams);
-        drawSphereGridAndShape(layerCtx, sphereParams, false);
-        drawDynamicSphere(layerCtx, sphereParams, { isWPlane: false });
-
-        if (state.probeActive) {
-            drawSphereProbeAndNeighborhood(
-                layerCtx,
-                sphereParams,
-                state.probeZ,
-                state.probeNeighborhoodSize,
-                null
-            );
-        }
-    }, 'capture');
-}
-
-function shouldDrawZReferenceGrid() {
-    return !state.domainColoringEnabled
-        && !state.navigationModeEnabled
-        && !state.vectorFieldEnabled
-        && !state.streamlineFlowEnabled
-        && state.currentInputShape !== 'empty_grid';
-}
-
 function visiblePlaneRange(planeParams, currentKey, fallbackKey) {
     const range = planeParams?.[currentKey] || planeParams?.[fallbackKey];
     return Array.isArray(range) && range.length >= 2 ? range : [-1, 1];
@@ -800,7 +652,7 @@ function getConformalIndicatrixData(map) {
     const xRange = visiblePlaneRange(zPlaneParams, 'currentVisXRange', 'xRange');
     const yRange = visiblePlaneRange(zPlaneParams, 'currentVisYRange', 'yRange');
     const key = [
-        map.signature || getCurrentFuncSignature(),
+        map.signature,
         state.gridDensity,
         xRange[0], xRange[1],
         yRange[0], yRange[1]
@@ -812,236 +664,174 @@ function getConformalIndicatrixData(map) {
             generateTissotIndicatrices(map, xRange, yRange, state.gridDensity, 72)
         );
     }
-
     return conformalIndicatrixCache.value;
 }
 
-function renderZPlanarBackground(map) {
-    refreshZPlanarDomainColoring(map);
-
-    drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
-        drawDomainOrSolidBackground(layerCtx, zDomainColorCanvas, zPlaneParams);
-        drawAxes(layerCtx, zPlaneParams, 'Re(z)', 'Im(z)');
-        drawZetaUndefinedRegionOverlay(layerCtx, zPlaneParams);
-
-        if (shouldDrawZReferenceGrid()) {
-            drawGrid(layerCtx, zPlaneParams, {
-                targetCount: state.gridDensity,
-                minorColor: 'rgba(128, 137, 255, 0.04)',
-                majorColor: 'rgba(128, 137, 255, 0.12)'
-            });
-        }
-    }, 'raster');
-}
-
 function renderZPlaneFlowLayer(targetCtx, planeParams, map, cacheMeta = null) {
-    if (state.streamlineFlowEnabled) {
-        let complete = true;
-        const streamOptions = {
+    if (!state.streamlineFlowEnabled) {
+        drawZPlaneVectorField(targetCtx, planeParams, map);
+        return true;
+    }
+
+    let complete = true;
+    const rendered = drawPlaneLayer(targetCtx, planeParams, 'z', layerCtx => {
+        complete = drawStreamlinesOnZPlane(layerCtx, planeParams, state, map, {
             cacheKey: cacheMeta?.cacheKey || null,
             fresh: cacheMeta ? !!cacheMeta.fresh : true
-        };
-        const rendered = drawPlaneLayer(targetCtx, planeParams, 'z', layerCtx => {
-            complete = drawStreamlinesOnZPlane(layerCtx, planeParams, state, map, streamOptions) !== false;
-        }, 'capture');
-
-        return rendered && complete;
-    }
-
-    drawZPlaneVectorField(targetCtx, planeParams, map);
-    return true;
-}
-
-function renderZFlowContent(map) {
-    invalidateCache(zPlanarInputLayerCache);
-
-    renderThroughCache({
-        cache: zFlowLayerCache,
-        targetCtx: zCtx,
-        planeParams: zPlaneParams,
-        cacheKey: buildZFlowLayerCacheKey(),
-        enabled: shouldUseZFlowLayerCache(),
-        render: (cacheCtx, cacheMeta) => renderZPlaneFlowLayer(cacheCtx, zPlaneParams, map, cacheMeta),
-        renderDirect: (targetCtx, cacheMeta) => renderZPlaneFlowLayer(targetCtx, zPlaneParams, map, cacheMeta)
+        }) !== false;
     });
-}
-
-function renderZNavigationContent() {
-    invalidateCache(zFlowLayerCache);
-    invalidateCache(zPlanarInputLayerCache);
-    drawNavigationLayer(zCtx, zPlaneParams, 'z');
-}
-
-function renderZPlanarInputShape() {
-    invalidateCache(zFlowLayerCache);
-
-    renderThroughCache({
-        cache: zPlanarInputLayerCache,
-        targetCtx: zCtx,
-        planeParams: zPlaneParams,
-        cacheKey: buildPlanarLayerCacheKey(false),
-        enabled: shouldUseZPlanarInputLayerCache(),
-        render: cacheCtx => drawPlanarInputShapeHybrid(cacheCtx, zPlaneParams, 'z')
-    });
-}
-
-function renderZPlanarInputOverlays() {
-    drawLayerWhen(
-        state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare',
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawPlanarInputOverlays(layerCtx, zPlaneParams),
-        'raster'
-    );
-}
-
-function renderZGraphSelectionOverlay() {
-    drawLayerWhen(
-        state.graphViewEnabled,
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawGraphSelectionOverlay(layerCtx, zPlaneParams),
-        'raster'
-    );
-}
-
-function renderZConformalIndicatrices(map) {
-    if (!state.conformalGridEnabled) return;
-
-    const indicatrices = getConformalIndicatrixData(map);
-    drawPlaneLayer(
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawConformalIndicatrices(
-            layerCtx,
-            zPlaneParams,
-            indicatrices,
-            'source'
-        ),
-        'capture'
-    );
-}
-
-function renderZPrimaryPlanarContent(map) {
-    if (state.navigationModeEnabled) {
-        renderZNavigationContent();
-        return;
-    }
-
-    if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
-        renderZFlowContent(map);
-        return;
-    }
-
-    renderZPlanarInputShape();
-    renderZPlanarInputOverlays();
+    return rendered && complete;
 }
 
 function drawCriticalMarkers(ctx, planeParams, points, color) {
-    asArray(points).forEach(point => {
-        if (!isFiniteComplex(point)) {
-            return;
-        }
-
-        const canvasPoint = mapToCanvasCoords(point.re, point.im, planeParams);
-        drawCriticalPointMarker(ctx, canvasPoint, color);
-    });
-}
-
-function renderZMarkers() {
-    const canDrawMarkers = !state.navigationModeEnabled;
-
-    drawLayerWhen(
-        state.showZerosPoles && canDrawMarkers,
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawZerosAndPolesMarkers(layerCtx, zPlaneParams),
-        'capture'
-    );
-
-    drawLayerWhen(
-        state.showCriticalPoints && canDrawMarkers && asArray(state.criticalPoints).length > 0,
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawCriticalMarkers(layerCtx, zPlaneParams, state.criticalPoints, COLOR_CRITICAL_POINT_Z),
-        'capture'
-    );}
-
-function renderZTaylorOverlay() {
-    drawLayerWhen(
-        state.taylorSeriesEnabled && !state.navigationModeEnabled,
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawTaylorConvergenceOverlay(layerCtx, zPlaneParams),
-        'raster'
-    );
-}
-
-function renderZProbeOverlay() {
-    drawLayerWhen(
-        state.probeActive && !state.navigationModeEnabled && !isPanning(runtime.interaction.panZ),
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawPlanarProbe(layerCtx, zPlaneParams),
-        'capture'
-    );
-}
-
-function renderZParticles(map, timestamp) {
-    if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
-        runtime.particlesLastUpdateTime = null;
+    if (!Array.isArray(points)) return;
+    for (let index = 0; index < points.length; index += 1) {
+        const point = points[index];
+        if (!isFiniteComplex(point)) continue;
+        drawCriticalPointMarker(ctx, mapToCanvasCoords(point.re, point.im, planeParams), color);
     }
-    drawLayerWhen(
-        state.particleAnimationEnabled && !state.navigationModeEnabled,
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => updateAndDrawParticles(layerCtx, zPlaneParams, state, map, timestamp),
-        'raster'
-    );
-}
-
-function renderZPlanar(map, timestamp) {
-    renderZPlanarBackground(map);
-    renderZPrimaryPlanarContent(map);
-    drawLayerWhen(
-        state.dynamicPlotting?.enabled,
-        zCtx,
-        zPlaneParams,
-        'z',
-        layerCtx => drawDynamicZPlane(layerCtx, zPlaneParams),
-        'raster'
-    );
-    renderZMarkers();
-    renderZGraphSelectionOverlay();
-    renderZConformalIndicatrices(map);
-    renderZTaylorOverlay();
-    renderZProbeOverlay();
-    renderZParticles(map, timestamp);
 }
 
 export function drawZPlaneContent(timestamp) {
-    syncRenderContext();
+    syncZRenderContext();
 
-    if (renderFirstSignalMode(Z_SIGNAL_RENDERERS, zCtx, zPlaneParams, 'z')) {
+    if (state.fourierModeEnabled) {
+        if (zCtx && zPlaneParams) drawTimeDomainSignal(zCtx, state.fourierTimeDomainSignal, zPlaneParams);
+        return;
+    }
+    if (state.laplaceModeEnabled) {
+        if (zCtx && zPlaneParams) drawLaplaceTimeDomain(zCtx, state.laplaceTimeDomainSignal, zPlaneParams);
         return;
     }
 
     const map = resolveActiveMap();
-
     if (state.riemannSphereViewEnabled && !state.splitViewEnabled) {
-        renderZSphere();
+        if (!zCtx || !zPlaneParams) return;
+        const sphereParams = sphereViewParams.z;
+        fillCanvasBackground(zCtx, zPlaneParams);
+        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+            drawRiemannSphereBase(layerCtx, sphereParams);
+            drawSphereGridAndShape(layerCtx, sphereParams, false);
+            drawDynamicSphere(layerCtx, sphereParams, { isWPlane: false });
+            if (state.probeActive) {
+                drawSphereProbeAndNeighborhood(
+                    layerCtx,
+                    sphereParams,
+                    state.probeZ,
+                    state.probeNeighborhoodSize,
+                    null
+                );
+            }
+        });
         return;
     }
 
-    renderZPlanar(map, timestamp);
+    if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCtx) {
+        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams, false, map);
+    }
+    if (!zCtx || !zPlaneParams) {
+        if (state.navigationModeEnabled) {
+            invalidateCache(zFlowLayerCache);
+            invalidateCache(zPlanarInputLayerCache);
+            drawNavigationLayer(zCtx, zPlaneParams, 'z');
+        } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
+            invalidateCache(zPlanarInputLayerCache);
+            buildZFlowLayerCacheKey();
+        } else {
+            invalidateCache(zFlowLayerCache);
+            buildPlanarLayerCacheKey(false);
+        }
+        if (state.conformalGridEnabled) getConformalIndicatrixData(map);
+        if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
+            runtime.particlesLastUpdateTime = null;
+        }
+        return;
+    }
+
+    drawDomainOrSolidBackground(zCtx, zDomainColorCanvas, zPlaneParams);
+    drawAxes(zCtx, zPlaneParams, 'Re(z)', 'Im(z)');
+    drawZetaUndefinedRegionOverlay(zCtx, zPlaneParams);
+    if (!state.domainColoringEnabled
+        && !state.navigationModeEnabled
+        && !state.vectorFieldEnabled
+        && !state.streamlineFlowEnabled
+        && state.currentInputShape !== 'empty_grid') {
+        drawGrid(zCtx, zPlaneParams, {
+            targetCount: state.gridDensity,
+            minorColor: 'rgba(128, 137, 255, 0.04)',
+            majorColor: 'rgba(128, 137, 255, 0.12)'
+        });
+    }
+
+    if (state.navigationModeEnabled) {
+        invalidateCache(zFlowLayerCache);
+        invalidateCache(zPlanarInputLayerCache);
+        drawNavigationLayer(zCtx, zPlaneParams, 'z');
+    } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
+        invalidateCache(zPlanarInputLayerCache);
+        const cacheKey = buildZFlowLayerCacheKey();
+        renderThroughCache(
+            zFlowLayerCache,
+            zCtx,
+            zPlaneParams,
+            cacheKey,
+            shouldUseZFlowLayerCache(),
+            (targetCtx, key, fresh) => renderZPlaneFlowLayer(
+                targetCtx,
+                zPlaneParams,
+                map,
+                { cacheKey: key, fresh }
+            )
+        );
+    } else {
+        invalidateCache(zFlowLayerCache);
+        renderThroughCache(
+            zPlanarInputLayerCache,
+            zCtx,
+            zPlaneParams,
+            buildPlanarLayerCacheKey(false),
+            shouldUseZPlanarInputLayerCache(),
+            cacheCtx => drawPlanarInputShapeHybrid(cacheCtx, zPlaneParams, 'z')
+        );
+        if (state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare') {
+            drawPlanarInputOverlays(zCtx, zPlaneParams);
+        }
+    }
+
+    if (state.dynamicPlotting?.enabled) drawDynamicZPlane(zCtx, zPlaneParams);
+    if (!state.navigationModeEnabled) {
+        if (state.showZerosPoles) {
+            drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+                drawZerosAndPolesMarkers(layerCtx, zPlaneParams);
+            });
+        }
+        if (state.showCriticalPoints && state.criticalPoints?.length) {
+            drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+                drawCriticalMarkers(layerCtx, zPlaneParams, state.criticalPoints, COLOR_CRITICAL_POINT_Z);
+            });
+        }
+    }
+    if (state.graphViewEnabled) drawGraphSelectionOverlay(zCtx, zPlaneParams);
+    if (state.conformalGridEnabled) {
+        const indicatrices = getConformalIndicatrixData(map);
+        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+            drawConformalIndicatrices(layerCtx, zPlaneParams, indicatrices, 'source');
+        });
+    }
+    if (state.taylorSeriesEnabled && !state.navigationModeEnabled) {
+        drawTaylorConvergenceOverlay(zCtx, zPlaneParams);
+    }
+    if (state.probeActive && !state.navigationModeEnabled && !isPanning(runtime.interaction.panZ)) {
+        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+            drawPlanarProbe(layerCtx, zPlaneParams);
+        });
+    }
+
+    if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
+        runtime.particlesLastUpdateTime = null;
+    } else {
+        updateAndDrawParticles(zCtx, zPlaneParams, state, map, timestamp);
+    }
 }
 
 function ensureWPlaneCache(index) {
@@ -1052,16 +842,32 @@ function ensureWPlaneCache(index) {
     return wPlanarTransformedLayerCacheList[index];
 }
 
-// Multi-W-plane rendering temporarily rebinds module-scoped variables; finally restores them.
-function withWPlaneScope(index, render) {
-    const previous = {
-        canvas: wCanvas,
-        ctx: wCtx,
-        params: wPlaneParams,
-        threeContainer: controls.wPlaneThreeContainer,
-        sphereParams: sphereViewParams.w,
-        cache: wPlanarTransformedLayerCache
-    };
+function setWThreeHidden(hidden) {
+    const container = controls.wPlaneThreeContainer;
+    container?.classList?.toggle('hidden', hidden);
+    if (hidden) wStaticThreeRenderers.get(container)?.stopAnimationLoop();
+}
+
+function setWPresentation(mode) {
+    wCanvas?.classList?.toggle('hidden', mode !== 'canvas');
+    setWThreeHidden(mode !== 'three');
+    if (mode === 'three') {
+        const container = controls.wPlaneThreeContainer;
+        if (container?.style && wPlaneParams?.width && wPlaneParams?.height) {
+            container.style.width = `${wPlaneParams.width}px`;
+            container.style.height = `${wPlaneParams.height}px`;
+        }
+    }
+}
+
+// A scalar scope keeps multi-plane rendering re-entrant without allocating closure/context objects.
+function renderSingleWPlane(index, map, isSpecialMode, options) {
+    const previousCanvas = wCanvas;
+    const previousCtx = wCtx;
+    const previousParams = wPlaneParams;
+    const previousThreeContainer = controls.wPlaneThreeContainer;
+    const previousSphereParams = sphereViewParams.w;
+    const previousCache = wPlanarTransformedLayerCache;
 
     wCanvas = wCanvasList?.[index];
     wCtx = wCtxList?.[index];
@@ -1071,85 +877,126 @@ function withWPlaneScope(index, render) {
     wPlanarTransformedLayerCache = ensureWPlaneCache(index);
 
     try {
-        return render();
+        if (!wCtx || !wPlaneParams) return;
+        if (isSpecialMode) {
+            hideRiemannSurface(wCanvas);
+            setWPresentation('canvas');
+            if (state.fourierModeEnabled) {
+                drawWindingVisualization(wCtx, state.fourierTimeDomainSignal, wPlaneParams);
+            } else if (state.laplaceModeEnabled) {
+                drawLaplaceWindingVisualization(wCtx, state.laplaceTimeDomainSignal, wPlaneParams);
+            }
+            return;
+        }
+        if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) return;
+        if (state.riemannTransformationEnabled) {
+            setWPresentation('hidden');
+            return;
+        }
+        if (state.foldSurface3dEnabled) {
+            if (isRasterInputShape(state.currentInputShape)) {
+                renderThreeWRasterSurface(map, index);
+                return;
+            }
+            if (isGridInputShape(state.currentInputShape)) {
+                renderThreeWGridFold(map);
+                return;
+            }
+        }
+
+        const isRiemannW = state.riemannSphereViewEnabled || state.splitViewEnabled;
+        if (state.threeSphereEnabled && isRiemannW) {
+            renderThreeWPlane(map, index);
+            return;
+        }
+
+        setWPresentation('canvas');
+        if (!isRiemannW) {
+            fillCanvasBackground(wCtx, wPlaneParams);
+            drawAxes(wCtx, wPlaneParams, 'Re(w)', 'Im(w)');
+            drawPolynomialOriginMarkerOverlay(wCtx, wPlaneParams);
+            drawWOriginGlowOverlay(wCtx, wPlaneParams);
+            if (!state.navigationModeEnabled && state.currentInputShape !== 'empty_grid') {
+                drawGrid(wCtx, wPlaneParams, {
+                    targetCount: state.gridDensity,
+                    minorColor: 'rgba(128, 137, 255, 0.04)',
+                    majorColor: 'rgba(128, 137, 255, 0.12)'
+                });
+            }
+        }
+
+        if (state.taylorSeriesEnabled
+            && map.presentation !== 'derivative'
+            && !isRiemannW
+            && !state.navigationModeEnabled) {
+            const cacheKey = buildPlanarLayerCacheKey(true);
+            renderThroughCache(
+                wPlanarTransformedLayerCache,
+                wCtx,
+                wPlaneParams,
+                cacheKey,
+                shouldUseWPlanarTransformedLayerCache(),
+                drawTaylorApproximationLayer,
+                targetCtx => drawPlaneLayer(targetCtx, wPlaneParams, 'w', drawTaylorApproximationLayer)
+            );
+        } else if (isRiemannW) {
+            const sphereParams = sphereViewParams.w;
+            fillCanvasBackground(wCtx, wPlaneParams);
+            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+                drawRiemannSphereBase(layerCtx, sphereParams);
+                drawSphereGridAndShape(layerCtx, sphereParams, true, map.evaluate);
+                drawDynamicSphere(layerCtx, sphereParams, {
+                    isWPlane: true,
+                    transform: map.evaluate,
+                    stageIndex: index
+                });
+            });
+        } else {
+            renderWPlanarTransformedShape(index, map);
+        }
+
+        if (!isRiemannW && state.dynamicPlotting?.enabled) {
+            drawDynamicWPlane(wCtx, wPlaneParams, map.evaluate, index);
+        }
+        if (state.showCriticalPoints
+            && !state.navigationModeEnabled
+            && !isRiemannW
+            && Array.isArray(state.criticalValues)
+            && state.criticalValues.length > 0) {
+            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+                drawCriticalMarkers(layerCtx, wPlaneParams, state.criticalValues, COLOR_CRITICAL_VALUE_W);
+            });
+        }
+        if (state.probeActive && !state.navigationModeEnabled) {
+            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+                if (isRiemannW) {
+                    drawSphereProbeAndNeighborhood(
+                        layerCtx,
+                        sphereViewParams.w,
+                        state.probeZ,
+                        state.probeNeighborhoodSize,
+                        map.evaluate
+                    );
+                } else {
+                    drawPlanarTransformedProbe(layerCtx, wPlaneParams, map);
+                }
+            });
+        }
+        if (state.conformalGridEnabled && !isRiemannW) {
+            const indicatrices = getConformalIndicatrixData(map);
+            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+                drawConformalIndicatrices(layerCtx, wPlaneParams, indicatrices, 'mapped');
+            });
+        }
+        if (!isRiemannW && index === 0) updateWindingNumberDisplay(map.evaluate);
     } finally {
-        wCanvas = previous.canvas;
-        wCtx = previous.ctx;
-        wPlaneParams = previous.params;
-        controls.wPlaneThreeContainer = previous.threeContainer;
-        sphereViewParams.w = previous.sphereParams;
-        wPlanarTransformedLayerCache = previous.cache;
+        wCanvas = previousCanvas;
+        wCtx = previousCtx;
+        wPlaneParams = previousParams;
+        controls.wPlaneThreeContainer = previousThreeContainer;
+        sphereViewParams.w = previousSphereParams;
+        wPlanarTransformedLayerCache = previousCache;
     }
-}
-
-function hasWPlaneTargets() {
-    return [wCanvasList, wCtxList, wPlaneParamsList].every(Array.isArray)
-        && wCanvasList.length > 0;
-}
-
-function setHidden(element, hidden) {
-    if (element?.classList) {
-        element.classList[hidden ? 'add' : 'remove']('hidden');
-    }
-}
-
-function showCanvas(canvas) {
-    setHidden(canvas, false);
-}
-
-function hideCanvas(canvas) {
-    setHidden(canvas, true);
-}
-
-function showThreeContainer() {
-    setHidden(controls.wPlaneThreeContainer, false);
-}
-
-function hideThreeContainer() {
-    setHidden(controls.wPlaneThreeContainer, true);
-    wStaticThreeRenderers.get(controls.wPlaneThreeContainer)?.stopAnimationLoop();
-}
-
-function setThreeContainerSize() {
-    const container = controls.wPlaneThreeContainer;
-
-    if (!container?.style || !wPlaneParams?.width || !wPlaneParams?.height) {
-        return;
-    }
-
-    container.style.width = `${wPlaneParams.width}px`;
-    container.style.height = `${wPlaneParams.height}px`;
-}
-
-function getWPlaneRenderCount() {
-    if (!state.chainingEnabled) {
-        return 1;
-    }
-
-    const available = wCanvasList?.length || 0;
-    const requested = Number.isFinite(state.chainCount) ? state.chainCount : 0;
-
-    return Math.max(0, Math.min(requested, available));
-}
-
-function* iterWPlaneTransforms() {
-    const count = getWPlaneRenderCount();
-
-    if (state.chainingEnabled && state.chainCount > 25) {
-        yield [0, resolveActiveMap(Math.max(0, state.chainCount - 1))];
-        return;
-    }
-
-    for (let index = 0; index < count; index += 1) {
-        yield [index, resolveActiveMap(index)];
-    }
-}
-
-function renderSpecialWPlaneMode() {
-    hideRiemannSurface(wCanvas);
-    showCanvas(wCanvas);
-    hideThreeContainer();
-    renderFirstSignalMode(W_SIGNAL_RENDERERS, wCtx, wPlaneParams, 'w');
 }
 
 function renderRiemannSurfaceIfEnabled(index, map, enabled) {
@@ -1158,7 +1005,7 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
         return false;
     }
 
-    hideThreeContainer();
+    setWThreeHidden(true);
     if (!enabled) return true;
 
     const stage = state.chainingEnabled && state.chainCount > 25
@@ -1166,25 +1013,22 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
         : index + 1;
     context.riemannSurfaceContourPipeline = { index, stage, map };
     if (wCanvas && renderRiemannSurface(wCanvas, { stage, map })) {
-        hideCanvas(wCanvas);
+        wCanvas?.classList?.toggle('hidden', true);
         return true;
     }
 
-    showCanvas(wCanvas);
+    wCanvas?.classList?.toggle('hidden', false);
     return false;
 }
 
 function prepareThreeWRenderer() {
     const container = controls.wPlaneThreeContainer;
     if (!container) {
-        showCanvas(wCanvas);
+        wCanvas?.classList?.toggle('hidden', false);
         return null;
     }
 
-    hideCanvas(wCanvas);
-    showThreeContainer();
-    setThreeContainerSize();
-
+    setWPresentation('three');
     let renderer = wStaticThreeRenderers.get(container);
     if (!renderer) {
         renderer = new ThreeRiemannRenderer(container, 'w');
@@ -1211,22 +1055,21 @@ function renderThreeWPlane(map, stageIndex) {
     });
     const gridConfigKey = `${map.signature}:${JSON.stringify(gridConfigObj)}`;
 
-    if (threeRenderer.lastGridConfigKey !== gridConfigKey) {
-        // Skip rebuilding heavy 3D geometries continuously during 2D canvas drag-panning
-        if (runtime.interaction.panZ.isPanning || runtime.interaction.panW.isPanning) {
-            // We'll catch it on the pointerup event which triggers a redraw
-        } else {
-            threeRenderer.lastGridConfigKey = gridConfigKey;
+    // Skip rebuilding heavy 3D geometries continuously during 2D canvas drag-panning.
+    // The pointerup redraw will rebuild any stale geometry.
+    if (threeRenderer.lastGridConfigKey !== gridConfigKey
+        && !runtime.interaction.panZ.isPanning
+        && !runtime.interaction.panW.isPanning) {
+        threeRenderer.lastGridConfigKey = gridConfigKey;
 
-            const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
-                currentFunction: state.currentFunction,
-                zetaContinuationEnabled: state.zetaContinuationEnabled,
-                curvePoints: 250,
-                gridDensity: state.gridDensity
-            });
+        const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
+            currentFunction: state.currentFunction,
+            zetaContinuationEnabled: state.zetaContinuationEnabled,
+            curvePoints: 250,
+            gridDensity: state.gridDensity
+        });
 
-            threeRenderer.buildGridFromPointSets(wPointSets, 1.0);
-        }
+        threeRenderer.buildGridFromPointSets(wPointSets, 1.0);
     }
 
     const geometryChanged = threeRenderer.updateGeometry(1.0);
@@ -1253,8 +1096,7 @@ function renderThreeWRasterSurface(map, stageIndex) {
     const source = getRasterSourceForShape(rasterShape);
 
     if (!source) {
-        showCanvas(wCanvas);
-        hideThreeContainer();
+        setWPresentation('canvas');
         return;
     }
 
@@ -1294,8 +1136,7 @@ function renderThreeWRasterSurface(map, stageIndex) {
         state.foldSurfaceHeightScale
     )) {
         threeRenderer.rasterSurfaceKey = null;
-        showCanvas(wCanvas);
-        hideThreeContainer();
+        setWPresentation('canvas');
         return;
     }
 
@@ -1338,35 +1179,11 @@ function renderThreeWGridFold(map) {
 
     if (!threeRenderer.setGridFoldSurface(surface, state.foldSurfaceHeightScale)) {
         threeRenderer.gridFoldSurfaceKey = null;
-        showCanvas(wCanvas);
-        hideThreeContainer();
+        setWPresentation('canvas');
         return;
     }
 
     threeRenderer.render();
-}
-
-function shouldDrawWReferenceGrid() {
-    return !state.navigationModeEnabled
-        && state.currentInputShape !== 'empty_grid';
-}
-
-function renderWPlanarBackground() {
-    drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
-        fillCanvasBackground(layerCtx, wPlaneParams);
-
-        drawAxes(layerCtx, wPlaneParams, 'Re(w)', 'Im(w)');
-        drawPolynomialOriginMarkerOverlay(layerCtx, wPlaneParams);
-        drawWOriginGlowOverlay(layerCtx, wPlaneParams);
-
-        if (shouldDrawWReferenceGrid()) {
-            drawGrid(layerCtx, wPlaneParams, {
-                targetCount: state.gridDensity,
-                minorColor: 'rgba(128, 137, 255, 0.04)',
-                majorColor: 'rgba(128, 137, 255, 0.12)'
-            });
-        }
-    }, 'raster');
 }
 
 function drawTaylorApproximationLayer(ctx) {
@@ -1382,38 +1199,6 @@ function drawTaylorApproximationLayer(ctx) {
     );
 }
 
-function renderWTaylorApproximation() {
-    renderThroughCache({
-        cache: wPlanarTransformedLayerCache,
-        targetCtx: wCtx,
-        planeParams: wPlaneParams,
-        cacheKey: buildPlanarLayerCacheKey(true),
-        enabled: shouldUseWPlanarTransformedLayerCache(),
-        render: drawTaylorApproximationLayer,
-        renderDirect: targetCtx => {
-            drawPlaneLayer(targetCtx, wPlaneParams, 'w', drawTaylorApproximationLayer, 'capture');
-        }
-    });
-}
-
-function renderWCanvasRiemannSphere(map, index) {
-    const sphereParams = sphereViewParams.w;
-
-    drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
-        fillCanvasBackground(layerCtx, wPlaneParams);
-    }, 'raster');
-
-    drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
-        drawRiemannSphereBase(layerCtx, sphereParams);
-        drawSphereGridAndShape(layerCtx, sphereParams, true, map.evaluate);
-        drawDynamicSphere(layerCtx, sphereParams, {
-            isWPlane: true,
-            transform: map.evaluate,
-            stageIndex: index
-        });
-    }, 'capture');
-}
-
 function drawWTransformedShape(index, map, targetCtx, options = null) {
     const stageIndex = Number.isFinite(map?.stage) ? map.stage : index;
     const drawOptions = { ...options, index: stageIndex, map };
@@ -1425,10 +1210,10 @@ function drawWTransformedShape(index, map, targetCtx, options = null) {
     return drawPlanarTransformedShape(targetCtx, wPlaneParams, map.evaluate, drawOptions);
 }
 
-function drawWTransformedShapeChunk(index, map, targetCtx, cacheMeta) {
+function drawWTransformedShapeChunk(index, map, targetCtx, fresh) {
     const cache = wPlanarTransformedLayerCache;
 
-    if (cacheMeta.fresh || !cache.renderJob) {
+    if (fresh || !cache.renderJob) {
         cache.renderJob = createPlanarTransformedShapeRenderJob(map.evaluate, map);
         cache.nextPointSet = 0;
     }
@@ -1477,171 +1262,45 @@ function renderWPlanarTransformedShape(index, map) {
         return;
     }
 
-    const complete = renderThroughCache({
-        cache: wPlanarTransformedLayerCache,
-        targetCtx: wCtx,
-        planeParams: wPlaneParams,
-        cacheKey: buildPlanarLayerCacheKey(true),
-        enabled: shouldUseWPlanarTransformedLayerCache(),
-        render: (cacheCtx, cacheMeta) => drawWTransformedShapeChunk(index, map, cacheCtx, cacheMeta),
-        renderDirect: targetCtx => drawWTransformedShape(index, map, targetCtx)
-    });
-
+    const cacheKey = buildPlanarLayerCacheKey(true);
+    const enabled = shouldUseWPlanarTransformedLayerCache();
+    const complete = renderThroughCache(
+        wPlanarTransformedLayerCache,
+        wCtx,
+        wPlaneParams,
+        cacheKey,
+        enabled,
+        (cacheCtx, _cacheKey, fresh) => drawWTransformedShapeChunk(index, map, cacheCtx, fresh),
+        targetCtx => drawWTransformedShape(index, map, targetCtx)
+    );
     if (!complete) requestRedrawAll();
 }
 
-function renderWPrimaryContent(index, map, isRiemannW) {
-    if (state.taylorSeriesEnabled && map.presentation !== 'derivative' && !isRiemannW && !state.navigationModeEnabled) {
-        renderWTaylorApproximation();
-        return;
-    }
-
-    if (isRiemannW) {
-        renderWCanvasRiemannSphere(map, index);
-        return;
-    }
-
-    renderWPlanarTransformedShape(index, map);
-}
-
-function renderWCriticalValueMarkers(isRiemannW) {
-    drawLayerWhen(
-        state.showCriticalPoints
-            && !state.navigationModeEnabled
-            && !isRiemannW
-            && asArray(state.criticalValues).length > 0,
-        wCtx,
-        wPlaneParams,
-        'w',
-        layerCtx => drawCriticalMarkers(layerCtx, wPlaneParams, state.criticalValues, COLOR_CRITICAL_VALUE_W),
-        'capture'
-    );
-}
-
-function renderWProbe(map, index, isRiemannW) {
-    if (!state.probeActive || state.navigationModeEnabled) {
-        return;
-    }
-
-    if (isRiemannW) {
-        drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
-            drawSphereProbeAndNeighborhood(
-                layerCtx,
-                sphereViewParams.w,
-                state.probeZ,
-                state.probeNeighborhoodSize,
-                map.evaluate
-            );
-        }, 'capture');
-
-        return;
-    }
-
-    drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
-        drawPlanarTransformedProbe(layerCtx, wPlaneParams, map);
-    }, 'capture');
-}
-
-function renderWCommonOverlays(index, map, isRiemannW) {
-    if (!isRiemannW && state.dynamicPlotting?.enabled) {
-        drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
-            drawDynamicWPlane(layerCtx, wPlaneParams, map.evaluate, index);
-        }, 'raster');
-    }
-
-    renderWCriticalValueMarkers(isRiemannW);
-    renderWProbe(map, index, isRiemannW);
-
-    if (state.conformalGridEnabled && !isRiemannW) {
-        const indicatrices = getConformalIndicatrixData(map);
-        drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
-            drawConformalIndicatrices(
-                layerCtx,
-                wPlaneParams,
-                indicatrices,
-                'mapped'
-            );
-        }, 'capture');
-    }
-
-    if (!isRiemannW && index === 0) {
-        updateWindingNumberDisplay(map.evaluate);
-    }
-}
-
-function renderNormalWPlane(index, map, options) {
-    if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) {
-        return;
-    }
-
-    if (state.riemannTransformationEnabled) {
-        hideCanvas(wCanvas);
-        hideThreeContainer();
-        return;
-    }
-
-    if (state.foldSurface3dEnabled) {
-        if (isRasterInputShape(state.currentInputShape)) {
-            renderThreeWRasterSurface(map, index);
-            return;
-        }
-        if (isGridInputShape(state.currentInputShape)) {
-            renderThreeWGridFold(map);
-            return;
-        }
-    }
-
-    const isRiemannW = state.riemannSphereViewEnabled || state.splitViewEnabled;
-
-    if (state.threeSphereEnabled && isRiemannW) {
-        renderThreeWPlane(map, index);
-        return;
-    }
-
-    showCanvas(wCanvas);
-    hideThreeContainer();
-
-    if (!isRiemannW) {
-        renderWPlanarBackground();
-    }
-
-    renderWPrimaryContent(index, map, isRiemannW);
-    renderWCommonOverlays(index, map, isRiemannW);
-}
-
-function _renderSingleWPlaneMode(index, curFunc, isSpecialMode, options) {
-    withWPlaneScope(index, () => {
-        if (!wCtx || !wPlaneParams) {
-            return;
-        }
-
-        if (isSpecialMode) {
-            renderSpecialWPlaneMode();
-            return;
-        }
-
-        renderNormalWPlane(index, curFunc, options);
-    });
-}
-
 export function drawWPlaneContent(options = {}) {
-    syncRenderContext();
+    syncWRenderContext();
     context.riemannSurfaceContourPipeline = null;
     wPlanarRenderDeadline = performance.now() + W_PLANAR_FRAME_BUDGET_MS;
     wPlanarWorkPerformed = false;
 
     try {
-        if (!hasWPlaneTargets()) {
-            return;
-        }
-
+        if (!Array.isArray(wCanvasList)
+            || !Array.isArray(wCtxList)
+            || !Array.isArray(wPlaneParamsList)
+            || wCanvasList.length === 0) return;
         if (state.fourierModeEnabled || state.laplaceModeEnabled) {
-            _renderSingleWPlaneMode(0, null, true, options);
+            renderSingleWPlane(0, null, true, options);
+            return;
+        }
+        if (state.chainingEnabled && state.chainCount > 25) {
+            renderSingleWPlane(0, resolveActiveMap(Math.max(0, state.chainCount - 1)), false, options);
             return;
         }
 
-        for (const [index, transform] of iterWPlaneTransforms()) {
-            _renderSingleWPlaneMode(index, transform, false, options);
+        const available = wCanvasList.length;
+        const requested = Number.isFinite(state.chainCount) ? state.chainCount : 0;
+        const count = state.chainingEnabled ? Math.max(0, Math.min(requested, available)) : 1;
+        for (let index = 0; index < count; index += 1) {
+            renderSingleWPlane(index, resolveActiveMap(index), false, options);
         }
     } finally {
         wPlanarRenderDeadline = Infinity;

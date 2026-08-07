@@ -18,7 +18,7 @@ const TRANSFORM_STATE_KEYS = new Set([
     'polynomialN', 'polynomialCoeffs', 'fractionalPowerN',
     'zetaContinuationEnabled', 'chainingEnabled', 'chainingMode', 'chainCount',
     'algebraicChainingEnabled', 'algebraicChainingZExpr', 'algebraicChainingTerms',
-    'taylorSeriesEnabled', 'taylorSeriesOrder', 'taylorSeriesCenter',
+    'taylorSeriesEnabled', 'taylorSeriesOrder', 'taylorSeriesCenter', 'taylorSeriesConvergenceRadius',
     'dynamicPlotting', 'fourierModeEnabled', 'laplaceModeEnabled'
 ]);
 
@@ -950,6 +950,10 @@ const ALGEBRAIC_RAW_SUPPORTED = new Set([
 ]);
 
 const ALG_TMP = new Float64Array(8);
+const ALG_CHAIN_RESULT = new Float64Array(3);
+const CHAIN_RESULT_INVALID = 0;
+const CHAIN_RESULT_FINITE = 1;
+const CHAIN_RESULT_BAILOUT = 2;
 
 function writeContextParameter(ctxRe, ctxIm, out, offset) {
     out[offset] = ctxRe;
@@ -1694,12 +1698,32 @@ function boundedPolynomialDegree() {
     return Math.max(0, Math.min(MAX_POLY_DEGREE, finite(state.polynomialN) ? state.polynomialN : 0));
 }
 
-function appendPolynomialProfileParts(parts, prefix = 'p') {
+function appendPolynomialProfileParts(parts, coefficientPrefix = 'p', degreePrefix = '') {
     const degree = boundedPolynomialDegree();
-    parts.push(`n:${degree}`);
+    parts.push(`${degreePrefix}n:${degree}`);
     for (let i = 0; i <= degree; i++) {
-        parts.push(`${prefix}${i}:${mappedTransformComplexKey(state.polynomialCoeffs?.[i])}`);
+        parts.push(`${coefficientPrefix}${i}:${mappedTransformComplexKey(state.polynomialCoeffs?.[i])}`);
     }
+}
+
+function appendMobiusProfileParts(parts, prefix = '') {
+    parts.push(
+        `${prefix}a:${mappedTransformComplexKey(state.mobiusA)}`,
+        `${prefix}b:${mappedTransformComplexKey(state.mobiusB)}`,
+        `${prefix}c:${mappedTransformComplexKey(state.mobiusC)}`,
+        `${prefix}d:${mappedTransformComplexKey(state.mobiusD)}`
+    );
+}
+
+function algebraicTermsUseTransform(terms, transformName) {
+    if (!Array.isArray(terms)) return false;
+    for (const term of terms) {
+        for (const factor of term?.factors ?? []) {
+            if (!factor || factor.func === 'none') break;
+            if (factor.func === transformName || factor.chainedFunc === transformName) return true;
+        }
+    }
+    return false;
 }
 
 function serializeAlgebraicTerms(terms) {
@@ -1730,17 +1754,16 @@ export function buildMappedTransformProfileKey(functionKey) {
     ];
 
     if (functionKey === 'mobius') {
-        parts.push(
-            `a:${mappedTransformComplexKey(state.mobiusA)}`,
-            `b:${mappedTransformComplexKey(state.mobiusB)}`,
-            `c:${mappedTransformComplexKey(state.mobiusC)}`,
-            `d:${mappedTransformComplexKey(state.mobiusD)}`
-        );
+        appendMobiusProfileParts(parts);
     } else if (functionKey === 'polynomial') {
         appendPolynomialProfileParts(parts);
     } else if (functionKey === 'algebraic_chaining') {
-        parts.push(`alg:${serializeAlgebraicTerms(state.algebraicChainingTerms)}`);
+        const terms = state.algebraicChainingTerms;
+        parts.push(`algOn:${state.algebraicChainingEnabled ? 1 : 0}`);
+        parts.push(`alg:${serializeAlgebraicTerms(terms)}`);
         parts.push(`algZ:${state.algebraicChainingZExpr}`);
+        if (algebraicTermsUseTransform(terms, 'mobius')) appendMobiusProfileParts(parts, 'algM');
+        if (algebraicTermsUseTransform(terms, 'polynomial')) appendPolynomialProfileParts(parts, 'algP', 'algP');
     }
 
     return parts.join('|');
@@ -1769,10 +1792,7 @@ export function shouldSkipMappedTransformPoint(functionKey, zPoint) {
 
 export function evaluateRawMappedTransform(transformFunc, zPoint, functionKey = state.currentFunction, evalContext = null) {
     if (!transformFunc || !zPoint || zPoint.re === undefined || zPoint.im === undefined) return null;
-    if (shouldSkipMappedTransformPoint(functionKey, zPoint)) return null;
-
-    const mapped = transformFunc(zPoint.re, zPoint.im, evalContext);
-    return isValidMappedTransformValue(mapped) ? mapped : null;
+    return evaluateRawMappedTransformXY(transformFunc, zPoint.re, zPoint.im, functionKey, evalContext);
 }
 
 export function getMappedTransformTolerance(value) {
@@ -1960,61 +1980,52 @@ function evaluateFastAlgebraicMappedChain(re, im, stageIndex, returnLastFinite) 
     const raw = kernel?.raw || null;
     if (!raw) return undefined;
 
-    const tmp = ALG_TMP;
     const stage = chainStageIndex(stageIndex);
-    const cRe = re;
-    const cIm = im;
-    let currentRe;
-    let currentIm;
+    const status = runFastAlgebraicChain(raw, re, im, stage);
+    if (status === CHAIN_RESULT_FINITE || (returnLastFinite && status === CHAIN_RESULT_BAILOUT)) {
+        return { re: ALG_CHAIN_RESULT[0], im: ALG_CHAIN_RESULT[1] };
+    }
+    if (returnLastFinite && ALG_CHAIN_RESULT[2]) {
+        return { re: ALG_CHAIN_RESULT[0], im: ALG_CHAIN_RESULT[1] };
+    }
+    return null;
+}
+
+function runFastAlgebraicChain(kernel, re, im, stage) {
+    const zeroSeed = state.chainingMode === 'zero_seed';
+    const tmp = ALG_TMP;
+    let currentRe = zeroSeed ? 0 : re;
+    let currentIm = zeroSeed ? 0 : im;
     let lastRe = NaN;
     let lastIm = NaN;
     let hasLast = false;
 
-    if (state.chainingMode === 'zero_seed') {
-        currentRe = 0;
-        currentIm = 0;
-        for (let i = 0; i <= stage; i++) {
-            raw(currentRe, currentIm, cRe, cIm, tmp, 0);
-            currentRe = tmp[0];
-            currentIm = tmp[1];
-            if (!finite(currentRe) || !finite(currentIm)) {
-                return returnLastFinite && hasLast ? { re: lastRe, im: lastIm } : null;
-            }
-            lastRe = currentRe;
-            lastIm = currentIm;
-            hasLast = true;
-            if (Math.max(Math.abs(currentRe), Math.abs(currentIm)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
-                return returnLastFinite ? { re: currentRe, im: currentIm } : null;
-            }
-        }
-        return hasLast ? { re: lastRe, im: lastIm } : null;
-    }
-
-    raw(re, im, cRe, cIm, tmp, 0);
-    currentRe = tmp[0];
-    currentIm = tmp[1];
-    if (!finite(currentRe) || !finite(currentIm)) return null;
-    lastRe = currentRe;
-    lastIm = currentIm;
-    if (Math.max(Math.abs(currentRe), Math.abs(currentIm)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
-        return returnLastFinite ? { re: currentRe, im: currentIm } : null;
-    }
-
-    for (let i = 1; i <= stage; i++) {
-        raw(currentRe, currentIm, cRe, cIm, tmp, 0);
+    for (let i = 0; i <= stage; i++) {
+        kernel(currentRe, currentIm, re, im, tmp, 0);
         currentRe = tmp[0];
         currentIm = tmp[1];
         if (!finite(currentRe) || !finite(currentIm)) {
-            return returnLastFinite ? { re: lastRe, im: lastIm } : null;
+            ALG_CHAIN_RESULT[0] = lastRe;
+            ALG_CHAIN_RESULT[1] = lastIm;
+            ALG_CHAIN_RESULT[2] = hasLast ? 1 : 0;
+            return CHAIN_RESULT_INVALID;
         }
+
         lastRe = currentRe;
         lastIm = currentIm;
+        hasLast = true;
         if (Math.max(Math.abs(currentRe), Math.abs(currentIm)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
-            return returnLastFinite ? { re: currentRe, im: currentIm } : null;
+            ALG_CHAIN_RESULT[0] = currentRe;
+            ALG_CHAIN_RESULT[1] = currentIm;
+            ALG_CHAIN_RESULT[2] = 1;
+            return CHAIN_RESULT_BAILOUT;
         }
     }
 
-    return { re: currentRe, im: currentIm };
+    ALG_CHAIN_RESULT[0] = currentRe;
+    ALG_CHAIN_RESULT[1] = currentIm;
+    ALG_CHAIN_RESULT[2] = 1;
+    return CHAIN_RESULT_FINITE;
 }
 
 function evaluateMappedChainStage(profileOrTransform, re, im, functionKey, stageIndex, options = null) {
@@ -2077,49 +2088,15 @@ export function evaluateDomainColoringMappedTransform(profileOrTransform, re, im
 function createFastAlgebraicChainedTransform(stage) {
     const kernel = getCompiledAlgebraicKernel(state.algebraicChainingTerms);
     if (!kernel) return null;
-    const rawKernel = kernel.raw || null;
+    const execute = kernel.raw || kernel;
 
     return (re, im) => {
-        const tmp = ALG_TMP;
-        const cRe = re;
-        const cIm = im;
-        let currentRe;
-        let currentIm;
-        let lastRe = NaN;
-        let lastIm = NaN;
-
-        if (state.chainingMode === 'zero_seed') {
-            currentRe = 0;
-            currentIm = 0;
-            for (let i = 0; i <= stage; i++) {
-                if (rawKernel) rawKernel(currentRe, currentIm, cRe, cIm, tmp, 0);
-                else kernel(currentRe, currentIm, cRe, cIm, tmp, 0);
-                currentRe = tmp[0];
-                currentIm = tmp[1];
-                if (!finite(currentRe) || !finite(currentIm)) return { re: NaN, im: NaN };
-                lastRe = currentRe;
-                lastIm = currentIm;
-                if (Math.max(Math.abs(currentRe), Math.abs(currentIm)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
-            }
-            return { re: lastRe, im: lastIm };
+        const status = runFastAlgebraicChain(execute, re, im, stage);
+        if (status === CHAIN_RESULT_FINITE ||
+            (status === CHAIN_RESULT_BAILOUT && state.chainingMode === 'zero_seed')) {
+            return { re: ALG_CHAIN_RESULT[0], im: ALG_CHAIN_RESULT[1] };
         }
-
-        if (rawKernel) rawKernel(re, im, cRe, cIm, tmp, 0);
-        else kernel(re, im, cRe, cIm, tmp, 0);
-        currentRe = tmp[0];
-        currentIm = tmp[1];
-        if (!finite(currentRe) || !finite(currentIm)) return { re: NaN, im: NaN };
-        if (Math.max(Math.abs(currentRe), Math.abs(currentIm)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) return { re: NaN, im: NaN };
-        for (let i = 1; i <= stage; i++) {
-            if (rawKernel) rawKernel(currentRe, currentIm, cRe, cIm, tmp, 0);
-            else kernel(currentRe, currentIm, cRe, cIm, tmp, 0);
-            currentRe = tmp[0];
-            currentIm = tmp[1];
-            if (!finite(currentRe) || !finite(currentIm)) return { re: NaN, im: NaN };
-            if (Math.max(Math.abs(currentRe), Math.abs(currentIm)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) return { re: NaN, im: NaN };
-        }
-
-        return { re: currentRe, im: currentIm };
+        return { re: NaN, im: NaN };
     };
 }
 
@@ -2343,7 +2320,8 @@ export function buildTaylorSeriesCoefficientCacheKey(functionKey, z0Complex, ord
         `f:${functionKey}`,
         `order:${order}`,
         `z0r:${toTaylorCacheNumber(z0.re)}`,
-        `z0i:${toTaylorCacheNumber(z0.im)}`
+        `z0i:${toTaylorCacheNumber(z0.im)}`,
+        `radius:${toTaylorCacheNumber(getTaylorContourRadius(z0))}`
     ];
 
     if (functionKey === 'zeta') {
@@ -2354,6 +2332,7 @@ export function buildTaylorSeriesCoefficientCacheKey(functionKey, z0Complex, ord
         appendTaylorPolynomialParts(parts, '');
     } else if (functionKey === 'algebraic_chaining') {
         const terms = state.algebraicChainingTerms ?? [];
+        parts.push(`algEnabled:${state.algebraicChainingEnabled ? 1 : 0}`);
         parts.push(`algTerms:${terms.length}`);
         parts.push(`algZExpr:${state.algebraicChainingZExpr || 'z'}`);
 

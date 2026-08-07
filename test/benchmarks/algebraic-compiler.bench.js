@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { runBenchmark } from './utils.js';
+import { BENCH_PROFILE, runBenchmark } from './utils.js';
 import { compileExpression } from '../../js/math/expression/index.js';
 import { state } from '../../js/store/state.js';
 import { getChainedTransformFunction } from '../../js/math-utils.js';
@@ -39,6 +39,68 @@ function algebraicFactor(func, overrides = {}) {
         exp: false,
         ...overrides
     };
+}
+
+function setupAlgebraicChainBenchmark(profile, forceFallback = false) {
+    Object.assign(state, {
+        currentFunction: 'algebraic_chaining',
+        algebraicChainingEnabled: true,
+        algebraicChainingZExpr: 'z',
+        polynomialN: 1,
+        polynomialCoeffs: [
+            { re: 0, im: 0 },
+            { re: 1, im: 0 }
+        ],
+        algebraicChainingTerms: [
+            { coeff: { re: 2 / 3, im: 0 }, factors: [algebraicFactor('polynomial')] },
+            { coeff: { re: 1 / 3, im: 0 }, factors: [algebraicFactor('polynomial', { power: 2, reciprocal: true })] }
+        ],
+        chainingEnabled: true,
+        chainingMode: 'recursion',
+        chainCount: 40
+    });
+
+    const originalFunction = globalThis.Function;
+    if (forceFallback) {
+        globalThis.Function = function blockedDynamicFunction() {
+            throw new Error('Dynamic function construction blocked by benchmark');
+        };
+    }
+
+    try {
+        const size = CHAIN_TILE_SIZES[profile];
+        const evaluator = getChainedTransformFunction('algebraic_chaining');
+        if (forceFallback) evaluator(1, 0);
+        return {
+            evaluator,
+            planeZ: makePlaneGrid(size, [-2, 2], [-2, 2]),
+            length: size * size
+        };
+    } finally {
+        globalThis.Function = originalFunction;
+    }
+}
+
+function evaluateAlgebraicChainTile({ evaluator, planeZ, length }) {
+    const result = new Float64Array(length * 2);
+    let finiteCount = 0;
+    let checksum = 0;
+
+    for (let index = 0; index < length; index += 1) {
+        const offset = index * 2;
+        const w = evaluator(planeZ[offset], planeZ[offset + 1]);
+        if (w && Number.isFinite(w.re) && Number.isFinite(w.im)) {
+            result[offset] = w.re;
+            result[offset + 1] = w.im;
+            finiteCount += 1;
+            checksum += w.re - w.im;
+        } else {
+            result[offset] = NaN;
+            result[offset + 1] = NaN;
+        }
+    }
+
+    return { result, finiteCount, checksum };
 }
 
 export async function runAlgebraicCompilerBenchmarks() {
@@ -95,67 +157,40 @@ export async function runAlgebraicCompilerBenchmarks() {
         }
     );
 
-    await runBenchmark(
-        'algebraic z^3 Newton-style output chain over a tile',
-        ({ profile }) => {
-            Object.assign(state, {
-                currentFunction: 'algebraic_chaining',
-                algebraicChainingEnabled: true,
-                algebraicChainingZExpr: 'z',
-                polynomialN: 1,
-                polynomialCoeffs: [
-                    { re: 0, im: 0 },
-                    { re: 1, im: 0 }
-                ],
-                algebraicChainingTerms: [
-                    { coeff: { re: 2 / 3, im: 0 }, factors: [algebraicFactor('polynomial')] },
-                    { coeff: { re: 1 / 3, im: 0 }, factors: [algebraicFactor('polynomial', { power: 2, reciprocal: true })] }
-                ],
-                chainingEnabled: true,
-                chainingMode: 'recursion',
-                chainCount: 40
-            });
-
-            const size = CHAIN_TILE_SIZES[profile];
-            return {
-                evaluator: getChainedTransformFunction('algebraic_chaining'),
-                planeZ: makePlaneGrid(size, [-2, 2], [-2, 2]),
-                length: size * size
-            };
+    const chainOptions = {
+        profiles: {
+            smoke: { iterations: 2, warmup: 1 },
+            standard: { iterations: 12, warmup: 3 },
+            deep: { iterations: 40, warmup: 8 }
         },
-        ({ evaluator, planeZ, length }) => {
-            const result = new Float64Array(length * 2);
-            let finiteCount = 0;
-            let checksum = 0;
-
-            for (let index = 0; index < length; index += 1) {
-                const offset = index * 2;
-                const w = evaluator(planeZ[offset], planeZ[offset + 1]);
-                if (w && Number.isFinite(w.re) && Number.isFinite(w.im)) {
-                    result[offset] = w.re;
-                    result[offset + 1] = w.im;
-                    finiteCount += 1;
-                    checksum += w.re - w.im;
-                } else {
-                    result[offset] = NaN;
-                    result[offset + 1] = NaN;
-                }
-            }
-
-            return { result, finiteCount, checksum };
-        },
-        {
-            profiles: {
-                smoke: { iterations: 2, warmup: 1 },
-                standard: { iterations: 12, warmup: 3 },
-                deep: { iterations: 40, warmup: 8 }
-            },
-            verify: ({ result, finiteCount, checksum }, { length }) => {
-                assert.equal(result.length, length * 2);
-                assert.ok(finiteCount > length * 0.5);
-                assert.ok(Number.isFinite(checksum));
-            }
+        verify: ({ result, finiteCount, checksum }, { length }) => {
+            assert.equal(result.length, length * 2);
+            assert.ok(finiteCount > length * 0.5);
+            assert.ok(Number.isFinite(checksum));
         }
+    };
+    const generatedStats = await runBenchmark(
+        'generated algebraic z^3 Newton-style output chain over a tile',
+        ({ profile }) => setupAlgebraicChainBenchmark(profile),
+        evaluateAlgebraicChainTile,
+        chainOptions
+    );
+    const fallbackStats = await runBenchmark(
+        'CSP fallback algebraic z^3 Newton-style output chain over a tile',
+        ({ profile }) => setupAlgebraicChainBenchmark(profile, true),
+        evaluateAlgebraicChainTile,
+        chainOptions
+    );
+
+    const generatedReference = evaluateAlgebraicChainTile(setupAlgebraicChainBenchmark(BENCH_PROFILE));
+    const fallbackReference = evaluateAlgebraicChainTile(setupAlgebraicChainBenchmark(BENCH_PROFILE, true));
+    assert.equal(fallbackReference.finiteCount, generatedReference.finiteCount);
+    assert.equal(fallbackReference.checksum, generatedReference.checksum);
+    assert.deepEqual(fallbackReference.result, generatedReference.result);
+
+    assert.ok(
+        generatedStats.median < fallbackStats.median * 0.8,
+        `generated kernel median ${generatedStats.median.toFixed(3)}ms should remain materially faster than fallback ${fallbackStats.median.toFixed(3)}ms`
     );
 }
 

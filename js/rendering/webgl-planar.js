@@ -37,6 +37,8 @@ const WEBGL_CONTEXT_ATTRIBUTES = Object.freeze({
 const LINE_MODE = 'line';
 const DEFAULT_RGBA = Object.freeze([1, 1, 1, 1]);
 const IDENTITY_TRANSFORM = Object.freeze([1, 0, 0, 1, 0, 0]);
+const VALID_LINE_CAPS = new Set(['butt', 'round', 'square']);
+const VALID_LINE_JOINS = new Set(['miter', 'round', 'bevel']);
 
 const LINE_VERTEX_SOURCE = lines(
     'attribute vec2 a_position;',
@@ -106,28 +108,6 @@ function createWebGLContext(canvas) {
     );
 }
 
-function createGpuResourceTracker(gl) {
-    const resources = {
-        programs: [],
-        buffers: []
-    };
-
-    return {
-        program(program) {
-            if (program) resources.programs.push(program);
-            return program;
-        },
-        buffer(buffer) {
-            if (buffer) resources.buffers.push(buffer);
-            return buffer;
-        },
-        release() {
-            resources.buffers.forEach(buffer => gl.deleteBuffer(buffer));
-            resources.programs.forEach(program => gl.deleteProgram(program));
-        }
-    };
-}
-
 function hasMissingLineLocations(locations) {
     return locations.aPosition < 0 ||
         locations.uResolution === null ||
@@ -156,22 +136,22 @@ export function createWebGLLineRenderer() {
     const gl = createWebGLContext(canvas);
     if (!canvas || !gl) return null;
 
-    const tracker = createGpuResourceTracker(gl);
-    const fail = () => {
-        tracker.release();
+    const fail = resources => {
+        destroyWebGLLineRenderer(resources);
         return null;
     };
 
-    const program = tracker.program(createWebGLProgramShared(gl, LINE_VERTEX_SOURCE, LINE_FRAGMENT_SOURCE));
-    const positionBuffer = tracker.buffer(gl.createBuffer());
+    const program = createWebGLProgramShared(gl, LINE_VERTEX_SOURCE, LINE_FRAGMENT_SOURCE);
+    const positionBuffer = gl.createBuffer();
+    const resources = { gl, program, positionBuffer };
 
     if (!program || !positionBuffer) {
-        return fail();
+        return fail(resources);
     }
 
     const lineLocations = getLineLocations(gl, program);
     if (hasMissingLineLocations(lineLocations)) {
-        return fail();
+        return fail(resources);
     }
 
     return {
@@ -382,6 +362,24 @@ function isFinitePoint(x, y) {
     return Number.isFinite(x) && Number.isFinite(y);
 }
 
+function getUnsupportedStrokeState(ctx, checkDash, combinedStyleError) {
+    if (checkDash && ctx._lineDash.length > 0) return 'setLineDash';
+    if (ctx.globalCompositeOperation !== 'source-over') return 'globalCompositeOperation';
+    if (!Number.isFinite(ctx.lineWidth) || ctx.lineWidth <= 0 ||
+        !Number.isFinite(ctx.globalAlpha) || ctx.globalAlpha < 0 || ctx.globalAlpha > 1) {
+        return 'strokeState';
+    }
+    if (typeof ctx.strokeStyle !== 'string') return 'strokeStyle';
+
+    const invalidCap = !VALID_LINE_CAPS.has(ctx.lineCap);
+    const invalidJoin = !VALID_LINE_JOINS.has(ctx.lineJoin);
+    const invalidMiter = !Number.isFinite(ctx.miterLimit) || ctx.miterLimit <= 0;
+    if (combinedStyleError && (invalidCap || invalidJoin || invalidMiter)) return 'strokeRectStyle';
+    if (invalidCap) return 'lineCap';
+    if (invalidJoin) return 'lineJoin';
+    return invalidMiter ? 'miterLimit' : null;
+}
+
 export class PolylineCaptureContext {
     constructor() {
         this.strokeStyle = 'rgba(255, 255, 255, 1)';
@@ -424,7 +422,7 @@ export class PolylineCaptureContext {
         return this._activeSubpath || this._startSubpath(x, y);
     }
 
-    _pushBatch(mode, pointsArray, colorString, lineWidth = 1, alphaMultiplier = 1) {
+    _pushBatch(mode, pointsArray, colorString, lineWidth = 1, alphaMultiplier = 1, closed = false) {
         if (!Array.isArray(pointsArray) || pointsArray.length < 4) return;
         this._batches.push({
             mode,
@@ -436,7 +434,7 @@ export class PolylineCaptureContext {
             lineCap: this.lineCap,
             miterLimit: this.miterLimit,
             globalCompositeOperation: this.globalCompositeOperation,
-            closed: false
+            closed
         });
     }
 
@@ -482,78 +480,30 @@ export class PolylineCaptureContext {
     }
 
     stroke() {
-        if (this._lineDash.length > 0) {
-            this._markUnsupported('setLineDash');
-            return;
-        }
-
-        if (this.globalCompositeOperation !== 'source-over') {
-            this._markUnsupported('globalCompositeOperation');
-            return;
-        }
-
-        if (!Number.isFinite(this.lineWidth) || this.lineWidth <= 0 ||
-            !Number.isFinite(this.globalAlpha) || this.globalAlpha < 0 || this.globalAlpha > 1) {
-            this._markUnsupported('strokeState');
-            return;
-        }
-
-        if (typeof this.strokeStyle !== 'string') {
-            this._markUnsupported('strokeStyle');
-            return;
-        }
-
-        if (!['butt', 'round', 'square'].includes(this.lineCap)) {
-            this._markUnsupported('lineCap');
-            return;
-        }
-
-        if (!['miter', 'round', 'bevel'].includes(this.lineJoin)) {
-            this._markUnsupported('lineJoin');
-            return;
-        }
-        if (!Number.isFinite(this.miterLimit) || this.miterLimit <= 0) {
-            this._markUnsupported('miterLimit');
-            return;
-        }
+        const unsupported = getUnsupportedStrokeState(this, true, false);
+        if (unsupported) return this._markUnsupported(unsupported);
 
         for (const subpath of this._subpaths) {
             if (subpath && subpath.points.length >= 4) {
-                this._pushBatch(LINE_MODE, subpath.points, this.strokeStyle, this.lineWidth, this.globalAlpha);
-                this._batches[this._batches.length - 1].closed = subpath.closed;
+                this._pushBatch(
+                    LINE_MODE, subpath.points, this.strokeStyle, this.lineWidth, this.globalAlpha, subpath.closed
+                );
             }
         }
     }
 
     strokeRect(x, y, width, height) {
         if (!isFinitePoint(x, y) || !isFinitePoint(width, height)) return;
-        if (this.globalCompositeOperation !== 'source-over') {
-            this._markUnsupported('globalCompositeOperation');
-            return;
-        }
-        if (!Number.isFinite(this.lineWidth) || this.lineWidth <= 0 ||
-            !Number.isFinite(this.globalAlpha) || this.globalAlpha < 0 || this.globalAlpha > 1) {
-            this._markUnsupported('strokeState');
-            return;
-        }
-        if (typeof this.strokeStyle !== 'string') {
-            this._markUnsupported('strokeStyle');
-            return;
-        }
-        if (!['butt', 'round', 'square'].includes(this.lineCap) ||
-            !['miter', 'round', 'bevel'].includes(this.lineJoin) ||
-            !Number.isFinite(this.miterLimit) || this.miterLimit <= 0) {
-            this._markUnsupported('strokeRectStyle');
-            return;
-        }
+        const unsupported = getUnsupportedStrokeState(this, false, true);
+        if (unsupported) return this._markUnsupported(unsupported);
         this._pushBatch(
             LINE_MODE,
             [x, y, x + width, y, x + width, y + height, x, y + height, x, y],
             this.strokeStyle,
             this.lineWidth,
-            this.globalAlpha
+            this.globalAlpha,
+            true
         );
-        this._batches[this._batches.length - 1].closed = true;
     }
 
     setLineDash(value) {
@@ -1043,7 +993,6 @@ export function drawPlanarTransformedShapeHybrid(ctx, planeParams, tf, planeKey,
     const drawOptions = {
         ...options,
         map,
-        index: options?.index,
         renderJob: options?.renderJob || createPlanarTransformedShapeRenderJob(tf, map)
     };
 

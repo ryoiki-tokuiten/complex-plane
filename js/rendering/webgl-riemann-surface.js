@@ -63,8 +63,6 @@ const SURFACE_COMPONENT_IDS = Object.freeze({
   phase: 4
 });
 
-const POLYNOMIAL_FUNCTION_ID = getWebGLDomainColorFunctionIdShared('polynomial', true);
-const MOBIUS_FUNCTION_ID = getWebGLDomainColorFunctionIdShared('mobius', true);
 const ALGEBRAIC_C_FUNCTION_ID = -1;
 const ALGEBRAIC_INVALID_FUNCTION_ID = -2;
 
@@ -153,11 +151,6 @@ function gridIndexArrayType(resolution) {
   const vertexCount = (resolution + 1) * (resolution + 1);
   return vertexCount > UINT16_INDEX_LIMIT ? Uint32Array : Uint16Array;
 }
-
-// Program signatures are control-plane data. Keep the signature canonical so
-// in-place formula edits still rebuild shaders, while caching derived metadata
-// such as function-uniform usage for unchanged signatures.
-const PROGRAM_SIGNATURE_BY_STATE = new WeakMap();
 
 // Dynamic aggregate validation is expensive because it emits GLSL. The result is
 // purely determined by the program signature, so validate once per signature.
@@ -383,49 +376,8 @@ function buildAlgebraicBranchBody(appState) {
   return steps.join('\n');
 }
 
-/**
- * Shader functions are authored as dependency-aware modules rather than opaque
- * slabs. This keeps GLSL ES 1.00 compatibility while making assembly auditable:
- * callers request entry points and receive the minimum topologically ordered set.
- */
-function assembleGlslModules(modules, entries, context = {}) {
-  const emitted = [];
-  const visiting = new Set();
-  const visited = new Set();
-
-  const visit = name => {
-    if (visited.has(name)) return;
-    if (visiting.has(name)) {
-      throw new Error(`cyclic GLSL dependency: ${name}`);
-    }
-
-    const module = modules[name];
-    if (!module) {
-      throw new Error(`unknown GLSL module: ${name}`);
-    }
-
-    visiting.add(name);
-
-    const dependencies = typeof module.deps === 'function'
-      ? module.deps(context)
-      : module.deps || [];
-
-    dependencies.forEach(visit);
-    visiting.delete(name);
-    visited.add(name);
-
-    emitted.push(typeof module.source === 'function'
-      ? module.source(context)
-      : module.source);
-  };
-
-  entries.forEach(visit);
-  return emitted.join('\n\n');
-}
-
 const SURFACE_MATH_GLSL = Object.freeze({
   complexLnOnSheet: {
-    deps: [],
     source: `bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 value) {
   float magnitude = length(z);
   if (magnitude < 1.0e-20) return false;
@@ -437,7 +389,6 @@ const SURFACE_MATH_GLSL = Object.freeze({
   },
 
   complexPowRealOnSheet: {
-    deps: ['complexLnOnSheet'],
     source: `bool complexPowRealOnSheet(vec2 z, float exponent, float branchIndex, float branchCutWidth, out vec2 value) {
   if (dot(z, z) < 1.0e-20) {
     if (exponent > 0.0) { value = vec2(0.0); return true; }
@@ -451,7 +402,6 @@ const SURFACE_MATH_GLSL = Object.freeze({
   },
 
   evaluateBasicOnSheet: {
-    deps: ['complexLnOnSheet', 'complexPowRealOnSheet'],
     source: `bool evaluateBasicOnSheet(
   float functionId,
   vec2 z,
@@ -490,7 +440,6 @@ const SURFACE_MATH_GLSL = Object.freeze({
   },
 
   evaluateTaylorSurface: {
-    deps: [],
     source: `vec2 evaluateTaylorSurface(vec2 z, vec2 center, int order, vec2 coefficients[9]) {
   vec2 delta = z - center;
   vec2 power = vec2(1.0, 0.0);
@@ -504,7 +453,6 @@ const SURFACE_MATH_GLSL = Object.freeze({
   },
 
   evaluateSurfaceBase: {
-    deps: ['evaluateTaylorSurface', 'evaluateBasicOnSheet'],
     source: ({ appState }) => `bool evaluateSurfaceBase(
   vec2 z,
   vec2 c,
@@ -548,7 +496,6 @@ ${buildAlgebraicBranchBody(appState)}
   },
 
   evaluateSurfaceStage: {
-    deps: ['evaluateSurfaceBase'],
     source: `bool evaluateSurfaceStage(
   vec2 z,
   vec2 c,
@@ -608,12 +555,10 @@ ${buildAlgebraicBranchBody(appState)}
 
 const VERTEX_SURFACE_GLSL = Object.freeze({
   surfacePaletteColor: {
-    deps: [],
     source: () => SURFACE_PALETTE_GLSL
   },
 
   surfaceHeight: {
-    deps: [],
     source: `float surfaceHeight(vec2 value) {
   if (u_surfaceComponent == 1) return value.x;
   if (u_surfaceComponent == 3) return length(value);
@@ -623,7 +568,6 @@ const VERTEX_SURFACE_GLSL = Object.freeze({
   },
 
   surfaceColor: {
-    deps: ['surfacePaletteColor'],
     source: `vec3 surfaceColor(vec2 value) {
   float phase = atan(value.y, value.x);
   float hue = fract(phase / TWO_PI + u_sheetTint);
@@ -647,7 +591,6 @@ const VERTEX_SURFACE_GLSL = Object.freeze({
   },
 
   mapSurfacePoint: {
-    deps: ['surfaceHeight'],
     source: `bool mapSurfacePoint(vec2 z, out vec2 mapped, out float height) {
   bool ok;
   if (u_derivativeMode > 0.5) {
@@ -683,7 +626,6 @@ const VERTEX_SURFACE_GLSL = Object.freeze({
   },
 
   main: {
-    deps: ['mapSurfacePoint', 'surfaceColor'],
     source: `void main() {
   vec2 z = vec2(
     mix(u_viewBounds.x, u_viewBounds.y, a_grid.x),
@@ -715,7 +657,6 @@ const VERTEX_SURFACE_GLSL = Object.freeze({
 
 const FRAGMENT_GLSL = Object.freeze({
   highQualityNormal: {
-    deps: [],
     source: `vec3 highQualityNormal(vec3 interpolatedNormal, vec3 viewPosition) {
   vec3 geometricNormal = normalize(cross(dFdx(viewPosition), dFdy(viewPosition)));
   if (dot(geometricNormal, interpolatedNormal) < 0.0) geometricNormal = -geometricNormal;
@@ -724,7 +665,6 @@ const FRAGMENT_GLSL = Object.freeze({
   },
 
   shadeSurface: {
-    deps: [],
     source: `vec3 shadeSurface(vec3 color, vec3 normal, vec3 viewPosition) {
   // Decode sRGB to Linear for physically accurate math
   vec3 albedo = pow(max(color, vec3(0.0)), vec3(2.2));
@@ -797,7 +737,6 @@ const FRAGMENT_GLSL = Object.freeze({
   },
 
   iteratedDynamicsColor: {
-    deps: [],
     source: `vec4 dynamicsEscapeColor(float smoothIteration, float brightnessFactor) {
   float count = max(float(u_chainCount), 1.0);
   float t = clamp(smoothIteration / count, 0.0, 1.0);
@@ -911,7 +850,6 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   },
 
   main: {
-    deps: ['highQualityNormal', 'shadeSurface', 'iteratedDynamicsColor'],
     source: `void main() {
   if (v_valid < 0.995) discard;
   if (u_wirePass > 0.5) {
@@ -954,7 +892,14 @@ ${GLSL_EXPRESSION_HELPERS}
 ${DOMAIN_DYNAMICS_GLSL}
 ${buildAlgebraicUniformDeclarations(appState)}
 ${dynamicSource}
-${assembleGlslModules(SURFACE_MATH_GLSL, ['evaluateSurfaceStage'], { appState })}
+${[
+  SURFACE_MATH_GLSL.evaluateTaylorSurface.source,
+  SURFACE_MATH_GLSL.complexLnOnSheet.source,
+  SURFACE_MATH_GLSL.complexPowRealOnSheet.source,
+  SURFACE_MATH_GLSL.evaluateBasicOnSheet.source,
+  SURFACE_MATH_GLSL.evaluateSurfaceBase.source({ appState }),
+  SURFACE_MATH_GLSL.evaluateSurfaceStage.source
+].join('\n\n')}
 `;
 }
 
@@ -990,7 +935,13 @@ varying float v_valid;
 varying vec2 v_z;
 varying float v_heightVal;
 ${buildCachedRiemannSurfaceMathLibrary(appState, signature)}
-${assembleGlslModules(VERTEX_SURFACE_GLSL, ['main'])}
+${[
+  VERTEX_SURFACE_GLSL.surfaceHeight.source,
+  VERTEX_SURFACE_GLSL.mapSurfacePoint.source,
+  VERTEX_SURFACE_GLSL.surfacePaletteColor.source(),
+  VERTEX_SURFACE_GLSL.surfaceColor.source,
+  VERTEX_SURFACE_GLSL.main.source
+].join('\n\n')}
 `;
 }
 
@@ -1009,8 +960,16 @@ varying vec2 v_z;
 varying float v_heightVal;
 
 ${buildCachedRiemannSurfaceMathLibrary(appState, signature)}
-${assembleGlslModules(VERTEX_SURFACE_GLSL, ['surfaceColor'])}
-${assembleGlslModules(FRAGMENT_GLSL, ['main'])}
+${[
+  VERTEX_SURFACE_GLSL.surfacePaletteColor.source(),
+  VERTEX_SURFACE_GLSL.surfaceColor.source
+].join('\n\n')}
+${[
+  FRAGMENT_GLSL.highQualityNormal.source,
+  FRAGMENT_GLSL.shadeSurface.source,
+  FRAGMENT_GLSL.iteratedDynamicsColor.source,
+  FRAGMENT_GLSL.main.source
+].join('\n\n')}
 `;
 }
 
@@ -1224,27 +1183,16 @@ function disposeMeshCache(gl, meshCache) {
 }
 
 function algebraicStructureSignature(algebraicTerms) {
-  const terms = Array.isArray(algebraicTerms) ? algebraicTerms : EMPTY_ARRAY;
-  let signature = '[';
-
-  for (let termIndex = 0; termIndex < terms.length; termIndex++) {
-    if (termIndex) signature += ',';
-    signature += '{"factors":[';
-
-    const term = terms[termIndex];
-    const factors = Array.isArray(term && term.factors) ? term.factors : EMPTY_ARRAY;
-    for (let factorIndex = 0; factorIndex < factors.length; factorIndex++) {
-      if (factorIndex) signature += ',';
-      const factor = factors[factorIndex];
-      signature += factor && factor.func && factor.func !== 'none'
-        ? '{"active":true}'
-        : '{"func":"none"}';
-    }
-
-    signature += ']}';
-  }
-
-  return signature + ']';
+    const terms = Array.isArray(algebraicTerms) ? algebraicTerms : EMPTY_ARRAY;
+    return `[${Array.from(terms, term => {
+        const factors = Array.isArray(term && term.factors) ? term.factors : EMPTY_ARRAY;
+        const factorSignature = Array.from(factors, factor => (
+            factor && factor.func && factor.func !== 'none'
+                ? '{"active":true}'
+                : '{"func":"none"}'
+        )).join(',');
+        return `{"factors":[${factorSignature}]}`;
+    }).join(',')}]`;
 }
 
 function getProgramSignature(appState) {
@@ -1259,26 +1207,7 @@ function getProgramSignature(appState) {
   const dynamicSignature = dynamicActive
     ? dynamicAggregateGLSLSignature(appState)
     : '';
-  const signature = `az:${algebraicZ}|a:${algebraicSignature}|d:${dynamicSignature}`;
-  const cached = PROGRAM_SIGNATURE_BY_STATE.get(appState);
-
-  if (cached
-    && cached.algebraicZ === algebraicZ
-    && cached.dynamicActive === dynamicActive
-    && cached.algebraicSignature === algebraicSignature
-    && cached.dynamicSignature === dynamicSignature) {
-    return cached.signature;
-  }
-
-  PROGRAM_SIGNATURE_BY_STATE.set(appState, {
-    algebraicZ,
-    dynamicActive,
-    algebraicSignature,
-    dynamicSignature,
-    signature
-  });
-
-  return signature;
+  return `az:${algebraicZ}|a:${algebraicSignature}|d:${dynamicSignature}`;
 }
 
 
@@ -1411,20 +1340,12 @@ function rebuildProgram(renderer, signature = getProgramSignature(state)) {
   renderer.program = program;
   renderer.locations = collectUniformLocations(gl, program, state);
   renderer.programSignature = signature;
-  // Uniform buffers are always resident in the packed shader interface.
-  // Uploading the small polynomial/Möbius blocks unconditionally avoids an
-  // O(formula-size) dependency scan on every animation frame and remains safe
-  // when formulas mutate in place without forcing a program rebuild.
-  renderer.formulaUsesPolynomial = true;
-  renderer.formulaUsesMobius = true;
   renderer.forceUniformRefresh = true;
   renderer.modelViewDirty = true;
   renderer.projectionDirty = true;
   renderer.boundGridMesh = null;
   renderer.boundGridProgram = null;
   renderer.activeProgram = null;
-  renderer.previousPolyDegree = -1;
-  renderer.previousTaylorOrder = -1;
   return true;
 }
 
@@ -1619,7 +1540,6 @@ function setTaylorUniforms(renderer) {
   renderer.currentTaylorOrder = useTaylor ? order : 0;
 
   if (!useTaylor) {
-    renderer.previousTaylorOrder = -1;
     return false;
   }
 
@@ -1635,7 +1555,6 @@ function setTaylorUniforms(renderer) {
   }
   uploadComplexUniformArray(gl, locations.uTaylorCoefficients, packed);
 
-  renderer.previousTaylorOrder = order;
   return true;
 }
 
@@ -1650,27 +1569,20 @@ function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
     +appState.fractionalPowerN || 0.5
   );
 
-  if (renderer.formulaUsesMobius || functionId === MOBIUS_FUNCTION_ID || appState.currentFunction === 'mobius') {
-    const mobiusA = appState.mobiusA || ZERO_COMPLEX;
-    const mobiusB = appState.mobiusB || ZERO_COMPLEX;
-    const mobiusC = appState.mobiusC || ZERO_COMPLEX;
-    const mobiusD = appState.mobiusD || ZERO_COMPLEX;
-    gl.uniform4f(
-      locations.uMobiusAB,
-      complexRe(mobiusA), complexIm(mobiusA),
-      complexRe(mobiusB), complexIm(mobiusB)
-    );
-    gl.uniform4f(
-      locations.uMobiusCD,
-      complexRe(mobiusC), complexIm(mobiusC),
-      complexRe(mobiusD), complexIm(mobiusD)
-    );
-  }
-
-  if (!(renderer.formulaUsesPolynomial || functionId === POLYNOMIAL_FUNCTION_ID || appState.currentFunction === 'polynomial')) {
-    renderer.previousPolyDegree = -1;
-    return 0;
-  }
+  const mobiusA = appState.mobiusA || ZERO_COMPLEX;
+  const mobiusB = appState.mobiusB || ZERO_COMPLEX;
+  const mobiusC = appState.mobiusC || ZERO_COMPLEX;
+  const mobiusD = appState.mobiusD || ZERO_COMPLEX;
+  gl.uniform4f(
+    locations.uMobiusAB,
+    complexRe(mobiusA), complexIm(mobiusA),
+    complexRe(mobiusB), complexIm(mobiusB)
+  );
+  gl.uniform4f(
+    locations.uMobiusCD,
+    complexRe(mobiusC), complexIm(mobiusC),
+    complexRe(mobiusD), complexIm(mobiusD)
+  );
 
   const poly = appState.polynomialCoeffs || EMPTY_ARRAY;
   const degree = Math.min(10, Math.max(0, (poly.length | 0) - 1));
@@ -1681,7 +1593,6 @@ function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
     packed[offset + 1] = complexIm(coeff);
   }
   uploadComplexUniformArray(gl, locations.uPolyCoeffs, packed);
-  renderer.previousPolyDegree = degree;
   return degree;
 }
 
@@ -1979,8 +1890,7 @@ class RiemannSurfaceRendererFactory {
     showRenderer(renderer);
     const frameOptions = renderer.frameOptions;
     frameOptions.stage = normalizeStage(options.stage);
-    frameOptions.map = options.map || null;
-    frameOptions.derivativeMode = frameOptions.map && frameOptions.map.presentation === 'derivative' ? 1 : 0;
+    frameOptions.derivativeMode = options.map && options.map.presentation === 'derivative' ? 1 : 0;
     renderer.lastOptions = frameOptions;
 
     const rendered = drawRenderer(renderer, frameOptions, signature);
@@ -2063,7 +1973,7 @@ class RiemannSurfaceRendererFactory {
       projectionMatrix: new Float32Array(16),
       polyCoeffUniformData: new Float32Array(22),
       taylorCoeffUniformData: new Float32Array(18),
-      frameOptions: { stage: 1, map: null, derivativeMode: 0 },
+      frameOptions: { stage: 1, derivativeMode: 0 },
       camera: { ...DEFAULT_CAMERA },
       visible: false,
       drawStateConfigured: false,
@@ -2080,12 +1990,8 @@ class RiemannSurfaceRendererFactory {
       viewportWidth: 0,
       viewportHeight: 0,
       branchCutScale: 0,
-      previousPolyDegree: -1,
-      previousTaylorOrder: -1,
       currentTaylorUse: 0,
       currentTaylorOrder: 0,
-      formulaUsesPolynomial: true,
-      formulaUsesMobius: true,
       forceUniformRefresh: true,
       backendLabel: '',
       dragging: false,

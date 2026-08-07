@@ -420,6 +420,17 @@
                         </div>
                     </div>
 
+                    <!-- Derivative Panel -->
+                    <div class="control-group control-toggle-heading"
+                       >
+                        <label for="enable_derivative_cb" class="slider-label"
+                            data-tooltip="Show the numerical derivative of the active map in map visualizations">
+                            <input type="checkbox" id="enable_derivative_cb">
+                            <span class="custom-checkbox-visual"></span>
+                            Show Derivative
+                        </label>
+                    </div>
+
                     <!-- Real Plots Panel -->
                     <div class="control-group control-toggle-heading"
                        >
@@ -566,17 +577,6 @@
                             <div class="control-divider">
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Derivative Panel -->
-                    <div class="control-group control-toggle-heading"
-                       >
-                        <label for="enable_derivative_cb" class="slider-label"
-                            data-tooltip="Show the numerical derivative of the active map in map visualizations">
-                            <input type="checkbox" id="enable_derivative_cb">
-                            <span class="custom-checkbox-visual"></span>
-                            Show Derivative
-                        </label>
                     </div>
 
                     <!-- Output Chaining Panel -->
@@ -1157,6 +1157,15 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="control-group control-toggle-heading">
+                        <label for="enable_graph_view_cb" class="slider-label"
+                            data-tooltip="Plot the selected input line as Re and Im output curves">
+                            <input type="checkbox" id="enable_graph_view_cb">
+                            <span class="custom-checkbox-visual"></span>
+                            View Graph
+                        </label>
                     </div>
 
                     <!-- Complex Plane Navigation Panel -->
@@ -1895,15 +1904,6 @@
                                     <span class="viz-toggle-card-title">Riemann Surface</span>
                                     <span class="viz-toggle-card-copy">Explore branch sheets as an interactive WebGL
                                         surface.</span>
-                                </span>
-                            </label>
-                            <label for="enable_graph_view_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="enable_graph_view_cb"
-                                    data-tooltip="Plot the selected input line as Re and Im output curves">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">View Graph</span>
-                                    <span class="viz-toggle-card-copy">Input z, Re, Im.</span>
                                 </span>
                             </label>
                         </div>

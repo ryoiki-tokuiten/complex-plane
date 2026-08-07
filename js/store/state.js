@@ -190,8 +190,6 @@ const rawState = {
     realPlotsColorMode: 'height',
     realPlotsHeightScale: 1.0,
     isRealPlotsFullScreen: false,
-    realPlotsCameraTargetMath: null,
-    realPlotsCameraNeedsReset: false,
     graphViewEnabled: false,
     graphSelectedShape: '',
     graphSelectedLineIndex: 0,

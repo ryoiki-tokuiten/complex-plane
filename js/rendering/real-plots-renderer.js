@@ -3,7 +3,15 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state, zPlaneParams } from '../store/state.js';
 import { buildMappedTransformProfileKey, getChainedTransformFunction } from '../math-utils.js';
 import { compileExpression } from '../math/expression/evaluator.js';
-import { POLE_MAGNITUDE_THRESHOLD } from '../constants/numerical.js';
+import {
+    MAX_STATE_ZOOM_LEVEL,
+    MIN_STATE_ZOOM_LEVEL,
+    POLE_MAGNITUDE_THRESHOLD,
+    ZOOM_IN_FACTOR,
+    ZOOM_OUT_FACTOR
+} from '../constants/numerical.js';
+import { setupVisualParameters } from '../utils/dom-utils.js';
+import { requestRedrawAll } from './redraw-scheduler.js';
 import { disposeThreeObject } from './three-utils.js';
 
 const BACKGROUND = 0x070812;
@@ -205,28 +213,12 @@ class InputEvaluator {
     }
 
     write(x, y, out) {
-        switch (this.type) {
-            case INPUT_PRESET.X:
-                out[0] = x; out[1] = 0; return;
-            case INPUT_PRESET.Y:
-                out[0] = y; out[1] = 0; return;
-            case INPUT_PRESET.ZERO:
-                out[0] = 0; out[1] = 0; return;
-            case INPUT_PRESET.X_PLUS_Y:
-                out[0] = x + y; out[1] = 0; return;
-            case INPUT_PRESET.X_MINUS_Y:
-                out[0] = x - y; out[1] = 0; return;
-            case INPUT_PRESET.X_TIMES_Y:
-                out[0] = x * y; out[1] = 0; return;
-            case INPUT_PRESET.TWO_X_PLUS_Y:
-                out[0] = 2 * x + y; out[1] = 0; return;
-            case INPUT_PRESET.SIN_X_PLUS_COS_Y:
-                out[0] = Math.sin(x) + Math.cos(y); out[1] = 0; return;
-            case INPUT_PRESET.X2_MINUS_Y2:
-                out[0] = x * x - y * y; out[1] = 0; return;
-            default:
-                this.writeCompiled(x, y, out);
+        if (this.type !== INPUT_PRESET.GENERIC) {
+            out[0] = evalScalarInput(this.type, x, y);
+            out[1] = 0;
+            return;
         }
+        this.writeCompiled(x, y, out);
     }
 
     writeCompiled(x, y, out) {
@@ -375,7 +367,6 @@ class SurfaceMeshStore {
         this.mesh.castShadow = true;
         this.mesh.receiveShadow = true;
         this.wireframe.renderOrder = 2;
-        this.lastBoundsKey = '';
     }
 
     #createGeometry() {
@@ -757,60 +748,53 @@ function sampleValuesPass(transformFunc, config, catchPerVertex) {
             let rawValue = NaN;
             let phase = 0.5;
             const inputValid = fastInputFinite || (isFiniteNumber(zInRe) && isFiniteNumber(zInIm));
+            let resultRe;
+            let resultIm;
             if (inputValid && hasKernel) {
-                let outRe;
-                let outIm;
                 switch (kernelKind) {
                     case TRANSFORM_KERNEL.IDENTITY:
-                        outRe = zInRe; outIm = zInIm; break;
+                        resultRe = zInRe; resultIm = zInIm; break;
                     case TRANSFORM_KERNEL.SQUARE:
-                        outRe = zInRe * zInRe - zInIm * zInIm; outIm = 2 * zInRe * zInIm; break;
+                        resultRe = zInRe * zInRe - zInIm * zInIm; resultIm = 2 * zInRe * zInIm; break;
                     case TRANSFORM_KERNEL.RECIPROCAL: {
                         writeReciprocalKernel(zInRe, zInIm, kernelOut);
-                        outRe = kernelOut[0];
-                        outIm = kernelOut[1];
+                        resultRe = kernelOut[0];
+                        resultIm = kernelOut[1];
                         break;
                     }
                     case TRANSFORM_KERNEL.EXP: {
                         const expRe = expSafeForPlot(zInRe);
-                        outRe = expRe * Math.cos(zInIm); outIm = expRe * Math.sin(zInIm); break;
+                        resultRe = expRe * Math.cos(zInIm); resultIm = expRe * Math.sin(zInIm); break;
                     }
                     case TRANSFORM_KERNEL.SIN:
-                        outRe = Math.sin(zInRe) * Math.cosh(zInIm); outIm = Math.cos(zInRe) * Math.sinh(zInIm); break;
+                        resultRe = Math.sin(zInRe) * Math.cosh(zInIm); resultIm = Math.cos(zInRe) * Math.sinh(zInIm); break;
                     case TRANSFORM_KERNEL.COS:
-                        outRe = Math.cos(zInRe) * Math.cosh(zInIm); outIm = -Math.sin(zInRe) * Math.sinh(zInIm); break;
+                        resultRe = Math.cos(zInRe) * Math.cosh(zInIm); resultIm = -Math.sin(zInRe) * Math.sinh(zInIm); break;
                     default:
-                        outRe = 0; outIm = 0;
-                }
-                if (isFiniteNumber(outRe) && isFiniteNumber(outIm)) {
-                    rawValue = selectRawValue(outRe, outIm, outputMode);
-                    if (rawValue === rawValue) {
-                        finiteResultCount += 1;
-                        phase = (Math.atan2(outIm, outRe) + Math.PI) * INV_TWO_PI;
-                    }
-                }
-            } else if (inputValid && catchPerVertex) {
-                try {
-                    const result = transformFunc(zInRe, zInIm);
-                    if (result && isFiniteNumber(result.re) && isFiniteNumber(result.im)) {
-                        rawValue = selectRawValue(result.re, result.im, outputMode);
-                        if (rawValue === rawValue) {
-                            finiteResultCount += 1;
-                            phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
-                        }
-                    }
-                } catch {
-                    rawValue = NaN;
-                    phase = 0.5;
+                        resultRe = 0; resultIm = 0;
                 }
             } else if (inputValid) {
-                const result = transformFunc(zInRe, zInIm);
-                if (result && isFiniteNumber(result.re) && isFiniteNumber(result.im)) {
-                    rawValue = selectRawValue(result.re, result.im, outputMode);
-                    if (rawValue === rawValue) {
-                        finiteResultCount += 1;
-                        phase = (Math.atan2(result.im, result.re) + Math.PI) * INV_TWO_PI;
+                if (catchPerVertex) {
+                    try {
+                        const result = transformFunc(zInRe, zInIm);
+                        resultRe = result?.re;
+                        resultIm = result?.im;
+                    } catch {
+                        resultRe = undefined;
+                        resultIm = undefined;
                     }
+                } else {
+                    const result = transformFunc(zInRe, zInIm);
+                    resultRe = result?.re;
+                    resultIm = result?.im;
+                }
+            }
+
+            if (isFiniteNumber(resultRe) && isFiniteNumber(resultIm)) {
+                rawValue = selectRawValue(resultRe, resultIm, outputMode);
+                if (rawValue === rawValue) {
+                    finiteResultCount += 1;
+                    phase = (Math.atan2(resultIm, resultRe) + Math.PI) * INV_TWO_PI;
                 }
             }
 
@@ -1105,18 +1089,17 @@ class RealPlots3DRenderer {
 
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;
-        this.controls.dampingFactor = 0.05;
         this.controls.enablePan = true;
-        this.controls.enableZoom = true;
-        this.controls.zoomToCursor = true;
+        // Wheel zoom changes the mathematical viewport below, never the camera.
+        this.controls.enableZoom = false;
         this.controls.target.set(0, 0, 0);
         this.controls.minDistance = 0.1;
         this.controls.maxDistance = 200;
         this.controls.update();
-        this.controls.addEventListener('change', () => {
-            this.#syncMathCameraTarget();
-            this.render();
-        });
+        this.controls.addEventListener('change', () => this.render());
+
+        this.coordinateWheelHandler = event => this.#zoomCoordinates(event);
+        this.renderer.domElement.addEventListener('wheel', this.coordinateWheelHandler, { passive: false });
 
         this.surfaceGroup = new THREE.Group();
         this.scene.add(this.surfaceGroup);
@@ -1126,7 +1109,6 @@ class RealPlots3DRenderer {
         this.zLabelText = '';
         this.coordBoundsKey = '';
         this.addReferenceFrame();
-        this.renderer.domElement.addEventListener('dblclick', () => this.resetCamera());
 
         this.resizeObserver = new ResizeObserver(() => this.resize());
         this.resizeObserver.observe(container);
@@ -1138,24 +1120,6 @@ class RealPlots3DRenderer {
     #syncPixelRatio() {
         const ratio = window.devicePixelRatio || 1;
         this.renderer.setPixelRatio(Math.min(ratio, 2.75));
-    }
-
-    #syncMathCameraTarget() {
-        const target = this.controls.target;
-        if (Math.abs(target.x) > 0.001 || Math.abs(target.z) > 0.001) {
-            const xSpan = zPlaneParams.currentVisXRange[1] - zPlaneParams.currentVisXRange[0];
-            const ySpan = zPlaneParams.currentVisYRange[1] - zPlaneParams.currentVisYRange[0];
-            const mathOffsetX = (target.x / SURFACE_SIZE) * xSpan;
-            const mathOffsetY = (target.z / SURFACE_SIZE) * ySpan;
-            const zWorldCenterX = (zPlaneParams.currentVisXRange[0] + zPlaneParams.currentVisXRange[1]) * 0.5;
-            const zWorldCenterY = (zPlaneParams.currentVisYRange[0] + zPlaneParams.currentVisYRange[1]) * 0.5;
-            state.realPlotsCameraTargetMath = {
-                x: zWorldCenterX + mathOffsetX,
-                y: zWorldCenterY - mathOffsetY
-            };
-        } else {
-            state.realPlotsCameraTargetMath = null;
-        }
     }
 
     createCoordinateLabel(color) {
@@ -1276,12 +1240,6 @@ class RealPlots3DRenderer {
         }
     }
 
-    resetCamera() {
-        this.camera.position.set(CAMERA_HOME.x, CAMERA_HOME.y, CAMERA_HOME.z);
-        this.controls.target.set(0, 0, 0);
-        this.controls.update();
-    }
-
     render() {
         this.renderer.render(this.scene, this.camera);
     }
@@ -1297,15 +1255,29 @@ class RealPlots3DRenderer {
         this.render();
     }
 
-    updateSurface(transformFunc, surfaceKey) {
-        if (state.realPlotsCameraNeedsReset) {
-            this.camera.position.x -= this.controls.target.x;
-            this.camera.position.z -= this.controls.target.z;
-            this.controls.target.set(0, 0, 0);
-            this.controls.update();
-            state.realPlotsCameraNeedsReset = false;
-        }
+    #zoomCoordinates(event) {
+        event.preventDefault();
 
+        const deltaY = Number(event.deltaY);
+        if (!Number.isFinite(deltaY) || deltaY === 0) return;
+
+        const oldZoom = Number(state.zPlaneZoom);
+        const currentZoom = Number.isFinite(oldZoom) && oldZoom > 0 ? oldZoom : 1;
+        const factor = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
+        const nextZoom = Math.max(
+            MIN_STATE_ZOOM_LEVEL,
+            Math.min(MAX_STATE_ZOOM_LEVEL, currentZoom * factor)
+        );
+        if (nextZoom === currentZoom) return;
+
+        state.zPlaneZoom = nextZoom;
+        // Use the same single viewport path as the z-plane slider. This keeps
+        // the state value, coordinate bounds, and surface samples consistent.
+        setupVisualParameters(true, false);
+        requestRedrawAll();
+    }
+
+    updateSurface(transformFunc, surfaceKey) {
         const store = this.surfaceStore;
         store.contourUniforms.uContoursEnabled.value = state.contoursEnabled ? 1.0 : 0.0;
         store.contourUniforms.uContourInterval.value = state.contourInterval !== undefined ? +state.contourInterval : 0.5;
@@ -1375,6 +1347,7 @@ class RealPlots3DRenderer {
 
     dispose() {
         this.resizeObserver?.disconnect();
+        this.renderer.domElement.removeEventListener('wheel', this.coordinateWheelHandler);
         this.controls.dispose();
         this.surfaceStore?.dispose();
         disposeThreeObject(this.scene);

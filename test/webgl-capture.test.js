@@ -43,6 +43,34 @@ test('Polyline capture stays active when Path2D is available', () => {
     }
 });
 
+test('Polyline capture preserves stroke and strokeRect validation categories', () => {
+    const cases = [
+        ['setLineDash', ctx => ctx.setLineDash([2, 2])],
+        ['globalCompositeOperation', ctx => { ctx.globalCompositeOperation = 'multiply'; }],
+        ['strokeState', ctx => { ctx.lineWidth = 0; }],
+        ['strokeStyle', ctx => { ctx.strokeStyle = {}; }],
+        ['lineCap', ctx => { ctx.lineCap = 'invalid'; }],
+        ['lineJoin', ctx => { ctx.lineJoin = 'invalid'; }],
+        ['miterLimit', ctx => { ctx.miterLimit = 0; }]
+    ];
+
+    for (const [expected, configure] of cases) {
+        const ctx = new PolylineCaptureContext();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(1, 1);
+        configure(ctx);
+        ctx.stroke();
+        assert.deepEqual([...ctx._unsupportedOperations], [expected]);
+    }
+
+    const rect = new PolylineCaptureContext();
+    rect.setLineDash([2, 2]);
+    rect.lineCap = 'invalid';
+    rect.strokeRect(0, 0, 10, 10);
+    assert.deepEqual([...rect._unsupportedOperations], ['strokeRectStyle']);
+});
+
 test('Newton Deep palette is registered across UI and shader paths', () => {
     assert.ok(domainPalettes.some(palette => palette.id === 'three-b1b-newton-deep'));
     assert.deepEqual(
