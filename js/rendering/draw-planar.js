@@ -35,6 +35,7 @@ import {
     generateRadialDiscreteStepPointSets
 } from './shape-generators.js';
 import { hslToRgb } from './canvas-primitives.js';
+import { filterGraphFullGridPointSets } from './transformation-graph.js';
 
 const EPSILON = 1e-9;
 const DEGENERATE_SEGMENT_EPSILON = 1e-12;
@@ -1061,10 +1062,13 @@ export function drawPlanarInputShape(ctx, planeParams) {
         return;
     }
 
-    const pointSets = generateCurrentInputShapePointSets(planeParams, {
+    const generatedPointSets = generateCurrentInputShapePointSets(planeParams, {
         currentFunction: appState.currentFunction,
         zetaContinuationEnabled: appState.zetaContinuationEnabled
     });
+    const pointSets = appState.graphFullGridEnabled
+        ? filterGraphFullGridPointSets(generatedPointSets)
+        : generatedPointSets;
     const highlightContour = appState.cauchyIntegralModeEnabled &&
         (inputShape === 'circle' || inputShape === 'ellipse');
 
@@ -1543,12 +1547,20 @@ export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
 
 export function createPlanarTransformedShapeRenderJob(tf, map = null) {
     const inputShape = appState.currentInputShape;
-    const pointSets = isRasterInputShape(inputShape)
+    const generatedPointSets = isRasterInputShape(inputShape)
         ? null
         : generateCurrentInputShapePointSets(zPlaneParams, {
             currentFunction: appState.currentFunction,
             zetaContinuationEnabled: appState.zetaContinuationEnabled
         });
+    let pointSets = generatedPointSets;
+    if (pointSets && appState.graphViewEnabled) {
+        pointSets = appState.graphFullGridEnabled
+            ? filterGraphFullGridPointSets(pointSets)
+            : pointSets.filter((_pointSet, index) =>
+                appState.graphSelectedShape !== inputShape || index === appState.graphSelectedLineIndex
+            );
+    }
 
     return {
         inputShape,

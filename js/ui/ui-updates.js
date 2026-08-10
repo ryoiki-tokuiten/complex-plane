@@ -33,27 +33,6 @@ export function syncLaplacePlayPauseButton() {
     }
 }
 
-const TRANSFORM_MODE_PARAMETER_GROUPS = Object.freeze([
-    'commonParamsSliders',
-    'mobiusParamsSliders',
-    'polynomialParamsSliders',
-    'fractionalPowerParamsSliders',
-    'shapeParamsSliders',
-    'chainingParams',
-    'algebraicChainingParams',
-    'dynamicPlottingParams',
-    'gridSurface3DControl'
-]);
-
-const TRANSFORM_MODE_VISUALIZATION_PANELS = Object.freeze([
-    'visualizationOptionsPanel',
-    'zetaSpecificControls',
-    'riemannSphereOptionsDiv',
-    'riemannSurfaceOptionsDiv',
-    'sphereViewControlsDiv',
-    'vectorFlowOptionsContent'
-]);
-
 const CENTER_LABELS = Object.freeze({
     line: [
         'Fixed Re(z) (<code>a<sub>0</sub></code>):',
@@ -316,12 +295,6 @@ function fractionalPowerExponent() {
     return Number((n || 0.5).toFixed(2));
 }
 
-function hideControls(keys) {
-    for (const key of keys) {
-        setHidden(key, true);
-    }
-}
-
 function syncDisclosure(checkboxKey, contentKey, enabled) {
     setChecked(checkboxKey, enabled);
     setHidden(contentKey, !enabled);
@@ -449,7 +422,6 @@ function syncFractionalPowerDisplays() {
 
 function syncComplexParameterControls() {
     if (state.fourierModeEnabled || state.laplaceModeEnabled) {
-        hideControls(TRANSFORM_MODE_PARAMETER_GROUPS);
         return;
     }
 
@@ -539,10 +511,67 @@ function syncVectorFlowControls() {
     setHidden('particleAnimationDetailsDiv', !state.particleAnimationEnabled);
 }
 
+export function syncTransformControlPanels() {
+    const standaloneTransform = state.fourierModeEnabled || state.laplaceModeEnabled;
+    setHidden('coreApplicationControls', standaloneTransform);
+    setHidden('visualizationOptionsPanel', standaloneTransform);
+    setHidden('fourierSpecificControls', !(state.fourierModeEnabled || state.graphFourierEnabled));
+    setHidden('laplaceSpecificControls', !state.laplaceModeEnabled);
+}
+
 function syncRiemannAndTransformDisplays() {
+    syncTransformControlPanels();
+    const graphSource = state.graphFourierEnabled && !state.fourierModeEnabled;
+    const sourceSelector = control('fourierFunctionSelector');
+    const graphOption = control('fourierCurrentGraphOption');
+    if (graphOption) graphOption.hidden = !graphSource;
+    if (sourceSelector) {
+        sourceSelector.disabled = graphSource;
+        sourceSelector.value = graphSource ? 'current_graph' : state.fourierFunction;
+        sourceSelector.dataset.tooltip = graphSource
+            ? 'The current graph supplies both Fourier signals'
+            : 'Select the time domain signal type';
+    }
+    setText('fourierSignalSectionTitle', graphSource ? 'Graph Signal' : 'Signal Configuration');
+    setText('fourierFunctionLabel', graphSource ? 'Source' : 'Waveform Type');
+    setText('fourierFrequencyLabel', graphSource ? 'Traversal Rate:' : 'Frequency:');
+    setHidden('fourierWindingNote', graphSource);
     syncValueBindings(RIEMANN_VIEW_VALUE_BINDINGS);
     syncValueBindings(FOURIER_VALUE_BINDINGS);
     syncValueBindings(LAPLACE_VALUE_BINDINGS);
+}
+
+function syncGraphControls() {
+    const isGrid = isGridInputShape(state.currentInputShape);
+    const isPolar = state.currentInputShape === 'grid_polar' || state.currentInputShape === 'grid_logpolar';
+    const graphActive = state.graphViewEnabled;
+
+    setHidden('fullGridPerspectiveControl', !isGrid || !graphActive);
+    setActive('viewFullGridPerspectiveBtn', state.graphFullGridEnabled);
+    setChecked('enableGraphViewCb', state.graphViewEnabled);
+    setHidden('graphFocusBoxToggle', !state.graphFullGridEnabled);
+    setChecked('enableGraphFocusBoxCb', state.graphFocusBoxEnabled);
+    setHidden('graphLayerLockToggle', !state.graphFullGridEnabled);
+    setChecked('enableGraphLayerLockCb', state.graphLayerLockEnabled);
+    setHidden('graphGridFamilySelector', !state.graphFullGridEnabled);
+    setValue('graphGridFamilySelector', state.graphGridFamily);
+    setHidden('graphFourierToggle', !graphActive || state.graphLayerLockEnabled);
+    setChecked('enableGraphFourierCb', state.graphFourierEnabled);
+    setHidden('graphTraceToggle', !graphActive || state.graphLayerLockEnabled);
+    setText(
+        'graphTitleLabel',
+        state.graphFullGridEnabled
+            ? state.graphLayerLockEnabled ? 'Locked Layer Perspective' : 'Full Grid Perspective'
+            : state.graphFourierEnabled ? 'Graph + Fourier' : 'Graph'
+    );
+
+    const familySelector = control('graphGridFamilySelector');
+    if (familySelector?.options?.length >= 2) {
+        familySelector.options[0].textContent = isPolar ? 'Circles' : 'Horizontal';
+        familySelector.options[1].textContent = isPolar ? 'Lines' : 'Vertical';
+    }
+
+    if (!graphActive) setHidden('graphColumn', true);
 }
 
 export function updateSliderLabelsAndDisplay() {
@@ -550,9 +579,10 @@ export function updateSliderLabelsAndDisplay() {
         syncComplexParameterControls();
         syncNormalModeDisplays();
         syncTaylorControls();
-        syncParameterControlsPanelVisibility();
         syncVectorFlowControls();
         syncRiemannAndTransformDisplays();
+        syncGraphControls();
+        syncParameterControlsPanelVisibility();
         syncDelegates();
     });
 }
@@ -1120,7 +1150,6 @@ function syncTransformModeTitles() {
         setHtml('zPlaneTitle', 'Time Domain (Signal)');
         setHtml('wPlaneTitle', 'Frequency Domain (Fourier Transform)');
         setDisabled('inputShapeSelector', true);
-        hideControls(TRANSFORM_MODE_VISUALIZATION_PANELS);
         return true;
     }
 
@@ -1140,7 +1169,6 @@ function syncTransformModeTitles() {
 
     const vizMode = state.laplaceVizMode || 'magnitude';
     setHtml('laplace3DTitleLabel', laplace3DTitles[vizMode] ?? laplace3DTitles.combined);
-    hideControls(TRANSFORM_MODE_VISUALIZATION_PANELS);
     return true;
 }
 

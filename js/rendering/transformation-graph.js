@@ -9,6 +9,7 @@ import {
     generateInputShapePointSets
 } from './shape-generators.js';
 import { disposeThreeObject } from './three-utils.js';
+import { buildFourierWinding } from '../analysis/fourier-transform.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -19,6 +20,12 @@ const GRAPHABLE_INPUT_SHAPES = new Set([
     'circle',
     'ellipse'
 ]);
+const GRID_INPUT_SHAPES = new Set([
+    'grid_cartesian',
+    'grid_polar',
+    'grid_logpolar',
+    'grid_logcartesian'
+]);
 
 const BACKGROUND = 0x05060b;
 const AXIS_COLOR = 0xaeb8cc;
@@ -27,11 +34,14 @@ const INPUT_TICK_COLOR = 0xf3f6ff;
 const RE_COLOR = 0xffd45f;
 const IM_COLOR = 0x5dd8e8;
 const TRACE_COLOR = 0xdfe8ff;
+const FOCUS_BOX_COLOR = 0xffd43b;
+const INTERSECTION_COLOR = 0xf8fafc;
 const RE_EMISSIVE = 0x4c3504;
 const IM_EMISSIVE = 0x053846;
 const SELECTION_STROKE = 'rgba(255, 220, 120, 0.95)';
 const SELECTION_GLOW = 'rgba(255, 199, 92, 0.28)';
 const SAMPLE_COUNT = 241;
+const FULL_GRID_SAMPLE_COUNT = 161;
 const INPUT_AXIS_HALF = 4.4;
 const OUTPUT_AXIS_HALF = 2.05;
 const DEPTH_AXIS_HALF = 2.05;
@@ -42,10 +52,13 @@ const GRID_RADIUS = 0.0045;
 const TRACE_RADIUS = 0.014;
 const FRUSTUM_HEIGHT = 6.3;
 const FRUSTUM_MIN_HALF_WIDTH = 5.65;
+const FULL_GRID_FRAME_SPACING = 8.25;
+const FOURIER_RING_RADIUS = 0.72;
 const EPSILON = 1e-10;
 
 let activeGraphRenderer = null;
 let graphDataCache = null;
+let fullGridDataCache = null;
 
 function isFiniteComplex(value) {
     return Number.isFinite(value?.re) && Number.isFinite(value?.im);
@@ -98,11 +111,21 @@ export function isGraphViewSupported(shape = state.currentInputShape) {
     return GRAPHABLE_INPUT_SHAPES.has(shape);
 }
 
-function getGraphPointSets(planeParams = zPlaneParams) {
+export function isFullGridPerspectiveSupported(shape = state.currentInputShape) {
+    return GRID_INPUT_SHAPES.has(shape);
+}
+
+function graphModeActive() {
+    return state.graphViewEnabled
+        && !state.fourierModeEnabled
+        && !state.laplaceModeEnabled;
+}
+
+function getGraphPointSets(planeParams = zPlaneParams, curvePoints = null) {
     if (!isGraphViewSupported()) return [];
 
     const config = buildInputShapeGeometryConfig(planeParams, {
-        curvePoints: Math.max(SAMPLE_COUNT * 2, Math.min(NUM_POINTS_CURVE, 1000))
+        curvePoints: curvePoints ?? Math.max(SAMPLE_COUNT * 2, Math.min(NUM_POINTS_CURVE, 1000))
     });
 
     return generateInputShapePointSets(config)
@@ -175,10 +198,23 @@ function prefersCircularPolarSelection(pointSet) {
 }
 
 function selectedLineIndex(pointSets, commitShapeChange = false) {
-    if (!pointSets.length) return -1;
+    const candidates = pointSets
+        .map((set, index) => ({ set, index }))
+        .filter(({ set }) => !state.graphFullGridEnabled
+            || state.graphLayerLockEnabled
+            || pointSetMatchesGridFamily(set));
+    if (!candidates.length) return -1;
 
-    if (state.graphSelectedShape !== state.currentInputShape) {
-        const nextIndex = defaultLineIndex(pointSets);
+    const selectedIndex = Math.floor(Number(state.graphSelectedLineIndex));
+    const selectionIsValid = state.graphSelectedShape === state.currentInputShape
+        && Number.isFinite(selectedIndex)
+        && candidates.some(candidate => candidate.index === selectedIndex);
+    if (!selectionIsValid) {
+        const defaultCandidates = state.graphFullGridEnabled && state.graphLayerLockEnabled
+            ? candidates.filter(({ set }) => pointSetMatchesGridFamily(set))
+            : candidates;
+        const localIndex = defaultLineIndex(defaultCandidates.map(candidate => candidate.set));
+        const nextIndex = defaultCandidates[localIndex]?.index ?? -1;
         if (commitShapeChange) {
             state.graphSelectedShape = state.currentInputShape;
             state.graphSelectedLineIndex = nextIndex;
@@ -186,9 +222,7 @@ function selectedLineIndex(pointSets, commitShapeChange = false) {
         return nextIndex;
     }
 
-    const raw = Math.floor(Number(state.graphSelectedLineIndex));
-    if (!Number.isFinite(raw)) return defaultLineIndex(pointSets);
-    return clamp(raw, 0, pointSets.length - 1);
+    return selectedIndex;
 }
 
 export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = zPlaneParams) {
@@ -199,7 +233,16 @@ export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = 
     if (!finitePoint(probe)) return false;
 
     const pointSets = getGraphPointSets(planeParams);
-    if (!pointSets.length) return false;
+    const lockedIndex = selectedLineIndex(pointSets, false);
+    const lockedFamily = gridFamilyForPointSet(pointSets[lockedIndex]);
+    const candidates = pointSets
+        .map((set, index) => ({ set, index }))
+        .filter(({ set, index }) => {
+            if (!state.graphFullGridEnabled) return true;
+            if (!state.graphLayerLockEnabled) return pointSetMatchesGridFamily(set);
+            return index === lockedIndex || gridFamilyForPointSet(set) !== lockedFamily;
+        });
+    if (!candidates.length) return false;
 
     const xRange = planeParams.currentVisXRange || planeParams.xRange || [-1, 1];
     const worldPerPixel = Math.abs((xRange[1] - xRange[0]) / Math.max(1, planeParams.width || 1));
@@ -208,7 +251,7 @@ export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = 
     let bestIndex = -1;
     let bestDistanceSq = Infinity;
     let bestPreferred = false;
-    pointSets.forEach((set, index) => {
+    candidates.forEach(({ set, index }) => {
         const distanceSq = pointSetDistanceSq(probe, set);
         const preferred = prefersCircularPolarSelection(set);
         const nearTie = Math.abs(distanceSq - bestDistanceSq) <= toleranceSq * 0.02;
@@ -223,6 +266,9 @@ export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = 
 
     state.graphSelectedShape = state.currentInputShape;
     state.graphSelectedLineIndex = bestIndex;
+    if (state.graphFullGridEnabled && state.graphLayerLockEnabled) {
+        state.graphGridFamily = gridFamilyForPointSet(pointSets[bestIndex]);
+    }
     state.graphSelectionRevision = (state.graphSelectionRevision || 0) + 1;
     return true;
 }
@@ -322,22 +368,360 @@ function resamplePolyline(points, count = SAMPLE_COUNT) {
     return samples;
 }
 
-function robustOutputScale(samples) {
-    const values = [];
-
+function linearComponentScale(samples, component) {
+    let maximum = 0;
     samples.forEach(sample => {
         if (!isFiniteComplex(sample.output)) return;
-        values.push(Math.abs(sample.output.re), Math.abs(sample.output.im));
+        maximum = Math.max(maximum, Math.abs(sample.output[component]));
+    });
+    return Math.max(EPSILON, maximum);
+}
+
+function normalizedComponentScale(samples, component) {
+    const values = [];
+    samples.forEach(sample => {
+        if (!isFiniteComplex(sample.output)) return;
+        values.push(Math.abs(sample.output[component]));
+    });
+    if (!values.length) return 1;
+    values.sort((a, b) => a - b);
+    const maxValue = values[values.length - 1];
+    if (maxValue <= EPSILON) return 1;
+    const p90 = values[Math.floor((values.length - 1) * 0.9)] || maxValue;
+    const robust = Math.max(EPSILON, p90 * 1.2);
+    return maxValue <= robust * 1.35 ? maxValue : robust;
+}
+
+function pointSetLabel(pointSet) {
+    const points = pointSet?.points || [];
+    const first = points.find(finitePoint);
+    const last = [...points].reverse().find(finitePoint);
+    const role = String(pointSet?.role || '');
+    if (!first) return role;
+    if (role.includes('horizontal')) return `Im(z) = ${formatNumber(first.im)}`;
+    if (role.includes('vertical')) return `Re(z) = ${formatNumber(first.re)}`;
+    if (role.includes('radial')) return `|z| = ${formatNumber(Math.hypot(first.re, first.im))}`;
+    if (role.includes('angular')) {
+        const direction = last || first;
+        return `arg(z) = ${formatNumber(Math.atan2(direction.im, direction.re))}`;
+    }
+    return formatComplexPoint(first);
+}
+
+function evaluateSamples(inputSamples, map) {
+    return inputSamples.map((input, index) => {
+        const t = inputSamples.length <= 1 ? 0 : index / (inputSamples.length - 1);
+        return evaluateSample(input, t, map);
+    });
+}
+
+function evaluateSample(input, t, map) {
+    let output = { re: NaN, im: NaN };
+    try {
+        output = map.evaluate(input.re, input.im);
+    } catch {
+        output = { re: NaN, im: NaN };
+    }
+    return { input: { re: input.re, im: input.im }, output, t };
+}
+
+function polylineParameterAtPoint(points, target) {
+    const safePoints = points.filter(finitePoint);
+    if (safePoints.length < 2) return 0;
+    const { distances, total } = cumulativeDistances(safePoints);
+    if (total <= EPSILON) return 0;
+
+    let bestDistanceSq = Infinity;
+    let bestDistance = 0;
+    for (let index = 1; index < safePoints.length; index += 1) {
+        const start = safePoints[index - 1];
+        const end = safePoints[index];
+        const dx = end.re - start.re;
+        const dy = end.im - start.im;
+        const segmentLengthSq = dx * dx + dy * dy;
+        const mix = segmentLengthSq <= EPSILON
+            ? 0
+            : clamp(((target.re - start.re) * dx + (target.im - start.im) * dy) / segmentLengthSq, 0, 1);
+        const re = lerp(start.re, end.re, mix);
+        const im = lerp(start.im, end.im, mix);
+        const distanceSq = (target.re - re) ** 2 + (target.im - im) ** 2;
+        if (distanceSq >= bestDistanceSq) continue;
+        bestDistanceSq = distanceSq;
+        bestDistance = distances[index - 1] + Math.sqrt(segmentLengthSq) * mix;
+    }
+    return clamp(bestDistance / total, 0, 1);
+}
+
+function insertMappedSample(samples, mappedSample, t) {
+    const next = {
+        input: { ...mappedSample.input },
+        output: { ...mappedSample.output },
+        t: clamp(t, 0, 1)
+    };
+    const existingIndex = samples.findIndex(sample => Math.abs(sample.t - next.t) <= 1e-8);
+    if (existingIndex >= 0) samples[existingIndex] = next;
+    else {
+        samples.push(next);
+        samples.sort((left, right) => left.t - right.t);
+    }
+    return next;
+}
+
+function gridIntersectionPoint(leftSet, rightSet) {
+    const leftRole = String(leftSet?.role || '');
+    const rightRole = String(rightSet?.role || '');
+    const horizontal = leftRole.includes('horizontal') ? leftSet
+        : rightRole.includes('horizontal') ? rightSet : null;
+    const vertical = leftRole.includes('vertical') ? leftSet
+        : rightRole.includes('vertical') ? rightSet : null;
+    if (horizontal && vertical) {
+        const horizontalPoint = horizontal.points.find(finitePoint);
+        const verticalPoint = vertical.points.find(finitePoint);
+        if (horizontalPoint && verticalPoint) {
+            return { re: verticalPoint.re, im: horizontalPoint.im };
+        }
+    }
+
+    const circle = leftRole.includes('radial') ? leftSet
+        : rightRole.includes('radial') ? rightSet : null;
+    const ray = leftRole.includes('angular') ? leftSet
+        : rightRole.includes('angular') ? rightSet : null;
+    if (!circle || !ray) return null;
+    const circlePoint = circle.points.find(finitePoint);
+    const direction = [...ray.points].reverse().find(point =>
+        finitePoint(point) && Math.hypot(point.re, point.im) > EPSILON
+    );
+    if (!circlePoint || !direction) return null;
+    const radius = Math.hypot(circlePoint.re, circlePoint.im);
+    const directionMagnitude = Math.hypot(direction.re, direction.im);
+    return {
+        re: radius * direction.re / directionMagnitude,
+        im: radius * direction.im / directionMagnitude
+    };
+}
+
+function selectEvenly(items, maximum) {
+    if (items.length <= maximum) return items;
+    return Array.from({ length: maximum }, (_, index) =>
+        items[Math.round(index * (items.length - 1) / (maximum - 1))]
+    );
+}
+
+export function pointSetMatchesGridFamily(
+    pointSet,
+    shape = state.currentInputShape,
+    family = state.graphGridFamily
+) {
+    const role = String(pointSet?.role || '');
+    const primary = family !== 'secondary';
+    const polar = shape === 'grid_polar' || shape === 'grid_logpolar';
+    if (polar) return primary ? role.includes('radial') : role.includes('angular');
+    return primary ? role.includes('horizontal') : role.includes('vertical');
+}
+
+function gridFamilyForPointSet(pointSet, shape = state.currentInputShape) {
+    const role = String(pointSet?.role || '');
+    const polar = shape === 'grid_polar' || shape === 'grid_logpolar';
+    if (polar) return role.includes('radial') ? 'primary' : 'secondary';
+    return role.includes('horizontal') ? 'primary' : 'secondary';
+}
+
+export function filterGraphFullGridPointSets(pointSets) {
+    if (!state.graphFullGridEnabled) return pointSets;
+    if (!state.graphLayerLockEnabled) {
+        return pointSets.filter(pointSet => pointSetMatchesGridFamily(pointSet));
+    }
+
+    const lockedIndex = selectedLineIndex(pointSets, false);
+    const lockedFamily = gridFamilyForPointSet(pointSets[lockedIndex]);
+    return pointSets.filter((pointSet, index) =>
+        index === lockedIndex || gridFamilyForPointSet(pointSet) !== lockedFamily
+    );
+}
+
+function gridFamilySortValue(pointSet) {
+    const first = pointSet?.points?.find(finitePoint);
+    if (!first) return 0;
+    const role = String(pointSet.role || '');
+    if (role.includes('horizontal')) return first.im;
+    if (role.includes('vertical')) return first.re;
+    if (role.includes('radial')) return Math.hypot(first.re, first.im);
+    if (role.includes('angular')) {
+        const direction = [...pointSet.points].reverse().find(finitePoint) || first;
+        const angle = Math.atan2(direction.im, direction.re);
+        return angle < 0 ? angle + Math.PI * 2 : angle;
+    }
+    return 0;
+}
+
+function visibleInputBounds(planeParams = zPlaneParams) {
+    return {
+        xRange: planeParams.currentVisXRange || planeParams.xRange || [-1, 1],
+        yRange: planeParams.currentVisYRange || planeParams.yRange || [-1, 1]
+    };
+}
+
+function makeFullGridInputKey(map, planeParams = zPlaneParams, lockedIndex = -1) {
+    const { xRange, yRange } = visibleInputBounds(planeParams);
+    return [
+        'full-grid',
+        map.signature,
+        state.currentInputShape,
+        state.graphGridFamily,
+        state.graphLayerLockEnabled ? 'locked' : 'separate',
+        state.graphLayerLockEnabled ? lockedIndex : '-',
+        state.gridDensity,
+        state.gridColor1,
+        state.gridColor2,
+        state.zetaContinuationEnabled ? 1 : 0,
+        FULL_GRID_SAMPLE_COUNT,
+        xRange[0], xRange[1], yRange[0], yRange[1]
+    ].join('|');
+}
+
+function buildLockedGridData(pointSets, lockedIndex, map, inputKey, sampleCount) {
+    const lockedSet = pointSets[lockedIndex];
+    if (!lockedSet) return null;
+    const lockedFamily = gridFamilyForPointSet(lockedSet);
+    const crossingSets = pointSets
+        .map((pointSet, sourceIndex) => ({ pointSet, sourceIndex }))
+        .filter(({ pointSet }) => gridFamilyForPointSet(pointSet) !== lockedFamily)
+        .sort((left, right) => gridFamilySortValue(left.pointSet) - gridFamilySortValue(right.pointSet));
+
+    const lockedSamples = evaluateSamples(resamplePolyline(lockedSet.points, sampleCount), map);
+    const intersections = [];
+    const crossingCurves = crossingSets.map(({ pointSet, sourceIndex }) => {
+        const input = gridIntersectionPoint(lockedSet, pointSet);
+        const lockedT = input ? polylineParameterAtPoint(lockedSet.points, input) : 0;
+        const crossingT = input ? polylineParameterAtPoint(pointSet.points, input) : 0;
+        const mapped = input ? evaluateSample(input, lockedT, map) : null;
+        if (mapped) insertMappedSample(lockedSamples, mapped, lockedT);
+
+        const samples = evaluateSamples(resamplePolyline(pointSet.points, sampleCount), map);
+        if (mapped) insertMappedSample(samples, mapped, crossingT);
+        if (mapped) {
+            intersections.push({
+                input: mapped.input,
+                output: mapped.output,
+                t: lockedT,
+                sourceIndex
+            });
+        }
+        return {
+            sourceIndex,
+            role: pointSet.role || '',
+            label: pointSetLabel(pointSet),
+            samples,
+            intersectionT: lockedT,
+            anchorT: crossingT
+        };
     });
 
-    if (!values.length) return 1;
+    const allSamples = [lockedSamples, ...crossingCurves.map(curve => curve.samples)].flat();
+    const reScale = normalizedComponentScale(lockedSamples, 're');
+    const imScale = normalizedComponentScale(lockedSamples, 'im');
+    const lockedCurve = {
+        sourceIndex: lockedIndex,
+        role: lockedSet.role || '',
+        label: pointSetLabel(lockedSet),
+        samples: lockedSamples,
+        reScale,
+        imScale,
+        locked: true
+    };
+    const curves = [lockedCurve, ...crossingCurves].map(curve => ({
+        ...curve,
+        reScale,
+        imScale
+    }));
+    const finiteCount = allSamples.reduce(
+        (count, sample) => count + (isFiniteComplex(sample.output) ? 1 : 0),
+        0
+    );
 
-    values.sort((a, b) => a - b);
-    const maxValue = values[values.length - 1] || 1;
-    const p90 = values[Math.floor((values.length - 1) * 0.90)] || maxValue;
-    const robust = Math.max(1, p90 * 1.2);
+    return {
+        mode: 'locked-grid',
+        geometryKey: inputKey,
+        key: makeGraphDisplayKey(inputKey),
+        curves,
+        lockedCurve: curves[0],
+        samples: lockedSamples,
+        intersections,
+        reScale,
+        imScale,
+        axisLabel: lockedCurve.label,
+        finiteCount
+    };
+}
 
-    return maxValue <= robust * 1.35 ? Math.max(1, maxValue) : robust;
+function syncFullGridSelection(data, pointSets) {
+    const sourceIndex = selectedLineIndex(pointSets, true);
+    data.selectedCurveIndex = data.curves.findIndex(curve => curve.sourceIndex === sourceIndex);
+    data.selectionKey = [
+        state.currentInputShape,
+        state.graphGridFamily,
+        sourceIndex,
+        state.graphSelectionRevision || 0,
+        data.curves.length,
+        state.graphFocusBoxEnabled ? 1 : 0
+    ].join('|');
+    data.key = `${makeGraphDisplayKey(data.geometryKey)}|selection:${data.selectionKey}`;
+    return data;
+}
+
+export function buildFullGridTransformationGraphData(planeParams = zPlaneParams) {
+    if (!graphModeActive() || !state.graphFullGridEnabled || !isFullGridPerspectiveSupported()) {
+        return null;
+    }
+
+    const map = resolveActiveMap();
+    const sampleCount = FULL_GRID_SAMPLE_COUNT;
+    const pointSets = getGraphPointSets(planeParams, sampleCount * 2);
+    const lockedIndex = state.graphLayerLockEnabled ? selectedLineIndex(pointSets, true) : -1;
+    if (state.graphLayerLockEnabled && lockedIndex >= 0) {
+        state.graphGridFamily = gridFamilyForPointSet(pointSets[lockedIndex]);
+    }
+    const inputKey = makeFullGridInputKey(map, planeParams, lockedIndex);
+    if (fullGridDataCache?.inputKey === inputKey) {
+        fullGridDataCache.data.key = makeGraphDisplayKey(inputKey);
+        return syncFullGridSelection(fullGridDataCache.data, fullGridDataCache.pointSets);
+    }
+
+    if (state.graphLayerLockEnabled) {
+        const data = buildLockedGridData(pointSets, lockedIndex, map, inputKey, sampleCount);
+        if (!data) return null;
+        fullGridDataCache = { inputKey, data, pointSets };
+        return syncFullGridSelection(data, pointSets);
+    }
+
+    const selectedSets = pointSets
+        .map((pointSet, sourceIndex) => ({ pointSet, sourceIndex }))
+        .filter(({ pointSet }) => pointSetMatchesGridFamily(pointSet))
+        .sort((left, right) => gridFamilySortValue(left.pointSet) - gridFamilySortValue(right.pointSet));
+    const curves = selectedSets.map(({ pointSet, sourceIndex }) => {
+        const samples = evaluateSamples(resamplePolyline(pointSet.points, sampleCount), map);
+        return {
+            sourceIndex,
+            role: pointSet.role || '',
+            label: pointSetLabel(pointSet),
+            samples,
+            fourierReScale: linearComponentScale(samples, 're'),
+            fourierImScale: linearComponentScale(samples, 'im'),
+            reScale: normalizedComponentScale(samples, 're'),
+            imScale: normalizedComponentScale(samples, 'im')
+        };
+    });
+    const finiteCount = curves.reduce((total, curve) =>
+        total + curve.samples.reduce((count, sample) => count + (isFiniteComplex(sample.output) ? 1 : 0), 0), 0);
+    const data = {
+        mode: 'grid',
+        geometryKey: inputKey,
+        key: makeGraphDisplayKey(inputKey),
+        curves,
+        finiteCount
+    };
+    fullGridDataCache = { inputKey, data, pointSets };
+    return syncFullGridSelection(data, pointSets);
 }
 
 function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
@@ -355,8 +739,7 @@ function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
         state.circleR,
         state.ellipseA,
         state.ellipseB,
-        planeParams.width,
-        planeParams.height,
+        SAMPLE_COUNT,
         xRange[0],
         xRange[1],
         yRange[0],
@@ -365,7 +748,17 @@ function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
 }
 
 function makeGraphDisplayKey(inputKey) {
-    return `${inputKey}|trace:${state.graphTraceEnabled ? 1 : 0}`;
+    return [
+        inputKey,
+        `trace:${state.graphTraceEnabled ? 1 : 0}`,
+        `fourier:${state.graphFourierEnabled ? 1 : 0}`,
+        state.fourierFrequency,
+        state.fourierAmplitude,
+        state.fourierTimeWindow,
+        state.fourierSamples,
+        state.fourierWindingFrequency,
+        state.fourierWindingTime
+    ].join('|');
 }
 
 function graphSelectionHint() {
@@ -381,7 +774,8 @@ function cachedGraphData(inputKey) {
 }
 
 export function buildTransformationGraphData(planeParams = zPlaneParams) {
-    if (!state.graphViewEnabled || !isGraphViewSupported()) return null;
+    if (!graphModeActive() || !isGraphViewSupported()) return null;
+    if (state.graphFullGridEnabled) return buildFullGridTransformationGraphData(planeParams);
 
     const map = resolveActiveMap();
     const provisionalKey = makeGraphInputKey(map, graphSelectionHint(), planeParams);
@@ -400,27 +794,19 @@ export function buildTransformationGraphData(planeParams = zPlaneParams) {
     const inputSamples = resamplePolyline(selected.points, SAMPLE_COUNT);
     if (inputSamples.length < 2) return null;
 
-    const samples = inputSamples.map((input, index) => {
-        let output = { re: NaN, im: NaN };
-        try {
-            output = map.evaluate(input.re, input.im);
-        } catch {
-            output = { re: NaN, im: NaN };
-        }
-        const t = inputSamples.length <= 1 ? 0 : index / (inputSamples.length - 1);
-        return { input, output, t };
-    });
-    const outputScale = robustOutputScale(samples);
+    const samples = evaluateSamples(inputSamples, map);
     const finiteCount = samples.reduce((count, sample) => count + (isFiniteComplex(sample.output) ? 1 : 0), 0);
 
     const data = {
+        mode: 'single',
+        geometryKey: inputKey,
         key: makeGraphDisplayKey(inputKey),
         samples,
-        outputScale,
-        finiteCount,
-        lineIndex,
-        pointSetCount: pointSets.length,
-        selectedRole: selected.role || ''
+        fourierReScale: linearComponentScale(samples, 're'),
+        fourierImScale: linearComponentScale(samples, 'im'),
+        reScale: normalizedComponentScale(samples, 're'),
+        imScale: normalizedComponentScale(samples, 'im'),
+        finiteCount
     };
     graphDataCache = { inputKey, data };
     return data;
@@ -501,6 +887,166 @@ function addSoftLine(group, start, end, options) {
     addSegmentedTube(group, [start, end], options);
 }
 
+function addPolyline(group, points, { color = GRID_COLOR, opacity = 1 } = {}) {
+    const finitePoints = points.filter(Boolean);
+    if (finitePoints.length < 2) return null;
+    const geometry = new THREE.BufferGeometry().setFromPoints(finitePoints);
+    const material = new THREE.LineBasicMaterial({
+        color,
+        transparent: opacity < 1,
+        opacity,
+        depthWrite: opacity >= 0.85
+    });
+    const line = new THREE.Line(geometry, material);
+    group.add(line);
+    return line;
+}
+
+function addSegmentedPolyline(group, points, options = {}) {
+    let segment = [];
+    const flush = () => {
+        if (segment.length >= 2) addPolyline(group, segment, options);
+        segment = [];
+    };
+
+    points.forEach(point => {
+        if (!point) {
+            flush();
+            return;
+        }
+        segment.push(point);
+    });
+    flush();
+}
+
+function addLineSegments(group, segments, {
+    color = GRID_COLOR,
+    opacity = 1,
+    vertexColors = null
+} = {}) {
+    if (!Array.isArray(segments) || segments.length === 0) return null;
+    const positions = new Float32Array(segments.length * 6);
+    const colors = vertexColors ? new Float32Array(segments.length * 6) : null;
+
+    segments.forEach(([start, end], index) => {
+        const offset = index * 6;
+        positions.set([start.x, start.y, start.z, end.x, end.y, end.z], offset);
+        if (!colors) return;
+        const [startColor, endColor = startColor] = vertexColors[index];
+        colors.set([
+            startColor.r, startColor.g, startColor.b,
+            endColor.r, endColor.g, endColor.b
+        ], offset);
+    });
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.LineBasicMaterial({
+        color: colors ? 0xffffff : color,
+        vertexColors: Boolean(colors),
+        transparent: opacity < 1,
+        opacity,
+        depthWrite: opacity >= 0.85
+    });
+    const lines = new THREE.LineSegments(geometry, material);
+    group.add(lines);
+    return lines;
+}
+
+function appendPolylineSegments(target, points) {
+    let previous = null;
+    points.forEach(point => {
+        if (!point) {
+            previous = null;
+            return;
+        }
+        if (previous) target.push([previous, point]);
+        previous = point;
+    });
+}
+
+function addPointCloud(group, points, {
+    color,
+    size = 4,
+    opacity = 1
+} = {}) {
+    if (!points.length) return null;
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.PointsMaterial({
+        color,
+        size,
+        sizeAttenuation: false,
+        transparent: opacity < 1,
+        opacity,
+        depthWrite: opacity >= 0.85
+    });
+    const cloud = new THREE.Points(geometry, material);
+    group.add(cloud);
+    return cloud;
+}
+
+function addMarker(group, point, color, radius = 0.07) {
+    const geometry = new THREE.SphereGeometry(radius, 18, 12);
+    const material = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.55,
+        roughness: 0.28
+    });
+    const marker = new THREE.Mesh(geometry, material);
+    marker.position.copy(point);
+    group.add(marker);
+    return marker;
+}
+
+function addGlowMarker(group, point, color, radius = 0.14, opacity = 0.16) {
+    const geometry = new THREE.SphereGeometry(radius, 18, 12);
+    const material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        depthWrite: false
+    });
+    const marker = new THREE.Mesh(geometry, material);
+    marker.position.copy(point);
+    marker.renderOrder = 2;
+    group.add(marker);
+    return marker;
+}
+
+function addArrowHead(group, origin, tip, color = 0xffdc32) {
+    const direction = tip.clone().sub(origin);
+    const length = direction.length();
+    if (length <= EPSILON) return null;
+    direction.normalize();
+    const geometry = new THREE.ConeGeometry(0.055, 0.15, 14);
+    const material = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.42,
+        roughness: 0.32
+    });
+    const arrow = new THREE.Mesh(geometry, material);
+    arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+    arrow.position.copy(tip).addScaledVector(direction, -0.075);
+    group.add(arrow);
+    return arrow;
+}
+
+function lineArrowHeadSegments(origin, tip, plane) {
+    const direction = tip.clone().sub(origin);
+    if (direction.lengthSq() <= EPSILON) return [];
+    direction.normalize();
+    const normal = plane === 're' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    const side = new THREE.Vector3().crossVectors(normal, direction).normalize();
+    const back = tip.clone().addScaledVector(direction, -0.12);
+    return [
+        [tip, back.clone().addScaledVector(side, 0.055)],
+        [tip, back.clone().addScaledVector(side, -0.055)]
+    ];
+}
+
 function addPlane(group, width, height, position, rotation, color, opacity) {
     const geometry = new THREE.PlaneGeometry(width, height);
     const material = new THREE.MeshBasicMaterial({
@@ -576,25 +1122,208 @@ function scaledOutputCoordinate(value, outputScale, halfExtent) {
     return signed * halfExtent;
 }
 
-function graphPointFor(sample, outputScale, mode) {
+function graphPointFor(sample, scales, mode, zOffset = 0) {
     if (!isFiniteComplex(sample.output)) return null;
 
     const x = lerp(-INPUT_AXIS_HALF, INPUT_AXIS_HALF, sample.t);
-    const y = scaledOutputCoordinate(sample.output.re, outputScale, OUTPUT_AXIS_HALF);
-    const z = scaledOutputCoordinate(sample.output.im, outputScale, DEPTH_AXIS_HALF);
+    const reScale = scales?.reScale || 1;
+    const imScale = scales?.imScale || 1;
+    const y = scaledOutputCoordinate(sample.output.re, reScale, OUTPUT_AXIS_HALF);
+    const z = zOffset + scaledOutputCoordinate(sample.output.im, imScale, DEPTH_AXIS_HALF);
 
-    if (mode === 're') return new THREE.Vector3(x, y, 0);
+    if (mode === 're') return new THREE.Vector3(x, y, zOffset);
     if (mode === 'im') return new THREE.Vector3(x, 0, z);
     return new THREE.Vector3(x, y, z);
+}
+
+function hasGraphPoleJump(previous, sample, scales, components) {
+    if (!isFiniteComplex(previous?.output) || !isFiniteComplex(sample?.output)) return false;
+    return components.some(component => {
+        const scale = component === 're'
+            ? scales?.reScale || 1
+            : scales?.imScale || 1;
+        const left = previous.output[component] / Math.max(EPSILON, scale);
+        const right = sample.output[component] / Math.max(EPSILON, scale);
+        return left * right < 0
+            && Math.abs(left) > 1.05
+            && Math.abs(right) > 1.05
+            && Math.abs(left - right) > 4;
+    });
+}
+
+function graphPointsForSamples(samples, scales, mode, zOffset = 0) {
+    const components = mode === 're' ? ['re'] : mode === 'im' ? ['im'] : ['re', 'im'];
+    const points = [];
+    let previous = null;
+
+    samples.forEach(sample => {
+        if (hasGraphPoleJump(previous, sample, scales, components)) points.push(null);
+        points.push(graphPointFor(sample, scales, mode, zOffset));
+        previous = sample;
+    });
+    return points;
+}
+
+function curveIsClosed(curve) {
+    const first = curve?.samples?.[0]?.input;
+    const last = curve?.samples?.at(-1)?.input;
+    return finitePoint(first) && finitePoint(last)
+        && Math.hypot(first.re - last.re, first.im - last.im) <= EPSILON;
+}
+
+function connectedLayerRatio(sample, curve) {
+    if (curve.locked) return 0;
+    const anchor = clamp(Number(curve.anchorT) || 0, 0, 1);
+    if (curveIsClosed(curve)) {
+        let phase = sample.t - anchor;
+        phase -= Math.round(phase);
+        return phase / 0.5;
+    }
+    const delta = sample.t - anchor;
+    const span = delta < 0 ? anchor : 1 - anchor;
+    return delta / Math.max(EPSILON, span);
+}
+
+function orderedConnectedSamples(samples, curve) {
+    if (curve.locked || !curveIsClosed(curve)) return samples;
+    const ordered = samples.slice();
+    const first = ordered[0]?.input;
+    const last = ordered.at(-1)?.input;
+    if (finitePoint(first) && finitePoint(last)
+        && Math.hypot(first.re - last.re, first.im - last.im) <= EPSILON) {
+        ordered.pop();
+    }
+    return ordered.sort((left, right) =>
+        connectedLayerRatio(left, curve) - connectedLayerRatio(right, curve)
+    );
+}
+
+function connectedGraphPointFor(sample, curve, mode) {
+    if (!isFiniteComplex(sample.output)) return null;
+    const inputT = curve.locked ? sample.t : curve.intersectionT;
+    const x = lerp(-INPUT_AXIS_HALF, INPUT_AXIS_HALF, inputT);
+    const transverse = connectedLayerRatio(sample, curve);
+    if (mode === 're') {
+        return new THREE.Vector3(
+            x,
+            scaledOutputCoordinate(sample.output.re, curve.reScale, OUTPUT_AXIS_HALF),
+            transverse * DEPTH_AXIS_HALF
+        );
+    }
+    return new THREE.Vector3(
+        x,
+        transverse * OUTPUT_AXIS_HALF,
+        scaledOutputCoordinate(sample.output.im, curve.imScale, DEPTH_AXIS_HALF)
+    );
+}
+
+function connectedGraphPointsForSamples(samples, curve, mode) {
+    const points = [];
+    let previous = null;
+    const component = mode === 're' ? ['re'] : ['im'];
+    orderedConnectedSamples(samples, curve).forEach(sample => {
+        if (hasGraphPoleJump(previous, sample, curve, component)) points.push(null);
+        points.push(connectedGraphPointFor(sample, curve, mode));
+        previous = sample;
+    });
+    return points;
+}
+
+function ringPoints(center, radius, plane) {
+    return Array.from({ length: 97 }, (_, index) => {
+        const angle = (index / 96) * Math.PI * 2;
+        if (plane === 're') {
+            return new THREE.Vector3(
+                center.x + radius * Math.cos(angle),
+                center.y + radius * Math.sin(angle),
+                center.z
+            );
+        }
+        return new THREE.Vector3(
+            center.x + radius * Math.cos(angle),
+            center.y,
+            center.z + radius * Math.sin(angle)
+        );
+    });
+}
+
+function windingPointToVector(point, center, plane) {
+    const re = point.re * FOURIER_RING_RADIUS;
+    const im = point.im * FOURIER_RING_RADIUS;
+    if (plane === 're') return new THREE.Vector3(center.x + re, center.y + im, center.z);
+    return new THREE.Vector3(center.x + re, center.y, center.z + im);
+}
+
+function graphFourierSignal(samples, component, scale) {
+    const requested = clamp(Math.floor(Number(state.fourierSamples) || 128), 32, 512);
+    let source = samples;
+    const firstInput = source[0]?.input;
+    const lastInput = source.at(-1)?.input;
+    if (finitePoint(firstInput) && finitePoint(lastInput)
+        && Math.hypot(firstInput.re - lastInput.re, firstInput.im - lastInput.im) <= EPSILON) {
+        source = source.slice(0, -1);
+    }
+    source = selectEvenly(source, requested);
+    const timeWindow = Math.max(EPSILON, Number(state.fourierTimeWindow) || 1);
+    const amplitudeScale = clamp(Number(state.fourierAmplitude) || 1, 0.1, 5);
+    const traversalFrequency = clamp(Number(state.fourierFrequency) || 1, 0.1, 10);
+    const signal = [];
+    for (let index = 0; index < requested; index += 1) {
+        const normalizedTime = requested <= 1 ? 0 : index / (requested - 1);
+        const traversal = normalizedTime * timeWindow * traversalFrequency;
+        const phase = traversal - Math.floor(traversal);
+        const sourcePosition = phase * Math.max(0, source.length - 1);
+        const leftIndex = Math.floor(sourcePosition);
+        const rightIndex = Math.min(source.length - 1, leftIndex + 1);
+        const left = source[leftIndex];
+        const right = source[rightIndex];
+        if (!isFiniteComplex(left?.output) || !isFiniteComplex(right?.output)) continue;
+        const mix = sourcePosition - leftIndex;
+        const value = lerp(left.output[component], right.output[component], mix);
+        signal.push({
+            t: normalizedTime * timeWindow,
+            value: (value / Math.max(EPSILON, scale)) * amplitudeScale
+        });
+    }
+    return signal;
+}
+
+function graphFourierWinding(samples, component, scale) {
+    const signal = graphFourierSignal(samples, component, scale);
+    return buildFourierWinding(signal, {
+        windingFrequency: Number(state.fourierWindingFrequency) || 0,
+        progress: Number(state.fourierWindingTime) || 0,
+        timeWindow: Math.max(EPSILON, Number(state.fourierTimeWindow) || 1)
+    });
+}
+
+function graphFourierProgress(data) {
+    const rawProgress = Number(state.fourierWindingTime);
+    const progress = Number.isFinite(rawProgress) ? clamp(rawProgress, 0, 1) : 1;
+    const traversalFrequency = clamp(Number(state.fourierFrequency) || 1, 0.1, 10);
+    const timeWindow = Math.max(EPSILON, Number(state.fourierTimeWindow) || 1);
+    const traversed = progress * timeWindow * traversalFrequency;
+    const phase = traversed - Math.floor(traversed);
+    const cursorProgress = progress === 1 && Math.abs(phase) <= EPSILON ? 1 : phase;
+    const activeProgress = traversed >= 1 ? 1 : cursorProgress;
+    const lastIndex = Math.max(0, data.samples.length - 1);
+    const cursorIndex = Math.min(lastIndex, Math.max(0, Math.floor(cursorProgress * lastIndex)));
+    const activeIndex = Math.min(lastIndex, Math.max(0, Math.floor(activeProgress * lastIndex)));
+    return {
+        progress,
+        activeSamples: data.samples.slice(0, activeIndex + 1),
+        cursorSample: data.samples[cursorIndex]
+    };
 }
 
 class TransformationGraphRenderer {
     constructor(container) {
         this.container = container;
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(BACKGROUND, 0.032);
-        this.camera = new THREE.OrthographicCamera(-5, 5, 3, -3, 0.08, 120);
-        this.camera.position.set(6.8, 4.9, 6.5);
+        this.camera = new THREE.OrthographicCamera(-5, 5, 3, -3, 0.08, 5000);
+        const cameraTarget = new THREE.Vector3(0.1, 0, 0);
+        const cameraOffset = new THREE.Vector3(6.7, 4.9, 6.5).normalize().multiplyScalar(2000);
+        this.camera.position.copy(cameraTarget).add(cameraOffset);
 
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
@@ -616,10 +1345,9 @@ class TransformationGraphRenderer {
         this.controls.enablePan = true;
         this.controls.enableZoom = true;
         this.controls.zoomToCursor = true;
-        this.controls.minDistance = 1.8;
-        this.controls.maxDistance = 60;
-        this.controls.target.set(0.1, 0, 0);
+        this.controls.target.copy(cameraTarget);
         this.controls.update();
+        this.controls.saveState();
         this.controls.addEventListener('change', () => this.render());
 
         this.contentGroup = new THREE.Group();
@@ -680,8 +1408,48 @@ class TransformationGraphRenderer {
             return;
         }
 
+        const geometryKey = `${data.mode}|${data.geometryKey}`;
+        const traceKey = `${geometryKey}|trace:${state.graphTraceEnabled ? 1 : 0}`;
+        const selectionKey = data.mode === 'grid' || data.mode === 'locked-grid'
+            ? `${geometryKey}|selection:${data.selectionKey}|box:${state.graphFocusBoxEnabled ? 1 : 0}`
+            : `${geometryKey}|selection:off`;
+        const fourierKey = state.graphFourierEnabled
+            ? [
+                geometryKey,
+                state.fourierFrequency,
+                state.fourierAmplitude,
+                state.fourierTimeWindow,
+                state.fourierSamples,
+                state.fourierWindingFrequency,
+                state.fourierWindingTime
+            ].join('|')
+            : `${geometryKey}|fourier:off`;
+
+        if (this.dataMode !== undefined && data.mode !== this.dataMode) {
+            this.controls.reset();
+        }
+        this.dataMode = data.mode;
         this.dataKey = data.key;
-        this.rebuildContent(data);
+        if (geometryKey !== this.geometryKey) {
+            this.rebuildContent(data);
+        } else {
+            if (traceKey !== this.traceKey) {
+                const traceGroup = this.replaceContentLayer('traceGroup');
+                this.buildTraceContent(traceGroup, data);
+            }
+            if (selectionKey !== this.selectionKey) {
+                const selectionGroup = this.replaceContentLayer('selectionGroup');
+                this.buildSelectionContent(selectionGroup, data);
+            }
+            if (fourierKey !== this.fourierKey) {
+                const fourierGroup = this.replaceContentLayer('fourierGroup');
+                this.buildFourierContent(fourierGroup, data);
+            }
+        }
+        this.geometryKey = geometryKey;
+        this.traceKey = traceKey;
+        this.selectionKey = selectionKey;
+        this.fourierKey = fourierKey;
         this.render();
     }
 
@@ -689,14 +1457,293 @@ class TransformationGraphRenderer {
         disposeThreeObject(this.contentGroup);
         this.scene.remove(this.contentGroup);
         this.contentGroup = new THREE.Group();
+        this.baseGroup = new THREE.Group();
+        this.traceGroup = new THREE.Group();
+        this.selectionGroup = new THREE.Group();
+        this.fourierGroup = new THREE.Group();
+        this.contentGroup.add(this.baseGroup, this.traceGroup, this.selectionGroup, this.fourierGroup);
         this.scene.add(this.contentGroup);
+    }
+
+    replaceContentLayer(key) {
+        const previous = this[key];
+        if (previous) {
+            disposeThreeObject(previous);
+            this.contentGroup.remove(previous);
+        }
+        const next = new THREE.Group();
+        this.contentGroup.add(next);
+        this[key] = next;
+        return next;
     }
 
     rebuildContent(data) {
         this.clearContent();
-        const group = this.contentGroup;
+        this.buildBaseContent(this.baseGroup, data);
+        this.buildTraceContent(this.traceGroup, data);
+        this.buildSelectionContent(this.selectionGroup, data);
+        this.buildFourierContent(this.fourierGroup, data);
+    }
+
+    buildBaseContent(group, data) {
+        if (data.mode === 'locked-grid') {
+            this.addLockedGridBase(group, data);
+            return;
+        }
+        if (data.mode === 'grid') {
+            this.addFullGridBase(group, data);
+            return;
+        }
         this.addReferenceFrame(group, data);
         this.addCurves(group, data);
+    }
+
+    buildTraceContent(group, data) {
+        if (!state.graphTraceEnabled) return;
+        if (data.mode === 'locked-grid') return;
+        if (data.mode === 'grid') {
+            this.addFullGridTrace(group, data);
+            return;
+        }
+        this.addTrace(group, data);
+    }
+
+    buildSelectionContent(group, data) {
+        if (!state.graphFocusBoxEnabled) return;
+        if (data.mode === 'locked-grid') {
+            const points = [
+                ...connectedGraphPointsForSamples(data.lockedCurve.samples, data.lockedCurve, 're'),
+                ...connectedGraphPointsForSamples(data.lockedCurve.samples, data.lockedCurve, 'im')
+            ].filter(Boolean);
+            if (points.length < 2) return;
+            const bounds = new THREE.Box3().setFromPoints(points).expandByScalar(0.22);
+            const size = bounds.getSize(new THREE.Vector3());
+            const center = bounds.getCenter(new THREE.Vector3());
+            const geometry = new THREE.BoxGeometry(
+                Math.max(0.12, size.x),
+                Math.max(0.12, size.y),
+                Math.max(0.12, size.z)
+            );
+            const box = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+                color: FOCUS_BOX_COLOR,
+                transparent: true,
+                opacity: 0.018,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            }));
+            box.position.copy(center);
+            group.add(box);
+            const outline = new THREE.LineSegments(
+                new THREE.EdgesGeometry(geometry),
+                new THREE.LineBasicMaterial({ color: FOCUS_BOX_COLOR, transparent: true, opacity: 0.22 })
+            );
+            outline.position.copy(center);
+            group.add(outline);
+            return;
+        }
+        if (data.mode !== 'grid' || data.selectedCurveIndex < 0) return;
+        const laneZ = (data.selectedCurveIndex - (data.curves.length - 1) * 0.5) * FULL_GRID_FRAME_SPACING;
+        const geometry = new THREE.BoxGeometry(
+            INPUT_AXIS_HALF * 2 + 0.5,
+            OUTPUT_AXIS_HALF * 2 + 0.5,
+            DEPTH_AXIS_HALF * 2 + 0.5
+        );
+        const box = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+            color: 0x8ed8ff,
+            transparent: true,
+            opacity: 0.025,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        }));
+        box.position.z = laneZ;
+        group.add(box);
+
+        const outline = new THREE.LineSegments(
+            new THREE.EdgesGeometry(geometry),
+            new THREE.LineBasicMaterial({ color: 0x8ed8ff, transparent: true, opacity: 0.14 })
+        );
+        outline.position.z = laneZ;
+        group.add(outline);
+    }
+
+    buildFourierContent(group, data) {
+        if (!state.graphFourierEnabled) return;
+        if (data.mode === 'locked-grid') return;
+        if (data.mode === 'grid') {
+            this.addFullGridFourierWindings(group, data);
+            return;
+        }
+        this.addFourierWindings(group, data);
+    }
+
+    addFullGridBase(group, data) {
+        const x0 = -INPUT_AXIS_HALF;
+        const x1 = INPUT_AXIS_HALF;
+        const y0 = -OUTPUT_AXIS_HALF;
+        const y1 = OUTPUT_AXIS_HALF;
+        const z0 = -DEPTH_AXIS_HALF;
+        const z1 = DEPTH_AXIS_HALF;
+        const centerIndex = (data.curves.length - 1) * 0.5;
+        const spacing = FULL_GRID_FRAME_SPACING;
+        const inputAxes = [];
+        const reAxes = [];
+        const imAxes = [];
+        const reGrid = [];
+        const imGrid = [];
+        const inputTicks = [];
+        const reCurves = [];
+        const imCurves = [];
+
+        data.curves.forEach((curve, curveIndex) => {
+            const laneZ = (curveIndex - centerIndex) * spacing;
+            inputAxes.push([new THREE.Vector3(x0, 0, laneZ), new THREE.Vector3(x1, 0, laneZ)]);
+            reAxes.push([new THREE.Vector3(x0, y0, laneZ), new THREE.Vector3(x0, y1, laneZ)]);
+            imAxes.push([
+                new THREE.Vector3(x0, 0, laneZ + z0),
+                new THREE.Vector3(x0, 0, laneZ + z1)
+            ]);
+
+            for (let index = 0; index <= 8; index += 1) {
+                const x = lerp(x0, x1, index / 8);
+                reGrid.push([
+                    new THREE.Vector3(x, y0, laneZ),
+                    new THREE.Vector3(x, y1, laneZ)
+                ]);
+                imGrid.push([
+                    new THREE.Vector3(x, 0, laneZ + z0),
+                    new THREE.Vector3(x, 0, laneZ + z1)
+                ]);
+            }
+            [-1, -0.5, 0, 0.5, 1].forEach(ratio => {
+                reGrid.push([
+                    new THREE.Vector3(x0, ratio * OUTPUT_AXIS_HALF, laneZ),
+                    new THREE.Vector3(x1, ratio * OUTPUT_AXIS_HALF, laneZ)
+                ]);
+                imGrid.push([
+                    new THREE.Vector3(x0, 0, laneZ + ratio * DEPTH_AXIS_HALF),
+                    new THREE.Vector3(x1, 0, laneZ + ratio * DEPTH_AXIS_HALF)
+                ]);
+            });
+
+            const tickCount = Math.min(MAX_TICK_LABELS, curve.samples.length);
+            for (let index = 0; index < tickCount; index += 1) {
+                const sampleIndex = tickCount === 1
+                    ? 0
+                    : Math.round((curve.samples.length - 1) * (index / (tickCount - 1)));
+                const x = lerp(x0, x1, curve.samples[sampleIndex].t);
+                inputTicks.push([
+                    new THREE.Vector3(x, -0.07, laneZ),
+                    new THREE.Vector3(x, 0.07, laneZ)
+                ]);
+            }
+
+            const renderSamples = selectEvenly(curve.samples, FULL_GRID_SAMPLE_COUNT);
+            appendPolylineSegments(
+                reCurves,
+                graphPointsForSamples(renderSamples, curve, 're', laneZ)
+            );
+            appendPolylineSegments(
+                imCurves,
+                graphPointsForSamples(renderSamples, curve, 'im', laneZ)
+            );
+            addLabel(group, curve.label, new THREE.Vector3(0, y1 + 0.36, laneZ), {
+                color: 'rgba(235, 239, 250, 0.9)',
+                height: 0.25,
+                fontSize: 40,
+                weight: 600
+            });
+        });
+
+        addLineSegments(group, inputAxes, { color: AXIS_COLOR, opacity: 0.54 });
+        addLineSegments(group, reAxes, { color: RE_COLOR, opacity: 0.86 });
+        addLineSegments(group, imAxes, { color: IM_COLOR, opacity: 0.86 });
+        addLineSegments(group, reGrid, { color: RE_COLOR, opacity: 0.1 });
+        addLineSegments(group, imGrid, { color: IM_COLOR, opacity: 0.09 });
+        addLineSegments(group, inputTicks, { color: INPUT_TICK_COLOR, opacity: 0.46 });
+        addLineSegments(group, reCurves, { color: RE_COLOR });
+        addLineSegments(group, imCurves, { color: IM_COLOR });
+
+        if (data.curves.length) {
+            const labelLane = (Math.floor(centerIndex) - centerIndex) * spacing;
+            addLabel(group, 'Re', new THREE.Vector3(x0 - 0.3, y1 + 0.25, labelLane), {
+                color: 'rgba(255, 222, 124, 0.9)',
+                height: 0.24,
+                fontSize: 42
+            });
+            addLabel(group, 'Im', new THREE.Vector3(x0 - 0.3, 0, labelLane + z1 + 0.27), {
+                color: 'rgba(122, 219, 236, 0.9)',
+                height: 0.24,
+                fontSize: 42
+            });
+        }
+    }
+
+    addLockedGridBase(group, data) {
+        this.addReferenceFrame(group, data);
+
+        const crossingRe = [];
+        const crossingIm = [];
+        data.curves.forEach(curve => {
+            if (!curve.locked) {
+                appendPolylineSegments(
+                    crossingRe,
+                    connectedGraphPointsForSamples(curve.samples, curve, 're')
+                );
+                appendPolylineSegments(
+                    crossingIm,
+                    connectedGraphPointsForSamples(curve.samples, curve, 'im')
+                );
+            }
+        });
+
+        addLineSegments(group, crossingRe, { color: RE_COLOR, opacity: 0.72 });
+        addLineSegments(group, crossingIm, { color: IM_COLOR, opacity: 0.72 });
+        this.addCurves(group, data);
+
+        const reIntersections = data.intersections
+            .map(intersection => connectedGraphPointFor({
+                input: intersection.input,
+                output: intersection.output,
+                t: intersection.t
+            }, data.lockedCurve, 're'))
+            .filter(Boolean);
+        const imIntersections = data.intersections
+            .map(intersection => connectedGraphPointFor({
+                input: intersection.input,
+                output: intersection.output,
+                t: intersection.t
+            }, data.lockedCurve, 'im'))
+            .filter(Boolean);
+        addPointCloud(group, reIntersections, {
+            color: RE_COLOR,
+            size: 5,
+            opacity: 0.92
+        });
+        addPointCloud(group, imIntersections, {
+            color: IM_COLOR,
+            size: 5,
+            opacity: 0.92
+        });
+        addPointCloud(group, [...reIntersections, ...imIntersections], {
+            color: INTERSECTION_COLOR,
+            size: 2.4,
+            opacity: 0.98
+        });
+    }
+
+    addFullGridTrace(group, data) {
+        const traceSegments = [];
+        const centerIndex = (data.curves.length - 1) * 0.5;
+        const spacing = FULL_GRID_FRAME_SPACING;
+        data.curves.forEach((curve, curveIndex) => {
+            const laneZ = (curveIndex - centerIndex) * spacing;
+            const samples = selectEvenly(curve.samples, FULL_GRID_SAMPLE_COUNT);
+            appendPolylineSegments(
+                traceSegments,
+                graphPointsForSamples(samples, curve, 'trace', laneZ)
+            );
+        });
+        addLineSegments(group, traceSegments, { color: TRACE_COLOR, opacity: 0.5 });
     }
 
     addReferenceFrame(group, data) {
@@ -791,9 +1838,12 @@ class TransformationGraphRenderer {
         });
 
         this.addInputTicks(group, data);
-        this.addOutputTicks(group, data.outputScale);
+        this.addOutputTicks(group);
 
-        addLabel(group, 'Input z', new THREE.Vector3(x1 + 0.68, -0.16, 0), { height: 0.34, fontSize: 48 });
+        addLabel(group, data.axisLabel || 'Input z', new THREE.Vector3(x1 + 0.68, -0.16, 0), {
+            height: 0.34,
+            fontSize: 48
+        });
         addLabel(group, 'Re', new THREE.Vector3(x0 - 0.35, y1 + 0.38, 0), {
             color: 'rgba(255, 222, 124, 0.96)',
             height: 0.34,
@@ -852,9 +1902,8 @@ class TransformationGraphRenderer {
     }
 
     addCurves(group, data) {
-        const rePoints = data.samples.map(sample => graphPointFor(sample, data.outputScale, 're'));
-        const imPoints = data.samples.map(sample => graphPointFor(sample, data.outputScale, 'im'));
-        const tracePoints = data.samples.map(sample => graphPointFor(sample, data.outputScale, 'trace'));
+        const rePoints = graphPointsForSamples(data.samples, data, 're');
+        const imPoints = graphPointsForSamples(data.samples, data, 'im');
 
         addSegmentedTube(group, rePoints, {
             color: RE_COLOR,
@@ -874,19 +1923,253 @@ class TransformationGraphRenderer {
             emissiveIntensity: 0.48,
             roughness: 0.24
         });
+    }
 
-        if (state.graphTraceEnabled) {
-            addSegmentedTube(group, tracePoints, {
-                color: TRACE_COLOR,
-                radius: TRACE_RADIUS,
-                opacity: 0.54,
-                glowRadius: TRACE_RADIUS * 2.4,
-                glowOpacity: 0.08,
-                emissive: 0x35415d,
-                emissiveIntensity: 0.2,
-                roughness: 0.5,
-                metalness: 0
+    addTrace(group, data) {
+        const tracePoints = graphPointsForSamples(data.samples, data, 'trace');
+        addSegmentedTube(group, tracePoints, {
+            color: TRACE_COLOR,
+            radius: TRACE_RADIUS,
+            opacity: 0.54,
+            glowRadius: TRACE_RADIUS * 2.4,
+            glowOpacity: 0.08,
+            emissive: 0x35415d,
+            emissiveIntensity: 0.2,
+            roughness: 0.5,
+            metalness: 0
+        });
+    }
+
+    addFullGridFourierWindings(group, data) {
+        const rings = [];
+        const windingPath = [];
+        const windingColors = [];
+        const spokes = [];
+        const samplePoints = [];
+        const centerOfMassVectors = [];
+        const arrowHeads = [];
+        const connectors = [];
+        const activeGraph = [];
+        const origins = [];
+        const centerOfMassPoints = [];
+        const cursors = [];
+        const gradientColorsByPointCount = new Map();
+        const centerIndex = (data.curves.length - 1) * 0.5;
+        const spacing = FULL_GRID_FRAME_SPACING;
+
+        data.curves.forEach((curve, curveIndex) => {
+            const laneZ = (curveIndex - centerIndex) * spacing;
+            const reScale = curve.fourierReScale;
+            const imScale = curve.fourierImScale;
+            const reWinding = graphFourierWinding(curve.samples, 're', reScale);
+            const imWinding = graphFourierWinding(curve.samples, 'im', imScale);
+            const maximumRadius = Math.max(
+                0.18,
+                reWinding.referenceRadius * FOURIER_RING_RADIUS,
+                imWinding.referenceRadius * FOURIER_RING_RADIUS
+            );
+            const center = new THREE.Vector3(-INPUT_AXIS_HALF - maximumRadius - 0.34, 0, laneZ);
+            origins.push(center);
+            connectors.push([
+                new THREE.Vector3(center.x + maximumRadius, 0, laneZ),
+                new THREE.Vector3(-INPUT_AXIS_HALF, 0, laneZ)
+            ]);
+
+            [
+                { winding: reWinding, plane: 're' },
+                { winding: imWinding, plane: 'im' }
+            ].forEach(({ winding, plane }) => {
+                const radius = Math.max(0.18, winding.referenceRadius * FOURIER_RING_RADIUS);
+                appendPolylineSegments(rings, ringPoints(center, radius, plane));
+                const points = winding.points.map(point => windingPointToVector(point, center, plane));
+                let gradientColors = gradientColorsByPointCount.get(points.length);
+                if (!gradientColors) {
+                    gradientColors = Array.from({ length: Math.max(0, points.length - 1) }, (_, index) => {
+                        const denominator = Math.max(1, points.length - 1);
+                        const previousProgress = index / denominator;
+                        const progress = (index + 1) / denominator;
+                        return [
+                            new THREE.Color().setHSL((280 + previousProgress * 60) / 360, 0.7, 0.65),
+                            new THREE.Color().setHSL((280 + progress * 60) / 360, 0.7, 0.65)
+                        ];
+                    });
+                    gradientColorsByPointCount.set(points.length, gradientColors);
+                }
+                for (let index = 1; index < points.length; index += 1) {
+                    windingPath.push([points[index - 1], points[index]]);
+                    windingColors.push(gradientColors[index - 1]);
+                }
+                for (let index = 0; index < points.length; index += winding.vectorStep) {
+                    spokes.push([center, points[index]]);
+                }
+                const pointStep = Math.max(1, Math.floor(points.length / 90));
+                points.forEach((point, index) => {
+                    if (index % pointStep === 0) samplePoints.push(point);
+                });
+
+                const centerOfMass = windingPointToVector(winding.centerOfMass, center, plane);
+                centerOfMassPoints.push(centerOfMass);
+                if (center.distanceToSquared(centerOfMass) > EPSILON) {
+                    centerOfMassVectors.push([center, centerOfMass]);
+                    arrowHeads.push(...lineArrowHeadSegments(center, centerOfMass, plane));
+                }
             });
+
+            const { progress, activeSamples, cursorSample } = graphFourierProgress(curve);
+            if (progress < 1 - EPSILON) {
+                appendPolylineSegments(
+                    activeGraph,
+                    graphPointsForSamples(activeSamples, curve, 're', laneZ)
+                );
+                appendPolylineSegments(
+                    activeGraph,
+                    graphPointsForSamples(activeSamples, curve, 'im', laneZ)
+                );
+            }
+            const reCursor = graphPointFor(cursorSample, curve, 're', laneZ);
+            const imCursor = graphPointFor(cursorSample, curve, 'im', laneZ);
+            if (reCursor) cursors.push(reCursor);
+            if (imCursor) cursors.push(imCursor);
+        });
+
+        addLineSegments(group, rings, { color: 0xc8dcff, opacity: 0.32 });
+        addLineSegments(group, windingPath, { vertexColors: windingColors, opacity: 0.82 });
+        addLineSegments(group, spokes, { color: 0x64b4ff, opacity: 0.24 });
+        addPointCloud(group, samplePoints, { color: 0xff64c8, size: 6, opacity: 0.14 });
+        addPointCloud(group, samplePoints, { color: 0xffa6df, size: 2.7, opacity: 0.94 });
+        addLineSegments(group, centerOfMassVectors, { color: 0xffdc32, opacity: 0.94 });
+        addLineSegments(group, arrowHeads, { color: 0xffdc32, opacity: 0.96 });
+        addLineSegments(group, connectors, { color: AXIS_COLOR, opacity: 0.36 });
+        addPointCloud(group, origins, { color: 0x8eb8ff, size: 7, opacity: 0.18 });
+        addPointCloud(group, origins, { color: 0xeaf1ff, size: 3.2, opacity: 0.96 });
+        addPointCloud(group, centerOfMassPoints, { color: 0xffdc32, size: 8, opacity: 0.2 });
+        addPointCloud(group, centerOfMassPoints, { color: 0xffec8a, size: 3.6, opacity: 0.98 });
+        addLineSegments(group, activeGraph, { color: 0xff7bcf, opacity: 0.65 });
+        addPointCloud(group, cursors, { color: 0xff9add, size: 7, opacity: 0.2 });
+        addPointCloud(group, cursors, { color: 0xffc1e8, size: 3, opacity: 0.96 });
+    }
+
+    addFourierWindings(group, data) {
+        const reWinding = graphFourierWinding(data.samples, 're', data.fourierReScale);
+        const imWinding = graphFourierWinding(data.samples, 'im', data.fourierImScale);
+        const maximumRadius = Math.max(
+            0.18,
+            reWinding.referenceRadius * FOURIER_RING_RADIUS,
+            imWinding.referenceRadius * FOURIER_RING_RADIUS
+        );
+        const center = new THREE.Vector3(-INPUT_AXIS_HALF - maximumRadius - 0.34, 0, 0);
+
+        this.addFourierWindingPlane(group, reWinding, {
+            center,
+            plane: 're',
+            label: 'F(Re)'
+        });
+        this.addFourierWindingPlane(group, imWinding, {
+            center,
+            plane: 'im',
+            label: 'F(Im)'
+        });
+
+        const connector = [
+            new THREE.Vector3(center.x + maximumRadius, center.y, center.z),
+            new THREE.Vector3(-INPUT_AXIS_HALF, 0, 0)
+        ];
+        addSoftLine(group, connector[0], connector[1], {
+            color: AXIS_COLOR,
+            radius: GRID_RADIUS,
+            opacity: 0.36,
+            roughness: 0.9
+        });
+        addGlowMarker(group, center, 0x8eb8ff, 0.09, 0.18);
+        addMarker(group, center, 0xeaf1ff, 0.038);
+        this.addFourierSourceProgress(group, data);
+    }
+
+    addFourierWindingPlane(group, winding, { center, plane, label }) {
+        const radius = Math.max(0.18, winding.referenceRadius * FOURIER_RING_RADIUS);
+        const ring = ringPoints(center, radius, plane);
+        addSegmentedTube(group, ring, {
+            color: 0x96b4ff,
+            radius: 0.024,
+            opacity: 0.075,
+            emissive: 0x96b4ff,
+            emissiveIntensity: 0.2,
+            roughness: 0.9,
+            metalness: 0
+        });
+        addPolyline(group, ring, { color: 0xc8dcff, opacity: 0.32 });
+
+        const points = winding.points.map(point => windingPointToVector(point, center, plane));
+        if (points.length > 1) {
+            const segments = [];
+            const colors = [];
+            for (let index = 1; index < points.length; index += 1) {
+                const progress = index / Math.max(1, points.length - 1);
+                const previousProgress = (index - 1) / Math.max(1, points.length - 1);
+                const startColor = new THREE.Color().setHSL((280 + previousProgress * 60) / 360, 0.7, 0.65);
+                const endColor = new THREE.Color().setHSL((280 + progress * 60) / 360, 0.7, 0.65);
+                segments.push([points[index - 1], points[index]]);
+                colors.push([startColor, endColor]);
+            }
+            addLineSegments(group, segments, { vertexColors: colors, opacity: 0.82 });
+        }
+
+        const spokes = [];
+        for (let index = 0; index < points.length; index += winding.vectorStep) {
+            spokes.push([center, points[index]]);
+        }
+        addLineSegments(group, spokes, { color: 0x64b4ff, opacity: 0.24 });
+
+        const pointStep = Math.max(1, Math.floor(points.length / 90));
+        const visiblePoints = points.filter((_point, index) => index % pointStep === 0);
+        addPointCloud(group, visiblePoints, { color: 0xff64c8, size: 7, opacity: 0.14 });
+        addPointCloud(group, visiblePoints, { color: 0xffa6df, size: 3.2, opacity: 0.94 });
+
+        const centerOfMass = windingPointToVector(winding.centerOfMass, center, plane);
+        if (center.distanceToSquared(centerOfMass) > EPSILON) {
+            addSoftLine(group, center, centerOfMass, {
+                color: 0xffdc32,
+                radius: 0.018,
+                glowRadius: 0.048,
+                glowOpacity: 0.14,
+                opacity: 0.94,
+                emissive: 0xffb400,
+                emissiveIntensity: 0.5,
+                roughness: 0.3
+            });
+            addArrowHead(group, center, centerOfMass);
+        }
+        addGlowMarker(group, centerOfMass, 0xffdc32, 0.13, 0.2);
+        addMarker(group, centerOfMass, 0xffdc32, 0.055);
+
+        const labelPosition = plane === 're'
+            ? new THREE.Vector3(center.x, center.y + radius + 0.2, center.z)
+            : new THREE.Vector3(center.x, center.y, center.z + radius + 0.2);
+        addLabel(group, label, labelPosition, {
+            color: plane === 're' ? 'rgba(255, 222, 124, 0.9)' : 'rgba(122, 219, 236, 0.9)',
+            height: 0.21,
+            fontSize: 38
+        });
+    }
+
+    addFourierSourceProgress(group, data) {
+        const { progress, activeSamples, cursorSample } = graphFourierProgress(data);
+        if (progress < 1 - EPSILON) {
+            const reActive = graphPointsForSamples(activeSamples, data, 're');
+            const imActive = graphPointsForSamples(activeSamples, data, 'im');
+            addSegmentedPolyline(group, reActive, { color: 0xff7bcf, opacity: 0.68 });
+            addSegmentedPolyline(group, imActive, { color: 0xff7bcf, opacity: 0.62 });
+        }
+
+        const reCursor = graphPointFor(cursorSample, data, 're');
+        const imCursor = graphPointFor(cursorSample, data, 'im');
+        if (reCursor) {
+            addGlowMarker(group, reCursor, 0xff9add, 0.095, 0.18);
+            addMarker(group, reCursor, 0xff9add, 0.035);
+        }
+        if (imCursor) {
+            addGlowMarker(group, imCursor, 0xff9add, 0.095, 0.18);
+            addMarker(group, imCursor, 0xff9add, 0.035);
         }
     }
 
@@ -906,8 +2189,8 @@ export function drawTransformationGraph(containerId = 'graph_3d_container') {
     const container = document.getElementById(containerId);
     const columnHidden = column?.classList.contains('hidden');
 
-    if (!state.graphViewEnabled || columnHidden || !container) {
-        if (!state.graphViewEnabled || columnHidden) disposeTransformationGraphRenderer();
+    if (!graphModeActive() || columnHidden || !container) {
+        if (!graphModeActive() || columnHidden) disposeTransformationGraphRenderer();
         return;
     }
 

@@ -69,12 +69,6 @@
                 </div>
 
                 <div id="parameter-controls-panel" class="controls-panel">
-                    <div id="zeta_specific_controls" class="control-group dependent-settings-block hidden">
-                        <button id="toggle_zeta_continuation_btn"
-                            data-tooltip="Toggle analytic continuation for ζ(z) beyond Re(z) > 1">Enable Analytic
-                            Continuation</button>
-                    </div>
-
                     <div id="fourier_specific_controls" class="hidden transform-control-grid is-three-column"
                        >
 
@@ -82,11 +76,11 @@
                         <div class="control-section fourier-signal">
                             <div class="section-header">
                                 <div class="section-header-icon"></div>
-                                Signal Configuration
+                                <span id="fourier_signal_section_title">Signal Configuration</span>
                             </div>
 
                             <div class="control-group control-group-compact">
-                                <label for="fourier_function_selector" class="slider-label">Waveform Type</label>
+                                <label id="fourier_function_label" for="fourier_function_selector" class="slider-label">Waveform Type</label>
                                 <select id="fourier_function_selector" name="fourier_function_selector"
                                     class="control-select fourier-select"
                                     data-tooltip="Select the time domain signal type">
@@ -113,12 +107,13 @@
                                         <option value="beat">Beat Frequency</option>
                                         <option value="noise">White Noise</option>
                                     </optgroup>
+                                    <option id="fourier_current_graph_option" value="current_graph" hidden>Current Graph (Re + Im)</option>
                                 </select>
                             </div>
 
                             <div class="control-group control-group-tight">
                                 <label for="fourier_frequency_slider" class="slider-label">
-                                    Frequency:
+                                    <span id="fourier_frequency_label">Frequency:</span>
                                     <output id="fourier_frequency_value_display" class="slider-value">1.0</output> Hz
                                 </label>
                                 <div class="slider-container">
@@ -181,7 +176,7 @@
                                 Winding Analysis
                             </div>
 
-                            <div
+                            <div id="fourier_winding_note"
                                 class="winding-note">
                                 <div class="winding-note-copy">
                                     Watch the <strong>golden center of mass</strong>
@@ -419,6 +414,13 @@
                             </div>
                         </div>
                     </div>
+
+                    <div id="core_application_controls">
+                        <div id="zeta_specific_controls" class="control-group dependent-settings-block hidden">
+                            <button id="toggle_zeta_continuation_btn"
+                                data-tooltip="Toggle analytic continuation for ζ(z) beyond Re(z) > 1">Enable Analytic
+                                Continuation</button>
+                        </div>
 
                     <!-- Derivative Panel -->
                     <div class="control-group control-toggle-heading"
@@ -1168,6 +1170,27 @@
                         </label>
                     </div>
 
+                    <div id="full_grid_perspective_control" class="control-group hidden">
+                        <button id="view_full_grid_perspective_btn" type="button"
+                            data-tooltip="Show the active grid family and its mapped graphs in 3D">
+                            View Full Grid Perspective
+                        </button>
+                        <label id="graph_focus_box_toggle" for="enable_graph_focus_box_cb"
+                            class="slider-label hidden"
+                            data-tooltip="Outline the 3D graph corresponding to the selected input shape">
+                            <input type="checkbox" id="enable_graph_focus_box_cb" checked>
+                            <span class="custom-checkbox-visual"></span>
+                            Enable the focus box
+                        </label>
+                        <label id="graph_layer_lock_toggle" for="enable_graph_layer_lock_cb"
+                            class="slider-label hidden"
+                            data-tooltip="Connect the selected grid shape to every intersecting shape from the other family">
+                            <input type="checkbox" id="enable_graph_layer_lock_cb">
+                            <span class="custom-checkbox-visual"></span>
+                            Lock a layer
+                        </label>
+                    </div>
+
                     <!-- Complex Plane Navigation Panel -->
                     <div id="navigation_params" class="control-group control-toggle-heading"
                        >
@@ -1678,6 +1701,7 @@
                                 </select>
                             </div>
                         </div>
+                    </div>
                     </div>
                 </div>
 
@@ -2519,9 +2543,21 @@
                 </div>
                 <div id="graph_column" class="hidden">
                     <div class="canvas-header-line">
-                        <h2 class="section-title"><span>Graph</span></h2>
+                        <h2 class="section-title"><span id="graph_title_label">Graph</span></h2>
                         <div class="canvas-header-controls">
-                            <label for="enable_graph_trace_cb" class="viz-toggle-card graph-trace-toggle"
+                            <select id="graph_grid_family_selector" class="canvas-shape-select graph-family-select hidden"
+                                aria-label="Choose grid family">
+                                <option value="primary">Horizontal</option>
+                                <option value="secondary">Vertical</option>
+                            </select>
+                            <label id="graph_fourier_toggle" for="enable_graph_fourier_cb"
+                                class="viz-toggle-card graph-trace-toggle"
+                                data-tooltip="Wind both graph components into their Fourier domains">
+                                <input type="checkbox" id="enable_graph_fourier_cb">
+                                <span class="custom-checkbox-visual"></span>
+                                <span>Fourier</span>
+                            </label>
+                            <label id="graph_trace_toggle" for="enable_graph_trace_cb" class="viz-toggle-card graph-trace-toggle"
                                 data-tooltip="Show the combined 3D Re/Im trace">
                                 <input type="checkbox" id="enable_graph_trace_cb">
                                 <span class="custom-checkbox-visual"></span>

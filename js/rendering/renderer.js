@@ -106,7 +106,9 @@ const PLANAR_STATE_DEPENDENCIES = Object.freeze([
     'currentFunction', 'mapPresentation', 'currentInputShape', 'gridDensity',
     'a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'themeId',
     'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity',
-    'cauchyIntegralModeEnabled'
+    'cauchyIntegralModeEnabled', 'graphViewEnabled', 'graphFullGridEnabled', 'graphGridFamily',
+    'graphLayerLockEnabled',
+    'graphSelectedShape', 'graphSelectedLineIndex'
 ]);
 const DOMAIN_STATE_DEPENDENCIES = Object.freeze([
     'domainPalette', 'domainBrightness', 'domainContrast',

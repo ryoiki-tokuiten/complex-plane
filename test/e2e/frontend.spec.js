@@ -104,6 +104,95 @@ test('controls visual contract remains stable', async ({ page }) => {
     });
 });
 
+test('full-grid and connected Fourier graph modes stay isolated from standalone Fourier', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+        if (message.type() === 'error') errors.push(message.text());
+    });
+
+    await expect(page.locator('#view_full_grid_perspective_btn')).toBeHidden();
+    await expect(page.locator('#graph_focus_box_toggle')).toBeHidden();
+    await page.locator('#enable_graph_view_cb').evaluate(element => element.click());
+    await expect(page.locator('#view_full_grid_perspective_btn')).toBeVisible();
+    await page.locator('#view_full_grid_perspective_btn').evaluate(element => element.click());
+    await expect(page.locator('#enable_graph_view_cb')).toBeChecked();
+    await expect(page.locator('#graph_focus_box_toggle')).toBeVisible();
+    await expect(page.locator('#graph_layer_lock_toggle')).toBeVisible();
+    await expect(page.locator('#enable_graph_layer_lock_cb')).not.toBeChecked();
+    await expect(page.locator('#enable_graph_focus_box_cb')).toBeChecked();
+    await page.locator('#enable_graph_focus_box_cb').evaluate(element => element.click());
+    await expect(page.locator('#enable_graph_focus_box_cb')).not.toBeChecked();
+    await page.locator('#enable_graph_focus_box_cb').evaluate(element => element.click());
+    await expect(page.locator('#graph_column')).toBeVisible();
+    await expect(page.locator('#graph_title_label')).toHaveText('Full Grid Perspective');
+    await expect(page.locator('#graph_3d_container canvas')).toHaveCount(1);
+    await expect(page.locator('#graph_grid_family_selector option').nth(0)).toHaveText('Horizontal');
+    await expect(page.locator('#graph_fourier_toggle')).toBeVisible();
+    await expect(page.locator('#graph_trace_toggle')).toBeVisible();
+
+    await page.locator('#enable_graph_layer_lock_cb').evaluate(element => element.click());
+    await expect(page.locator('#enable_graph_layer_lock_cb')).toBeChecked();
+    await expect(page.locator('#graph_title_label')).toHaveText('Locked Layer Perspective');
+    await expect(page.locator('#graph_fourier_toggle')).toBeHidden();
+    await expect(page.locator('#graph_trace_toggle')).toBeHidden();
+    const graphCanvas = page.locator('#graph_3d_container canvas');
+    const lockedBaseline = await graphCanvas.screenshot();
+
+    await page.locator('#enable_graph_layer_lock_cb').evaluate(element => element.click());
+    await expect(page.locator('#graph_title_label')).toHaveText('Full Grid Perspective');
+    const graphBounds = await graphCanvas.boundingBox();
+    expect(graphBounds).not.toBeNull();
+    const graphX = graphBounds.x + graphBounds.width * 0.5;
+    const graphY = graphBounds.y + graphBounds.height * 0.5;
+    await page.mouse.move(graphX, graphY);
+    await page.mouse.down();
+    await page.mouse.move(graphX + 120, graphY + 70, { steps: 12 });
+    await page.mouse.up();
+    await page.mouse.wheel(0, 480);
+
+    await page.locator('#enable_graph_layer_lock_cb').evaluate(element => element.click());
+    await expect(page.locator('#graph_title_label')).toHaveText('Locked Layer Perspective');
+    expect((await graphCanvas.screenshot()).equals(lockedBaseline)).toBe(true);
+    await page.locator('#enable_graph_layer_lock_cb').evaluate(element => element.click());
+    await expect(page.locator('#graph_title_label')).toHaveText('Full Grid Perspective');
+
+    await page.locator('#enable_graph_trace_cb').evaluate(element => element.click());
+    await expect(page.locator('#enable_graph_trace_cb')).toBeChecked();
+    await page.locator('#enable_graph_fourier_cb').evaluate(element => element.click());
+    await expect(page.locator('#enable_graph_fourier_cb')).toBeChecked();
+    await expect(page.locator('#fourier_specific_controls')).toBeVisible();
+    await expect(page.locator('#fourier_function_selector')).toHaveValue('current_graph');
+    await expect(page.locator('#fourier_function_selector')).toBeDisabled();
+    await expect(page.locator('#fourier_frequency_label')).toHaveText('Traversal Rate:');
+
+    await page.locator('#input_shape_selector').selectOption('grid_logpolar');
+    await expect(page.locator('#graph_grid_family_selector option').nth(0)).toHaveText('Circles');
+    await expect(page.locator('#graph_grid_family_selector option').nth(1)).toHaveText('Lines');
+    await page.locator('#graph_grid_family_selector').selectOption('secondary');
+
+    await page.locator('#view_full_grid_perspective_btn').evaluate(element => element.click());
+    await expect(page.locator('#graph_column')).toBeVisible();
+    await expect(page.locator('#graph_title_label')).toHaveText('Graph + Fourier');
+    await expect(page.locator('#fourier_specific_controls')).toBeVisible();
+    await expect(page.locator('#graph_3d_container canvas')).toHaveCount(1);
+
+    await page.locator('#select_fourier_btn').evaluate(element => element.click());
+    await expect(page.locator('#graph_column')).toBeHidden();
+    await expect(page.locator('#enable_graph_view_cb')).not.toBeChecked();
+    await expect(page.locator('#core_application_controls')).toBeHidden();
+    await expect(page.locator('#visualization-options-panel')).toBeHidden();
+    await expect(page.locator('#fourier_specific_controls')).toBeVisible();
+    await expect(page.locator('#fourier_function_selector')).toHaveValue('sine');
+    await expect(page.locator('#fourier_function_selector')).toBeEnabled();
+
+    await page.locator('#select_laplace_btn').evaluate(element => element.click());
+    await expect(page.locator('#laplace_specific_controls')).toBeVisible();
+    await expect(page.locator('#core_application_controls')).toBeHidden();
+    await expect(page.locator('#visualization-options-panel')).toBeHidden();
+    expect(errors).toEqual([]);
+});
+
 test('raster fold view stays connected and chain depth settles safely', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));

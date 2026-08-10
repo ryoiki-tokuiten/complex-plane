@@ -77,6 +77,9 @@ function syncOptionalColumn(column, shouldHide, onHide) {
 }
 
 export function renderApplicationFrame(timestamp) {
+    const graphActive = state.graphViewEnabled
+        && !state.fourierModeEnabled
+        && !state.laplaceModeEnabled;
     const zIsPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
     if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar && state.currentFunction !== 'poincare') {
         findZerosAndPoles();
@@ -108,8 +111,8 @@ export function renderApplicationFrame(timestamp) {
 
     syncOptionalColumn(
         controls.graphColumn,
-        !state.graphViewEnabled || state.realPlotsEnabled || !isGraphViewSupported(),
+        !graphActive || state.realPlotsEnabled || !isGraphViewSupported(),
         disposeTransformationGraphRenderer
     );
-    if (state.graphViewEnabled && !state.realPlotsEnabled) drawTransformationGraph();
+    if (graphActive && !state.realPlotsEnabled) drawTransformationGraph();
 }

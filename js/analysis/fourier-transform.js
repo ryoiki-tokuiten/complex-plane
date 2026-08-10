@@ -227,6 +227,65 @@ export function computeDFT(signal) {
 }
 
 /**
+ * Build the winding-domain geometry shared by the canvas and graph renderers.
+ * The caller supplies any real signal; graph mode uses mapped Re/Im samples
+ * while standalone Fourier mode uses the generated waveform.
+ */
+export function buildFourierWinding(signal, options = {}) {
+    if (!Array.isArray(signal) || signal.length === 0) {
+        return {
+            points: [],
+            centerOfMass: { re: 0, im: 0 },
+            referenceRadius: 1,
+            vectorStep: 1
+        };
+    }
+
+    const windingFrequency = Number.isFinite(options.windingFrequency)
+        ? Math.max(0, options.windingFrequency)
+        : Math.max(0, state.fourierWindingFrequency || 1);
+    const progress = Number.isFinite(options.progress)
+        ? Math.max(0, Math.min(1, options.progress))
+        : Math.max(0, Math.min(1, state.fourierWindingTime || 0));
+    const timeWindow = Number.isFinite(options.timeWindow)
+        ? Math.max(Number.EPSILON, options.timeWindow)
+        : Math.max(Number.EPSILON, state.fourierTimeWindow || signal.at(-1)?.t || 1);
+    const cutoff = progress * timeWindow;
+    const points = [];
+    let centerRe = 0;
+    let centerIm = 0;
+    let maxAmplitude = 0;
+
+    for (let index = 0; index < signal.length; index += 1) {
+        const sample = signal[index];
+        const t = Number(sample?.t);
+        const value = Number(sample?.value);
+        if (!Number.isFinite(t) || !Number.isFinite(value)) continue;
+        maxAmplitude = Math.max(maxAmplitude, Math.abs(value));
+        if (t > cutoff) continue;
+
+        const angle = -2 * Math.PI * windingFrequency * t;
+        const re = value * Math.cos(angle);
+        const im = value * Math.sin(angle);
+        points.push({ re, im, t, value });
+        centerRe += re;
+        centerIm += im;
+    }
+
+    if (points.length > 0) {
+        centerRe /= points.length;
+        centerIm /= points.length;
+    }
+
+    return {
+        points,
+        centerOfMass: { re: centerRe, im: centerIm },
+        referenceRadius: Math.max(Number.EPSILON, maxAmplitude * 1.1),
+        vectorStep: Math.max(1, Math.floor(points.length / 50))
+    };
+}
+
+/**
  * Update Fourier transform calculations
  * Called when parameters change or when entering Fourier mode
  */

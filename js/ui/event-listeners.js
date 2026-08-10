@@ -15,7 +15,7 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, updateCustomFormulaPreview } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview } from './ui-updates.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
 import { toggleRiemannTransformationAnimationZ, toggleRiemannTransformationAnimationW, syncRiemannTransformationPlayPauseButton } from '../rendering/riemann-transformation-animation.js';
 import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
@@ -465,9 +465,9 @@ export function setActiveFunctionButton(activeKey) {
 }
 
 function updateModePanels() {
-    hidden(controls.fourierSpecificControls, !state.fourierModeEnabled);
-    hidden(controls.laplaceSpecificControls, !state.laplaceModeEnabled);
+    syncTransformControlPanels();
     syncLaplacePlayPauseButton();
+    syncParameterControlsPanelVisibility();
 }
 
 function disableAlgebraicChaining() {
@@ -530,9 +530,14 @@ function disableGraphView() {
     }
 
     state.graphViewEnabled = false;
+    state.graphFullGridEnabled = false;
+    state.graphLayerLockEnabled = false;
+    state.graphFourierEnabled = false;
     checked('enableGraphViewCb', false);
+    checked('enableGraphFourierCb', false);
     hidden(controls.graphColumn, true);
     disposeTransformationGraphRenderer();
+    updateModePanels();
 }
 
 function syncChainingControlsFromState() {
@@ -698,6 +703,8 @@ function activateFunctionMode(key) {
     if (enteringTransform && state.currentInputShape === 'video') pauseUploadedVideoPlayback();
 
     if (enteringTransform) snapshotNormalViewports();
+
+    if (enteringTransform) disableGraphView();
 
     disableAlgebraicChaining();
     disableOutputChaining();
@@ -1910,6 +1917,10 @@ function bindChainingControls() {
         } else if (value === 'video' && runtime.media.video && state.videoIsPlaying) {
             startVideoProcessingLoop();
         }
+        if (state.graphFullGridEnabled && !isGridInputShape(value)) {
+            state.graphFullGridEnabled = false;
+            state.graphLayerLockEnabled = false;
+        }
         syncGridFoldDensity(state.foldSurface3dEnabled && isGridInputShape(value));
         requestDomainRedraw(true);
     });
@@ -2427,15 +2438,75 @@ function bindPalettePanel(viewButtonId, closeButtonId, panelId, updatePanel) {
 
 function bindGraphControls() {
     checked('enableGraphTraceCb', state.graphTraceEnabled);
+    checked('enableGraphFourierCb', state.graphFourierEnabled);
+    checked('enableGraphFocusBoxCb', state.graphFocusBoxEnabled);
+    checked('enableGraphLayerLockCb', state.graphLayerLockEnabled);
 
     bindCheckbox('enableGraphViewCb', 'graphViewEnabled', (_event, enabled) => {
+        if (state.fourierModeEnabled || state.laplaceModeEnabled) {
+            state.graphViewEnabled = false;
+            checked('enableGraphViewCb', false);
+            return;
+        }
         if (enabled) {
             disableRealPlots();
+            state.graphFullGridEnabled = false;
             state.graphSelectedShape = '';
         } else {
+            state.graphFullGridEnabled = false;
+            state.graphLayerLockEnabled = false;
+            state.graphFourierEnabled = false;
+            checked('enableGraphLayerLockCb', false);
+            checked('enableGraphFourierCb', false);
+            updateModePanels();
             disposeTransformationGraphRenderer();
         }
 
+        requestUiRedraw();
+    });
+
+    bindControlListener('viewFullGridPerspectiveBtn', 'click', () => {
+        if (!state.graphViewEnabled || !isGridInputShape(state.currentInputShape)
+            || state.fourierModeEnabled || state.laplaceModeEnabled) return;
+
+        state.graphFullGridEnabled = !state.graphFullGridEnabled;
+        if (state.graphFullGridEnabled) {
+            state.graphGridFamily = 'primary';
+            state.graphSelectedShape = '';
+            if (controls.graphGridFamilySelector) controls.graphGridFamilySelector.value = 'primary';
+        } else {
+            state.graphLayerLockEnabled = false;
+            checked('enableGraphLayerLockCb', false);
+        }
+        updateModePanels();
+        requestUiRedraw();
+    });
+
+    bindSelector('graphGridFamilySelector', 'graphGridFamily', () => {
+        state.graphSelectedShape = '';
+        requestUiRedraw();
+    });
+    bindCheckbox('enableGraphFocusBoxCb', 'graphFocusBoxEnabled', () => requestUiRedraw());
+    bindCheckbox('enableGraphLayerLockCb', 'graphLayerLockEnabled', (_event, enabled) => {
+        if (enabled) {
+            state.graphTraceEnabled = false;
+            state.graphFourierEnabled = false;
+            checked('enableGraphTraceCb', false);
+            checked('enableGraphFourierCb', false);
+        }
+        state.graphSelectedShape = '';
+        state.graphSelectionRevision = (state.graphSelectionRevision || 0) + 1;
+        updateModePanels();
+        requestUiRedraw();
+    });
+    bindCheckbox('enableGraphFourierCb', 'graphFourierEnabled', (_event, enabled) => {
+        if (!state.graphViewEnabled || state.fourierModeEnabled || state.laplaceModeEnabled) {
+            state.graphFourierEnabled = false;
+            checked('enableGraphFourierCb', false);
+        } else {
+            state.graphFourierEnabled = enabled;
+        }
+        updateModePanels();
         requestUiRedraw();
     });
 

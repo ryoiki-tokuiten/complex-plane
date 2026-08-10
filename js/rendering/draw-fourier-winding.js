@@ -2,6 +2,7 @@ import { state } from '../store/state.js';
 import { COLOR_TEXT_ON_CANVAS, COLOR_CANVAS_BACKGROUND } from '../constants/colors.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
+import { buildFourierWinding } from '../analysis/fourier-transform.js';
 
 
 // 3Blue1Brown-style Fourier "Winding" Visualization
@@ -38,40 +39,14 @@ export function drawWindingVisualization(ctx, signal, planeParams) {
     drawGrid(ctx, planeParams);
     drawAxes(ctx, planeParams, "Real", "Imaginary");
 
-    // Get winding parameters
-    const windingFreq = state.fourierWindingFrequency || 1.0;
-    const windingTime = state.fourierWindingTime || 1.0;
-    const timeWindow = state.fourierTimeWindow;
-
-    // Calculate winding: g(t) * e^(-2πift)
-    const windedPoints = [];
-    let centerOfMassX = 0;
-    let centerOfMassY = 0;
-    let count = 0;
-
-    for (let i = 0; i < signal.length; i++) {
-        const pt = signal[i];
-        if (pt.t > windingTime * timeWindow) break; // Only up to current time
-
-        const angle = -2 * Math.PI * windingFreq * pt.t;
-        const re = pt.value * Math.cos(angle);
-        const im = pt.value * Math.sin(angle);
-
-        windedPoints.push({ re, im, t: pt.t, value: pt.value });
-        centerOfMassX += re;
-        centerOfMassY += im;
-        count++;
-    }
-
-    if (count > 0) {
-        centerOfMassX /= count;
-        centerOfMassY /= count;
-    }
+    const winding = buildFourierWinding(signal);
+    const windedPoints = winding.points;
+    const centerOfMassX = winding.centerOfMass.re;
+    const centerOfMassY = winding.centerOfMass.im;
 
     // Draw beautiful reference circle with gradient
     const origin = mapToCanvasCoords(0, 0, planeParams);
-    const maxSignalAmp = Math.max(...signal.map(pt => Math.abs(pt.value)));
-    const circleRadiusWorld = maxSignalAmp * 1.1;
+    const circleRadiusWorld = winding.referenceRadius;
     const circleRadiusCanvas = circleRadiusWorld * planeParams.scale.x;
 
     // Outer glow
@@ -113,7 +88,7 @@ export function drawWindingVisualization(ctx, signal, planeParams) {
     }
 
     // Draw vectors from origin with fading opacity
-    const vectorStep = Math.max(1, Math.floor(windedPoints.length / 50));
+    const vectorStep = winding.vectorStep;
     for (let i = 0; i < windedPoints.length; i += vectorStep) {
         const wp = windedPoints[i];
         const canvasPos = mapToCanvasCoords(wp.re, wp.im, planeParams);
@@ -259,7 +234,9 @@ export function drawTimeDomainSignal(ctx, signal, planeParams) {
     ctx.fillRect(0, 0, planeParams.width, planeParams.height);
 
     const timeWindow = state.fourierTimeWindow || signal.at(-1)?.t || 1;
-    const windingTime = state.fourierWindingTime || 1.0;
+    const windingTime = Number.isFinite(state.fourierWindingTime)
+        ? state.fourierWindingTime
+        : 1.0;
     drawGrid(ctx, planeParams);
     drawAxes(ctx, planeParams, 'Time (t)', 'g(t)');
 
