@@ -40,6 +40,7 @@ export function buildGridFoldLineData(pointSets, transform, options = {}) {
     const outputXRange = usableRange(options.outputXRange);
     const outputYRange = usableRange(options.outputYRange);
     const rawLines = [];
+    const rawPointGroups = new Map();
     let minMappedX = Infinity;
     let maxMappedX = -Infinity;
     let minMappedY = Infinity;
@@ -49,6 +50,31 @@ export function buildGridFoldLineData(pointSets, transform, options = {}) {
 
     for (const pointSet of pointSets) {
         if (!Array.isArray(pointSet?.points)) continue;
+
+        if (pointSet.role === 'grid-dots') {
+            for (const sourcePoint of pointSet.points) {
+                if (!Number.isFinite(sourcePoint?.re) || !Number.isFinite(sourcePoint?.im)) continue;
+                let mappedPoint;
+                try { mappedPoint = transform(sourcePoint.re, sourcePoint.im); } catch { mappedPoint = null; }
+                if (!Number.isFinite(mappedPoint?.re) || !Number.isFinite(mappedPoint?.im) ||
+                    !isInsideRange(mappedPoint.re, outputXRange) || !isInsideRange(mappedPoint.im, outputYRange)) continue;
+                const point = {
+                    sourceRe: sourcePoint.re, sourceIm: sourcePoint.im,
+                    mappedRe: mappedPoint.re, mappedIm: mappedPoint.im
+                };
+                const color = pointSet.color || 0xa78bfa;
+                const group = rawPointGroups.get(color);
+                if (group) group.push(point);
+                else rawPointGroups.set(color, [point]);
+                minMappedX = Math.min(minMappedX, mappedPoint.re);
+                maxMappedX = Math.max(maxMappedX, mappedPoint.re);
+                minMappedY = Math.min(minMappedY, mappedPoint.im);
+                maxMappedY = Math.max(maxMappedY, mappedPoint.im);
+                minSourceX = Math.min(minSourceX, sourcePoint.re);
+                maxSourceX = Math.max(maxSourceX, sourcePoint.re);
+            }
+            continue;
+        }
 
         let line = [];
         const flushLine = () => {
@@ -95,7 +121,7 @@ export function buildGridFoldLineData(pointSets, transform, options = {}) {
         flushLine();
     }
 
-    if (rawLines.length === 0) return { lines: [] };
+    if (rawLines.length === 0 && rawPointGroups.size === 0) return { lines: [], points: [] };
 
     const sourceMin = sourceXRange?.[0] ?? minSourceX;
     const sourceMax = sourceXRange?.[1] ?? maxSourceX;
@@ -121,7 +147,19 @@ export function buildGridFoldLineData(pointSets, transform, options = {}) {
                 positions[offset + 2] = (point.mappedIm - mappedCenterY) * scale;
             }
             return { positions, color: rawLine.color };
-        })
+        }).filter(line => line.positions.length >= 6),
+        points: Array.from(rawPointGroups, ([color, points]) => {
+            const positions = new Float32Array(points.length * 3);
+            for (let index = 0; index < points.length; index += 1) {
+                const point = points[index];
+                const offset = index * 3;
+                positions[offset] = (point.mappedRe - mappedCenterX) * scale;
+                positions[offset + 1] = (point.sourceRe - sourceCenter) * scale;
+                positions[offset + 2] = (point.mappedIm - mappedCenterY) * scale;
+            }
+            return { positions, color };
+        }),
+        mapping: { mappedCenterX, mappedCenterY, sourceCenter, scale }
     };
 }
 
@@ -249,6 +287,12 @@ export class ThreeRiemannRenderer {
         this.gridFoldSurfaceGroup.visible = false;
         this.scene.add(this.gridFoldSurfaceGroup);
 
+        this.foldPreimageGroup = new THREE.Group();
+        this.foldPreimageGroup.renderOrder = 50;
+        this.foldPreimageGroup.visible = false;
+        this.foldPreimageKey = '';
+        this.scene.add(this.foldPreimageGroup);
+
         this.markersGroup = new THREE.Group();
         this.scene.add(this.markersGroup);
 
@@ -334,6 +378,22 @@ export class ThreeRiemannRenderer {
             };
             window.addEventListener('pointerup', onPointerUp);
             this.onPointerUpClean = onPointerUp;
+        } else {
+            this.renderer.domElement.addEventListener('click', event => {
+                if (!state.preimageExplorerEnabled || !this.onFoldTargetSelected || !this.foldSurfaceMode) return;
+                this.refreshPointerRect();
+                this.updatePointerNdc(event);
+                this.raycaster.params.Line.threshold = 0.18;
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                const group = this.foldSurfaceMode === 'raster' ? this.rasterSurfaceGroup : this.gridFoldSurfaceGroup;
+                const hit = this.raycaster.intersectObject(group, true)[0];
+                const mapping = this.foldMapping;
+                if (!hit || !mapping?.scale) return;
+                this.onFoldTargetSelected({
+                    re: hit.point.x / mapping.scale + mapping.mappedCenterX,
+                    im: hit.point.z / mapping.scale + mapping.mappedCenterY
+                });
+            });
         }
     }
 
@@ -408,6 +468,8 @@ export class ThreeRiemannRenderer {
         this.linesGroup.visible = true;
         this.dynamicOverlayGroup.visible = true;
         this.markersGroup.visible = Boolean(this.probePoint);
+        this.foldPreimageGroup.visible = false;
+        this.foldPreimageKey = '';
         if (this.dragPlane) this.dragPlane.visible = true;
         if (changed) {
             this.controls.target.set(0, SPHERE_RADIUS * 0.5, 0);
@@ -486,6 +548,8 @@ export class ThreeRiemannRenderer {
             geometry.computeBoundingSphere();
             this.rasterSurfaceMesh.geometry.dispose();
             this.rasterSurfaceMesh.geometry = geometry;
+            this.foldMapping = { mappedCenterX: centerX, mappedCenterY: centerY, scale };
+            this.foldMapping.sourceCenter = sourceCenter.re;
             this.rasterSurfaceData = data;
             this.rasterSurfaceHeightScale = nextHeightScale;
         }
@@ -517,10 +581,60 @@ export class ThreeRiemannRenderer {
         return true;
     }
 
+    setFoldPreimageMarkers(roots, target, transform) {
+        const mapping = this.foldMapping;
+        const heightScale = this.foldSurfaceMode === 'raster' ? this.rasterSurfaceHeightScale : this.gridFoldHeightScale;
+        const nextKey = state.preimageExplorerEnabled && mapping?.scale && target && Array.isArray(roots) && roots.length
+            ? [
+                this.foldSurfaceMode, heightScale, mapping.mappedCenterX, mapping.mappedCenterY,
+                mapping.sourceCenter, mapping.scale, target.re, target.im,
+                ...roots.flatMap(root => [root?.re, root?.im])
+            ].join('|')
+            : '';
+        if (this.foldPreimageKey === nextKey) return;
+        this.foldPreimageKey = nextKey;
+        while (this.foldPreimageGroup.children.length) {
+            const child = this.foldPreimageGroup.children[0];
+            child.geometry?.dispose?.();
+            child.material?.dispose?.();
+            this.foldPreimageGroup.remove(child);
+        }
+        this.foldPreimageGroup.clear();
+        if (!state.preimageExplorerEnabled || !mapping?.scale || !target || !Array.isArray(roots) || !roots.length) {
+            this.foldPreimageGroup.visible = false;
+            this.renderDirty = true;
+            return;
+        }
+        const sourceCenter = Number(mapping.sourceCenter) || 0;
+        const positions = new Float32Array(roots.length * 3);
+        let count = 0;
+        for (const root of roots) {
+            let mapped = target;
+            try { mapped = typeof transform === 'function' ? transform(root.re, root.im) : target; } catch {}
+            if (!Number.isFinite(mapped?.re) || !Number.isFinite(mapped?.im)) continue;
+            const offset = count++ * 3;
+            positions[offset] = (mapped.re - mapping.mappedCenterX) * mapping.scale;
+            positions[offset + 1] = (root.re - sourceCenter) * mapping.scale * heightScale;
+            positions[offset + 2] = (mapped.im - mapping.mappedCenterY) * mapping.scale;
+        }
+        if (!count) {
+            this.foldPreimageGroup.visible = false;
+            return;
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(count === roots.length ? positions : positions.slice(0, count * 3), 3));
+        this.foldPreimageGroup.add(new THREE.Points(geometry, new THREE.PointsMaterial({
+            color: 0xfacc15, size: 0.2, sizeAttenuation: true, depthTest: false
+        })));
+        this.foldPreimageGroup.visible = true;
+        this.renderDirty = true;
+    }
+
     setGridFoldSurface(data, heightScale = 1) {
         if (!data) return false;
 
         this.setFoldSurfaceMode('grid');
+        this.foldMapping = data.mapping || null;
         const nextHeightScale = Number.isFinite(Number(heightScale))
             ? Math.max(0, Number(heightScale))
             : 1;
@@ -554,6 +668,15 @@ export class ThreeRiemannRenderer {
             });
             this.gridFoldSurfaceGroup.add(new THREE.Line(geometry, material));
         }
+        for (const pointData of data.points || []) {
+            if (!(pointData.positions instanceof Float32Array) || pointData.positions.length < 3) continue;
+            const geometry = new THREE.BufferGeometry();
+            const positions = pointData.positions.slice();
+            for (let index = 1; index < positions.length; index += 3) positions[index] *= nextHeightScale;
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const material = new THREE.PointsMaterial({ color: pointData.color || 0xa78bfa, size: 0.09, sizeAttenuation: true });
+            this.gridFoldSurfaceGroup.add(new THREE.Points(geometry, material));
+        }
 
         this.gridFoldSurfaceData = data;
         this.gridFoldHeightScale = nextHeightScale;
@@ -581,7 +704,7 @@ export class ThreeRiemannRenderer {
             : null;
 
         for (const pointSet of pointSets) {
-            if (!pointSet || !pointSet.points || pointSet.points.length < 2) continue;
+            if (!pointSet || !pointSet.points || pointSet.points.length < (pointSet.role === 'grid-dots' ? 1 : 2)) continue;
             
             const pts = pointSet.points;
             const count = pts.length;
@@ -593,13 +716,22 @@ export class ThreeRiemannRenderer {
                 } catch {}
             }
 
-            const material = new THREE.LineBasicMaterial({
-                color: colorHex,
-                transparent: true,
-                opacity: 0.6,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false
-            });
+            const material = pointSet.role === 'grid-dots'
+                ? new THREE.PointsMaterial({
+                    color: colorHex,
+                    size: 0.08,
+                    sizeAttenuation: true,
+                    transparent: true,
+                    opacity: 0.75,
+                    depthWrite: false
+                })
+                : new THREE.LineBasicMaterial({
+                    color: colorHex,
+                    transparent: true,
+                    opacity: 0.6,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                });
 
             const geometry = new THREE.BufferGeometry();
             const positions = new Float32Array(count * 3);
@@ -639,8 +771,10 @@ export class ThreeRiemannRenderer {
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.userData = { start: startPositions, target: targetPositions };
             
-            const line = new THREE.Line(geometry, material);
-            this.linesGroup.add(line);
+            const object = pointSet.role === 'grid-dots'
+                ? new THREE.Points(geometry, material)
+                : new THREE.Line(geometry, material);
+            this.linesGroup.add(object);
         }
 
         // Apply geometry snapping

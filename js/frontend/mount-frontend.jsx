@@ -2,6 +2,7 @@
 import { render } from 'preact';
 import { PolynomialCoefficients } from './components/polynomial-coefficients.jsx';
 import { ComplexPointEditor } from './components/complex-point-editor.jsx';
+import { ComplexParameterEditor } from './components/complex-parameter-editor.jsx';
 import { AlgebraicTermEditor } from './components/algebraic-term-editor.jsx';
 import { PaletteGuide } from './components/palette-guide.jsx';
 import { ThemeModal } from './components/theme-modal.jsx';
@@ -22,6 +23,9 @@ import {
 const ISLANDS = [
     ['polynomial_coeffs_container', PolynomialCoefficients],
     ['taylor_complex_points_ui_container', ComplexPointEditor],
+    ['exp_base_ui_container', () => <ComplexParameterEditor stateKey="expBase" label="a" />],
+    ['log_base_ui_container', () => <ComplexParameterEditor stateKey="logBase" label="a" />],
+    ['bessel_order_ui_container', () => <ComplexParameterEditor stateKey="besselOrder" label="ν" />],
     ['algebraic_terms_list', AlgebraicTermEditor],
     ['frontend_modal_root', ThemeModal],
     ['domain_palette_circles', DomainPaletteOptions],

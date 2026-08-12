@@ -17,6 +17,7 @@ import {
     NUM_RESIDUE_INTEGRAL_STEPS
 } from '../constants/numerical.js';
 import { createSafeMarkupFragment } from '../ui/dom-components.js';
+import { buildInputShapeGeometryConfig, generateArbitraryShapePointSets } from '../rendering/shape-generators.js';
 
 const { controls } = context;
 
@@ -50,6 +51,12 @@ function cauchyAnalysisKey(isZPlanar) {
         state.circleR,
         state.ellipseA,
         state.ellipseB,
+        state.arbitraryShapeMode,
+        state.arbitraryShapeExpression,
+        state.arbitraryShapeTMin,
+        state.arbitraryShapeTMax,
+        complexListKey(state.arbitraryShapePoints),
+        state.arbitraryShapeClosed ? 1 : 0,
         state.showZerosPoles ? 1 : 0,
         complexListKey(state.poles)
     ].join('|');
@@ -112,6 +119,7 @@ export function performCauchyAnalysis() {
 
 
     let contourC_points = null;
+    let contourCPointSets = null;
     let contourParams = {};
 
     if (state.currentInputShape === 'circle') {
@@ -121,6 +129,7 @@ export function performCauchyAnalysis() {
         }
         contourParams = { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR };
         contourC_points = getContourPoints('circle', contourParams, NUM_INTEGRAL_STEPS);
+        contourCPointSets = [contourC_points];
     } else if (state.currentInputShape === 'ellipse') {
         if (state.ellipseA <= 0 || state.ellipseB <= 0) {
             publish(`${analysisKey}|invalid-ellipse-axes`, { text: 'Cauchy mode: Ellipse axes must be positive.' });
@@ -128,8 +137,25 @@ export function performCauchyAnalysis() {
         }
         contourParams = { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
         contourC_points = getContourPoints('ellipse', contourParams, NUM_INTEGRAL_STEPS);
+        contourCPointSets = [contourC_points];
+    } else if (state.currentInputShape === 'arbitrary') {
+        if (!state.arbitraryShapeClosed) {
+            publish(`${analysisKey}|open-arbitrary-shape`, { text: 'Cauchy mode: Close the arbitrary shape before integrating.' });
+            return;
+        }
+        contourCPointSets = generateArbitraryShapePointSets(buildInputShapeGeometryConfig(null, {
+            currentInputShape: 'arbitrary',
+            curvePoints: NUM_INTEGRAL_STEPS
+        })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
+        contourC_points = contourCPointSets[0] || [];
+        contourParams = { type: 'contours', contours: contourCPointSets };
+        if (!contourCPointSets.length || contourCPointSets.some(points =>
+            points.some(point => !Number.isFinite(point?.re) || !Number.isFinite(point?.im)))) {
+            publish(`${analysisKey}|invalid-arbitrary-shape`, { text: 'Cauchy mode: Draw or enter finite closed shapes C.' });
+            return;
+        }
     } else {
-        publish(`${analysisKey}|unsupported-shape`, { text: 'Cauchy mode: Select Circle or Ellipse contour C.' });
+        publish(`${analysisKey}|unsupported-shape`, { text: 'Cauchy mode: Select Circle, Ellipse, or Arbitrary Shape.' });
         return;
     }
 
@@ -138,7 +164,10 @@ export function performCauchyAnalysis() {
         return;
     }
 
-    const integralValue = numericalLineIntegral(func, contourC_points);
+    const integralValue = (contourCPointSets || [contourC_points]).reduce((sum, points) => {
+        const value = numericalLineIntegral(func, points);
+        return { re: sum.re + value.re, im: sum.im + value.im };
+    }, { re: 0, im: 0 });
     let resultsHTML = `∮<sub>C</sub> f(z)dz ≈ `;
     if (isNaN(integralValue.re) || isNaN(integralValue.im)) {
         resultsHTML += `N/A (Pole likely on contour)`;
@@ -155,18 +184,35 @@ export function performCauchyAnalysis() {
             if (isPointInsideContour(pole, contourParams.type, contourParams)) {
                 
                 let safeToCalcResidue = true;
-                const distToCenterSq = (pole.re - contourParams.cx)**2 + (pole.im - contourParams.cy)**2;
 
                 if (contourParams.type === 'circle') {
+                    const distToCenterSq = (pole.re - contourParams.cx)**2 + (pole.im - contourParams.cy)**2;
                     if (Math.sqrt(distToCenterSq) >= contourParams.r - RESIDUE_CALC_EPSILON_RADIUS * RESIDUE_BOUNDARY_CHECK_FACTOR) {
                         safeToCalcResidue = false;
                     }
-                } else { 
+                } else if (contourParams.type === 'ellipse') {
                     const dx = pole.re - contourParams.cx;
                     const dy = pole.im - contourParams.cy;
                     const effectiveEpsilon = RESIDUE_CALC_EPSILON_RADIUS * RESIDUE_BOUNDARY_CHECK_FACTOR / Math.min(contourParams.a, contourParams.b);
                     if ((dx / contourParams.a)**2 + (dy / contourParams.b)**2 >= (1 - effectiveEpsilon)**2 ) {
                          safeToCalcResidue = false;
+                    }
+                } else {
+                    const epsilon = RESIDUE_CALC_EPSILON_RADIUS * RESIDUE_BOUNDARY_CHECK_FACTOR;
+                    for (const points of contourCPointSets || [contourC_points]) {
+                        for (let i = 1; i < points.length; i++) {
+                            const a = points[i - 1];
+                            const b = points[i];
+                            const dx = b.re - a.re;
+                            const dy = b.im - a.im;
+                            const lengthSq = dx * dx + dy * dy;
+                            const t = lengthSq ? Math.max(0, Math.min(1, ((pole.re - a.re) * dx + (pole.im - a.im) * dy) / lengthSq)) : 0;
+                            if (Math.hypot(pole.re - (a.re + t * dx), pole.im - (a.im + t * dy)) <= epsilon) {
+                                safeToCalcResidue = false;
+                                break;
+                            }
+                        }
+                        if (!safeToCalcResidue) break;
                     }
                 }
 
@@ -258,14 +304,24 @@ export function updateWindingNumberDisplay(tf) {
     let canCalculateWinding = false;
     const wIsPlanar = !(state.riemannSphereViewEnabled || state.splitViewEnabled);
 
-    if (wIsPlanar && state.cauchyIntegralModeEnabled && (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse')) {
+    if (wIsPlanar && state.cauchyIntegralModeEnabled && (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse' || state.currentInputShape === 'arbitrary')) {
         canCalculateWinding = true;
         if (state.currentInputShape === 'circle') {
             contourParams = { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR };
             if (state.circleR <= 0) canCalculateWinding = false;
-        } else {
+        } else if (state.currentInputShape === 'ellipse') {
             contourParams = { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
             if (state.ellipseA <= 0 || state.ellipseB <= 0) canCalculateWinding = false;
+        } else {
+            const contours = generateArbitraryShapePointSets(buildInputShapeGeometryConfig(null, {
+                currentInputShape: 'arbitrary', curvePoints: N_winding_num_pts
+            })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
+            contourParams = { type: 'contours', contours };
+            contourC_points = contours.flatMap((points, index) => index ? [null, ...points] : points);
+            if (!state.arbitraryShapeClosed || !contours.length || contours.some(points =>
+                points.some(point => !Number.isFinite(point?.re) || !Number.isFinite(point?.im)))) {
+                canCalculateWinding = false;
+            }
         }
     } else if (wIsPlanar && !state.cauchyIntegralModeEnabled && state.currentFunction === 'polynomial' && state.currentInputShape === 'circle') {
         canCalculateWinding = true;
@@ -273,11 +329,13 @@ export function updateWindingNumberDisplay(tf) {
         if (state.circleR <= 0) canCalculateWinding = false;
     }
     
-    if (canCalculateWinding) {contourC_points = getContourPoints(contourParams.type, contourParams, N_winding_num_pts);}
+    if (canCalculateWinding && !contourC_points) {contourC_points = getContourPoints(contourParams.type, contourParams, N_winding_num_pts);}
     if (contourC_points && contourC_points.length > 1) {
         let totalAngleChange = 0;let prev_w_arg = null;let pathCrossesOrigin = false;let pathHasNaN = false;
         for (let i = 0; i < contourC_points.length; i++) { 
-            const z_on_C = contourC_points[i];const w = tf(z_on_C.re, z_on_C.im);
+            const z_on_C = contourC_points[i];
+            if (!z_on_C) { prev_w_arg = null; continue; }
+            const w = tf(z_on_C.re, z_on_C.im);
             if (isNaN(w.re) || isNaN(w.im) || !isFinite(w.re) || !isFinite(w.im)) {prev_w_arg = null; pathHasNaN = true; break; }
             if (Math.abs(w.re) < 1e-9 && Math.abs(w.im) < 1e-9) { pathCrossesOrigin = true; break; }
             const current_w_arg = Math.atan2(w.im, w.re);

@@ -6,6 +6,8 @@ import {
     generatePolarGridPointSets,
     generateLogPolarGridPointSets,
     generateLogCartesianGridPointSets,
+    generateDotsPointSets,
+    generateArbitraryShapePointSets,
     generateCurrentInputShapePointSets
 } from '../js/rendering/shape-generators.js';
 import { state } from '../js/store/state.js';
@@ -85,6 +87,43 @@ test('Cartesian grid line count scales with gridDensity', () => {
     // gridDensity=5 -> 6 lines, gridDensity=20 -> 21 lines
     assert.equal(xCount1, 6);
     assert.equal(xCount2, 21);
+});
+
+test('Dots grid density controls the two-dimensional point count', () => {
+    const base = { xRange: [-2, 2], yRange: [-1, 1], curvePoints: 50 };
+    assert.equal(generateDotsPointSets({ ...base, gridDensity: 5 })[0].points.length, 36);
+    assert.equal(generateDotsPointSets({ ...base, gridDensity: 20 })[0].points.length, 441);
+});
+
+test('parametric and drawn arbitrary shapes share the closed point-set contract', () => {
+    const parametric = generateArbitraryShapePointSets({
+        arbitraryShapeMode: 'parametric', arbitraryShapeExpression: 'cos(t)+i*sin(t)',
+        arbitraryShapeTMin: 0, arbitraryShapeTMax: Math.PI * 2, arbitraryShapeClosed: true,
+        curvePoints: 64, gridDensity: 5
+    });
+    assert.equal(parametric.length, 1);
+    assert.ok(Math.hypot(parametric[0].points[0].re - parametric[0].points.at(-1).re,
+        parametric[0].points[0].im - parametric[0].points.at(-1).im) < 1e-9);
+
+    const drawn = generateArbitraryShapePointSets({
+        arbitraryShapeMode: 'draw', arbitraryShapePoints: [{ re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 1 }],
+        arbitraryShapeClosed: true, curvePoints: 32, gridDensity: 5
+    });
+    assert.deepEqual(drawn[0].points.at(-1), drawn[0].points[0]);
+});
+
+test('drawn arbitrary shapes preserve appended strokes without connecting them', () => {
+    const drawn = generateArbitraryShapePointSets({
+        arbitraryShapeMode: 'draw',
+        arbitraryShapePoints: [
+            { re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 1 }, null,
+            { re: 2, im: 2 }, { re: 3, im: 2 }, { re: 2, im: 3 }
+        ],
+        arbitraryShapeClosed: true, curvePoints: 32, gridDensity: 5
+    });
+    assert.equal(drawn.length, 2);
+    assert.deepEqual(drawn[0].points.at(-1), drawn[0].points[0]);
+    assert.deepEqual(drawn[1].points.at(-1), drawn[1].points[0]);
 });
 
 test('Polar grid radial circles are evenly distributed up to max radius', () => {

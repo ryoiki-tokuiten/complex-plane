@@ -4,17 +4,27 @@ import { TWO_PI } from '../constants/numerical.js';
 import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_THICK } from '../constants/rendering.js';
 import { isPointInsideContour } from '../math-utils.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
+import { buildInputShapeGeometryConfig, generateArbitraryShapePointSets } from './shape-generators.js';
 
 export function drawZerosAndPolesMarkers(ctx, planeParams) {
-    let contourParams = null;
+    let contour = null;
     if (
         state.cauchyIntegralModeEnabled &&
         (!state.riemannSphereViewEnabled || state.splitViewEnabled) &&
-        (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse')
+        (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse' || state.currentInputShape === 'arbitrary')
     ) {
-        contourParams = state.currentInputShape === 'circle'
-            ? { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR }
-            : { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
+        if (state.currentInputShape === 'circle') {
+            contour = { type: 'circle', params: { cx: state.a0, cy: state.b0, r: state.circleR } };
+        } else if (state.currentInputShape === 'ellipse') {
+            contour = { type: 'ellipse', params: { cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB } };
+        } else if (state.arbitraryShapeClosed) {
+            const contours = generateArbitraryShapePointSets(buildInputShapeGeometryConfig(planeParams, {
+                currentInputShape: 'arbitrary'
+            })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
+            if (contours.length) {
+                contour = { type: 'contours', params: { contours } };
+            }
+        }
     }
 
     state.zeros.forEach(zero => {
@@ -30,7 +40,7 @@ export function drawZerosAndPolesMarkers(ctx, planeParams) {
 
     state.poles.forEach(pole => {
         const point = mapToCanvasCoords(pole.re, pole.im, planeParams);
-        const insideContour = contourParams && isPointInsideContour(pole, contourParams.type, contourParams);
+        const insideContour = contour && isPointInsideContour(pole, contour.type, contour.params);
         const color = insideContour ? COLOR_POLE_INSIDE_CONTOUR_MARKER : COLOR_POLE_MARKER;
         const radius = insideContour ? 5 : 4;
 
@@ -64,5 +74,3 @@ export function drawCriticalPointMarker(ctx, canvasPoint, color) {
     ctx.stroke();
     ctx.restore();
 }
-
-

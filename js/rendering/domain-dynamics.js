@@ -34,6 +34,7 @@ const SUPPORTED_FUNCTIONS = new Set([
     'poincare',
     'algebraic_chaining'
 ]);
+const WORKER_UNSUPPORTED_FUNCTIONS = new Set(['asin', 'atan', 'gamma', 'loggamma', 'bessel']);
 
 let nextJobId = 1;
 let activeSignature = null;
@@ -98,6 +99,18 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
 
     const functionKey = runtimeState.currentFunction;
     if (!SUPPORTED_FUNCTIONS.has(functionKey)) return null;
+    const naturalBase = value => Math.abs((value?.re ?? Math.E) - Math.E) < 1e-12 && Math.abs(value?.im || 0) < 1e-12;
+    const terms = runtimeState.algebraicChainingTerms || [];
+    const algebraicUses = predicate => terms.some(term => (term?.factors || []).some(factor =>
+        factor && factor.func !== 'none' && predicate(factor)
+    ));
+    if (functionKey === 'algebraic_chaining' && algebraicUses(factor =>
+        WORKER_UNSUPPORTED_FUNCTIONS.has(factor.func) || WORKER_UNSUPPORTED_FUNCTIONS.has(factor.chainedFunc)
+    )) return null;
+    if (!naturalBase(runtimeState.expBase) && (functionKey === 'exp' ||
+        (functionKey === 'algebraic_chaining' && algebraicUses(factor => factor.func === 'exp' || factor.chainedFunc === 'exp' || factor.exp)))) return null;
+    if (!naturalBase(runtimeState.logBase) && (functionKey === 'ln' ||
+        (functionKey === 'algebraic_chaining' && algebraicUses(factor => factor.func === 'ln' || factor.chainedFunc === 'ln' || factor.log)))) return null;
     const orbitColoringMode = normalizeOrbitColoringMode(runtimeState.orbitColoringMode);
 
     const snapshot = {
@@ -117,6 +130,8 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         polynomialN: Math.max(0, Math.floor(Number(runtimeState.polynomialN) || 0)),
         polynomialCoeffs: cloneComplexList(runtimeState.polynomialCoeffs),
         fractionalPowerN: Number.isFinite(Number(runtimeState.fractionalPowerN)) ? Number(runtimeState.fractionalPowerN) : 0.5,
+        branchCutType: runtimeState.branchCutType === 'ray' ? 'ray' : 'draw',
+        branchCutAngle: Number.isFinite(Number(runtimeState.branchCutAngle)) ? Number(runtimeState.branchCutAngle) : Math.PI,
         zetaContinuationEnabled: !!runtimeState.zetaContinuationEnabled,
         taylorSeriesEnabled: !!runtimeState.taylorSeriesEnabled,
         dynamicAggregateEnabled: !!runtimeState.dynamicPlotting?.enabled,

@@ -37,8 +37,9 @@ function isSafeIdentifierName(name) {
     return true;
 }
 const GPU_ARITY = Object.freeze({
-    sin: [1, 1], cos: [1, 1], tan: [1, 1], sec: [1, 1],
+    sin: [1, 1], cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
     exp: [1, 1], ln: [1, 1], log: [1, 1],
+    gamma: [1, 1], loggamma: [1, 1], bessel: [1, 2],
     sinh: [1, 1], cosh: [1, 1], tanh: [1, 1],
     sqrt: [1, 1], reciprocal: [1, 1],
     abs: [1, 1], arg: [1, 1], re: [1, 1], im: [1, 1], conj: [1, 1],
@@ -323,12 +324,19 @@ function compileCallExpression(node, args, context) {
         case 'cos': return `complexCos(${first})`;
         case 'tan': return `complexDiv(complexSin(${first}), complexCos(${first}))`;
         case 'sec': return `complexDiv(${ONE_VEC}, complexCos(${first}))`;
-        case 'exp': return `complexExp(${first})`;
+        case 'exp': return `complexExpWithBase(${first})`;
+        case 'asin': return `complexArcsin(${first})`;
+        case 'atan': return `complexArctan(${first})`;
+        case 'gamma': return `complexGamma(${first})`;
+        case 'loggamma': return `complexLogGamma(${first})`;
+        case 'bessel': return args.length === 1
+            ? `complexBesselJ(${first}, u_besselOrder)`
+            : `complexBesselJ(${args[1]}, ${first})`;
         case 'ln':
         case 'log':
             return context.sheet
                 ? `dynamicLnOnSheet(${first}, branchIndex, branchCutWidth)`
-                : `complexLn(${first})`;
+                : `complexLogWithBase(${first})`;
         case 'sinh': return `complexSinh(${first})`;
         case 'cosh': return `complexCosh(${first})`;
         case 'tanh': return `complexTanh(${first})`;
@@ -548,7 +556,13 @@ function compileSourceExpressionWithCSE(source, context) {
     return cacheMapResult(cseExpressionCache, MAX_CSE_EXPRESSION_CACHE_ENTRIES, key, compiled);
 }
 
-export const GLSL_EXPRESSION_HELPERS = `
+export function createGlslExpressionHelpers({ drawnBranchCuts = false } = {}) {
+    const branchCutGuard = drawnBranchCuts
+        ? `if (pointTouchesActiveBranchCut(value, branchCutWidth)) return vec2(1.0e20);`
+        : `vec2 ray = vec2(cos(u_branchCutAngle), sin(u_branchCutAngle));
+  vec2 rotated = vec2(dot(value, ray), -value.x * ray.y + value.y * ray.x);
+  if (branchCutWidth > 0.0 && rotated.x > 0.0 && abs(rotated.y) < branchCutWidth) return vec2(1.0e20);`;
+    return `
 float dynamicReal(vec2 value) { return value.x; }
 bool dynamicTruthy(vec2 value) { return dot(value, value) > 1.0e-20; }
 vec2 dynamicBool(bool value) { return value ? vec2(1.0, 0.0) : vec2(0.0); }
@@ -557,14 +571,19 @@ vec2 dynamicComplexPow(vec2 base, vec2 exponent) {
   if (dot(base, base) < 1.0e-20) {
     return exponent.x > 0.0 ? vec2(0.0) : vec2(1.0e20);
   }
-  return complexExp(complexMul(exponent, complexLn(base)));
+  return complexExp(complexMul(exponent, complexLnActive(base)));
+}
+vec2 dynamicNaturalLnOnSheet(vec2 value, float branchIndex, float branchCutWidth) {
+  if (dot(value, value) < 1.0e-20) return vec2(1.0e20);
+  ${branchCutGuard}
+  float argument = atan(value.y, value.x);
+  if (argument > u_branchCutAngle) argument -= TWO_PI;
+  if (argument <= u_branchCutAngle - TWO_PI) argument += TWO_PI;
+  vec2 logarithm = vec2(log(length(value)), argument + branchIndex * TWO_PI);
+  return logarithm;
 }
 vec2 dynamicLnOnSheet(vec2 value, float branchIndex, float branchCutWidth) {
-  if (dot(value, value) < 1.0e-20) return vec2(1.0e20);
-  if (branchCutWidth > 0.0 && value.x < 0.0 && abs(value.y) < branchCutWidth) return vec2(1.0e20);
-  vec2 logarithm = complexLn(value);
-  logarithm.y += branchIndex * TWO_PI;
-  return logarithm;
+  return complexDiv(dynamicNaturalLnOnSheet(value, branchIndex, branchCutWidth), complexLn(u_logBase));
 }
 vec2 dynamicComplexPowOnSheet(
   vec2 base,
@@ -577,7 +596,7 @@ vec2 dynamicComplexPowOnSheet(
   }
   return complexExp(complexMul(
     exponent,
-    dynamicLnOnSheet(base, branchIndex, branchCutWidth)
+    dynamicNaturalLnOnSheet(base, branchIndex, branchCutWidth)
   ));
 }
 float dynamicFactorial(float value) {
@@ -652,6 +671,9 @@ vec2 dynamicEvaluateBasicOnSheet(
   );
 }
 `;
+}
+
+export const GLSL_EXPRESSION_HELPERS = createGlslExpressionHelpers();
 
 function sourceRecords(appState) {
     const raw = appState.dynamicPlotting.source || {};
@@ -854,7 +876,7 @@ export function isDynamicAggregateGLSLActive(appState) {
     return dynamicEnabled(appState);
 }
 
-export function compileCustomExpressionToGLSL(source, getFunctionId) {
+export function compileCustomExpressionToGLSL(source, getFunctionId, options = null) {
     if (!source || source === 'z') {
         return 'z';
     }
@@ -865,7 +887,7 @@ export function compileCustomExpressionToGLSL(source, getFunctionId) {
         const context = {
             parameters: {},
             variables: { z: 'z', i: I_VEC },
-            sheet: false,
+            sheet: Boolean(options?.sheet),
             getFunctionId: name => getFunctionId(name, true)
         };
         return cacheMapResult(

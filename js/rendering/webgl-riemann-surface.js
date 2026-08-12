@@ -12,7 +12,7 @@ import {
   dynamicAggregateGLSLSignature,
   isDynamicAggregateGLSLActive,
   compileCustomExpressionToGLSL,
-  GLSL_EXPRESSION_HELPERS
+  createGlslExpressionHelpers
 } from '../math/expression/glsl.js';
 import {
   getBranchWindowLabel,
@@ -65,6 +65,7 @@ const SURFACE_COMPONENT_IDS = Object.freeze({
 
 const ALGEBRAIC_C_FUNCTION_ID = -1;
 const ALGEBRAIC_INVALID_FUNCTION_ID = -2;
+const MAX_DRAWN_BRANCH_CUT_POINTS = 32;
 
 const SURFACE_PALETTE_GLSL = createDomainPaletteGlslSource('surfacePaletteColor');
 
@@ -83,6 +84,11 @@ const UNIFORM_NAMES = Object.freeze({
   uDomainStep: 'u_domainStep',
   uNormalizedStep: 'u_normalizedStep',
   uTaylorCenter: 'u_taylorCenter',
+  uExpBase: 'u_expBase',
+  uLogBase: 'u_logBase',
+  uBesselOrder: 'u_besselOrder',
+  uBranchCutAngle: 'u_branchCutAngle',
+  uBranchCutPointCount: 'u_branchCutPointCount',
   uContourParams: 'u_contourParams'
 });
 
@@ -98,6 +104,8 @@ uniform vec4 u_contourParams;
 uniform vec2 u_polyCoeffs[11];
 uniform vec2 u_taylorCenter;
 uniform vec2 u_taylorCoefficients[9];
+uniform vec2 u_branchCutPoints[${MAX_DRAWN_BRANCH_CUT_POINTS}];
+uniform int u_branchCutPointCount;
 #define u_functionId u_functionParams.x
 #define u_zetaContinuationEnabled u_functionParams.y
 #define u_zetaReflectionBoundary u_functionParams.z
@@ -132,7 +140,8 @@ uniform vec2 u_taylorCoefficients[9];
 
 const ARRAY_UNIFORMS = Object.freeze([
   { key: 'uPolyCoeffs', name: 'u_polyCoeffs', length: 11 },
-  { key: 'uTaylorCoefficients', name: 'u_taylorCoefficients', length: 9 }
+  { key: 'uTaylorCoefficients', name: 'u_taylorCoefficients', length: 9 },
+  { key: 'uBranchCutPoints', name: 'u_branchCutPoints', length: MAX_DRAWN_BRANCH_CUT_POINTS }
 ]);
 
 // Immutable CPU-side mesh data is shared across renderers; GPU buffers remain renderer-owned.
@@ -313,7 +322,7 @@ function emitAlgebraicFactor(factor, termIndex, factorIndex) {
     '          if (!complexLnOnSheet(factorValue, branchIndex, branchCutWidth, tempValue)) return false;',
     '          factorValue = tempValue;',
     '        }',
-    '        if (mod(floor(factorFlags / 4.0), 2.0) >= 0.5) factorValue = complexExp(factorValue);'
+    '        if (mod(floor(factorFlags / 4.0), 2.0) >= 0.5) factorValue = complexExpWithBase(factorValue);'
   );
 
   steps.push('        termValue = complexMul(termValue, factorValue);', '      }');
@@ -357,7 +366,8 @@ function buildAlgebraicBranchBody(appState) {
   if (zExpr !== 'z') {
     const zCustomExprGLSL = compileCustomExpressionToGLSL(
       zExpr,
-      functionName => getWebGLDomainColorFunctionIdShared(functionName, true)
+      functionName => getWebGLDomainColorFunctionIdShared(functionName, true),
+      { sheet: true }
     );
     if (!zCustomExprGLSL) {
       steps.push('    mapped = vec2(0.0);', '    return false;');
@@ -378,12 +388,40 @@ function buildAlgebraicBranchBody(appState) {
 
 const SURFACE_MATH_GLSL = Object.freeze({
   complexLnOnSheet: {
-    source: `bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 value) {
+    source: `float branchSegmentDistance(vec2 point, vec2 a, vec2 b) {
+  vec2 delta = b - a;
+  float lengthSquared = dot(delta, delta);
+  float t = lengthSquared > 1.0e-20 ? clamp(dot(point - a, delta) / lengthSquared, 0.0, 1.0) : 0.0;
+  return length(point - (a + t * delta));
+}
+bool pointTouchesDrawnBranchCut(vec2 z, float branchCutWidth) {
+  if (u_branchCutPointCount < 2 || branchCutWidth <= 0.0) return false;
+  for (int index = 1; index < ${MAX_DRAWN_BRANCH_CUT_POINTS}; index++) {
+    if (index >= u_branchCutPointCount) break;
+    if (branchSegmentDistance(z, u_branchCutPoints[index - 1], u_branchCutPoints[index]) < branchCutWidth) return true;
+  }
+  return false;
+}
+bool pointTouchesActiveBranchCut(vec2 z, float branchCutWidth) {
+  if (branchCutWidth <= 0.0) return false;
+  if (u_branchCutPointCount >= 2) return pointTouchesDrawnBranchCut(z, branchCutWidth);
+  vec2 ray = vec2(cos(u_branchCutAngle), sin(u_branchCutAngle));
+  vec2 rotated = vec2(dot(z, ray), -z.x * ray.y + z.y * ray.x);
+  return rotated.x > 0.0 && abs(rotated.y) < branchCutWidth;
+}
+bool complexNaturalLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 value) {
   float magnitude = length(z);
   if (magnitude < 1.0e-20) return false;
-  if (branchCutWidth > 0.0 && z.x < 0.0 && abs(z.y) < branchCutWidth) return false;
-  value = complexLn(z);
-  value.y += branchIndex * TWO_PI;
+  if (pointTouchesActiveBranchCut(z, branchCutWidth)) return false;
+  float argument = atan(z.y, z.x);
+  if (argument > u_branchCutAngle) argument -= TWO_PI;
+  if (argument <= u_branchCutAngle - TWO_PI) argument += TWO_PI;
+  value = vec2(log(magnitude), argument + branchIndex * TWO_PI);
+  return isFiniteVec2Compat(value);
+}
+bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 value) {
+  if (!complexNaturalLnOnSheet(z, branchIndex, branchCutWidth, value)) return false;
+  value = complexDiv(value, complexLn(u_logBase));
   return isFiniteVec2Compat(value);
 }`
   },
@@ -395,7 +433,7 @@ const SURFACE_MATH_GLSL = Object.freeze({
     return false;
   }
   vec2 logarithm = vec2(0.0);
-  if (!complexLnOnSheet(z, branchIndex, branchCutWidth, logarithm)) return false;
+  if (!complexNaturalLnOnSheet(z, branchIndex, branchCutWidth, logarithm)) return false;
   value = complexExp(vec2(exponent * logarithm.x, exponent * logarithm.y));
   return isFiniteVec2Compat(value);
 }`
@@ -432,6 +470,24 @@ const SURFACE_MATH_GLSL = Object.freeze({
       isIntegerPower ? 0.0 : branchCutWidth,
       mapped
     );
+  }
+  if (abs(fId - 18.0) < 0.5) {
+    vec2 principalAsin = complexArcsin(z);
+    float asinParity = mod(abs(branchIndex), 2.0) < 0.5 ? 1.0 : -1.0;
+    mapped = asinParity * principalAsin + vec2(branchIndex * PI, 0.0);
+    return isFiniteVec2Compat(mapped);
+  }
+  if (abs(fId - 19.0) < 0.5) {
+    mapped = complexArctan(z) + vec2(branchIndex * PI, 0.0);
+    return isFiniteVec2Compat(mapped);
+  }
+  if (abs(fId - 21.0) < 0.5) {
+    mapped = complexLogGamma(z) + vec2(0.0, branchIndex * TWO_PI);
+    return isFiniteVec2Compat(mapped);
+  }
+  if (abs(fId - 22.0) < 0.5) {
+    mapped = complexMul(complexBesselJ(z, u_besselOrder), complexExp(complexMul(vec2(0.0, branchIndex * TWO_PI), u_besselOrder)));
+    return isFiniteVec2Compat(mapped);
   }
   return evaluateBasicFuncShared(
     fId, z, mA, mB, mC, mD, polyDeg, polyCoeffs, zetaCont, zetaRefl, fracPower, mapped
@@ -592,6 +648,7 @@ const VERTEX_SURFACE_GLSL = Object.freeze({
 
   mapSurfacePoint: {
     source: `bool mapSurfacePoint(vec2 z, out vec2 mapped, out float height) {
+  if (pointTouchesActiveBranchCut(z, u_branchCutWidth)) return false;
   bool ok;
   if (u_derivativeMode > 0.5) {
     float h = 1.0e-6 * max(1.0, max(abs(z.x), abs(z.y)));
@@ -888,13 +945,15 @@ function buildRiemannSurfaceMathLibraryUncached(appState) {
   );
   const dynamicSource = dynamic.source || EMPTY_DYNAMIC_AGGREGATE_GLSL;
   return `${GLSL_COMPLEX_MATH_LIBRARY_BASE}
-${GLSL_EXPRESSION_HELPERS}
 ${DOMAIN_DYNAMICS_GLSL}
 ${buildAlgebraicUniformDeclarations(appState)}
+${[
+  SURFACE_MATH_GLSL.complexLnOnSheet.source,
+  createGlslExpressionHelpers({ drawnBranchCuts: true })
+].join('\n\n')}
 ${dynamicSource}
 ${[
   SURFACE_MATH_GLSL.evaluateTaylorSurface.source,
-  SURFACE_MATH_GLSL.complexLnOnSheet.source,
   SURFACE_MATH_GLSL.complexPowRealOnSheet.source,
   SURFACE_MATH_GLSL.evaluateBasicOnSheet.source,
   SURFACE_MATH_GLSL.evaluateSurfaceBase.source({ appState }),
@@ -972,6 +1031,21 @@ ${[
 ].join('\n\n')}
 `;
 }
+
+const CONTINUATION_VERTEX_SHADER = `
+precision highp float;
+attribute vec3 a_position;
+uniform mat4 u_modelView;
+uniform mat4 u_projection;
+void main() {
+  gl_Position = u_projection * u_modelView * vec4(a_position, 1.0);
+  gl_PointSize = 6.0;
+}`;
+
+const CONTINUATION_FRAGMENT_SHADER = `
+precision highp float;
+void main() { gl_FragColor = vec4(0.133, 0.827, 0.933, 1.0); }
+`;
 
 /**
  * Writes T * Rx * Ry directly into a caller-owned column-major matrix.
@@ -1349,6 +1423,63 @@ function rebuildProgram(renderer, signature = getProgramSignature(state)) {
   return true;
 }
 
+function ensureContinuationProgram(renderer) {
+  if (renderer.continuationProgram) return true;
+  const { gl } = renderer;
+  const program = createWebGLProgramShared(gl, CONTINUATION_VERTEX_SHADER, CONTINUATION_FRAGMENT_SHADER);
+  if (!program) return false;
+  renderer.continuationProgram = program;
+  renderer.continuationLocations = {
+    aPosition: gl.getAttribLocation(program, 'a_position'),
+    uModelView: gl.getUniformLocation(program, 'u_modelView'),
+    uProjection: gl.getUniformLocation(program, 'u_projection')
+  };
+  renderer.continuationBuffer = gl.createBuffer();
+  return Boolean(renderer.continuationBuffer);
+}
+
+function drawContinuationTrace(renderer, options) {
+  const path = state.continuationPath;
+  if (!Array.isArray(path) || path.length < 2 || !ensureContinuationProgram(renderer)) return;
+  const values = state.continuationValues || [];
+  const xRange = zPlaneParams.currentVisXRange || [-2, 2];
+  const yRange = zPlaneParams.currentVisYRange || [-2, 2];
+  const xSpan = xRange[1] - xRange[0] || 1;
+  const ySpan = yRange[1] - yRange[0] || 1;
+  const heightClip = Math.max(LIMITS.minHeightClip, +state.riemannSurfaceHeightClip || 1);
+  const heightScale = +state.riemannSurfaceHeightScale || 1;
+  const data = renderer.continuationData;
+  let count = 0;
+  for (let index = 0; index < path.length && count < data.length / 3; index += 1) {
+    const z = path[index];
+    const value = values[index];
+    if (!Number.isFinite(value?.re) || !Number.isFinite(value?.im)) continue;
+    let component = value.im;
+    if (state.riemannSurfaceComponent === 'real') component = value.re;
+    else if (state.riemannSurfaceComponent === 'magnitude') component = Math.hypot(value.re, value.im);
+    else if (state.riemannSurfaceComponent === 'phase') component = Math.atan2(value.im, value.re);
+    data[count * 3] = -1.18 + 2.36 * (z.re - xRange[0]) / xSpan;
+    data[count * 3 + 1] = Math.max(-1, Math.min(1, component / heightClip)) * heightScale + 0.012;
+    data[count * 3 + 2] = -1 + 2 * (z.im - yRange[0]) / ySpan;
+    count += 1;
+  }
+  if (count < 2) return;
+  const { gl, continuationLocations: locations } = renderer;
+  gl.useProgram(renderer.continuationProgram);
+  renderer.activeProgram = renderer.continuationProgram;
+  gl.uniformMatrix4fv(locations.uModelView, false, renderer.modelViewMatrix);
+  gl.uniformMatrix4fv(locations.uProjection, false, renderer.projectionMatrix);
+  gl.bindBuffer(gl.ARRAY_BUFFER, renderer.continuationBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, count * 3), gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(locations.aPosition);
+  gl.vertexAttribPointer(locations.aPosition, 3, gl.FLOAT, false, 0, 0);
+  gl.disable(gl.DEPTH_TEST);
+  gl.lineWidth(3);
+  gl.drawArrays(gl.LINE_STRIP, 0, count);
+  gl.drawArrays(gl.POINTS, 0, count);
+  gl.enable(gl.DEPTH_TEST);
+}
+
 function addDisposableListener(target, type, listener, options) {
   target.addEventListener(type, listener, options);
   return () => target.removeEventListener(type, listener, options);
@@ -1568,6 +1699,33 @@ function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
     typeof ZETA_REFLECTION_POINT_RE !== 'undefined' ? ZETA_REFLECTION_POINT_RE : 0.5,
     +appState.fractionalPowerN || 0.5
   );
+  const expBase = appState.expBase || { re: Math.E, im: 0 };
+  const logBase = appState.logBase || { re: Math.E, im: 0 };
+  const besselOrder = appState.besselOrder || ZERO_COMPLEX;
+  gl.uniform2f(locations.uExpBase, complexRe(expBase), complexIm(expBase));
+  gl.uniform2f(locations.uLogBase, complexRe(logBase), complexIm(logBase));
+  gl.uniform2f(locations.uBesselOrder, complexRe(besselOrder), complexIm(besselOrder));
+  gl.uniform1f(locations.uBranchCutAngle,
+    appState.branchCutType === 'ray' && Number.isFinite(appState.branchCutAngle)
+      ? appState.branchCutAngle
+      : Math.PI
+  );
+  const drawnCut = appState.branchCutType === 'draw' && Array.isArray(appState.branchCutPoints)
+    ? appState.branchCutPoints
+    : EMPTY_ARRAY;
+  const cutCount = Math.min(MAX_DRAWN_BRANCH_CUT_POINTS, drawnCut.length);
+  gl.uniform1i(locations.uBranchCutPointCount, cutCount);
+  const cutData = renderer.branchCutUniformData;
+  cutData.fill(0);
+  if (cutCount > 0) {
+    const sourceStep = cutCount > 1 ? (drawnCut.length - 1) / (cutCount - 1) : 0;
+    for (let index = 0; index < cutCount; index += 1) {
+      const point = drawnCut[Math.round(index * sourceStep)] || ZERO_COMPLEX;
+      cutData[index * 2] = complexRe(point);
+      cutData[index * 2 + 1] = complexIm(point);
+    }
+    uploadComplexUniformArray(gl, locations.uBranchCutPoints, cutData);
+  }
 
   const mobiusA = appState.mobiusA || ZERO_COMPLEX;
   const mobiusB = appState.mobiusB || ZERO_COMPLEX;
@@ -1846,6 +2004,7 @@ function drawRenderer(renderer, options = renderer.lastOptions, signature = getP
   for (let sheetIndex = 0; sheetIndex < branchCount; sheetIndex++) {
     drawSurfaceSheet(renderer, branchIndices[sheetIndex], sheetIndex, tintStep, cutWidth, wireframe);
   }
+  drawContinuationTrace(renderer, options);
 
   renderer.forceUniformRefresh = false;
   updateHud(renderer, branchIndices, hasBranches, options.stage);
@@ -1924,6 +2083,8 @@ class RiemannSurfaceRendererFactory {
     if (renderer.program) {
       gl.deleteProgram(renderer.program);
     }
+    if (renderer.continuationProgram) gl.deleteProgram(renderer.continuationProgram);
+    if (renderer.continuationBuffer) gl.deleteBuffer(renderer.continuationBuffer);
 
     renderer.canvas.remove();
     renderer.hud.remove();
@@ -1973,6 +2134,11 @@ class RiemannSurfaceRendererFactory {
       projectionMatrix: new Float32Array(16),
       polyCoeffUniformData: new Float32Array(22),
       taylorCoeffUniformData: new Float32Array(18),
+      branchCutUniformData: new Float32Array(MAX_DRAWN_BRANCH_CUT_POINTS * 2),
+      continuationData: new Float32Array(4096 * 3),
+      continuationProgram: null,
+      continuationLocations: null,
+      continuationBuffer: null,
       frameOptions: { stage: 1, derivativeMode: 0 },
       camera: { ...DEFAULT_CAMERA },
       visible: false,

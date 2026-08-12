@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
     algebraicExpressionHasBranches,
@@ -9,6 +10,7 @@ import {
     surfaceStageHasBranches
 } from '../js/analysis/riemann-surface.js';
 import {
+    buildRiemannSurfaceMathLibrary,
     getRiemannSurfaceGridData,
     getRiemannSurfaceProgramSignature
 } from '../js/rendering/webgl-riemann-surface.js';
@@ -60,6 +62,15 @@ test('algebraic chaining detects branch-bearing functions and modifiers', () => 
     terms[0].factors[0].power = 2;
     terms[0].factors[0].log = true;
     assert.equal(algebraicExpressionHasBranches(terms, makeState()), true);
+});
+
+test('algebraic custom z expressions contribute branch metadata', () => {
+    const runtimeState = makeState({
+        currentFunction: 'algebraic_chaining',
+        algebraicChainingZExpr: 'sqrt(z)',
+        algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'sin' }] }]
+    });
+    assert.equal(surfaceStageHasBranches(runtimeState), true);
 });
 
 test('Taylor surfaces are single-valued polynomial approximations', () => {
@@ -132,6 +143,26 @@ test('Riemann program signatures keep algebraic parameter edits uniform-backed',
     runtimeState.algebraicChainingTerms[0].factors[0].exp = true;
     const afterModifierEdit = getRiemannSurfaceProgramSignature(runtimeState);
     assert.equal(afterModifierEdit, before);
+});
+
+test('drawn branch-cut shader inputs declare their scalar uniforms', async () => {
+    const source = await readFile(new URL('../js/rendering/webgl-riemann-surface.js', import.meta.url), 'utf8');
+    assert.match(source, /uniform int u_branchCutPointCount;/);
+});
+
+test('sheet-aware algebraic expressions use the active cut helpers', () => {
+    const runtimeState = makeState({
+        currentFunction: 'algebraic_chaining',
+        algebraicChainingZExpr: 'sqrt(z) + ln(z)',
+        algebraicChainingTerms: [{
+            coeff: { re: 1, im: 0 },
+            factors: [{ func: 'sin', power: 1 }]
+        }]
+    });
+    const source = buildRiemannSurfaceMathLibrary(runtimeState);
+    assert.match(source, /pointTouchesActiveBranchCut/);
+    assert.match(source, /dynamicComplexPowOnSheet\(z, vec2\(0\.5, 0\.0\), branchIndex, branchCutWidth\)/);
+    assert.match(source, /dynamicLnOnSheet\(z, branchIndex, branchCutWidth\)/);
 });
 
 test('Riemann surface grid topology is cached and index-safe', () => {

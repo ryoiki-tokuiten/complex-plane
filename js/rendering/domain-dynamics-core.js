@@ -171,35 +171,18 @@ function complexExp(z) {
     };
 }
 
-function complexLn(z) {
+function complexLn(z, snapshot = null) {
     const value = toComplex(z);
     if (value.re === 0 && value.im === 0) return { re: -Infinity, im: 0 };
+    let argument = Math.atan2(value.im, value.re);
+    if (snapshot?.branchCutType === 'ray') {
+        const angle = Number.isFinite(snapshot.branchCutAngle) ? snapshot.branchCutAngle : Math.PI;
+        while (argument > angle) argument -= TWO_PI;
+        while (argument <= angle - TWO_PI) argument += TWO_PI;
+    }
     return {
         re: Math.log(Math.hypot(value.re, value.im)),
-        im: Math.atan2(value.im, value.re)
-    };
-}
-
-function complexRealBasePow(baseRe, expRe) {
-    if (baseRe >= 0) {
-        return { re: expSafe(expRe * Math.log(baseRe)), im: 0 };
-    }
-
-    const magnitude = expSafe(expRe * Math.log(-baseRe));
-    const doubledExponent = expRe * 2;
-    if (Number.isSafeInteger(doubledExponent)) {
-        switch (((doubledExponent % 4) + 4) % 4) {
-            case 0: return { re: magnitude, im: 0 };
-            case 1: return { re: 0, im: magnitude };
-            case 2: return { re: -magnitude, im: 0 };
-            case 3: return { re: 0, im: -magnitude };
-        }
-    }
-
-    const angle = expRe * Math.PI;
-    return {
-        re: magnitude * Math.cos(angle),
-        im: magnitude * Math.sin(angle)
+        im: argument
     };
 }
 
@@ -226,7 +209,7 @@ function complexIntegerPow(base, exponent) {
     return negative ? complexDivide(ONE, acc) : acc;
 }
 
-function complexPow(base, exponent) {
+function complexPow(base, exponent, snapshot = null) {
     const b = toComplex(base);
     const e = toComplex(exponent);
     if (b.re === 0 && b.im === 0) {
@@ -236,10 +219,7 @@ function complexPow(base, exponent) {
     if (e.im === 0 && Number.isSafeInteger(e.re)) {
         return complexIntegerPow(b, e.re);
     }
-    if (b.im === 0 && e.im === 0) {
-        return complexRealBasePow(b.re, e.re);
-    }
-    return complexExp(complexMul(e, complexLn(b)));
+    return complexExp(complexMul(e, complexLn(b, snapshot)));
 }
 
 function complexReciprocal(z) {
@@ -430,12 +410,12 @@ function evaluateBuiltin(functionKey, z, snapshot, evalContext) {
         case 'tan': return complexTan(z);
         case 'sec': return complexSec(z);
         case 'exp': return complexExp(z);
-        case 'ln': return complexLn(z);
+        case 'ln': return complexLn(z, snapshot);
         case 'reciprocal': return complexReciprocal(z);
         case 'sinh': return complexSinh(z);
         case 'cosh': return complexCosh(z);
         case 'tanh': return complexTanh(z);
-        case 'power': return complexPow(z, { re: snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER, im: 0 });
+        case 'power': return complexPow(z, { re: snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER, im: 0 }, snapshot);
         case 'mobius': return complexMobius(z, snapshot);
         case 'polynomial': return complexPolynomial(z, snapshot);
         case 'poincare': return complexPoincare(z);
@@ -466,9 +446,9 @@ function evaluateFunctionBlock(block, z, snapshot, context) {
         : evaluateBuiltin(block.func, arg, snapshot, context);
     if (!validComplex(value)) return { re: NaN, im: NaN };
 
-    if (block.power !== undefined && block.power !== 1) value = complexPow(value, { re: Number(block.power), im: 0 });
+    if (block.power !== undefined && block.power !== 1) value = complexPow(value, { re: Number(block.power), im: 0 }, snapshot);
     if (block.reciprocal) value = complexReciprocal(value);
-    if (block.log) value = complexLn(value);
+    if (block.log) value = complexLn(value, snapshot);
     if (block.exp) value = complexExp(value);
 
     return value;
@@ -3250,6 +3230,8 @@ export function domainDynamicsSignature(snapshot) {
         mobiusC: snapshot.mobiusC,
         mobiusD: snapshot.mobiusD,
         fractionalPowerN: snapshot.fractionalPowerN,
+        branchCutType: snapshot.branchCutType,
+        branchCutAngle: snapshot.branchCutAngle,
         zetaContinuationEnabled: snapshot.zetaContinuationEnabled,
         style: snapshot.style,
         paletteStops: snapshot.paletteStops,

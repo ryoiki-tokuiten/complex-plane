@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildGridFoldLineData } from '../js/rendering/three-riemann-renderer.js';
-import { isGridInputShape } from '../js/rendering/shape-generators.js';
+import { isFoldableInputShape, isGridInputShape } from '../js/rendering/shape-generators.js';
 
-test('grid fold view is limited to the four grid input shapes', () => {
-    for (const shape of ['grid_cartesian', 'grid_logcartesian', 'grid_polar', 'grid_logpolar']) {
+test('grid fold view includes grids, dots, and arbitrary shapes', () => {
+    for (const shape of ['grid_cartesian', 'grid_logcartesian', 'grid_polar', 'grid_logpolar', 'grid_dots']) {
         assert.equal(isGridInputShape(shape), true);
     }
-    for (const shape of ['line', 'circle', 'image', 'video', 'empty_grid']) {
+    for (const shape of ['line', 'circle', 'arbitrary', 'image', 'video', 'empty_grid']) {
         assert.equal(isGridInputShape(shape), false);
     }
+    assert.equal(isFoldableInputShape('arbitrary'), true);
 });
 
 test('grid folds separate equal mapped points by source real coordinate', () => {
@@ -30,6 +31,19 @@ test('grid folds separate equal mapped points by source real coordinate', () => 
     const positions = data.lines[0].positions;
     assert.deepEqual([positions[0], positions[1], positions[3], positions[4]], [0, -5, 0, 5]);
     assert.equal(Math.abs(positions[2]) + Math.abs(positions[5]), 0);
+});
+
+test('dot folds batch points into one typed geometry per color', () => {
+    const data = buildGridFoldLineData([{
+        role: 'grid-dots',
+        color: '#123456',
+        points: [{ re: -1, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }]
+    }], (re, im) => ({ re: re * re, im }), {
+        sourceXRange: [-1, 1], outputXRange: [-1, 2], outputYRange: [-1, 1]
+    });
+    assert.equal(data.points.length, 1);
+    assert.equal(data.points[0].positions.length, 9);
+    assert.equal(data.lines.length, 0);
 });
 
 test('grid folds split invalid mapped regions without emitting non-finite geometry', () => {

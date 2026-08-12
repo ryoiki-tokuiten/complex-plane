@@ -1,6 +1,6 @@
 import { parseExpression, walkExpression } from '../math/expression/parser.js';
 
-const MULTIVALUED_FUNCTIONS = new Set(['ln', 'power']);
+const MULTIVALUED_FUNCTIONS = new Set(['ln', 'power', 'asin', 'atan', 'loggamma', 'bessel']);
 
 function isIntegerLike(value) {
     return Number.isFinite(value) && Math.abs(value - Math.round(value)) < 1e-9;
@@ -13,6 +13,10 @@ export function isMultivaluedFunction(functionKey, runtimeState) {
             ? runtimeState.fractionalPowerN
             : 0.5;
         return !isIntegerLike(exponent);
+    }
+    if (functionKey === 'bessel') {
+        const order = runtimeState?.besselOrder || { re: 0, im: 0 };
+        return Math.abs(order.im || 0) > 1e-9 || !isIntegerLike(order.re);
     }
     return true;
 }
@@ -75,6 +79,7 @@ export function dynamicExpressionHasBranches(runtimeState) {
 
 export function baseExpressionHasBranches(runtimeState) {
     if (!runtimeState) return false;
+    if (runtimeState.mapPresentation === 'derivative') return false;
     if (
         runtimeState.dynamicPlotting?.enabled &&
         runtimeState.dynamicPlotting.mode === 'aggregate' &&
@@ -84,7 +89,8 @@ export function baseExpressionHasBranches(runtimeState) {
     }
     if (runtimeState.taylorSeriesEnabled) return false;
     if (runtimeState.currentFunction === 'algebraic_chaining') {
-        return algebraicExpressionHasBranches(runtimeState.algebraicChainingTerms, runtimeState);
+        return algebraicExpressionHasBranches(runtimeState.algebraicChainingTerms, runtimeState) ||
+            expressionHasBranches(runtimeState.algebraicChainingZExpr || 'z', runtimeState);
     }
     return isMultivaluedFunction(runtimeState.currentFunction, runtimeState);
 }

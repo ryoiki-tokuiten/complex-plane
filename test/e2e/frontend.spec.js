@@ -8,6 +8,93 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('#video_resolution_slider')).toHaveCount(0);
 });
 
+test('Riemann surface shaders compile with branch-cut controls', async ({ page }) => {
+    const shaderErrors = [];
+    page.on('console', message => {
+        if (message.text().includes('WebGL shader compile error')) shaderErrors.push(message.text());
+    });
+
+    await page.click('#select_ln_btn');
+    const rendered = await page.evaluate(async () => {
+        const { renderRiemannSurface } = await import('./js/rendering/webgl-riemann-surface.js');
+        return renderRiemannSurface(document.getElementById('w_plane_canvas'), { stage: 1 });
+    });
+    expect(rendered).toBe(true);
+    await expect(page.locator('.riemann-surface-canvas')).toHaveCount(1);
+    expect(shaderErrors).toEqual([]);
+});
+
+test('branch-aware algebraic Riemann shaders compile', async ({ page }) => {
+    const shaderErrors = [];
+    page.on('console', message => {
+        if (message.text().includes('WebGL shader compile error')) shaderErrors.push(message.text());
+    });
+    await page.locator('#enable_algebraic_chaining_cb').evaluate(element => {
+        element.checked = true;
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.locator('#algebraic_chaining_z_input').fill('sqrt(z) + ln(z)');
+    const rendered = await page.evaluate(async () => {
+        const { renderRiemannSurface } = await import('./js/rendering/webgl-riemann-surface.js');
+        return renderRiemannSurface(document.getElementById('w_plane_canvas'), { stage: 1 });
+    });
+    expect(rendered).toBe(true);
+    expect(shaderErrors).toEqual([]);
+});
+
+test('branch-aware dynamic aggregate Riemann shaders compile', async ({ page }) => {
+    const shaderErrors = [];
+    page.on('console', message => {
+        if (message.text().includes('WebGL shader compile error')) shaderErrors.push(message.text());
+    });
+    const rendered = await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        Object.assign(state.dynamicPlotting, {
+            enabled: true,
+            mode: 'aggregate',
+            source: { kind: 'integers', count: 4, start: 1, step: 1, ordering: 'ascending' },
+            pointExpression: 'd',
+            term: { kind: 'expression', expression: 'ln(s) + d^(-s)', bindings: [] },
+            reduction: { kind: 'sum', invalidPolicy: 'stop' },
+            parameters: [],
+            playback: { visibleCount: 4, playing: false, speed: 10, loop: false }
+        });
+        const { renderRiemannSurface } = await import('./js/rendering/webgl-riemann-surface.js');
+        return renderRiemannSurface(document.getElementById('w_plane_canvas'), { stage: 1 });
+    });
+    expect(rendered).toBe(true);
+    expect(shaderErrors).toEqual([]);
+});
+
+test('arbitrary shapes support freehand drawing without Cauchy mode', async ({ page }) => {
+    await page.locator('#input_shape_selector').selectOption('arbitrary');
+    await expect(page.locator('#arbitrary_shape_controls')).not.toHaveClass(/hidden/);
+    await expect(page.locator('#enable_cauchy_integral_mode_cb')).not.toBeChecked();
+
+    await expect(page.locator('#drawn_arbitrary_shape_controls')).not.toHaveClass(/hidden/);
+
+    const canvas = page.locator('#z_plane_canvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.35, { steps: 4 });
+    await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.5, { steps: 4 });
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.65, { steps: 4 });
+    await page.mouse.up();
+
+    await expect(page.locator('#arbitrary_shape_draw_status')).toContainText('sampled points');
+
+    const firstCount = await page.evaluate(async () => (await import('./js/store/state.js')).state.arbitraryShapePoints.length);
+    await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.4);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.6, { steps: 4 });
+    await page.mouse.up();
+    const points = await page.evaluate(async () => (await import('./js/store/state.js')).state.arbitraryShapePoints);
+    expect(points.length).toBeGreaterThan(firstCount);
+    expect(points.some(point => point === null)).toBe(true);
+});
+
 test('Preact controls preserve the public DOM and interaction contract', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));

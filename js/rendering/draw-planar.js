@@ -36,6 +36,8 @@ import {
 } from './shape-generators.js';
 import { hslToRgb } from './canvas-primitives.js';
 import { filterGraphFullGridPointSets } from './transformation-graph.js';
+import { branchCutCrossingForSegment } from '../analysis/branch-continuation.js';
+import { surfaceStageHasBranches } from '../analysis/riemann-surface.js';
 
 const EPSILON = 1e-9;
 const DEGENERATE_SEGMENT_EPSILON = 1e-12;
@@ -333,6 +335,14 @@ function buildAdaptiveTransformedPolyline(planeParams, mappedTransform, points, 
 
         const mappedRe = mappedPoint.re;
         const mappedIm = mappedPoint.im;
+
+        if (hasPrevious && surfaceStageHasBranches(appState) && branchCutCrossingForSegment(
+            { re: previousZRe, im: previousZIm }, zPoint,
+            appState.branchCutType, appState.branchCutAngle, appState.branchCutPoints
+        )) {
+            hasPrevious = false;
+            breakPolylinePath(pathState);
+        }
 
         if (hasPrevious) {
             const deltaRe = mappedRe - previousMappedRe;
@@ -905,6 +915,22 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
 
             ctx.lineWidth = lineWidth;
 
+            if (preparedPointSet.role === 'grid-dots') {
+                ctx.fillStyle = color;
+                const radius = Math.max(1.5, lineWidth * 0.75);
+                for (const point of preparedPointSet.points) {
+                    const mapped = mappedTransform
+                        ? evaluateMappedTransform(mappedTransform, point.re, point.im, appState.currentFunction)
+                        : point;
+                    if (!mapped || !Number.isFinite(mapped.re) || !Number.isFinite(mapped.im)) continue;
+                    const canvasPoint = mapToCanvasCoords(mapped.re, mapped.im, planeParams);
+                    ctx.beginPath();
+                    ctx.arc(canvasPoint.x, canvasPoint.y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                continue;
+            }
+
             if (mappedTransform) {
                 drawPlanarTransformedLine(ctx, planeParams, mappedTransform, preparedPointSet.points, color);
             } else {
@@ -1070,13 +1096,13 @@ export function drawPlanarInputShape(ctx, planeParams) {
         ? filterGraphFullGridPointSets(generatedPointSets)
         : generatedPointSets;
     const highlightContour = appState.cauchyIntegralModeEnabled &&
-        (inputShape === 'circle' || inputShape === 'ellipse');
+        (inputShape === 'circle' || inputShape === 'ellipse' || inputShape === 'arbitrary');
 
     drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, {
-        colorResolver: pointSet => highlightContour && pointSet.role === 'shape-curve'
+        colorResolver: pointSet => highlightContour && (pointSet.role === 'shape-curve' || pointSet.role === 'shape-arbitrary')
             ? COLOR_CAUCHY_CONTOUR_Z
             : pointSet.color,
-        lineWidthResolver: pointSet => highlightContour && pointSet.role === 'shape-curve'
+        lineWidthResolver: pointSet => highlightContour && (pointSet.role === 'shape-curve' || pointSet.role === 'shape-arbitrary')
             ? 3.5
             : (pointSet.lineWidth || LINE_WIDTH_NORMAL)
     });
@@ -1499,6 +1525,27 @@ export function drawPlanarInputOverlays(ctx, planeParams) {
             appState.radialDiscreteStepsCount
         );
     }
+    const drawOverlayPath = (points, color, dash = []) => {
+        if (!Array.isArray(points) || points.length < 2) return;
+        withSavedContext(ctx, () => {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.setLineDash?.(dash);
+            strokeComplexArrayOnPlane(ctx, planeParams, points);
+        });
+    };
+    if (appState.branchCutType === 'draw') {
+        drawOverlayPath(appState.branchCutPoints, '#fb7185', [7, 5]);
+    } else if (Number.isFinite(appState.branchCutAngle)) {
+        const xRange = getPlaneXRanges(planeParams);
+        const yRange = getPlaneYRanges(planeParams);
+        const length = Math.max(Math.abs(xRange[0]), Math.abs(xRange[1]), Math.abs(yRange[0]), Math.abs(yRange[1])) * 2;
+        drawOverlayPath([
+            { re: 0, im: 0 },
+            { re: length * Math.cos(appState.branchCutAngle), im: length * Math.sin(appState.branchCutAngle) }
+        ], '#fb7185', [7, 5]);
+    }
+    drawOverlayPath(appState.continuationPath, '#22d3ee');
 }
 
 export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
@@ -1522,10 +1569,10 @@ export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
                 transformProfile: renderJob.transformProfile,
                 startIndex,
                 endIndex,
-                colorResolver: pointSet => renderJob.highlightContour && pointSet.role === 'shape-curve'
+                colorResolver: pointSet => renderJob.highlightContour && (pointSet.role === 'shape-curve' || pointSet.role === 'shape-arbitrary')
                     ? COLOR_CAUCHY_CONTOUR_W
                     : pointSet.color,
-                lineWidthResolver: pointSet => renderJob.highlightContour && pointSet.role === 'shape-curve'
+                lineWidthResolver: pointSet => renderJob.highlightContour && (pointSet.role === 'shape-curve' || pointSet.role === 'shape-arbitrary')
                     ? 3.5
                     : (pointSet.lineWidth || LINE_WIDTH_NORMAL),
                 preparePointSet: pointSet => preparePointSetForMappedPlane(pointSet, renderJob.transformFunc, {
@@ -1571,7 +1618,7 @@ export function createPlanarTransformedShapeRenderJob(tf, map = null) {
             ? getMappedTransformProfile(appState.currentFunction, tf)
             : null,
         highlightContour: appState.cauchyIntegralModeEnabled &&
-            (inputShape === 'circle' || inputShape === 'ellipse')
+            (inputShape === 'circle' || inputShape === 'ellipse' || inputShape === 'arbitrary')
     };
 }
 

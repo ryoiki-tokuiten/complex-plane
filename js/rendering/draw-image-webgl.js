@@ -25,6 +25,7 @@ const EMPTY_ARRAY = Object.freeze([]);
 const MAX_INVERSE_CHAIN_INDEX = 15;
 
 const IMAGE_INVERSE_FUNCTIONS = new Set([
+    'exp',
     'ln',
     'reciprocal',
     'mobius',
@@ -76,12 +77,16 @@ const RENDER_SNAPSHOT = {
     polynomialN: 0,
     polynomialCoeffs: SNAPSHOT_POLY_COEFFS,
     fractionalPowerN: 0.5,
+    expBase: { re: Math.E, im: 0 },
+    logBase: { re: Math.E, im: 0 },
+    besselOrder: { re: 0, im: 0 },
     algebraicChainingTerms: EMPTY_ARRAY,
     algebraicChainingZExpr: 'z',
     chainingEnabled: false,
     chainCount: 0,
     chainingMode: null,
     navigationModeEnabled: false,
+    branchCutAngle: Math.PI,
     zetaContinuationEnabled: false
 };
 
@@ -151,6 +156,9 @@ function readRenderState() {
     snapshot.polynomialN = finiteOr(state.polynomialN, 0);
     writePolynomialCoeffs(snapshot.polynomialCoeffs, state.polynomialCoeffs);
     snapshot.fractionalPowerN = state.fractionalPowerN !== undefined ? finiteOr(state.fractionalPowerN, 0.5) : 0.5;
+    writeComplex(snapshot.expBase, state.expBase, Math.E, 0);
+    writeComplex(snapshot.logBase, state.logBase, Math.E, 0);
+    writeComplex(snapshot.besselOrder, state.besselOrder, 0, 0);
 
     snapshot.algebraicChainingTerms = cloneAlgebraicTerms(state.algebraicChainingTerms);
     snapshot.algebraicChainingZExpr = state.algebraicChainingZExpr || 'z';
@@ -158,6 +166,9 @@ function readRenderState() {
     snapshot.chainCount = finiteOr(state.chainCount, 0);
     snapshot.chainingMode = state.chainingMode;
     snapshot.navigationModeEnabled = Boolean(state.navigationModeEnabled);
+    snapshot.branchCutAngle = state.branchCutType === 'ray' && Number.isFinite(state.branchCutAngle)
+        ? state.branchCutAngle
+        : Math.PI;
 
     snapshot.zetaContinuationEnabled = Boolean(state.zetaContinuationEnabled);
 
@@ -502,6 +513,13 @@ function bindComplexImageUniforms(gl, locs, snapshot) {
     bindMobiusUniforms(gl, locs, snapshot);
     bindPolynomialUniforms(gl, locs, snapshot);
     bindFractionalPowerUniform(gl, locs, snapshot);
+    const expBase = snapshot.expBase || { re: Math.E, im: 0 };
+    const logBase = snapshot.logBase || { re: Math.E, im: 0 };
+    const besselOrder = snapshot.besselOrder || { re: 0, im: 0 };
+    if (locs.uExpBase) gl.uniform2f(locs.uExpBase, expBase.re, expBase.im);
+    if (locs.uLogBase) gl.uniform2f(locs.uLogBase, logBase.re, logBase.im);
+    if (locs.uBesselOrder) gl.uniform2f(locs.uBesselOrder, besselOrder.re, besselOrder.im);
+    if (locs.uBranchCutAngle) gl.uniform1f(locs.uBranchCutAngle, snapshot.branchCutAngle);
 }
 
 function getCommonImageLocs(gl, program) {
@@ -511,6 +529,7 @@ function getCommonImageLocs(gl, program) {
         uViewBounds: gl.getUniformLocation(program, 'u_viewBounds'),
         uIsWPlane: gl.getUniformLocation(program, 'u_isWPlane'),
         uFunctionId: gl.getUniformLocation(program, 'u_functionId'),
+        uBranchCutAngle: gl.getUniformLocation(program, 'u_branchCutAngle'),
         uOpacity: gl.getUniformLocation(program, 'u_opacity'),
         uAlphaCutoff: gl.getUniformLocation(program, 'u_alphaCutoff'),
         uMobiusA: gl.getUniformLocation(program, 'u_mobiusA'),
@@ -1238,6 +1257,9 @@ function getMeshKeys(currentShape, planeParams, isWP, snapshot, map, pixelWidth,
         snapshot.chainingMode,
         snapshot.polynomialN,
         snapshot.fractionalPowerN,
+        snapshot.expBase.re, snapshot.expBase.im,
+        snapshot.logBase.re, snapshot.logBase.im,
+        snapshot.besselOrder.re, snapshot.besselOrder.im,
         snapshot.algebraicChainingZExpr,
         algebraicStructure
     ].join('|');
@@ -1502,6 +1524,9 @@ function isInverseImageRenderSupportedForSnapshot(snapshot) {
     if (!snapshot) return false;
     if (snapshot.chainingMode === 'zero_seed') return false;
     if (!IMAGE_INVERSE_FUNCTIONS.has(snapshot.currentFunction)) return false;
+    const naturalBase = value => Math.abs((value?.re ?? Math.E) - Math.E) < 1e-12 && Math.abs(value?.im || 0) < 1e-12;
+    if (snapshot.currentFunction === 'exp' && !naturalBase(snapshot.expBase)) return false;
+    if (snapshot.currentFunction === 'ln' && !naturalBase(snapshot.logBase)) return false;
 
     if (snapshot.currentFunction === 'mobius') {
         const a = snapshot.mobiusA || {};

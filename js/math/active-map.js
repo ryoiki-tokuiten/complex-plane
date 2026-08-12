@@ -33,6 +33,7 @@ function sourceSignature() {
         mobius: [state.mobiusA, state.mobiusB, state.mobiusC, state.mobiusD],
         polynomial: [state.polynomialN, state.polynomialCoeffs],
         fractionalPower: state.fractionalPowerN,
+        branchCut: [state.branchCutType, state.branchCutAngle],
         zetaContinuationEnabled: state.zetaContinuationEnabled,
         taylor: [state.taylorSeriesEnabled, state.taylorSeriesCenter, state.taylorSeriesOrder],
         dynamic: state.dynamicPlotting

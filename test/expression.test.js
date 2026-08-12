@@ -8,6 +8,7 @@ import {
     compileExpression,
     parseExpression
 } from '../js/math/expression/index.js';
+import { state } from '../js/store/state.js';
 
 function closeComplex(actual, expected, tolerance = 1e-10) {
     assert.ok(Math.abs(actual.re - expected.re) <= tolerance, `real ${actual.re} != ${expected.re}`);
@@ -54,6 +55,42 @@ test('complex literals, composition, and helpers evaluate without eval', () => {
 
     const composed = compileExpression('exp(ln(z))', { allowedVariables: ['z'] });
     closeComplex(composed({ z: { re: 1.25, im: -0.4 } }), { re: 1.25, im: -0.4 }, 1e-9);
+});
+
+test('inverse trig, Gamma, log Gamma, and generalized Bessel expressions evaluate', () => {
+    closeComplex(compileExpression('asin(0.5)')({}), { re: Math.PI / 6, im: 0 }, 1e-9);
+    closeComplex(compileExpression('atan(1)')({}), { re: Math.PI / 4, im: 0 }, 1e-9);
+    closeComplex(compileExpression('gamma(5)')({}), { re: 24, im: 0 }, 1e-9);
+    closeComplex(compileExpression('loggamma(5)')({}), { re: Math.log(24), im: 0 }, 1e-9);
+    closeComplex(compileExpression('bessel(0,0)')({}), { re: 1, im: 0 }, 1e-9);
+});
+
+test('configured bases apply consistently to exp and ln expressions', () => {
+    const oldExp = state.expBase;
+    const oldLog = state.logBase;
+    try {
+        state.expBase = { re: 2, im: 0 };
+        state.logBase = { re: 10, im: 0 };
+        closeComplex(compileExpression('exp(3)')({}), { re: 8, im: 0 }, 1e-9);
+        closeComplex(compileExpression('ln(100)')({}), { re: 2, im: 0 }, 1e-9);
+    } finally {
+        state.expBase = oldExp;
+        state.logBase = oldLog;
+    }
+});
+
+test('undefined exponential and logarithm bases stay invalid', () => {
+    const oldExp = state.expBase;
+    const oldLog = state.logBase;
+    try {
+        state.expBase = { re: 0, im: 0 };
+        state.logBase = { re: 1, im: 0 };
+        assert.throws(() => compileExpression('exp(3)')({}), ExpressionEvaluationError);
+        assert.throws(() => compileExpression('ln(3)')({}), ExpressionEvaluationError);
+    } finally {
+        state.expBase = oldExp;
+        state.logBase = oldLog;
+    }
 });
 
 test('conditionals, predicates, factorial, gcd, and custom parameters work', () => {

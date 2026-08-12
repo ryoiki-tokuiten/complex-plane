@@ -6,6 +6,7 @@ import {
     COLOR_INPUT_SHAPE_Z, COLOR_INPUT_LINE_IM_Z
 } from '../constants/colors.js';
 import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_THICK } from '../constants/rendering.js';
+import { compileExpression } from '../math/expression/evaluator.js';
 
 const EPSILON = 1e-9;
 const MIN_VISIBLE_RADIUS = 0.1;
@@ -214,8 +215,94 @@ export function buildInputShapeGeometryConfig(planeParams, options = {}) {
         b0: options.b0 ?? state.b0,
         circleR: options.circleR ?? state.circleR,
         ellipseA: options.ellipseA ?? state.ellipseA,
-        ellipseB: options.ellipseB ?? state.ellipseB
+        ellipseB: options.ellipseB ?? state.ellipseB,
+        arbitraryShapeMode: options.arbitraryShapeMode ?? state.arbitraryShapeMode,
+        arbitraryShapeExpression: options.arbitraryShapeExpression ?? state.arbitraryShapeExpression,
+        arbitraryShapeTMin: options.arbitraryShapeTMin ?? state.arbitraryShapeTMin,
+        arbitraryShapeTMax: options.arbitraryShapeTMax ?? state.arbitraryShapeTMax,
+        arbitraryShapeClosed: options.arbitraryShapeClosed ?? state.arbitraryShapeClosed,
+        arbitraryShapePoints: options.arbitraryShapePoints ?? state.arbitraryShapePoints
     };
+}
+
+export function generateDotsPointSets(config) {
+    const palette = currentGridPalette();
+    const density = integerAtLeast(config.gridDensity, 1);
+    const points = new Array((density + 1) * (density + 1));
+    const xStep = (config.xRange[1] - config.xRange[0]) / density;
+    const yStep = (config.yRange[1] - config.yRange[0]) / density;
+    let cursor = 0;
+    for (let row = 0; row <= density; row += 1) {
+        const im = config.yRange[0] + row * yStep;
+        for (let column = 0; column <= density; column += 1) {
+            points[cursor++] = { re: config.xRange[0] + column * xStep, im };
+        }
+    }
+    return [createLineSet(points, palette.vertical, 'grid-dots', Math.max(2, LINE_WIDTH_NORMAL))];
+}
+
+let arbitraryExpressionSource = '';
+let arbitraryExpressionEvaluator = null;
+
+function compileArbitraryExpression(source) {
+    if (source === arbitraryExpressionSource) return arbitraryExpressionEvaluator;
+    arbitraryExpressionSource = source;
+    try {
+        arbitraryExpressionEvaluator = compileExpression(source, { allowedVariables: ['t'] });
+    } catch {
+        arbitraryExpressionEvaluator = null;
+    }
+    return arbitraryExpressionEvaluator;
+}
+
+function arbitraryShapePoint(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? { re: value, im: 0 } : null;
+    return finitePoint(value) ? { re: value.re, im: value.im } : null;
+}
+
+export function generateArbitraryShapePointSets(config) {
+    let points = [];
+    if (config.arbitraryShapeMode === 'draw') {
+        points = Array.isArray(config.arbitraryShapePoints)
+            ? config.arbitraryShapePoints.map(point => finitePoint(point) ? { re: point.re, im: point.im } : null)
+            : [];
+    } else {
+        const evaluator = compileArbitraryExpression(config.arbitraryShapeExpression || '');
+        if (!evaluator) return [];
+        const count = integerAtLeast(Math.max(config.curvePoints, config.gridDensity * 16), 32);
+        const t0 = Number(config.arbitraryShapeTMin);
+        const t1 = Number(config.arbitraryShapeTMax);
+        if (!Number.isFinite(t0) || !Number.isFinite(t1) || t0 === t1) return [];
+        points = new Array(count + 1);
+        for (let index = 0; index <= count; index += 1) {
+            try {
+                points[index] = arbitraryShapePoint(evaluator({ t: t0 + (t1 - t0) * index / count }));
+            } catch {
+                points[index] = null;
+            }
+        }
+    }
+    const pointSets = [];
+    let stroke = [];
+    const flushStroke = () => {
+        if (stroke.length < 2) {
+            stroke = [];
+            return;
+        }
+        if (config.arbitraryShapeClosed && stroke.length > 2) {
+            const first = stroke[0];
+            const last = stroke[stroke.length - 1];
+            if (Math.hypot(last.re - first.re, last.im - first.im) > EPSILON) stroke.push({ ...first });
+        }
+        pointSets.push(createLineSet(stroke, COLOR_INPUT_SHAPE_Z, 'shape-arbitrary', LINE_WIDTH_THICK));
+        stroke = [];
+    };
+    for (const point of points) {
+        if (!finitePoint(point)) flushStroke();
+        else stroke.push(point);
+    }
+    flushStroke();
+    return pointSets;
 }
 
 export function generateCartesianGridPointSets(config) {
@@ -420,6 +507,8 @@ const INPUT_SHAPE_GENERATORS = Object.freeze({
     grid_polar: generatePolarGridPointSets,
     grid_logpolar: generateLogPolarGridPointSets,
     grid_logcartesian: generateLogCartesianGridPointSets,
+    grid_dots: generateDotsPointSets,
+    arbitrary: generateArbitraryShapePointSets,
     line: generateLineShapePointSets,
     circle: generateGeometricShapePointSets,
     ellipse: generateGeometricShapePointSets,
@@ -432,11 +521,16 @@ const GRID_INPUT_SHAPES = new Set([
     'grid_cartesian',
     'grid_polar',
     'grid_logpolar',
-    'grid_logcartesian'
+    'grid_logcartesian',
+    'grid_dots'
 ]);
 
 export function isGridInputShape(shape) {
     return GRID_INPUT_SHAPES.has(shape);
+}
+
+export function isFoldableInputShape(shape) {
+    return GRID_INPUT_SHAPES.has(shape) || shape === 'arbitrary';
 }
 
 export function generateInputShapePointSets(config) {

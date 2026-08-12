@@ -2,11 +2,18 @@ import {
     complexAbs,
     complexAdd,
     complexArg,
+    complexAsin,
+    complexAtan,
+    complexBesselJ,
     complexCos,
     complexCosh,
     complexDivide,
     complexExp,
+    complexExpWithBase,
+    complexGamma,
     complexLn,
+    complexLogGamma,
+    complexLogWithBase,
     complexMul,
     complexPow,
     complexReciprocal,
@@ -140,7 +147,13 @@ function callTransform(name, argument, environment) {
         return selected(z.re, z.im);
     }
 
-    const transform = transformFunctions[name];
+    const override = environment.functions?.[name];
+    if (typeof override === 'function') {
+        const z = toComplex(argument);
+        return override(z, environment);
+    }
+
+    const transform = transformFunctions[name === 'log' ? 'ln' : name];
     if (typeof transform === 'function') {
         const z = toComplex(argument);
         return transform(z.re, z.im);
@@ -154,15 +167,22 @@ const CALLS = Object.freeze({
     cos: ([value]) => complexCos(toComplex(value)),
     tan: ([value]) => complexTan(toComplex(value)),
     sec: ([value]) => complexSec(toComplex(value)),
-    exp: ([value]) => complexExp(toComplex(value)),
+    exp: ([value]) => complexExpWithBase(toComplex(value)),
     ln: ([value]) => {
         if (isZero(value)) throw new ExpressionEvaluationError('ln(0) is undefined');
-        return complexLn(toComplex(value));
+        return complexLogWithBase(toComplex(value));
     },
     log: ([value]) => {
         if (isZero(value)) throw new ExpressionEvaluationError('log(0) is undefined');
-        return complexLn(toComplex(value));
+        return complexLogWithBase(toComplex(value));
     },
+    asin: ([value]) => complexAsin(toComplex(value)),
+    atan: ([value]) => complexAtan(toComplex(value)),
+    gamma: ([value]) => complexGamma(toComplex(value)),
+    loggamma: ([value]) => complexLogGamma(toComplex(value)),
+    bessel: values => values.length === 1
+        ? complexBesselJ(toComplex(values[0]))
+        : complexBesselJ(toComplex(values[1]), undefined, toComplex(values[0])),
     sinh: ([value]) => complexSinh(toComplex(value)),
     cosh: ([value]) => complexCosh(toComplex(value)),
     tanh: ([value]) => complexTanh(toComplex(value)),
@@ -219,8 +239,9 @@ const CALLS = Object.freeze({
 });
 
 const ARITY = Object.freeze({
-    sin: [1, 1], cos: [1, 1], tan: [1, 1], sec: [1, 1],
+    sin: [1, 1], cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
     exp: [1, 1], ln: [1, 1], log: [1, 1],
+    gamma: [1, 1], loggamma: [1, 1], bessel: [1, 2],
     sinh: [1, 1], cosh: [1, 1], tanh: [1, 1],
     sqrt: [1, 1], reciprocal: [1, 1], zeta: [1, 1],
     abs: [1, 1], arg: [1, 1], re: [1, 1], im: [1, 1], conj: [1, 1],
@@ -294,6 +315,11 @@ function evaluateCall(node, environment) {
         args[index] = evaluateNode(node.args[index], environment);
     }
     assertArity(node.name, args, node);
+
+    const override = environment.functions?.[node.name];
+    if (typeof override === 'function') {
+        return override(toComplex(args[args.length - 1]), environment, args);
+    }
 
     const builtIn = CALLS[node.name];
     if (builtIn) return builtIn(args, environment);
@@ -406,7 +432,14 @@ function getGeneratedHelpers() {
         complexTan,
         complexSec,
         complexExp,
+        complexExpWithBase,
         complexLn,
+        complexLogWithBase,
+        complexAsin,
+        complexAtan,
+        complexGamma,
+        complexLogGamma,
+        complexBesselJ,
         complexSinh,
         complexCosh,
         complexTanh,
@@ -466,7 +499,9 @@ function getGeneratedHelpers() {
                 }
                 return selected(re, im);
             }
-            const transform = transformFunctions[name];
+            const override = environment.functions?.[name];
+            if (typeof override === 'function') return override({ re, im }, environment);
+            const transform = transformFunctions[name === 'log' ? 'ln' : name];
             if (typeof transform === 'function') return transform(re, im);
             throw new ExpressionEvaluationError(`Unknown function "${name}"`, node);
         },
@@ -753,25 +788,43 @@ class GeneratedEvaluatorBuilder {
             }
             case 'sqrt': {
                 const value = this.emitAsPair(node.args[0]);
+                const nodeRef = this.addNode(node);
+                const override = this.temp('z');
+                this.emit(`const ${override}=environment.functions&&typeof environment.functions.sqrt==='function'?H.transform('sqrt',${value.re},${value.im},environment,${nodeRef}):null;`);
                 const magnitude = this.temp('m');
                 const re = this.temp('r');
                 const im = this.temp('i');
                 this.emit(`const ${magnitude}=Math.hypot(${value.re},${value.im});`);
                 this.emit(`const ${re}=Math.sqrt(Math.max(0,(${magnitude}+${value.re})*0.5));`);
                 this.emit(`const ${im}=(${value.im}<0?-1:1)*Math.sqrt(Math.max(0,(${magnitude}-${value.re})*0.5));`);
-                return this.pair(re, im);
+                return this.pair(`(${override}?${override}.re:${re})`, `(${override}?${override}.im:${im})`);
             }
             case 'ln': case 'log': {
                 const value = this.emitAsPair(node.args[0]);
                 const nodeRef = this.addNode(node);
                 this.emit(`if(Math.hypot(${value.re},${value.im})<=1e-12)H.fail('${name}(0) is undefined',${nodeRef});`);
-                return this.pair(`Math.log(Math.hypot(${value.re},${value.im}))`, `Math.atan2(${value.im},${value.re})`);
+                const out = this.temp('z');
+                this.emit(`const ${out}=H.transform(${JSON.stringify(name)},${value.re},${value.im},environment,${nodeRef});`);
+                return this.pair(`${out}.re`, `${out}.im`);
             }
-            case 'sin': return this.emitUnaryComplexCall(node, 'complexSin');
-            case 'cos': return this.emitUnaryComplexCall(node, 'complexCos');
-            case 'tan': return this.emitUnaryComplexCall(node, 'complexTan');
-            case 'sec': return this.emitUnaryComplexCall(node, 'complexSec');
-            case 'exp': return this.emitUnaryComplexCall(node, 'complexExp');
+            case 'sin': case 'cos': case 'tan': case 'sec': case 'exp':
+            case 'asin': case 'atan': case 'gamma': case 'loggamma': {
+                const value = this.emitAsPair(node.args[0]);
+                const out = this.temp('z');
+                this.emit(`const ${out}=H.transform(${JSON.stringify(name)},${value.re},${value.im},environment,${this.addNode(node)});`);
+                return this.pair(`${out}.re`, `${out}.im`);
+            }
+            case 'bessel': {
+                const value = this.emitAsPair(node.args[node.args.length - 1]);
+                const out = this.temp('z');
+                if (node.args.length === 1) {
+                    this.emit(`const ${out}=H.complexBesselJ({re:${value.re},im:${value.im}});`);
+                } else {
+                    const order = this.emitAsPair(node.args[0]);
+                    this.emit(`const ${out}=H.complexBesselJ({re:${value.re},im:${value.im}},undefined,{re:${order.re},im:${order.im}});`);
+                }
+                return this.pair(`${out}.re`, `${out}.im`);
+            }
             case 'sinh': return this.emitUnaryComplexCall(node, 'complexSinh');
             case 'cosh': return this.emitUnaryComplexCall(node, 'complexCosh');
             case 'tanh': return this.emitUnaryComplexCall(node, 'complexTanh');
@@ -1081,7 +1134,7 @@ class RealEvaluatorBuilder {
             case 'sin': return this.emitRealTemp(`Math.sin(${this.asReal(node.args[0]).value})`);
             case 'cos': return this.emitRealTemp(`Math.cos(${this.asReal(node.args[0]).value})`);
             case 'tan': return this.emitRealTemp(`Math.tan(${this.asReal(node.args[0]).value})`);
-            case 'exp': return this.emitRealTemp(`Math.exp(${this.asReal(node.args[0]).value})`);
+            case 'exp': throw new Error('configured complex base');
             case 'sinh': return this.emitRealTemp(`Math.sinh(${this.asReal(node.args[0]).value})`);
             case 'cosh': return this.emitRealTemp(`Math.cosh(${this.asReal(node.args[0]).value})`);
             case 'tanh': return this.emitRealTemp(`Math.tanh(${this.asReal(node.args[0]).value})`);
@@ -1091,13 +1144,7 @@ class RealEvaluatorBuilder {
                 this.emit(`if(${value}<0)return G(environment);`);
                 return this.emitRealTemp(`Math.sqrt(${value})`);
             }
-            case 'ln': case 'log': {
-                const value = this.asReal(node.args[0]).value;
-                const nodeRef = this.addNode(node);
-                this.emit(`if(${value}<0)return G(environment);`);
-                this.emit(`if(Math.abs(${value})<=1e-12)H.fail('${name}(0) is undefined',${nodeRef});`);
-                return this.emitRealTemp(`Math.log(${value})`);
-            }
+            case 'ln': case 'log': throw new Error('configured complex base');
             case 'reciprocal': {
                 const value = this.asReal(node.args[0]).value;
                 const nodeRef = this.addNode(node);

@@ -17,9 +17,10 @@ import {
 import { domainPalettes } from './theme-manager.js';
 import { startRiemannTransformationAnimation, stopRiemannTransformationAnimation, syncRiemannTransformationPlayPauseButton, initThreeJSRenderers, buildThreeJSMeshes, syncRiemannSliders, disposeThreeJSRenderers } from '../rendering/riemann-transformation-animation.js';
 import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
-import { createExpressionMathML } from '../math/expression/index.js';
+import { compileExpression, createExpressionMathML } from '../math/expression/index.js';
 import { createFormulaFragment } from './dom-components.js';
-import { isGridInputShape } from '../rendering/shape-generators.js';
+import { isFoldableInputShape } from '../rendering/shape-generators.js';
+import { isFullGridPerspectiveSupported, isGraphViewSupported } from '../rendering/transformation-graph.js';
 
 const { controls = {} } = context;
 
@@ -53,16 +54,18 @@ const CENTER_LABELS = Object.freeze({
 });
 
 const INPUT_SHAPE_TITLE_SUFFIX = Object.freeze({
-    line: ': Lines)',
-    circle: ': Circle)',
-    ellipse: ': Ellipse)',
-    grid_cartesian: ': Cartesian Grid)',
-    grid_polar: ': Polar Grid)',
-    grid_logpolar: ': Log-Polar Grid)',
-    grid_logcartesian: ': Log-Cartesian Grid)',
-    image: ': Image)',
-    video: ': Video)',
-    empty_grid: ': Empty)'
+    line: ': Lines',
+    circle: ': Circle',
+    ellipse: ': Ellipse',
+    grid_cartesian: ': Cartesian Grid',
+    grid_polar: ': Polar Grid',
+    grid_logpolar: ': Log-Polar Grid',
+    grid_logcartesian: ': Log-Cartesian Grid',
+    grid_dots: ': Dots',
+    arbitrary: ': Arbitrary Shape',
+    image: ': Image',
+    video: ': Video',
+    empty_grid: ': Empty'
 });
 
 const SHAPE_SPECIFIC_GROUPS = Object.freeze({
@@ -79,7 +82,12 @@ const SIMPLE_FUNCTION_LABELS = Object.freeze({
     ln: 'ln',
     sinh: 'sinh',
     cosh: 'cosh',
-    tanh: 'tanh'
+    tanh: 'tanh',
+    asin: 'asin',
+    atan: 'atan',
+    gamma: 'Γ',
+    loggamma: 'log Γ',
+    bessel: 'Jν'
 });
 
 const FUNCTION_ARGUMENT_HTML = Object.freeze({
@@ -92,6 +100,11 @@ const FUNCTION_ARGUMENT_HTML = Object.freeze({
     sinh: 'sinh(z)',
     cosh: 'cosh(z)',
     tanh: 'tanh(z)',
+    asin: 'asin(z)',
+    atan: 'atan(z)',
+    gamma: 'Γ(z)',
+    loggamma: 'log Γ(z)',
+    bessel: 'J<sub>ν</sub>(z)',
     reciprocal: '1/z',
     mobius: 'Möbius(z)',
     zeta: 'ζ(z)',
@@ -436,20 +449,58 @@ function syncComplexParameterControls() {
     const isEllipse = shape === 'ellipse';
     const isImage = shape === 'image';
     const isVideo = shape === 'video';
-    const isGrid = isGridInputShape(shape);
+    const isGrid = isFoldableInputShape(shape);
+    const isArbitrary = shape === 'arbitrary';
     const showCommonParams = isLine || isCircle || isEllipse;
     const showMediaCenterParams = isImage || isVideo;
     const showShapeSpecificSliders = isCircle || isEllipse;
     const isMobiusFunc = activeFunctions.has('mobius');
     const isPolyFunc = activeFunctions.has('polynomial');
     const isPowerFunc = activeFunctions.has('power');
+    const hasExp = activeFunctions.has('exp') || safeArray(state.algebraicChainingTerms).some(term => safeArray(term?.factors).some(factor => factor?.exp));
+    const hasLog = activeFunctions.has('ln') || safeArray(state.algebraicChainingTerms).some(term => safeArray(term?.factors).some(factor => factor?.log));
 
     setHidden('commonParamsSliders', !(showCommonParams || showMediaCenterParams));
     setHidden('mobiusParamsSliders', !isMobiusFunc);
     setHidden('polynomialParamsSliders', !isPolyFunc);
     setHidden('fractionalPowerParamsSliders', !isPowerFunc);
+    setHidden('expBaseSpecificControls', !hasExp);
+    setHidden('logBaseSpecificControls', !hasLog);
+    setHidden('besselOrderSpecificControls', !activeFunctions.has('bessel'));
+    const hasBranches = surfaceStageHasBranches(state);
+    setHidden('branchToolsControls', !hasBranches);
+    setHidden('branchCutAngleGroup', !hasBranches || state.branchCutType !== 'ray');
+    setText('branchCutAngleValueDisplay', Math.abs(state.branchCutAngle - Math.PI) < 1e-6 ? 'π' : `${(state.branchCutAngle / Math.PI).toFixed(2)}π`);
+    const continued = state.continuationValue;
+    setActive('drawBranchCutBtn', state.branchDrawMode === 'cut');
+    setActive('drawContinuationPathBtn', state.branchDrawMode === 'path');
+    setText('drawBranchCutBtn', state.branchDrawMode === 'cut' ? 'Drawing Cut…' : 'Draw Cut');
+    setText('drawContinuationPathBtn', state.branchDrawMode === 'path' ? 'Drawing Path…' : 'Continue Along Path');
+    const continuationText = state.branchDrawMode === 'cut'
+        ? 'Drag on the z-plane to place the seam.'
+        : state.branchDrawMode === 'path'
+            ? 'Drag a path on the z-plane; each seam crossing changes k.'
+            : state.continuationPath.length > 1
+                ? `Active sheet k = ${state.continuationSheet}${continued ? ` · w ≈ ${continued.re.toFixed(4)} ${continued.im < 0 ? '−' : '+'} ${Math.abs(continued.im).toFixed(4)}i` : ''}`
+                : state.branchCutType === 'draw' && state.branchCutPoints.length < 2
+                    ? 'Draw a cut, then continue a value along a crossing path.'
+                    : 'Cut ready. Continue along a path to move between sheets.';
+    setText('continuationStatus', continuationText);
     setHidden('imageUploadControls', !isImage);
     setHidden('videoUploadControls', !isVideo);
+    setHidden('arbitraryShapeControls', !isArbitrary);
+    setActive('arbitraryShapeParametricModeBtn', state.arbitraryShapeMode === 'parametric');
+    setActive('arbitraryShapeDrawModeBtn', state.arbitraryShapeMode === 'draw');
+    setValue('arbitraryShapeTMinInput', state.arbitraryShapeTMin);
+    setValue('arbitraryShapeTMaxInput', state.arbitraryShapeTMax);
+    setChecked('arbitraryShapeClosedCb', state.arbitraryShapeClosed);
+    setHidden('parametricArbitraryShapeControls', !isArbitrary || state.arbitraryShapeMode !== 'parametric');
+    setHidden('drawnArbitraryShapeControls', !isArbitrary || state.arbitraryShapeMode !== 'draw');
+    const drawnPointCount = state.arbitraryShapePoints.reduce((count, point) =>
+        count + (Number.isFinite(point?.re) && Number.isFinite(point?.im) ? 1 : 0), 0);
+    setText('arbitraryShapeDrawStatus', drawnPointCount > 1
+        ? `${drawnPointCount} sampled points. Drag again to append another stroke.`
+        : 'Drag anywhere on the z-plane. New strokes are appended.');
     setHidden('gridSurface3DControl', !isGrid);
     setHidden('gridSurface3DOptions', !isGrid || !state.foldSurface3dEnabled);
     setHidden('imageSurface3DOptions', !isImage || !state.foldSurface3dEnabled);
@@ -542,12 +593,14 @@ function syncRiemannAndTransformDisplays() {
 }
 
 function syncGraphControls() {
-    const isGrid = isGridInputShape(state.currentInputShape);
+    const fullGridSupported = isFullGridPerspectiveSupported();
     const isPolar = state.currentInputShape === 'grid_polar' || state.currentInputShape === 'grid_logpolar';
     const graphActive = state.graphViewEnabled;
 
-    setHidden('fullGridPerspectiveControl', !isGrid || !graphActive);
+    setHidden('fullGridPerspectiveControl', !fullGridSupported || !graphActive);
+    if (controls.enableGraphViewCb) controls.enableGraphViewCb.disabled = !isGraphViewSupported();
     setActive('viewFullGridPerspectiveBtn', state.graphFullGridEnabled);
+    setChecked('viewFullGridPerspectiveBtn', state.graphFullGridEnabled);
     setChecked('enableGraphViewCb', state.graphViewEnabled);
     setHidden('graphFocusBoxToggle', !state.graphFullGridEnabled);
     setChecked('enableGraphFocusBoxCb', state.graphFocusBoxEnabled);
@@ -1011,7 +1064,7 @@ function outputFormulaModel() {
 }
 
 function defaultZPlaneTitle(fND) {
-    const suffix = INPUT_SHAPE_TITLE_SUFFIX[state.currentInputShape] ?? ')';
+    const suffix = INPUT_SHAPE_TITLE_SUFFIX[state.currentInputShape] ?? '';
     let title = `z-plane (Input${suffix})`;
     const showRadialSteps = state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare';
     const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
@@ -1237,7 +1290,7 @@ function syncZetaControls() {
         return;
     }
 
-    const isZeta = state.currentFunction === 'zeta';
+    const isZeta = collectActiveFunctionKeys().has('zeta');
     setHidden(container, !isZeta);
 
     if (!isZeta) {
@@ -1442,17 +1495,21 @@ export function syncRealPlotsUI() {
     setHidden('realPlotsContoursDetails', !state.contoursEnabled);
 }
 
-export function updateCustomFormulaPreview(inputEl, displayEl) {
+export function updateCustomFormulaPreview(inputEl, displayEl, options = {}) {
     if (!inputEl || !displayEl) return;
     displayEl.replaceChildren();
     const source = inputEl.value.trim() || '0';
     try {
-        const mathNode = createExpressionMathML(source);
+        compileExpression(source, options);
+        const mathNode = createExpressionMathML(source, options);
         displayEl.appendChild(mathNode);
         displayEl.classList.remove('dynamic-math-error');
+        inputEl.setCustomValidity('');
     } catch (error) {
-        displayEl.textContent = error?.message || String(error);
+        const message = error?.message || String(error);
+        displayEl.textContent = message;
         displayEl.classList.add('dynamic-math-error');
+        inputEl.setCustomValidity(message);
     }
 }
 

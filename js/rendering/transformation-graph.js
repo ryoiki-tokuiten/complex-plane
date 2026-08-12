@@ -18,7 +18,8 @@ const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_logcartesian',
     'line',
     'circle',
-    'ellipse'
+    'ellipse',
+    'arbitrary'
 ]);
 const GRID_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -2213,6 +2214,8 @@ export function resizeTransformationGraphRenderer() {
 }
 
 export function disposeTransformationGraphRenderer() {
+    graphDataCache = null;
+    fullGridDataCache = null;
     if (!activeGraphRenderer) return;
     activeGraphRenderer.dispose();
     activeGraphRenderer = null;

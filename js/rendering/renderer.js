@@ -34,7 +34,7 @@ import { ThreeRiemannRenderer, buildGridFoldLineData } from './three-riemann-ren
 import {
     generateCurrentInputShapePointSets,
     buildInputShapeGeometryConfig,
-    isGridInputShape
+    isFoldableInputShape
 } from './shape-generators.js';
 import { drawGraphSelectionOverlay } from './transformation-graph.js';
 import { hideRiemannSurface, renderRiemannSurface } from './webgl-riemann-surface.js';
@@ -70,6 +70,43 @@ import {
     getDynamicSphereSceneData
 } from './draw-dynamic-plotting.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices } from '../analysis/tissot.js';
+import { findPreimages } from '../analysis/preimage.js';
+import { surfaceStageHasBranches } from '../analysis/riemann-surface.js';
+
+function drawPreimageMarkers(ctx, planeParams, points, target = false) {
+    if (!Array.isArray(points) || points.length === 0) return;
+    ctx.save();
+    ctx.fillStyle = target ? '#fb7185' : '#facc15';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    for (const point of points) {
+        if (!Number.isFinite(point?.re) || !Number.isFinite(point?.im)) continue;
+        const canvas = mapToCanvasCoords(point.re, point.im, planeParams);
+        ctx.beginPath();
+        ctx.arc(canvas.x, canvas.y, target ? 6 : 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function drawContinuationValues(ctx, planeParams) {
+    const points = state.continuationValues;
+    if (!Array.isArray(points) || points.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    let active = false;
+    for (const point of points) {
+        if (!Number.isFinite(point?.re) || !Number.isFinite(point?.im)) { active = false; continue; }
+        const canvas = mapToCanvasCoords(point.re, point.im, planeParams);
+        if (active) ctx.lineTo(canvas.x, canvas.y);
+        else { ctx.moveTo(canvas.x, canvas.y); active = true; }
+    }
+    ctx.stroke();
+    ctx.restore();
+}
 
 let wCanvas;
 let zCtx;
@@ -105,6 +142,9 @@ const zFlowKeyTracker = { values: [], cursor: 0, changed: true, key: null };
 const PLANAR_STATE_DEPENDENCIES = Object.freeze([
     'currentFunction', 'mapPresentation', 'currentInputShape', 'gridDensity',
     'a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'themeId',
+    'arbitraryShapeMode', 'arbitraryShapeExpression', 'arbitraryShapeTMin', 'arbitraryShapeTMax',
+    'arbitraryShapeClosed', 'arbitraryShapePoints',
+    'branchCutType', 'branchCutAngle', 'branchCutPoints',
     'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity',
     'cauchyIntegralModeEnabled', 'graphViewEnabled', 'graphFullGridEnabled', 'graphGridFamily',
     'graphLayerLockEnabled',
@@ -314,6 +354,15 @@ function captureNamedTransformDependencies(tracker, name) {
         case 'power':
             captureDependency(tracker, state.fractionalPowerN ?? 0.5);
             return;
+        case 'exp':
+            captureComplexDependency(tracker, state.expBase);
+            return;
+        case 'ln':
+            captureComplexDependency(tracker, state.logBase);
+            return;
+        case 'bessel':
+            captureComplexDependency(tracker, state.besselOrder);
+            return;
         default:
             return;
     }
@@ -345,6 +394,8 @@ function captureAlgebraicDependencies(tracker) {
             captureDependency(tracker, Boolean(factor.reciprocal));
             captureDependency(tracker, Boolean(factor.log));
             captureDependency(tracker, Boolean(factor.exp));
+            if (factor.log) captureComplexDependency(tracker, state.logBase);
+            if (factor.exp) captureComplexDependency(tracker, state.expBase);
             captureNamedTransformDependencies(tracker, factor.func);
             if (factor.chainedFunc !== factor.func) {
                 captureNamedTransformDependencies(tracker, factor.chainedFunc);
@@ -795,7 +846,7 @@ export function drawZPlaneContent(timestamp) {
             shouldUseZPlanarInputLayerCache(),
             cacheCtx => drawPlanarInputShapeHybrid(cacheCtx, zPlaneParams, 'z')
         );
-        if (state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare') {
+        if ((state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare') || surfaceStageHasBranches(state)) {
             drawPlanarInputOverlays(zCtx, zPlaneParams);
         }
     }
@@ -827,6 +878,9 @@ export function drawZPlaneContent(timestamp) {
         drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
             drawPlanarProbe(layerCtx, zPlaneParams);
         });
+    }
+    if (state.preimageExplorerEnabled && state.preimageRoots.length) {
+        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => drawPreimageMarkers(layerCtx, zPlaneParams, state.preimageRoots));
     }
 
     if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
@@ -900,7 +954,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 renderThreeWRasterSurface(map, index);
                 return;
             }
-            if (isGridInputShape(state.currentInputShape)) {
+            if (isFoldableInputShape(state.currentInputShape)) {
                 renderThreeWGridFold(map);
                 return;
             }
@@ -959,6 +1013,19 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
 
         if (!isRiemannW && state.dynamicPlotting?.enabled) {
             drawDynamicWPlane(wCtx, wPlaneParams, map.evaluate, index);
+        }
+        if (!isRiemannW && state.preimageExplorerEnabled && state.preimageTarget) {
+            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+                drawPreimageMarkers(layerCtx, wPlaneParams, [state.preimageTarget], true);
+                if (state.preimageStatus) {
+                    layerCtx.fillStyle = '#ffffff';
+                    layerCtx.font = '12px sans-serif';
+                    layerCtx.fillText(state.preimageStatus, 12, 20);
+                }
+            });
+        }
+        if (!isRiemannW && state.continuationValues.length > 1) {
+            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => drawContinuationValues(layerCtx, wPlaneParams));
         }
         if (state.showCriticalPoints
             && !state.navigationModeEnabled
@@ -1036,6 +1103,15 @@ function prepareThreeWRenderer() {
         renderer = new ThreeRiemannRenderer(container, 'w');
         wStaticThreeRenderers.set(container, renderer);
     }
+    renderer.onFoldTargetSelected = target => {
+        const map = resolveActiveMap();
+        const xRange = zPlaneParams.currentVisXRange || zPlaneParams.xRange;
+        const yRange = zPlaneParams.currentVisYRange || zPlaneParams.yRange;
+        state.preimageTarget = target;
+        state.preimageRoots = findPreimages(target, map.evaluate, { xRange, yRange });
+        state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
+        requestRedrawAll();
+    };
     return renderer;
 }
 
@@ -1142,6 +1218,8 @@ function renderThreeWRasterSurface(map, stageIndex) {
         return;
     }
 
+    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map.evaluate);
+
     threeRenderer.render();
 }
 
@@ -1184,6 +1262,8 @@ function renderThreeWGridFold(map) {
         setWPresentation('canvas');
         return;
     }
+
+    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map.evaluate);
 
     threeRenderer.render();
 }

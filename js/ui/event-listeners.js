@@ -16,6 +16,7 @@ import {
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
 import { syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview } from './ui-updates.js';
+import { syncGridDensityControls } from './grid-density-controls.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
 import { toggleRiemannTransformationAnimationZ, toggleRiemannTransformationAnimationW, syncRiemannTransformationPlayPauseButton } from '../rendering/riemann-transformation-animation.js';
 import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
@@ -33,6 +34,8 @@ import { domainColorForValue } from '../rendering/domain-coloring.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import {
     disposeTransformationGraphRenderer,
+    isFullGridPerspectiveSupported,
+    isGraphViewSupported,
     resizeTransformationGraphRenderer,
     selectGraphInputFromCanvasPoint
 } from '../rendering/transformation-graph.js';
@@ -44,7 +47,9 @@ import {
 import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
-import { isGridInputShape } from '../rendering/shape-generators.js';
+import { isFoldableInputShape } from '../rendering/shape-generators.js';
+import { findPreimages } from '../analysis/preimage.js';
+import { continuationSheetForPath, evaluateOnSheet } from '../analysis/branch-continuation.js';
 
 const { controls = {} } = context;
 
@@ -165,7 +170,8 @@ const BASIC_CHECKBOX_BINDINGS = [
     ['enableParticleAnimationCb', 'particleAnimationEnabled'],
     ['enableDomainColoringCb', 'domainColoringEnabled'],
     ['enableRiemannSurfaceCb', 'riemannSurfaceEnabled'],
-    ['riemannSurfaceWireframeCb', 'riemannSurfaceWireframe']
+    ['riemannSurfaceWireframeCb', 'riemannSurfaceWireframe'],
+    ['arbitraryShapeClosedCb', 'arbitraryShapeClosed']
 ].map(([controlKey, stateKey]) => ({ controlKey, stateKey }));
 
 const BASIC_SELECTOR_BINDINGS = [
@@ -197,7 +203,7 @@ const SPECIAL_CHECKBOXES = new Set([
     'enableThreeSphereCb', 'enableTaylorSeriesCb', 'enableTaylorSeriesCustomCenterCb',
     'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
     'laplaceShowFourierLineCb', 'laplaceAnimationLoopCb', 'enableParticleAnimationCb',
-    'enableDomainColoringCb'
+    'enableDomainColoringCb', 'enableCauchyIntegralModeCb'
 ]);
 
 const SPECIAL_SELECTORS = new Set([
@@ -249,8 +255,100 @@ const BINDERS = [
     bindRealPlotsPaletteCirclePanelListeners,
     bindGraphControls,
     bindRealPlotsControls,
-    bindContourControls
+    bindContourControls,
+    bindRequestedExplorerControls
 ];
+
+function syncPreimageCheckboxes(value) {
+    for (const key of ['gridPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
+        if (controls[key]) controls[key].checked = value;
+    }
+}
+
+function bindRequestedExplorerControls() {
+    for (const key of ['gridPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
+        bindControlListener(key, 'change', (_event, checkbox) => {
+            state.preimageExplorerEnabled = checkbox.checked;
+            if (!checkbox.checked) {
+                state.preimageTarget = null;
+                state.preimageRoots = [];
+                state.preimageStatus = '';
+            }
+            syncPreimageCheckboxes(checkbox.checked);
+            requestUiRedraw();
+        });
+    }
+    bindCheckbox('enableCauchyIntegralModeCb', 'cauchyIntegralModeEnabled', (_event, enabled) => {
+        syncParameterControlsPanelVisibility();
+        requestUiRedraw();
+    });
+    const setArbitraryShapeMode = mode => {
+        state.arbitraryShapeMode = mode === 'draw' ? 'draw' : 'parametric';
+        syncParameterControlsPanelVisibility();
+        requestUiRedraw();
+    };
+    bindControlListener('arbitraryShapeParametricModeBtn', 'click', () => setArbitraryShapeMode('parametric'));
+    bindControlListener('arbitraryShapeDrawModeBtn', 'click', () => setArbitraryShapeMode('draw'));
+    const bindNumber = (key, stateKey) => bindControlListener(key, 'input', (_event, input) => {
+        const value = Number(input.value);
+        if (Number.isFinite(value)) state[stateKey] = value;
+        requestUiRedraw();
+    });
+    bindNumber('arbitraryShapeTMinInput', 'arbitraryShapeTMin');
+    bindNumber('arbitraryShapeTMaxInput', 'arbitraryShapeTMax');
+    bindControlListener('arbitraryShapeExpressionInput', 'input', (_event, input) => {
+        state.arbitraryShapeExpression = input.value;
+        updateCustomFormulaPreview(input, controls.arbitraryShapeExpressionMath, { allowedVariables: ['t'] });
+        requestUiRedraw();
+    });
+    updateCustomFormulaPreview(controls.arbitraryShapeExpressionInput, controls.arbitraryShapeExpressionMath, {
+        allowedVariables: ['t']
+    });
+    bindControlListener('clearArbitraryShapeBtn', 'click', () => {
+        state.arbitraryShapePoints = [];
+        requestUiRedraw();
+    });
+    bindControlListener('branchCutTypeSelector', 'change', (_event, selector) => {
+        state.branchCutType = selector.value;
+        state.branchDrawMode = null;
+        resetContinuationForCutChange();
+        syncParameterControlsPanelVisibility();
+        requestUiRedraw();
+    });
+    bindControlListener('branchCutAngleSlider', 'input', (_event, slider) => {
+        state.branchCutAngle = Number(slider.value);
+        resetContinuationForCutChange();
+        requestUiRedraw();
+    });
+    bindControlListener('drawBranchCutBtn', 'click', () => {
+        state.branchCutType = 'draw';
+        state.branchDrawMode = 'cut';
+        resetContinuationForCutChange();
+        if (controls.branchCutTypeSelector) controls.branchCutTypeSelector.value = 'draw';
+        requestUiRedraw();
+    });
+    bindControlListener('drawContinuationPathBtn', 'click', () => {
+        state.branchDrawMode = 'path';
+        requestUiRedraw();
+    });
+    bindControlListener('clearContinuationPathBtn', 'click', () => {
+        state.branchDrawMode = null;
+        state.continuationPath = [];
+        state.continuationValues = [];
+        state.continuationSheet = 0;
+        state.continuationValue = null;
+        state.riemannSurfaceBranchCenter = 0;
+        requestUiRedraw();
+    });
+}
+
+function resetContinuationForCutChange() {
+    state.continuationPath = [];
+    state.continuationValues = [];
+    state.continuationSheet = 0;
+    state.continuationValue = null;
+    state.riemannSurfaceBranchCenter = 0;
+}
 
 function bindDynamicPlottingControls() {
     initializeDynamicPlottingUI({
@@ -523,20 +621,26 @@ function disableRealPlots() {
 }
 
 function disableGraphView() {
-    if (!state.graphViewEnabled) return;
+    state.graphViewEnabled = false;
+    state.graphFullGridEnabled = false;
+    state.graphLayerLockEnabled = false;
+    state.graphFourierEnabled = false;
+    state.graphTraceEnabled = false;
+    state.graphSelectedShape = '';
+    checked('enableGraphViewCb', false);
+    checked('viewFullGridPerspectiveBtn', false);
+    checked('enableGraphLayerLockCb', false);
+    checked('enableGraphFourierCb', false);
+    checked('enableGraphTraceCb', false);
+    syncGridDensityControls();
 
     if (state.isGraphFullScreen && controls.toggleFullscreenGraphBtn) {
         controls.toggleFullscreenGraphBtn.click();
     }
 
-    state.graphViewEnabled = false;
-    state.graphFullGridEnabled = false;
-    state.graphLayerLockEnabled = false;
-    state.graphFourierEnabled = false;
-    checked('enableGraphViewCb', false);
-    checked('enableGraphFourierCb', false);
     hidden(controls.graphColumn, true);
     disposeTransformationGraphRenderer();
+    refreshPlanesAfterLayoutChange();
     updateModePanels();
 }
 
@@ -775,6 +879,7 @@ function initializeScalarBindings() {
 
 export function initializeStateFromControls() {
     initializeScalarBindings();
+    syncGridDensityControls();
     updateModePanels();
     setActiveFunctionButton(state.currentFunction);
     syncVideoPlaybackUI();
@@ -985,7 +1090,7 @@ function syncFoldSurfaceControls() {
     checked('videoSurface3DCb', state.foldSurface3dEnabled);
     hidden(
         controls.gridSurface3DOptions,
-        !state.foldSurface3dEnabled || !isGridInputShape(state.currentInputShape)
+        !state.foldSurface3dEnabled || !isFoldableInputShape(state.currentInputShape)
     );
     hidden(
         controls.imageSurface3DOptions,
@@ -998,17 +1103,7 @@ function syncFoldSurfaceControls() {
 }
 
 function syncGridFoldDensity(useFoldDefault = false) {
-    const slider = controls.gridDensitySlider;
-    if (!slider) return;
-
-    const gridFoldEnabled = state.foldSurface3dEnabled && isGridInputShape(state.currentInputShape);
-    slider.max = gridFoldEnabled ? '250' : '50';
-    if (gridFoldEnabled && useFoldDefault) state.gridDensity = 100;
-    if (!gridFoldEnabled && state.gridDensity > 50) state.gridDensity = 50;
-    slider.value = String(state.gridDensity);
-    if (controls.gridDensityValueDisplay) {
-        controls.gridDensityValueDisplay.textContent = String(state.gridDensity);
-    }
+    syncGridDensityControls({ applyFoldDefault: useFoldDefault });
 }
 
 function enableFoldSurface3d() {
@@ -1500,6 +1595,43 @@ function handleCanvasMoveNow(ctx, pointer) {
 
     const pos = canvasPosition(ctx, pointer);
 
+    if (ctx.isZ && ctx.drawingBranch) {
+        const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        const key = ctx.drawingBranch === 'cut' ? 'branchCutPoints' : 'continuationPath';
+        const points = state[key];
+        const last = points[points.length - 1];
+        const sampleDistance = 2 / Math.max(Math.abs(ctx.params.scale.x), Math.abs(ctx.params.scale.y), 1);
+        if (!last || Math.hypot(world.x - last.re, world.y - last.im) > sampleDistance) {
+            const nextPoints = [...points, { re: world.x, im: world.y }];
+            state[key] = nextPoints;
+            ctx.hasDragged = true;
+            if (key === 'continuationPath') {
+                const delta = continuationSheetForPath(nextPoints.slice(-2), state.branchCutType, state.branchCutAngle, state.branchCutPoints);
+                const sheet = state.continuationSheet + delta;
+                const value = evaluateOnSheet(state.currentFunction, nextPoints[nextPoints.length - 1], sheet, state);
+                state.continuationSheet = sheet;
+                state.continuationValue = value;
+                state.continuationValues = [...state.continuationValues, value];
+                state.riemannSurfaceBranchCenter = sheet;
+            }
+            requestUiRedraw();
+        }
+        return;
+    }
+
+    if (ctx.isZ && ctx.drawingArbitraryShape) {
+        const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        const points = state.arbitraryShapePoints;
+        const last = points[points.length - 1];
+        const sampleDistance = 2 / Math.max(Math.abs(ctx.params.scale.x), Math.abs(ctx.params.scale.y), 1);
+        if (!last || Math.hypot(world.x - last.re, world.y - last.im) > sampleDistance) {
+            state.arbitraryShapePoints = [...points, { re: world.x, im: world.y }];
+            ctx.hasDragged = true;
+            requestUiRedraw();
+        }
+        return;
+    }
+
     if (ctx.pan.isPanning) {
         panPlane(ctx, pos);
         return;
@@ -1533,11 +1665,63 @@ function handleCanvasDown(ctx, event) {
 
     refreshCanvasRect(ctx);
     updatePointerSnapshot(ctx.pendingMove, event);
+    if (ctx.isZ && state.branchDrawMode) {
+        const mode = state.branchDrawMode;
+        const pos = canvasPosition(ctx, ctx.pendingMove);
+        const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        const key = mode === 'cut' ? 'branchCutPoints' : 'continuationPath';
+        ctx.hasDragged = false;
+        if (mode === 'cut') {
+            state.branchCutType = 'draw';
+            resetContinuationForCutChange();
+        }
+        state[key] = [{ re: world.x, im: world.y }];
+        if (mode === 'path') {
+            state.continuationSheet = 0;
+            state.continuationValue = evaluateOnSheet(state.currentFunction, state[key][0], 0, state);
+            state.continuationValues = [state.continuationValue];
+        }
+        ctx.drawingBranch = mode;
+        requestUiRedraw();
+        return;
+    }
+    if (ctx.isZ && state.currentInputShape === 'arbitrary' && state.arbitraryShapeMode === 'draw') {
+        const pos = canvasPosition(ctx, ctx.pendingMove);
+        const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        ctx.hasDragged = false;
+        const points = state.arbitraryShapePoints;
+        state.arbitraryShapePoints = points.length
+            ? [...points, null, { re: world.x, im: world.y }]
+            : [{ re: world.x, im: world.y }];
+        ctx.drawingArbitraryShape = true;
+        ctx.canvas.style.cursor = 'crosshair';
+        requestUiRedraw();
+        return;
+    }
     startPan(ctx, canvasPosition(ctx, ctx.pendingMove));
 }
 
+function finishCanvasStroke(ctx) {
+    if (ctx.drawingBranch) {
+        ctx.drawingBranch = null;
+        state.branchDrawMode = null;
+        ctx.hasDragged = true;
+        ctx.canvas.style.cursor = 'crosshair';
+        requestUiRedraw();
+        return true;
+    }
+    if (ctx.drawingArbitraryShape) {
+        ctx.drawingArbitraryShape = false;
+        ctx.hasDragged = true;
+        ctx.canvas.style.cursor = 'crosshair';
+        requestUiRedraw();
+        return true;
+    }
+    return false;
+}
+
 function handleCanvasUp(ctx, event) {
-    if (isSphereInteractionActive(ctx.isZ)) return;
+    if (finishCanvasStroke(ctx) || isSphereInteractionActive(ctx.isZ)) return;
     if (event.button !== 0 || !ctx.pan.isPanning) return;
 
     ctx.pan.isPanning = false;
@@ -1560,6 +1744,7 @@ function handleCanvasUp(ctx, event) {
 }
 
 function handleCanvasLeave(ctx) {
+    if (finishCanvasStroke(ctx)) return;
     if (isSphereInteractionActive(ctx.isZ)) return;
 
     ctx.pendingMove.hasData = false;
@@ -1625,6 +1810,12 @@ function bindCanvasInteractions() {
         ctx.canvas.addEventListener('click', onCanvasClick, PASSIVE_LISTENER_OPTIONS);
     });
 
+    bindElementListener(window, 'mouseup', event => {
+        for (const ctx of Object.values(canvasInteractionContexts)) {
+            if (ctx) handleCanvasUp(ctx, event);
+        }
+    }, PASSIVE_LISTENER_OPTIONS);
+
     // Wire up contour_2d_canvas organically to the z-plane transformation state
     const contourCanvas = document.getElementById('contour_2d_canvas');
     if (contourCanvas) {
@@ -1687,7 +1878,7 @@ function onCanvasWheel(event) {
 
 function onCanvasClick(event) {
     const ctx = contextForCanvasEvent(event);
-    if (!ctx || !ctx.isZ || !state.graphViewEnabled || isSphereInteractionActive(ctx.isZ)) return;
+    if (!ctx || isSphereInteractionActive(ctx.isZ)) return;
     if (ctx.hasDragged) {
         ctx.hasDragged = false;
         return;
@@ -1696,6 +1887,18 @@ function onCanvasClick(event) {
     refreshCanvasRect(ctx);
     updatePointerSnapshot(ctx.pendingMove, event);
     const pos = canvasPosition(ctx, ctx.pendingMove);
+    if (!ctx.isZ && state.preimageExplorerEnabled) {
+        const target = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        const map = resolveActiveMap();
+        const xRange = zPlaneParams.currentVisXRange || zPlaneParams.xRange;
+        const yRange = zPlaneParams.currentVisYRange || zPlaneParams.yRange;
+        state.preimageTarget = { re: target.x, im: target.y };
+        state.preimageRoots = findPreimages(state.preimageTarget, map.evaluate, { xRange, yRange });
+        state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
+        requestUiRedraw();
+        return;
+    }
+    if (!ctx.isZ || !state.graphViewEnabled) return;
     if (selectGraphInputFromCanvasPoint(pos.x, pos.y, ctx.params)) {
         requestUiRedraw();
     }
@@ -1917,11 +2120,17 @@ function bindChainingControls() {
         } else if (value === 'video' && runtime.media.video && state.videoIsPlaying) {
             startVideoProcessingLoop();
         }
-        if (state.graphFullGridEnabled && !isGridInputShape(value)) {
+        if (state.graphFullGridEnabled && !isFullGridPerspectiveSupported(value)) {
             state.graphFullGridEnabled = false;
             state.graphLayerLockEnabled = false;
         }
-        syncGridFoldDensity(state.foldSurface3dEnabled && isGridInputShape(value));
+        if (state.graphViewEnabled && !isGraphViewSupported(value)) {
+            state.graphViewEnabled = false;
+            state.graphFourierEnabled = false;
+            disposeTransformationGraphRenderer();
+        }
+        if (canvasInteractionContexts.z) canvasInteractionContexts.z.drawingArbitraryShape = false;
+        syncGridFoldDensity(state.foldSurface3dEnabled && isFoldableInputShape(value));
         requestDomainRedraw(true);
     });
 
@@ -2050,7 +2259,7 @@ function fullscreenTarget(planeType, index = 0) {
     const isThree = threeContainer && (
         (state.threeSphereEnabled && state.riemannSphereViewEnabled) ||
         (state.foldSurface3dEnabled && (
-            isGridInputShape(state.currentInputShape) ||
+            isFoldableInputShape(state.currentInputShape) ||
             (isRasterInputShape(state.currentInputShape) && getRasterSourceForShape(state.currentInputShape))
         ))
     );
@@ -2152,14 +2361,14 @@ function bindAlgebraicChainingControls() {
     bindControlListener('algebraicChainingZInput', 'input', () => {
         const val = controls.algebraicChainingZInput?.value || 'z';
         state.algebraicChainingZExpr = val;
-        updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath);
+        updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath, { allowedVariables: ['z'] });
         requestAlgebraicRedraw();
     });
 
     bindControlListener('algebraicChainingZInput', 'change', () => {
         const val = controls.algebraicChainingZInput?.value || 'z';
         state.algebraicChainingZExpr = val;
-        updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath);
+        updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath, { allowedVariables: ['z'] });
         requestAlgebraicRedraw();
     });
 }
@@ -2443,40 +2652,34 @@ function bindGraphControls() {
     checked('enableGraphLayerLockCb', state.graphLayerLockEnabled);
 
     bindCheckbox('enableGraphViewCb', 'graphViewEnabled', (_event, enabled) => {
-        if (state.fourierModeEnabled || state.laplaceModeEnabled) {
-            state.graphViewEnabled = false;
-            checked('enableGraphViewCb', false);
-            return;
-        }
-        if (enabled) {
+        if (state.fourierModeEnabled || state.laplaceModeEnabled || !enabled) {
+            disableGraphView();
+        } else {
             disableRealPlots();
             state.graphFullGridEnabled = false;
             state.graphSelectedShape = '';
-        } else {
-            state.graphFullGridEnabled = false;
-            state.graphLayerLockEnabled = false;
-            state.graphFourierEnabled = false;
-            checked('enableGraphLayerLockCb', false);
-            checked('enableGraphFourierCb', false);
-            updateModePanels();
-            disposeTransformationGraphRenderer();
         }
 
+        syncGridDensityControls();
         requestUiRedraw();
     });
 
-    bindControlListener('viewFullGridPerspectiveBtn', 'click', () => {
-        if (!state.graphViewEnabled || !isGridInputShape(state.currentInputShape)
-            || state.fourierModeEnabled || state.laplaceModeEnabled) return;
+    bindCheckbox('viewFullGridPerspectiveBtn', 'graphFullGridEnabled', (_event, enabled) => {
+        if (!state.graphViewEnabled || !isFullGridPerspectiveSupported(state.currentInputShape)
+            || state.fourierModeEnabled || state.laplaceModeEnabled) {
+            state.graphFullGridEnabled = false;
+            checked('viewFullGridPerspectiveBtn', false);
+            return;
+        }
 
-        state.graphFullGridEnabled = !state.graphFullGridEnabled;
-        if (state.graphFullGridEnabled) {
+        if (enabled) {
             state.graphGridFamily = 'primary';
             state.graphSelectedShape = '';
             if (controls.graphGridFamilySelector) controls.graphGridFamilySelector.value = 'primary';
         } else {
             state.graphLayerLockEnabled = false;
             checked('enableGraphLayerLockCb', false);
+            syncGridDensityControls();
         }
         updateModePanels();
         requestUiRedraw();
@@ -2496,6 +2699,7 @@ function bindGraphControls() {
         }
         state.graphSelectedShape = '';
         state.graphSelectionRevision = (state.graphSelectionRevision || 0) + 1;
+        syncGridDensityControls();
         updateModePanels();
         requestUiRedraw();
     });

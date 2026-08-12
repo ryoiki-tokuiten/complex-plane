@@ -15,7 +15,8 @@ const chainedFuncCache = new Map();
 const TRANSFORM_STATE_KEYS = new Set([
     'a0', 'b0', 'currentFunction', 'mapPresentation',
     'mobiusA', 'mobiusB', 'mobiusC', 'mobiusD',
-    'polynomialN', 'polynomialCoeffs', 'fractionalPowerN',
+    'polynomialN', 'polynomialCoeffs', 'fractionalPowerN', 'expBase', 'logBase', 'besselOrder',
+    'branchCutType', 'branchCutAngle',
     'zetaContinuationEnabled', 'chainingEnabled', 'chainingMode', 'chainCount',
     'algebraicChainingEnabled', 'algebraicChainingZExpr', 'algebraicChainingTerms',
     'taylorSeriesEnabled', 'taylorSeriesOrder', 'taylorSeriesCenter', 'taylorSeriesConvergenceRadius',
@@ -480,6 +481,117 @@ export function complexLn(a, b) {
     return { re: logHypot(re, im), im: Math.atan2(im, re) };
 }
 
+function configuredBaseLog(base) {
+    const re = realOf(base);
+    const im = imagOf(base);
+    return {
+        re: re === 0 && im === 0 ? -Infinity : logHypot(re, im),
+        im: re === 0 && im === 0 ? 0 : Math.atan2(im, re)
+    };
+}
+
+function expAtBaseRawInto(re, im, base, out, offset = 0) {
+    const baseRe = realOf(base);
+    const baseIm = imagOf(base);
+    if (baseRe === 0 && baseIm === 0) {
+        out[offset] = NaN;
+        out[offset + 1] = NaN;
+        return out;
+    }
+    if (Math.abs(baseRe - Math.E) < 1e-14 && Math.abs(baseIm) < 1e-14) {
+        return expRawInto(re, im, out, offset);
+    }
+    const logarithm = configuredBaseLog(base);
+    return expRawInto(
+        re * logarithm.re - im * logarithm.im,
+        re * logarithm.im + im * logarithm.re,
+        out,
+        offset
+    );
+}
+
+function expBaseRawInto(re, im, out, offset = 0) {
+    return expAtBaseRawInto(re, im, state.expBase || { re: Math.E, im: 0 }, out, offset);
+}
+
+function logBaseRawInto(re, im, out, offset = 0) {
+    if (re === 0 && im === 0) {
+        out[offset] = -Infinity;
+        out[offset + 1] = 0;
+        return out;
+    }
+    const denominator = configuredBaseLog(state.logBase || { re: Math.E, im: 0 });
+    if (denominator.re === 0 && denominator.im === 0) {
+        out[offset] = NaN;
+        out[offset + 1] = NaN;
+        return out;
+    }
+    return divideRawInto(logHypot(re, im), activeBranchArgument(re, im), denominator.re, denominator.im, out, offset);
+}
+
+function activeBranchArgument(re, im) {
+    let argument = Math.atan2(im, re);
+    if (state.branchCutType !== 'ray') return argument;
+    const angle = Number.isFinite(state.branchCutAngle) ? state.branchCutAngle : Math.PI;
+    while (argument > angle) argument -= TWO_PI;
+    while (argument <= angle - TWO_PI) argument += TWO_PI;
+    return argument;
+}
+
+function powOnActiveBranchRawInto(baseRe, baseIm, expRe, expIm, out, offset = 0) {
+    if (baseRe === 0 && baseIm === 0) return powRawInto(baseRe, baseIm, expRe, expIm, out, offset);
+    if (expIm === 0 && Number.isSafeInteger(expRe)) return powIntegerInto(baseRe, baseIm, expRe, out, offset);
+    const lnRe = logHypot(baseRe, baseIm);
+    const lnIm = activeBranchArgument(baseRe, baseIm);
+    return expRawInto(expRe * lnRe - expIm * lnIm, expRe * lnIm + expIm * lnRe, out, offset);
+}
+
+export function complexExpWithBase(a, b) {
+    const obj = isObject(a);
+    expBaseRawInto(obj ? realOf(a) : (a ?? 0), obj ? imagOf(a) : (b ?? 0), ALG_TMP, 0);
+    return { re: ALG_TMP[0], im: ALG_TMP[1] };
+}
+
+export function complexExpAtBase(value, base) {
+    expAtBaseRawInto(realOf(value), imagOf(value), base || { re: Math.E, im: 0 }, ALG_TMP, 0);
+    return { re: ALG_TMP[0], im: ALG_TMP[1] };
+}
+
+export function complexLogWithBase(a, b) {
+    const obj = isObject(a);
+    logBaseRawInto(obj ? realOf(a) : (a ?? 0), obj ? imagOf(a) : (b ?? 0), ALG_TMP, 0);
+    return { re: ALG_TMP[0], im: ALG_TMP[1] };
+}
+
+function sqrtRaw(re, im) {
+    const magnitude = Math.hypot(re, im);
+    const rootRe = Math.sqrt(Math.max(0, (magnitude + re) * 0.5));
+    return {
+        re: rootRe,
+        im: (im < 0 ? -1 : 1) * Math.sqrt(Math.max(0, (magnitude - re) * 0.5))
+    };
+}
+
+export function complexAsin(a, b) {
+    const re = argRe(a);
+    const im = argIm(a, b);
+    const z2Re = re * re - im * im;
+    const z2Im = 2 * re * im;
+    const root = sqrtRaw(1 - z2Re, -z2Im);
+    const logarithm = complexLn(-im + root.re, re + root.im);
+    return { re: logarithm.im, im: -logarithm.re };
+}
+
+export function complexAtan(a, b) {
+    const re = argRe(a);
+    const im = argIm(a, b);
+    const upper = complexLn(1 - im, re);
+    const lower = complexLn(1 + im, -re);
+    const diffRe = upper.re - lower.re;
+    const diffIm = upper.im - lower.im;
+    return { re: diffIm * 0.5, im: -diffRe * 0.5 };
+}
+
 export function complexReciprocal(a, b) {
     const obj = isObject(a);
     return reciprocalRaw(obj ? (a.re ?? a.real ?? 0) : (a ?? 0), obj ? (a.im ?? a.imag ?? 0) : (b ?? 0));
@@ -516,7 +628,8 @@ export function complexPowerFractional(a, b) {
     const im = argIm(a, b);
     const n = state.fractionalPowerN !== undefined ? state.fractionalPowerN : DEFAULT_FRACTIONAL_POWER;
     if (re === 0 && im === 0) return { re: 0, im: 0 };
-    return powRaw(re, im, n, 0);
+    powOnActiveBranchRawInto(re, im, n, 0, ALG_TMP, 0);
+    return { re: ALG_TMP[0], im: ALG_TMP[1] };
 }
 
 export function complexPow(base_re, base_im, exp_re, exp_im) {
@@ -547,7 +660,8 @@ export function complexPow(base_re, base_im, exp_re, exp_im) {
         }
     }
 
-    return powRaw(baseRe, baseIm, expRe, expIm);
+    powOnActiveBranchRawInto(baseRe, baseIm, expRe, expIm, ALG_TMP, 0);
+    return { re: ALG_TMP[0], im: ALG_TMP[1] };
 }
 
 export function C(re, im) {
@@ -706,6 +820,79 @@ export function complexGamma(re, im) {
         re: SQRT_TWO_PI * (pdRe * lRe - pdIm * lIm),
         im: SQRT_TWO_PI * (pdRe * lIm + pdIm * lRe)
     };
+}
+
+export function complexLogGamma(re, im) {
+    const zRe = argRe(re);
+    const zIm = argIm(re, im);
+
+    if (zRe < 0.5) {
+        const reflected = complexLogGamma(1 - zRe, -zIm);
+        const sinRe = Math.sin(PI * zRe) * _cosh(PI * zIm);
+        const sinIm = Math.cos(PI * zRe) * _sinh(PI * zIm);
+        const sinLog = complexLn(sinRe, sinIm);
+        return {
+            re: Math.log(PI) - sinLog.re - reflected.re,
+            im: -sinLog.im - reflected.im
+        };
+    }
+
+    const zmRe = zRe - 1;
+    let lRe = LANCZOS_P[0];
+    let lIm = 0;
+    for (let k = 1; k < LANCZOS_P.length; k++) {
+        const q = divideRaw(LANCZOS_P[k], 0, zmRe + k, zIm);
+        lRe += q.re;
+        lIm += q.im;
+    }
+    const tRe = zRe + LANCZOS_G - 0.5;
+    const tIm = zIm;
+    const logT = complexLn(tRe, tIm);
+    const logL = complexLn(lRe, lIm);
+    return {
+        re: Math.log(SQRT_TWO_PI) + (zRe - 0.5) * logT.re - zIm * logT.im - tRe + logL.re,
+        im: (zRe - 0.5) * logT.im + zIm * logT.re - tIm + logL.im
+    };
+}
+
+export function complexBesselJ(a, b, order = state.besselOrder) {
+    const zRe = argRe(a);
+    const zIm = argIm(a, b);
+    let nuRe = realOf(order);
+    let nuIm = imagOf(order);
+
+    if (Math.abs(nuIm) < 1e-14 && Number.isInteger(nuRe) && nuRe < 0) {
+        const sign = Math.abs(nuRe) % 2 ? -1 : 1;
+        const value = complexBesselJ(zRe, zIm, { re: -nuRe, im: 0 });
+        return { re: sign * value.re, im: sign * value.im };
+    }
+    if (zRe === 0 && zIm === 0) {
+        if (nuRe === 0 && nuIm === 0) return { re: 1, im: 0 };
+        return nuRe > 0 ? { re: 0, im: 0 } : { re: NaN, im: NaN };
+    }
+
+    const halfLog = complexLn(zRe * 0.5, zIm * 0.5);
+    const logGamma = complexLogGamma(nuRe + 1, nuIm);
+    const initialLogRe = nuRe * halfLog.re - nuIm * halfLog.im - logGamma.re;
+    const initialLogIm = nuRe * halfLog.im + nuIm * halfLog.re - logGamma.im;
+    let term = expRaw(initialLogRe, initialLogIm);
+    let sumRe = term.re;
+    let sumIm = term.im;
+    const stepRe = -(zRe * zRe - zIm * zIm) * 0.25;
+    const stepIm = -zRe * zIm * 0.5;
+
+    for (let k = 0; k < 160; k++) {
+        const dRe = (k + 1) * (k + 1 + nuRe);
+        const dIm = (k + 1) * nuIm;
+        const numeratorRe = term.re * stepRe - term.im * stepIm;
+        const numeratorIm = term.re * stepIm + term.im * stepRe;
+        term = divideRaw(numeratorRe, numeratorIm, dRe, dIm);
+        sumRe += term.re;
+        sumIm += term.im;
+        if (!finite(sumRe) || !finite(sumIm)) return { re: NaN, im: NaN };
+        if (Math.hypot(term.re, term.im) <= 1e-14 * Math.max(1, Math.hypot(sumRe, sumIm))) break;
+    }
+    return { re: sumRe, im: sumIm };
 }
 
 export function complexRiemannZeta_DirectSum(a, b, numTerms) {
@@ -942,6 +1129,11 @@ const ALGEBRAIC_RAW_SUPPORTED = new Set([
     'sinh',
     'cosh',
     'tanh',
+    'asin',
+    'atan',
+    'gamma',
+    'loggamma',
+    'bessel',
     'power',
     'mobius',
     'zeta',
@@ -1014,11 +1206,9 @@ function evaluateRawTransformInto(func, re, im, ctxRe, ctxIm, out, offset = 0) {
             return divideRawInto(1, 0, cRe, cIm, out, offset);
         }
         case 'exp':
-            return expRawInto(re, im, out, offset);
+            return expBaseRawInto(re, im, out, offset);
         case 'ln':
-            out[offset] = re === 0 && im === 0 ? -Infinity : logHypot(re, im);
-            out[offset + 1] = re === 0 && im === 0 ? 0 : Math.atan2(im, re);
-            return out;
+            return logBaseRawInto(re, im, out, offset);
         case 'reciprocal':
             return divideRawInto(1, 0, re, im, out, offset);
         case 'sinh': {
@@ -1041,8 +1231,38 @@ function evaluateRawTransformInto(func, re, im, ctxRe, ctxIm, out, offset = 0) {
             out[offset + 1] = Math.sin(2 * im) / denominator;
             return out;
         }
+        case 'asin': {
+            const value = complexAsin(re, im);
+            out[offset] = value.re;
+            out[offset + 1] = value.im;
+            return out;
+        }
+        case 'atan': {
+            const value = complexAtan(re, im);
+            out[offset] = value.re;
+            out[offset + 1] = value.im;
+            return out;
+        }
+        case 'gamma': {
+            const value = complexGamma(re, im);
+            out[offset] = value.re;
+            out[offset + 1] = value.im;
+            return out;
+        }
+        case 'loggamma': {
+            const value = complexLogGamma(re, im);
+            out[offset] = value.re;
+            out[offset + 1] = value.im;
+            return out;
+        }
+        case 'bessel': {
+            const value = complexBesselJ(re, im);
+            out[offset] = value.re;
+            out[offset + 1] = value.im;
+            return out;
+        }
         case 'power':
-            return powRawInto(re, im, state.fractionalPowerN !== undefined ? state.fractionalPowerN : DEFAULT_FRACTIONAL_POWER, 0, out, offset);
+            return powOnActiveBranchRawInto(re, im, state.fractionalPowerN !== undefined ? state.fractionalPowerN : DEFAULT_FRACTIONAL_POWER, 0, out, offset);
         case 'mobius':
             return complexMobiusRawInto(re, im, out, offset);
         case 'polynomial':
@@ -1123,20 +1343,17 @@ function applyAlgebraicModifiersInto(factor, out, offset = 0) {
         if (isFastPositiveIntegerPower(factor.power)) {
             powSmallIntegerInto(out[offset], out[offset + 1], factor.power, out, offset);
         } else {
-            powRawInto(out[offset], out[offset + 1], factor.power, 0, out, offset);
+            powOnActiveBranchRawInto(out[offset], out[offset + 1], factor.power, 0, out, offset);
         }
     }
     if (factor.reciprocal) {
         divideRawInto(1, 0, out[offset], out[offset + 1], out, offset);
     }
     if (factor.log) {
-        const re = out[offset];
-        const im = out[offset + 1];
-        out[offset] = re === 0 && im === 0 ? -Infinity : logHypot(re, im);
-        out[offset + 1] = re === 0 && im === 0 ? 0 : Math.atan2(im, re);
+        logBaseRawInto(out[offset], out[offset + 1], out, offset);
     }
     if (factor.exp) {
-        expRawInto(out[offset], out[offset + 1], out, offset);
+        expBaseRawInto(out[offset], out[offset + 1], out, offset);
     }
     return out;
 }
@@ -1204,9 +1421,9 @@ function emitRawTransform(func, inRe, inIm, outRe, outIm, tag) {
         case 'sec':
             return `const cre_${tag}=Math.cos(${inRe})*Math.cosh(${inIm}),cim_${tag}=-Math.sin(${inRe})*Math.sinh(${inIm});divideRawInto(1,0,cre_${tag},cim_${tag},tmp,0);let ${outRe}=tmp[0],${outIm}=tmp[1];`;
         case 'exp':
-            return `expRawInto(${inRe},${inIm},tmp,0);let ${outRe}=tmp[0],${outIm}=tmp[1];`;
+            return `expBaseRawInto(${inRe},${inIm},tmp,0);let ${outRe}=tmp[0],${outIm}=tmp[1];`;
         case 'ln':
-            return `let ${outRe}=(${inRe})===0&&(${inIm})===0?-Infinity:logHypot(${inRe},${inIm}),${outIm}=(${inRe})===0&&(${inIm})===0?0:Math.atan2(${inIm},${inRe});`;
+            return `logBaseRawInto(${inRe},${inIm},tmp,0);let ${outRe}=tmp[0],${outIm}=tmp[1];`;
         case 'reciprocal':
             return `divideRawInto(1,0,${inRe},${inIm},tmp,0);let ${outRe}=tmp[0],${outIm}=tmp[1];`;
         case 'sinh':
@@ -1215,8 +1432,18 @@ function emitRawTransform(func, inRe, inIm, outRe, outIm, tag) {
             return `const cosh_${tag}=Math.cosh(${inRe}),sinh_${tag}=Math.sinh(${inRe});let ${outRe}=cosh_${tag}*Math.cos(${inIm}),${outIm}=sinh_${tag}*Math.sin(${inIm});`;
         case 'tanh':
             return `const den_${tag}=Math.cosh(2*(${inRe}))+Math.cos(2*(${inIm}));let ${outRe}=Math.sinh(2*(${inRe}))/den_${tag},${outIm}=Math.sin(2*(${inIm}))/den_${tag};`;
+        case 'asin':
+            return `const asin_${tag}=complexAsin(${inRe},${inIm});let ${outRe}=asin_${tag}.re,${outIm}=asin_${tag}.im;`;
+        case 'atan':
+            return `const atan_${tag}=complexAtan(${inRe},${inIm});let ${outRe}=atan_${tag}.re,${outIm}=atan_${tag}.im;`;
+        case 'gamma':
+            return `const gamma_${tag}=complexGamma(${inRe},${inIm});let ${outRe}=gamma_${tag}.re,${outIm}=gamma_${tag}.im;`;
+        case 'loggamma':
+            return `const loggamma_${tag}=complexLogGamma(${inRe},${inIm});let ${outRe}=loggamma_${tag}.re,${outIm}=loggamma_${tag}.im;`;
+        case 'bessel':
+            return `const bessel_${tag}=complexBesselJ(${inRe},${inIm});let ${outRe}=bessel_${tag}.re,${outIm}=bessel_${tag}.im;`;
         case 'power':
-            return `powRawInto(${inRe},${inIm},state.fractionalPowerN!==undefined?state.fractionalPowerN:0.5,0,tmp,0);let ${outRe}=tmp[0],${outIm}=tmp[1];`;
+            return `powOnActiveBranchRawInto(${inRe},${inIm},state.fractionalPowerN!==undefined?state.fractionalPowerN:0.5,0,tmp,0);let ${outRe}=tmp[0],${outIm}=tmp[1];`;
         case 'mobius':
             return emitMobiusInline(inRe, inIm, outRe, outIm, tag);
         case 'polynomial':
@@ -1245,30 +1472,34 @@ function emitModifiers(factor, reVar, imVar, tag) {
                 code += `powSmallIntegerInto(${reVar},${imVar},${n},tmp,0);${reVar}=tmp[0];${imVar}=tmp[1];`;
             }
         } else {
-            code += `powRawInto(${reVar},${imVar},${jsNumber(factor.power)},0,tmp,0);${reVar}=tmp[0];${imVar}=tmp[1];`;
+            code += `powOnActiveBranchRawInto(${reVar},${imVar},${jsNumber(factor.power)},0,tmp,0);${reVar}=tmp[0];${imVar}=tmp[1];`;
         }
     }
     if (factor.reciprocal) {
         code += `divideRawInto(1,0,${reVar},${imVar},tmp,0);${reVar}=tmp[0];${imVar}=tmp[1];`;
     }
     if (factor.log) {
-        code += `const lr_${tag}=${reVar},li_${tag}=${imVar};${reVar}=lr_${tag}===0&&li_${tag}===0?-Infinity:logHypot(lr_${tag},li_${tag});${imVar}=lr_${tag}===0&&li_${tag}===0?0:Math.atan2(li_${tag},lr_${tag});`;
+        code += `logBaseRawInto(${reVar},${imVar},tmp,0);${reVar}=tmp[0];${imVar}=tmp[1];`;
     }
     if (factor.exp) {
-        code += `expRawInto(${reVar},${imVar},tmp,0);${reVar}=tmp[0];${imVar}=tmp[1];`;
+        code += `expBaseRawInto(${reVar},${imVar},tmp,0);${reVar}=tmp[0];${imVar}=tmp[1];`;
     }
     return code;
 }
 
 
 function isExpLogIdentityFactor(factor) {
+    const expBase = state.expBase || { re: Math.E, im: 0 };
+    const logBase = state.logBase || { re: Math.E, im: 0 };
     return !!(
         factor &&
         factor.func === 'ln' &&
         factor.exp === true &&
         !factor.log &&
         !factor.reciprocal &&
-        (factor.power === undefined || factor.power === 1)
+        (factor.power === undefined || factor.power === 1) &&
+        Math.abs(realOf(expBase) - Math.E) < 1e-14 && Math.abs(imagOf(expBase)) < 1e-14 &&
+        Math.abs(realOf(logBase) - Math.E) < 1e-14 && Math.abs(imagOf(logBase)) < 1e-14
     );
 }
 
@@ -1320,9 +1551,17 @@ function createGeneratedAlgebraicKernel(compiledTerms) {
             'logHypot',
             'divideRawInto',
             'expRawInto',
+            'expBaseRawInto',
+            'logBaseRawInto',
             'powRawInto',
+            'powOnActiveBranchRawInto',
             'powSmallIntegerInto',
             'complexRiemannZeta',
+            'complexAsin',
+            'complexAtan',
+            'complexGamma',
+            'complexLogGamma',
+            'complexBesselJ',
             `return function generatedAlgebraicKernel(zRe,zIm,ctxRe,ctxIm,out,offset){${code}};`
         )(
             ALG_TMP,
@@ -1332,9 +1571,17 @@ function createGeneratedAlgebraicKernel(compiledTerms) {
             logHypot,
             divideRawInto,
             expRawInto,
+            expBaseRawInto,
+            logBaseRawInto,
             powRawInto,
+            powOnActiveBranchRawInto,
             powSmallIntegerInto,
-            complexRiemannZeta
+            complexRiemannZeta,
+            complexAsin,
+            complexAtan,
+            complexGamma,
+            complexLogGamma,
+            complexBesselJ
         );
 
         const wrapper = (zRe, zIm, context = null, directCtxIm = undefined, out = null, offset = 0) => {
@@ -1528,8 +1775,8 @@ export function evaluateFunctionBlock(block, z_re, z_im, context = null) {
 
     if (block.power !== undefined && block.power !== 1) value = complexPow(value, block.power, 0);
     if (block.reciprocal) value = complexReciprocal(value);
-    if (block.log) value = complexLn(value);
-    if (block.exp) value = complexExp(value);
+    if (block.log) value = complexLogWithBase(value);
+    if (block.exp) value = complexExpWithBase(value);
 
     return value;
 }
@@ -1634,12 +1881,17 @@ export const transformFunctions = {
     sin: complexSin,
     tan: complexTan,
     sec: complexSec,
-    exp: complexExp,
-    ln: complexLn,
+    exp: complexExpWithBase,
+    ln: complexLogWithBase,
     reciprocal: complexReciprocal,
     sinh: complexSinh,
     cosh: complexCosh,
     tanh: complexTanh,
+    asin: complexAsin,
+    atan: complexAtan,
+    gamma: complexGamma,
+    loggamma: complexLogGamma,
+    bessel: complexBesselJ,
     power: complexPowerFractional,
     mobius: complexMobius,
     zeta: complexRiemannZeta,
@@ -1750,7 +2002,11 @@ export function buildMappedTransformProfileKey(functionKey) {
     const parts = [
         `f:${functionKey}`,
         `zetaC:${state.zetaContinuationEnabled ? 1 : 0}`,
-        `frac:${mappedTransformNumberKey(state.fractionalPowerN !== undefined ? state.fractionalPowerN : DEFAULT_FRACTIONAL_POWER)}`
+        `frac:${mappedTransformNumberKey(state.fractionalPowerN !== undefined ? state.fractionalPowerN : DEFAULT_FRACTIONAL_POWER)}`,
+        `expBase:${mappedTransformComplexKey(state.expBase)}`,
+        `logBase:${mappedTransformComplexKey(state.logBase)}`,
+        `besselOrder:${mappedTransformComplexKey(state.besselOrder)}`,
+        `branch:${state.branchCutType}:${mappedTransformNumberKey(state.branchCutAngle)}`
     ];
 
     if (functionKey === 'mobius') {
@@ -2170,6 +2426,32 @@ const CONTOUR_GENERATORS = {
             const x = (point.re - cx) / a;
             const y = (point.im - cy) / b;
             return x * x + y * y < toleranceFactor;
+        }
+    },
+    contour: {
+        valid: ({ points }) => Array.isArray(points) && points.length > 2,
+        inside: (point, { points }) => {
+            let inside = false;
+            for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                const a = points[i];
+                const b = points[j];
+                if (!a || !b) continue;
+                if ((a.im > point.im) !== (b.im > point.im) &&
+                    point.re < (b.re - a.re) * (point.im - a.im) / ((b.im - a.im) || 1e-30) + a.re) {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+    },
+    contours: {
+        valid: ({ contours }) => Array.isArray(contours) && contours.some(points => points?.length > 2),
+        inside: (point, { contours }) => {
+            let inside = false;
+            for (const points of contours || []) {
+                if (points?.length > 2 && CONTOUR_GENERATORS.contour.inside(point, { points })) inside = !inside;
+            }
+            return inside;
         }
     }
 };

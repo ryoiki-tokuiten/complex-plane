@@ -48,6 +48,8 @@
                             <button id="select_sinh_btn" data-tooltip="Select w = sinh(z) function">w = sinh(z)</button>
                             <button id="select_cosh_btn" data-tooltip="Select w = cosh(z) function">w = cosh(z)</button>
                             <button id="select_tanh_btn" data-tooltip="Select w = tanh(z) function">w = tanh(z)</button>
+                            <button id="select_asin_btn" data-tooltip="Select w = asin(z) function">w = asin(z)</button>
+                            <button id="select_atan_btn" data-tooltip="Select w = atan(z) function">w = atan(z)</button>
                             <button id="select_power_btn" data-tooltip="Select fractional power w = z^n">w =
                                 z<sup>n</sup></button>
                             <button id="select_reciprocal_btn" data-tooltip="Select w = 1/z function">w = 1/z</button>
@@ -55,6 +57,9 @@
                                 data-tooltip="Select w = (az+b)/(cz+d) Möbius transformation">Möbius</button>
                             <button id="select_zeta_btn" data-tooltip="Select w = ζ(z) Riemann Zeta function">w =
                                 ζ(z)</button>
+                            <button id="select_gamma_btn" data-tooltip="Select the Gamma function">w = Γ(z)</button>
+                            <button id="select_loggamma_btn" data-tooltip="Select the log Gamma function">w = log Γ(z)</button>
+                            <button id="select_bessel_btn" data-tooltip="Select the generalized Bessel function">w = J<sub>ν</sub>(z)</button>
                             <button id="select_polynomial_btn"
                                 data-tooltip="Select w = P(z) polynomial function">Polynomial</button>
                             <button id="select_poincare_btn"
@@ -420,6 +425,41 @@
                             <button id="toggle_zeta_continuation_btn"
                                 data-tooltip="Toggle analytic continuation for ζ(z) beyond Re(z) > 1">Enable Analytic
                                 Continuation</button>
+                        </div>
+
+                        <div id="exp_base_specific_controls" class="control-group dependent-settings-block hidden">
+                            <div class="section-header"><span>Exponential Base</span></div>
+                            <div id="exp_base_ui_container"></div>
+                        </div>
+
+                        <div id="log_base_specific_controls" class="control-group dependent-settings-block hidden">
+                            <div class="section-header"><span>Logarithm Base</span></div>
+                            <div id="log_base_ui_container"></div>
+                        </div>
+
+                        <div id="bessel_order_specific_controls" class="control-group dependent-settings-block hidden">
+                            <div class="section-header"><span>Bessel Order ν</span></div>
+                            <div id="bessel_order_ui_container"></div>
+                        </div>
+
+                        <div id="branch_tools_controls" class="control-group dependent-settings-block hidden">
+                            <div class="section-header"><span>Branch Cut &amp; Continuation</span></div>
+                            <label>Cut
+                                <select id="branch_cut_type_selector" class="control-select">
+                                    <option value="ray">Ray</option>
+                                    <option value="draw">Drawn cut</option>
+                                </select>
+                            </label>
+                            <label id="branch_cut_angle_group">Ray angle
+                                <output id="branch_cut_angle_value_display">π</output>
+                                <input id="branch_cut_angle_slider" type="range" min="-3.141592653589793" max="3.141592653589793" step="0.017453292519943295" value="3.141592653589793">
+                            </label>
+                            <div class="control-row-between">
+                                <button id="draw_branch_cut_btn" type="button">Draw Cut</button>
+                                <button id="draw_continuation_path_btn" type="button">Continue Along Path</button>
+                                <button id="clear_continuation_path_btn" type="button">Clear Path</button>
+                            </div>
+                            <div id="continuation_status" class="compact-text">Active sheet k = 0</div>
                         </div>
 
                     <!-- Derivative Panel -->
@@ -1139,6 +1179,43 @@
                         </div>
                     </div>
 
+                    <div id="arbitrary_shape_controls" class="dependent-settings-block hidden">
+                        <div class="panel-inline-heading"><span class="panel-inline-title">Arbitrary Shape</span></div>
+                        <div class="arbitrary-shape-mode-row" role="group" aria-label="Arbitrary shape definition">
+                            <button id="arbitrary_shape_parametric_mode_btn" type="button">Expression</button>
+                            <button id="arbitrary_shape_draw_mode_btn" type="button">Freehand</button>
+                        </div>
+                        <div id="parametric_arbitrary_shape_controls" class="formula-editor-stack">
+                            <label for="arbitrary_shape_expression_input" class="formula-editor-label">Custom z(t) expression</label>
+                            <input id="arbitrary_shape_expression_input" type="text"
+                                class="dynamic-formula-input compact-formula-input" value="cos(t) + i*sin(t)"
+                                placeholder="e.g. cos(t) + i*sin(t)"
+                                spellcheck="false" autocomplete="off">
+                            <div id="arbitrary_shape_expression_math"
+                                class="dynamic-math-display compact-formula-preview"></div>
+                            <div class="taylor-series-input-row">
+                                <label class="taylor-series-input-field"><span>t min</span><input
+                                        id="arbitrary_shape_t_min_input" class="small-number-input taylor-series-text-input"
+                                        type="number" step="0.1" value="0"></label>
+                                <label class="taylor-series-input-field"><span>t max</span><input
+                                        id="arbitrary_shape_t_max_input" class="small-number-input taylor-series-text-input"
+                                        type="number" step="0.1" value="6.283185307179586"></label>
+                            </div>
+                        </div>
+                        <div id="drawn_arbitrary_shape_controls" class="hidden">
+                            <div class="arbitrary-shape-draw-row">
+                                <button id="clear_arbitrary_shape_btn" type="button">Clear</button>
+                            </div>
+                            <div id="arbitrary_shape_draw_status" class="compact-status-text">Drag anywhere on the z-plane. New strokes are appended.</div>
+                        </div>
+                        <div class="control-group arbitrary-shape-close-control">
+                            <label for="arbitrary_shape_closed_cb" class="slider-label arbitrary-shape-close-label">
+                                <input id="arbitrary_shape_closed_cb" type="checkbox" checked>
+                                <span class="custom-checkbox-visual"></span>Close shape
+                            </label>
+                        </div>
+                    </div>
+
                     <div id="grid_surface_3d_control" class="control-group control-toggle-heading">
                         <label for="grid_surface_3d_cb" class="slider-label"
                             data-tooltip="Show the transformed grid as an interactive 3D fold view, with overlapping output curves separated by their source real coordinate.">
@@ -1158,37 +1235,42 @@
                                         data-tooltip="Scale the height of the transformed grid folds.">
                                 </div>
                             </div>
+                            <label for="grid_preimage_explorer_cb" class="slider-label">
+                                <input type="checkbox" id="grid_preimage_explorer_cb">
+                                <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
+                            </label>
                         </div>
                     </div>
 
-                    <div class="control-group control-toggle-heading">
+                    <div id="graph_view_control" class="control-group control-toggle-heading">
                         <label for="enable_graph_view_cb" class="slider-label"
                             data-tooltip="Plot the selected input line as Re and Im output curves">
                             <input type="checkbox" id="enable_graph_view_cb">
                             <span class="custom-checkbox-visual"></span>
                             View Graph
                         </label>
-                    </div>
-
-                    <div id="full_grid_perspective_control" class="control-group hidden">
-                        <button id="view_full_grid_perspective_btn" type="button"
-                            data-tooltip="Show the active grid family and its mapped graphs in 3D">
-                            View Full Grid Perspective
-                        </button>
-                        <label id="graph_focus_box_toggle" for="enable_graph_focus_box_cb"
-                            class="slider-label hidden"
-                            data-tooltip="Outline the 3D graph corresponding to the selected input shape">
-                            <input type="checkbox" id="enable_graph_focus_box_cb" checked>
-                            <span class="custom-checkbox-visual"></span>
-                            Enable the focus box
-                        </label>
-                        <label id="graph_layer_lock_toggle" for="enable_graph_layer_lock_cb"
-                            class="slider-label hidden"
-                            data-tooltip="Connect the selected grid shape to every intersecting shape from the other family">
-                            <input type="checkbox" id="enable_graph_layer_lock_cb">
-                            <span class="custom-checkbox-visual"></span>
-                            Lock a layer
-                        </label>
+                        <div id="full_grid_perspective_control" class="dependent-settings-block hidden">
+                            <label for="view_full_grid_perspective_btn" class="slider-label"
+                                data-tooltip="Show the active grid family and its mapped graphs in 3D">
+                                <input type="checkbox" id="view_full_grid_perspective_btn">
+                                <span class="custom-checkbox-visual"></span>
+                                View Full Grid Perspective
+                            </label>
+                            <label id="graph_focus_box_toggle" for="enable_graph_focus_box_cb"
+                                class="slider-label hidden"
+                                data-tooltip="Outline the 3D graph corresponding to the selected input shape">
+                                <input type="checkbox" id="enable_graph_focus_box_cb" checked>
+                                <span class="custom-checkbox-visual"></span>
+                                Enable the focus box
+                            </label>
+                            <label id="graph_layer_lock_toggle" for="enable_graph_layer_lock_cb"
+                                class="slider-label hidden"
+                                data-tooltip="Connect the selected grid shape to every intersecting shape from the other family">
+                                <input type="checkbox" id="enable_graph_layer_lock_cb">
+                                <span class="custom-checkbox-visual"></span>
+                                Lock a layer
+                            </label>
+                        </div>
                     </div>
 
                     <!-- Complex Plane Navigation Panel -->
@@ -1421,6 +1503,10 @@
                                 </div>
                             </div>
                         </div>
+                        <label for="image_preimage_explorer_cb" class="slider-label">
+                            <input type="checkbox" id="image_preimage_explorer_cb">
+                            <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
+                        </label>
                     </div>
 
                     <div id="video_upload_controls" class="dependent-settings-block hidden image-upload-panel">
@@ -1495,6 +1581,10 @@
                                 </div>
                             </div>
                         </div>
+                        <label for="video_preimage_explorer_cb" class="slider-label">
+                            <input type="checkbox" id="video_preimage_explorer_cb">
+                            <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
+                        </label>
                     </div>
 
 
@@ -2405,6 +2495,8 @@
                                 <option value="grid_polar">Grid (Polar)</option>
                                 <option value="grid_logpolar">Grid (Log-Polar)</option>
                                 <option value="grid_logcartesian">Grid (Log-Cartesian)</option>
+                                <option value="grid_dots">Grid (Dots)</option>
+                                <option value="arbitrary">Arbitrary Shape</option>
                                 <option value="empty_grid">Grid (Empty)</option>
                                 <option value="line">Lines (Re/Im Fixed)</option>
                                 <option value="circle">Circle</option>

@@ -7,12 +7,14 @@ const FUNCTION_OPTIONS = [
     ['none', 'None'], ['c', 'c'], ['cos', 'cos(z)'], ['sin', 'sin(z)'], ['tan', 'tan(z)'],
     ['sec', 'sec(z)'], ['exp', 'e^z'], ['ln', 'ln(z)'], ['sinh', 'sinh(z)'],
     ['cosh', 'cosh(z)'], ['tanh', 'tanh(z)'], ['power', 'z^n'], ['reciprocal', '1/z'],
-    ['mobius', 'Möbius'], ['zeta', 'ζ(z)'], ['polynomial', 'Polynomial'], ['poincare', 'Poincare Disk']
+    ['asin', 'asin(z)'], ['atan', 'atan(z)'], ['gamma', 'Γ(z)'], ['loggamma', 'log Γ(z)'],
+    ['bessel', 'Jν(z)'], ['mobius', 'Möbius'], ['zeta', 'ζ(z)'], ['polynomial', 'Polynomial'], ['poincare', 'Poincare Disk']
 ];
 
 const SYMBOLS = new Map([
     ['c', 'c'], ['power', 'z^n'], ['zeta', 'ζ'], ['polynomial', 'P'],
-    ['mobius', 'Möbius'], ['poincare', 'Poincare']
+    ['mobius', 'Möbius'], ['poincare', 'Poincare'], ['gamma', 'Γ'],
+    ['loggamma', 'log Γ'], ['bessel', 'Jν']
 ]);
 
 export const createAlgebraicFactor = (func = 'cos') => ({

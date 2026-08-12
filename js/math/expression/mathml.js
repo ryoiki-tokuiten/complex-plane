@@ -2,10 +2,10 @@ import { parseExpression } from './parser.js';
 
 const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
 const FUNCTION_NAMES = new Set([
-    'sin', 'cos', 'tan', 'sec', 'sinh', 'cosh', 'tanh',
+    'sin', 'cos', 'tan', 'sec', 'asin', 'atan', 'sinh', 'cosh', 'tanh',
     'ln', 'log', 'exp', 'abs', 'arg', 're', 'im', 'conj',
     'floor', 'ceil', 'round', 'trunc', 'sign', 'min', 'max',
-    'mod', 'gcd', 'zeta'
+    'mod', 'gcd', 'zeta', 'gamma', 'loggamma', 'bessel'
 ]);
 
 function mathNode(tag, text = null, children = []) {
