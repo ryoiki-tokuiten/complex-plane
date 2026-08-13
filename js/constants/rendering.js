@@ -4,8 +4,7 @@ export const DEFAULT_CANVAS_WIDTH = 600;
 export const DEFAULT_CANVAS_HEIGHT = 450;
 export const ORIGIN_GLOW_DURATION_MS = 500;
 
-export const WEBGL_LINE_BATCH_LIMIT = 3500000;
-export const WEBGL_SUPERSAMPLE_FACTOR = 2.25;
+export const PLANAR_CANVAS_SUPERSAMPLE = 2;
 export const WEBGL_DOMAIN_COLOR_SUPERSAMPLE = 2.0;
 
 export const ORBIT_COLORING_MODES = Object.freeze({

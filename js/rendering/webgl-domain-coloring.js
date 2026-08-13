@@ -1565,16 +1565,10 @@ export function renderDomainColoringWithWebGL(targetCtx, planeParams, options = 
 }
 
 export function getGPUBackendStatus() {
-  const lineDiag = context.webglSupport || null;
   const domainDiag = context.webglDomainColorSupport || null;
   const currentFunctionName = state?.currentFunction || null;
 
   return {
-    lineRendering: lineDiag ? {
-      available: !!lineDiag.available,
-      reason: lineDiag.reason,
-      diagnostics: lineDiag.diagnostics || null
-    } : null,
     domainColoring: domainDiag ? {
       available: !!domainDiag.available,
       reason: domainDiag.reason,

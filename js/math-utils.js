@@ -9,7 +9,9 @@ import {
 } from './constants/domain-dynamics.js';
 
 let cachesDirty = true;
+let mappedRenderCacheEpoch = 0;
 const mappedProfileCache = new Map();
+const mappedRenderCacheOwners = new WeakMap();
 const chainedFuncCache = new Map();
 
 const TRANSFORM_STATE_KEYS = new Set([
@@ -358,6 +360,7 @@ let algebraicKernel = null;
 let algebraicTermKernelCache = new WeakMap();
 
 function invalidateHotPathCaches() {
+    mappedRenderCacheEpoch++;
     polynomialKernelRef = null;
     polynomialKernelDegree = -1;
     polynomialKernelRe = new Float64Array(0);
@@ -1900,6 +1903,245 @@ export const transformFunctions = {
     algebraic_chaining: evaluateAlgebraicChaining
 };
 
+const transformRenderCapabilities = new WeakMap();
+
+function setTransformRenderCapability(transformFunc, key, value) {
+    if (typeof transformFunc !== 'function' || typeof value !== 'function') return;
+    let capabilities = transformRenderCapabilities.get(transformFunc);
+    if (!capabilities) {
+        capabilities = Object.create(null);
+        transformRenderCapabilities.set(transformFunc, capabilities);
+    }
+    capabilities[key] = value;
+}
+
+function getTransformRenderCapabilities(transformFunc) {
+    return transformRenderCapabilities.get(transformFunc) || null;
+}
+
+function getTransformRenderCacheOwner(transformFunc) {
+    let entry = mappedRenderCacheOwners.get(transformFunc);
+    if (!entry || entry.epoch !== mappedRenderCacheEpoch) {
+        entry = { epoch: mappedRenderCacheEpoch, token: Object.freeze({}) };
+        mappedRenderCacheOwners.set(transformFunc, entry);
+    }
+    return entry.token;
+}
+
+function createBuiltInEvaluateInto(functionKey, transformFunc) {
+    return (re, im, out, offset = 0, evalContext = null) => {
+        if (functionKey === 'algebraic_chaining') {
+            const terms = state.algebraicChainingTerms;
+            const kernel = state.algebraicChainingEnabled && Array.isArray(terms) && terms.length
+                ? getCompiledAlgebraicKernel(terms)
+                : null;
+            if (kernel?.raw) {
+                const contextC = evalContext?.c;
+                const ctxRe = contextC ? argRe(contextC) : re;
+                const ctxIm = contextC ? argIm(contextC) : im;
+                return kernel.raw(re, im, ctxRe, ctxIm, out, offset);
+            }
+        } else {
+            const contextC = evalContext?.c;
+            const ctxRe = contextC ? argRe(contextC) : re;
+            const ctxIm = contextC ? argIm(contextC) : im;
+            const raw = evaluateRawTransformInto(functionKey, re, im, ctxRe, ctxIm, out, offset);
+            if (raw) return raw;
+        }
+
+        const value = transformFunc(re, im, evalContext);
+        out[offset] = value?.re;
+        out[offset + 1] = value?.im;
+        return out;
+    };
+}
+
+for (const [functionKey, transformFunc] of Object.entries(transformFunctions)) {
+    setTransformRenderCapability(transformFunc, 'evaluateInto', createBuiltInEvaluateInto(functionKey, transformFunc));
+}
+
+function fillSinCosLine(startRe, startIm, stepRe, stepIm, count, out, offset, cosineOutput) {
+    // Uniform complex lines admit the exact second-order recurrence
+    // f(z + 2h) = 2 cos(h) f(z + h) - f(z). Periodic exact anchors
+    // bound floating-point drift without paying trigonometric cost per sample.
+    if (count <= 0) return out;
+    const cosStepRe = Math.cos(stepRe) * Math.cosh(stepIm);
+    const cosStepIm = -Math.sin(stepRe) * Math.sinh(stepIm);
+    let currentRe = cosineOutput
+        ? Math.cos(startRe) * Math.cosh(startIm)
+        : Math.sin(startRe) * Math.cosh(startIm);
+    let currentIm = cosineOutput
+        ? -Math.sin(startRe) * Math.sinh(startIm)
+        : Math.cos(startRe) * Math.sinh(startIm);
+    out[offset] = currentRe;
+    out[offset + 1] = currentIm;
+    if (count === 1) return out;
+
+    let nextRe = cosineOutput
+        ? Math.cos(startRe + stepRe) * Math.cosh(startIm + stepIm)
+        : Math.sin(startRe + stepRe) * Math.cosh(startIm + stepIm);
+    let nextIm = cosineOutput
+        ? -Math.sin(startRe + stepRe) * Math.sinh(startIm + stepIm)
+        : Math.cos(startRe + stepRe) * Math.sinh(startIm + stepIm);
+
+    for (let i = 1; i < count; i++) {
+        const at = offset + i * 2;
+        out[at] = nextRe;
+        out[at + 1] = nextIm;
+        if (i + 1 === count) break;
+
+        if ((i & 127) === 127) {
+            const re0 = startRe + stepRe * i;
+            const im0 = startIm + stepIm * i;
+            const re1 = re0 + stepRe;
+            const im1 = im0 + stepIm;
+            currentRe = cosineOutput ? Math.cos(re0) * Math.cosh(im0) : Math.sin(re0) * Math.cosh(im0);
+            currentIm = cosineOutput ? -Math.sin(re0) * Math.sinh(im0) : Math.cos(re0) * Math.sinh(im0);
+            nextRe = cosineOutput ? Math.cos(re1) * Math.cosh(im1) : Math.sin(re1) * Math.cosh(im1);
+            nextIm = cosineOutput ? -Math.sin(re1) * Math.sinh(im1) : Math.cos(re1) * Math.sinh(im1);
+            continue;
+        }
+
+        const twiceCosTimesNextRe = 2 * (cosStepRe * nextRe - cosStepIm * nextIm);
+        const twiceCosTimesNextIm = 2 * (cosStepRe * nextIm + cosStepIm * nextRe);
+        const followingRe = twiceCosTimesNextRe - currentRe;
+        const followingIm = twiceCosTimesNextIm - currentIm;
+        currentRe = nextRe;
+        currentIm = nextIm;
+        nextRe = followingRe;
+        nextIm = followingIm;
+    }
+    return out;
+}
+
+
+const zetaLineKernelCache = new Map();
+
+function createZetaLineKernel(levels) {
+    let init = '';
+    let sumRe = '0';
+    let sumIm = '0';
+    let advance = '';
+    for (let n = 1; n <= levels; n++) {
+        init += `const l${n}=logs[${n}],c${n}=coeffs[${n}];`;
+        init += `let m${n}=expSafe(-startRe*l${n}),a${n}=-startIm*l${n},tr${n}=m${n}*Math.cos(a${n}),ti${n}=m${n}*Math.sin(a${n});`;
+        init += `const rm${n}=expSafe(-stepRe*l${n}),ra${n}=-stepIm*l${n},rr${n}=rm${n}*Math.cos(ra${n}),ri${n}=rm${n}*Math.sin(ra${n});`;
+        sumRe += `+c${n}*tr${n}`;
+        sumIm += `+c${n}*ti${n}`;
+        advance += `const nr${n}=tr${n}*rr${n}-ti${n}*ri${n};ti${n}=tr${n}*ri${n}+ti${n}*rr${n};tr${n}=nr${n};`;
+    }
+
+    const source = `'use strict';return function zetaLineKernel(startRe,startIm,stepRe,stepIm,count,out,offset,coeffs,logs){` +
+        init +
+        `let pm=expSafe((1-startRe)*LN2),pa=-startIm*LN2,pr=pm*Math.cos(pa),pi=pm*Math.sin(pa);` +
+        `const prm=expSafe(-stepRe*LN2),pra=-stepIm*LN2,prr=prm*Math.cos(pra),pri=prm*Math.sin(pra);` +
+        `let re=startRe,im=startIm;` +
+        `for(let i=0;i<count;i++,re+=stepRe,im+=stepIm){` +
+        `const at=offset+(i<<1);let sr=${sumRe},si=${sumIm};` +
+        `if(re===1&&im===0){out[at]=Infinity;out[at+1]=NaN;}` +
+        `else if(re===0&&im===0){out[at]=-0.5;out[at+1]=0;}` +
+        `else if(im===0&&re<0&&re%2===0){out[at]=0;out[at+1]=0;}` +
+        `else{const dr=1-pr,di=-pi,ar=Math.abs(dr),ai=Math.abs(di),scale=ar>ai?ar:ai;` +
+        `if(scale<1e-15){const nm=sr*sr+si*si;if(nm<1e-30){out[at]=NaN;out[at+1]=NaN;}` +
+        `else if(Math.abs(sr)<1e-15&&Math.abs(si)<1e-15){out[at]=0;out[at+1]=0;}` +
+        `else{const q=(POLE*2)/Math.sqrt(nm);out[at]=sr*q;out[at+1]=si*q;}}` +
+        `else if(ar>=ai){const r=di/dr,d=dr+di*r;out[at]=(sr+si*r)/d;out[at+1]=(si-sr*r)/d;}` +
+        `else{const r=dr/di,d=di+dr*r;out[at]=(sr*r+si)/d;out[at+1]=(si*r-sr)/d;}}` +
+        advance +
+        `const npr=pr*prr-pi*pri;pi=pr*pri+pi*prr;pr=npr;}` +
+        `return out;}`;
+    try {
+        return Function('Math', 'expSafe', 'LN2', 'POLE', source)(Math, expSafe, LN_2, POLE_MAGNITUDE_THRESHOLD);
+    } catch {
+        return null;
+    }
+}
+
+function getZetaLineKernel(levels) {
+    let kernel = zetaLineKernelCache.get(levels);
+    if (kernel === undefined) {
+        kernel = createZetaLineKernel(levels);
+        zetaLineKernelCache.set(levels, kernel || null);
+    }
+    return kernel;
+}
+
+function fillZetaLine(startRe, startIm, stepRe, stepIm, count, out, offset) {
+    if (!state.zetaContinuationEnabled) {
+        for (let i = 0, re = startRe, im = startIm; i < count; i++, re += stepRe, im += stepIm) {
+            const value = complexRiemannZeta(re, im);
+            out[offset + i * 2] = value.re;
+            out[offset + i * 2 + 1] = value.im;
+        }
+        return out;
+    }
+
+    const levels = getDynamicZetaHasseLevels();
+    const coeffs = getZetaHasseCombinedCoefficients(levels);
+    ensureZetaLogIntegerCache(levels);
+    const kernel = getZetaLineKernel(levels);
+    if (kernel) {
+        return kernel(startRe, startIm, stepRe, stepIm, count, out, offset, coeffs, zetaLogIntegerCache);
+    }
+
+    // CSP-restricted fallback: same recurrence without generated straight-line code.
+    out.fill(0, offset, offset + count * 2);
+    for (let n = 1; n <= levels; n++) {
+        const logN = zetaLogIntegerCache[n];
+        const coeff = coeffs[n];
+        const magnitude = expSafe(-startRe * logN);
+        const angle = -startIm * logN;
+        let termRe = magnitude * Math.cos(angle);
+        let termIm = magnitude * Math.sin(angle);
+        const ratioMagnitude = expSafe(-stepRe * logN);
+        const ratioAngle = -stepIm * logN;
+        const ratioRe = ratioMagnitude * Math.cos(ratioAngle);
+        const ratioIm = ratioMagnitude * Math.sin(ratioAngle);
+        for (let i = 0; i < count; i++) {
+            const at = offset + i * 2;
+            out[at] += coeff * termRe;
+            out[at + 1] += coeff * termIm;
+            const nextRe = termRe * ratioRe - termIm * ratioIm;
+            termIm = termRe * ratioIm + termIm * ratioRe;
+            termRe = nextRe;
+        }
+    }
+
+    const powMagnitude = expSafe((1 - startRe) * LN_2);
+    const powAngle = -startIm * LN_2;
+    let powRe = powMagnitude * Math.cos(powAngle);
+    let powIm = powMagnitude * Math.sin(powAngle);
+    const powRatioMagnitude = expSafe(-stepRe * LN_2);
+    const powRatioAngle = -stepIm * LN_2;
+    const powRatioRe = powRatioMagnitude * Math.cos(powRatioAngle);
+    const powRatioIm = powRatioMagnitude * Math.sin(powRatioAngle);
+    for (let i = 0, re = startRe, im = startIm; i < count; i++, re += stepRe, im += stepIm) {
+        const at = offset + i * 2;
+        if (re === 1 && im === 0) {
+            out[at] = Infinity;
+            out[at + 1] = NaN;
+        } else if (re === 0 && im === 0) {
+            out[at] = -0.5;
+            out[at + 1] = 0;
+        } else if (im === 0 && re < 0 && re % 2 === 0) {
+            out[at] = 0;
+            out[at + 1] = 0;
+        } else {
+            divideRawInto(out[at], out[at + 1], 1 - powRe, -powIm, out, at);
+        }
+        const nextPowRe = powRe * powRatioRe - powIm * powRatioIm;
+        powIm = powRe * powRatioIm + powIm * powRatioRe;
+        powRe = nextPowRe;
+    }
+    return out;
+}
+
+setTransformRenderCapability(transformFunctions.sin, 'evaluateLineInto',
+    (startRe, startIm, stepRe, stepIm, count, out, offset = 0) => fillSinCosLine(startRe, startIm, stepRe, stepIm, count, out, offset, false));
+setTransformRenderCapability(transformFunctions.cos, 'evaluateLineInto',
+    (startRe, startIm, stepRe, stepIm, count, out, offset = 0) => fillSinCosLine(startRe, startIm, stepRe, stepIm, count, out, offset, true));
+setTransformRenderCapability(transformFunctions.zeta, 'evaluateLineInto', fillZetaLine);
+
 const REAL_PLOT_KERNELS = Object.freeze({
     cos: 'cos',
     sin: 'sin',
@@ -2133,6 +2375,32 @@ export function getMappedTransformProfile(functionKey = state.currentFunction, t
         constantSampleCount: constant ? constant.validCount : 0
     };
 
+    const renderCapabilities = getTransformRenderCapabilities(resolvedTransform);
+    if (renderCapabilities) {
+        Object.defineProperty(profile, 'renderCacheOwner', {
+            value: getTransformRenderCacheOwner(resolvedTransform),
+            enumerable: false,
+            configurable: false,
+            writable: false
+        });
+    }
+    if (typeof renderCapabilities?.evaluateInto === 'function') {
+        Object.defineProperty(profile, 'evaluateInto', {
+            value: renderCapabilities.evaluateInto,
+            enumerable: false,
+            configurable: false,
+            writable: false
+        });
+    }
+    if (typeof renderCapabilities?.evaluateLineInto === 'function') {
+        Object.defineProperty(profile, 'evaluateLineInto', {
+            value: renderCapabilities.evaluateLineInto,
+            enumerable: false,
+            configurable: false,
+            writable: false
+        });
+    }
+
     if (cacheable) {
         mappedProfileCache.set(functionKey, profile);
     }
@@ -2364,11 +2632,35 @@ function createChainedTransformForStage(funcKey, stageIndex, baseFunc) {
     }
 
     const baseProfile = getMappedTransformProfile(funcKey, baseFunc);
-
-    return (re, im) => {
+    const chainedTransform = (re, im) => {
         const mapped = evaluateMappedChainStage(baseProfile, re, im, funcKey, stage);
         return mapped || { re: NaN, im: NaN };
     };
+
+    const baseEvaluateInto = baseProfile.evaluateInto;
+    if (typeof baseEvaluateInto === 'function') {
+        const chainScratch = new Float64Array(2);
+        setTransformRenderCapability(chainedTransform, 'evaluateInto', (re, im, out, offset = 0) => {
+            let currentRe = state.chainingMode === 'zero_seed' ? 0 : re;
+            let currentIm = state.chainingMode === 'zero_seed' ? 0 : im;
+            for (let i = 0; i <= stage; i++) {
+                baseEvaluateInto(currentRe, currentIm, chainScratch, 0, null);
+                currentRe = chainScratch[0];
+                currentIm = chainScratch[1];
+                if (!finite(currentRe) || !finite(currentIm) ||
+                    Math.max(Math.abs(currentRe), Math.abs(currentIm)) >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
+                    out[offset] = NaN;
+                    out[offset + 1] = NaN;
+                    return out;
+                }
+            }
+            out[offset] = currentRe;
+            out[offset + 1] = currentIm;
+            return out;
+        });
+    }
+
+    return chainedTransform;
 }
 
 export function getChainedStageTransformFunction(funcKey = state.currentFunction, stageIndex = 0) {

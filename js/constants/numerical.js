@@ -3,8 +3,8 @@
 export const TWO_PI = 2 * Math.PI;
 export const PI = TWO_PI / 2;
 
-export const NUM_POINTS_CURVE = 1000;
-export const NUM_ZETA_TERMS_DIRECT_SUM = 100;
+export const NUM_POINTS_CURVE = 1600;
+export const NUM_ZETA_TERMS_DIRECT_SUM = 100;   
 export const NUM_ZETA_TERMS_ETA_SERIES = 500;
 export const NUM_ZETA_HASSE_LEVELS = 32;
 export const MAX_POLY_DEGREE = 10;
@@ -15,9 +15,9 @@ export const CRITICAL_POINT_FIND_GRID_SIZE = 60;
 export const CRITICAL_POINT_EPSILON = 1e-5;
 export const ZP_CP_CHECK_DISTANCE_FACTOR = 1.5;
 
-export const MIN_POINTS_ADAPTIVE = 1200;
+export const MIN_POINTS_ADAPTIVE = 2000;
 export const MAX_POINTS_ADAPTIVE_DEFAULT = 10000;
-export const DEFAULT_POINTS_PER_LINE = 1000;
+export const DEFAULT_POINTS_PER_LINE = 2500;
 
 export const ZETA_POLE = { re: 1, im: 0 };
 export const ZETA_REFLECTION_POINT_RE = 1.0;

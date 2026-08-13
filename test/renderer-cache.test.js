@@ -125,6 +125,8 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
         const { drawWPlaneContent } = await import('../js/rendering/renderer.js');
         drawWPlaneContent();
         assert.equal(counters.clear, 1);
+        assert.equal(context.wPlanarTransformedLayerCacheList[0].canvas.width, 640);
+        assert.equal(context.wPlanarTransformedLayerCacheList[0].canvas.height, 480);
         drawWPlaneContent();
         assert.equal(counters.clear, 1, 'unchanged state should hit the layer cache');
 

@@ -77,11 +77,23 @@ const LINEAR_SOURCE_POINT_SET_ROLES = new Set([
 ]);
 
 const PATH2D_MIN_POINTS = 64;
-const STATIC_CURVE_TOLERANCE_PX_SQ = 0.22;
-const INTERACTION_CURVE_TOLERANCE_PX_SQ = 1.45;
-const STATIC_MAX_SEGMENT_PX_SQ = 24 * 24;
-const INTERACTION_MAX_SEGMENT_PX_SQ = 56 * 56;
-const MAX_TRANSFORM_SUBDIVISION_DEPTH = 9;
+const STATIC_CURVE_TOLERANCE_PX_SQ = 0.001;
+const INTERACTION_CURVE_TOLERANCE_PX_SQ = 1;
+const STATIC_MAX_SEGMENT_PX_SQ = 4 * 4;
+const INTERACTION_MAX_SEGMENT_PX_SQ = 36 * 36;
+const MAX_TRANSFORM_SUBDIVISION_DEPTH = 16;
+
+// One transformed-grid geometry pipeline is shared by every W-plane stage.
+// Bulk evaluators accelerate sampling where available; all lines then use the
+// same clipping, discontinuity detection, simplification, and cache semantics.
+const TRANSFORM_GRID_RENDER_LIMIT_HEADROOM = 1.25;
+const TRANSFORM_GRID_STATIC_TOLERANCE_SQ = 0.01;
+const TRANSFORM_GRID_INTERACTION_TOLERANCE_SQ = 0.36;
+const TRANSFORM_GRID_OUTPUT_SAMPLES = Math.max(DEFAULT_POINTS_PER_LINE, 512);
+const TRANSFORM_GRID_INTERACTION_OUTPUT_SAMPLES = Math.max(DEFAULT_POINTS_PER_LINE, 256);
+let transformGridSampleBuffer = new Float64Array(0);
+let transformGridGeometryBuffer = new Float64Array(0);
+const transformGridGeometryCaches = new WeakMap();
 
 function getPathConstructorForContext(ctx) {
     const PathCtor = typeof Path2D === 'function' ? Path2D : null;
@@ -566,6 +578,331 @@ function evaluateProfilePoint(mappedTransform, re, im, evalContext = null) {
     ) || INVALID_COMPLEX_POINT;
 }
 
+function evaluateProfilePointInto(mappedTransform, re, im, evalContext, out, offset = 0) {
+    const raw = mappedTransform && mappedTransform.evaluateInto;
+    if (typeof raw === 'function') {
+        raw(re, im, out, offset, evalContext);
+        return isFiniteNumber(out[offset]) && isFiniteNumber(out[offset + 1]);
+    }
+
+    const mapped = evaluateProfilePoint(mappedTransform, re, im, evalContext);
+    out[offset] = mapped.re;
+    out[offset + 1] = mapped.im;
+    return isRenderableComplexPoint(mapped);
+}
+
+function getTransformGridTuning() {
+    const interacting = isViewportManipulationActive();
+    return {
+        toleranceSq: interacting ? TRANSFORM_GRID_INTERACTION_TOLERANCE_SQ : TRANSFORM_GRID_STATIC_TOLERANCE_SQ,
+        outputSamples: interacting ? TRANSFORM_GRID_INTERACTION_OUTPUT_SAMPLES : TRANSFORM_GRID_OUTPUT_SAMPLES
+    };
+}
+
+// The public render limit is an off-screen numerical safety guard, not a visual
+// clip rectangle. Bucket it with modest headroom so translating the output
+// viewport does not invalidate otherwise identical transformed geometry.
+function getTransformGridRenderSafetyLimit(renderLimit) {
+    if (!(renderLimit > 0) || !Number.isFinite(renderLimit)) return renderLimit;
+    const requested = renderLimit * TRANSFORM_GRID_RENDER_LIMIT_HEADROOM;
+    return 2 ** Math.ceil(Math.log2(requested));
+}
+
+function ensureTransformGridSampleBuffer(pointCount) {
+    const requiredValues = pointCount * 2;
+    if (transformGridSampleBuffer.length < requiredValues) {
+        let capacity = Math.max(2048, transformGridSampleBuffer.length || 2048);
+        while (capacity < requiredValues) capacity <<= 1;
+        transformGridSampleBuffer = new Float64Array(capacity);
+    }
+    return transformGridSampleBuffer;
+}
+
+function mappedChordFitsTolerance(buffer, startIndex, endIndex, scaleX, scaleY, toleranceSq) {
+    if (endIndex <= startIndex + 1) return true;
+    const startAt = startIndex * 2;
+    const endAt = endIndex * 2;
+    const ax = buffer[startAt] * scaleX;
+    const ay = -buffer[startAt + 1] * scaleY;
+    const bx = buffer[endAt] * scaleX;
+    const by = -buffer[endAt + 1] * scaleY;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    for (let index = startIndex + 1; index < endIndex; index++) {
+        const pointAt = index * 2;
+        const px = buffer[pointAt] * scaleX;
+        const py = -buffer[pointAt + 1] * scaleY;
+        let distanceSq;
+        if (lenSq <= DEGENERATE_SEGMENT_EPSILON) {
+            const ex = px - ax;
+            const ey = py - ay;
+            distanceSq = ex * ex + ey * ey;
+        } else {
+            let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+            if (t < 0) t = 0;
+            else if (t > 1) t = 1;
+            const ex = px - (ax + t * dx);
+            const ey = py - (ay + t * dy);
+            distanceSq = ex * ex + ey * ey;
+        }
+        if (distanceSq > toleranceSq) return false;
+    }
+    return true;
+}
+
+function ensureTransformGridGeometryBuffer(valueCount) {
+    if (transformGridGeometryBuffer.length < valueCount) {
+        let capacity = Math.max(2048, transformGridGeometryBuffer.length || 2048);
+        while (capacity < valueCount) capacity <<= 1;
+        transformGridGeometryBuffer = new Float64Array(capacity);
+    }
+    return transformGridGeometryBuffer;
+}
+
+function appendMappedIndexToCompressed(source, index, dest, destOffset) {
+    const at = index * 2;
+    dest[destOffset] = source[at];
+    dest[destOffset + 1] = source[at + 1];
+    return destOffset + 2;
+}
+
+function appendSimplifiedMappedRangeToBuffer(source, startIndex, endIndex, scaleX, scaleY, toleranceSq, dest, destOffset) {
+    if (endIndex < startIndex) return destOffset;
+    destOffset = appendMappedIndexToCompressed(source, startIndex, dest, destOffset);
+    if (endIndex === startIndex) return destOffset;
+    const coarseSpan = 32;
+    const fineSpan = 8;
+    let blockStart = startIndex;
+    while (blockStart < endIndex) {
+        const blockEnd = Math.min(endIndex, blockStart + coarseSpan);
+        if (mappedChordFitsTolerance(source, blockStart, blockEnd, scaleX, scaleY, toleranceSq)) {
+            destOffset = appendMappedIndexToCompressed(source, blockEnd, dest, destOffset);
+            blockStart = blockEnd;
+            continue;
+        }
+        let fineStart = blockStart;
+        while (fineStart < blockEnd) {
+            const fineEnd = Math.min(blockEnd, fineStart + fineSpan);
+            if (mappedChordFitsTolerance(source, fineStart, fineEnd, scaleX, scaleY, toleranceSq)) {
+                destOffset = appendMappedIndexToCompressed(source, fineEnd, dest, destOffset);
+            } else {
+                for (let index = fineStart + 1; index <= fineEnd; index++) {
+                    destOffset = appendMappedIndexToCompressed(source, index, dest, destOffset);
+                }
+            }
+            fineStart = fineEnd;
+        }
+        blockStart = blockEnd;
+    }
+    return destOffset;
+}
+
+function buildOriginRelativePath(PathCtor, points, scaleX, scaleY) {
+    if (!PathCtor) return null;
+    const path = new PathCtor();
+    let open = false;
+    for (let at = 0; at < points.length; at += 2) {
+        const re = points[at];
+        const im = points[at + 1];
+        if (!Number.isFinite(re) || !Number.isFinite(im)) {
+            open = false;
+            continue;
+        }
+        const x = re * scaleX;
+        const y = -im * scaleY;
+        if (open) path.lineTo(x, y);
+        else { path.moveTo(x, y); open = true; }
+    }
+    return path;
+}
+
+function createTransformGridGeometry(points) {
+    return { points, path: null, pathConstructor: null };
+}
+
+function drawTransformGridGeometry(ctx, planeParams, geometry, color) {
+    const points = geometry?.points || geometry;
+    if (!points) return;
+    ctx.strokeStyle = color;
+    configureRoundStroke(ctx);
+
+    const PathCtor = getPathConstructorForContext(ctx);
+    if (PathCtor && geometry && typeof ctx.translate === 'function') {
+        if (!geometry.path || geometry.pathConstructor !== PathCtor) {
+            geometry.path = buildOriginRelativePath(PathCtor, points, planeParams.scale.x, planeParams.scale.y);
+            geometry.pathConstructor = PathCtor;
+        }
+        ctx.save();
+        try {
+            ctx.translate(planeParams.origin.x, planeParams.origin.y);
+            ctx.stroke(geometry.path);
+        } finally {
+            ctx.restore();
+        }
+        return;
+    }
+
+    const path = PathCtor ? new PathCtor() : ctx;
+    if (!PathCtor) ctx.beginPath();
+    const originX = planeParams.origin.x;
+    const originY = planeParams.origin.y;
+    const scaleX = planeParams.scale.x;
+    const scaleY = planeParams.scale.y;
+    let open = false;
+    let drew = false;
+    for (let at = 0; at < points.length; at += 2) {
+        const re = points[at];
+        const im = points[at + 1];
+        if (!Number.isFinite(re) || !Number.isFinite(im)) {
+            open = false;
+            continue;
+        }
+        const x = originX + re * scaleX;
+        const y = originY - im * scaleY;
+        if (open) path.lineTo(x, y);
+        else { path.moveTo(x, y); open = true; }
+        drew = true;
+    }
+    if (PathCtor) {
+        if (drew) ctx.stroke(path);
+    } else if (drew) ctx.stroke();
+}
+
+function getTransformGridGeometryCache(mappedTransform) {
+    const cacheOwner = mappedTransform?.renderCacheOwner || mappedTransform;
+    let cache = transformGridGeometryCaches.get(cacheOwner);
+    if (!cache) {
+        cache = new Map();
+        transformGridGeometryCaches.set(cacheOwner, cache);
+    }
+    return cache;
+}
+
+function transformGridGeometryKey(start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, toleranceSq) {
+    return `${sampleCount}|${start.re}|${start.im}|${end.re}|${end.im}|${planeParams.scale.x}|${planeParams.scale.y}|${renderLimit}|${jumpThresholdSq}|${toleranceSq}`;
+}
+
+function fillTransformGridSamples(mappedTransform, start, end, sampleCount, buffer) {
+    const lineEvaluator = mappedTransform?.evaluateLineInto;
+    const pointCount = sampleCount + 1;
+    const stepRe = (end.re - start.re) / sampleCount;
+    const stepIm = (end.im - start.im) / sampleCount;
+    if (typeof lineEvaluator === 'function') {
+        lineEvaluator(start.re, start.im, stepRe, stepIm, pointCount, buffer, 0);
+        return;
+    }
+
+    const evalContext = { re: 0, im: 0 };
+    for (let index = 0; index < pointCount; index++) {
+        const re = index === sampleCount ? end.re : start.re + stepRe * index;
+        const im = index === sampleCount ? end.im : start.im + stepIm * index;
+        evaluateProfilePointInto(mappedTransform, re, im, evalContext, buffer, index * 2);
+    }
+}
+
+function buildTransformGridGeometry(mappedTransform, start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, toleranceSq) {
+    const pointCount = sampleCount + 1;
+    const buffer = ensureTransformGridSampleBuffer(pointCount);
+    const compressed = ensureTransformGridGeometryBuffer(pointCount * 4 + 2);
+    fillTransformGridSamples(mappedTransform, start, end, sampleCount, buffer);
+
+    const scaleX = planeParams.scale.x;
+    const scaleY = planeParams.scale.y;
+    const stepRe = (end.re - start.re) / sampleCount;
+    const stepIm = (end.im - start.im) / sampleCount;
+    const hasBranchCuts = surfaceStageHasBranches(appState);
+    let runStart = -1;
+    let previousRe = 0;
+    let previousIm = 0;
+    let previousSourceRe = 0;
+    let previousSourceIm = 0;
+    let destOffset = 0;
+    for (let i = 0; i <= pointCount; i++) {
+        let usable = i < pointCount;
+        let re = 0;
+        let im = 0;
+        let sourceRe = 0;
+        let sourceIm = 0;
+        if (usable) {
+            const at = i * 2;
+            re = buffer[at];
+            im = buffer[at + 1];
+            sourceRe = i === sampleCount ? end.re : start.re + stepRe * i;
+            sourceIm = i === sampleCount ? end.im : start.im + stepIm * i;
+            usable = Number.isFinite(re) && Number.isFinite(im) && Math.abs(re) <= renderLimit && Math.abs(im) <= renderLimit;
+            if (usable && runStart >= 0) {
+                const dRe = re - previousRe;
+                const dIm = im - previousIm;
+                usable = dRe * dRe + dIm * dIm <= jumpThresholdSq && (!hasBranchCuts || !branchCutCrossingForSegment(
+                    { re: previousSourceRe, im: previousSourceIm },
+                    { re: sourceRe, im: sourceIm },
+                    appState.branchCutType,
+                    appState.branchCutAngle,
+                    appState.branchCutPoints
+                ));
+            }
+        }
+        if (!usable) {
+            if (runStart >= 0) {
+                if (destOffset > 0) {
+                    compressed[destOffset++] = NaN;
+                    compressed[destOffset++] = NaN;
+                }
+                destOffset = appendSimplifiedMappedRangeToBuffer(buffer, runStart, i - 1, scaleX, scaleY, toleranceSq, compressed, destOffset);
+                runStart = -1;
+            }
+            if (i < pointCount && Number.isFinite(re) && Number.isFinite(im) && Math.abs(re) <= renderLimit && Math.abs(im) <= renderLimit) {
+                runStart = i;
+                previousRe = re;
+                previousIm = im;
+                previousSourceRe = sourceRe;
+                previousSourceIm = sourceIm;
+            }
+            continue;
+        }
+        if (runStart < 0) runStart = i;
+        previousRe = re;
+        previousIm = im;
+        previousSourceRe = sourceRe;
+        previousSourceIm = sourceIm;
+    }
+
+    return compressed.slice(0, destOffset);
+}
+
+function drawTransformedLinearPointSet(ctx, planeParams, mappedTransform, pointSet, color) {
+    const endpoints = getPointSetEndpoints(pointSet);
+    if (!endpoints) return false;
+
+    const start = endpoints.start;
+    const end = endpoints.end;
+    const renderLimit = getTransformGridRenderSafetyLimit(getPlanarTransformRenderLimit(planeParams));
+    const jumpThresholdSq = getViewportJumpThresholdSq(planeParams);
+    const tuning = getTransformGridTuning();
+    const requestedFloor = Number.isFinite(mappedTransform.lineSampleFloor) ? mappedTransform.lineSampleFloor : 0;
+    const sampleCount = Math.max(tuning.outputSamples, requestedFloor);
+    const cache = getTransformGridGeometryCache(mappedTransform);
+    const cacheKey = transformGridGeometryKey(
+        start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, tuning.toleranceSq
+    );
+    const cached = cache.get(cacheKey);
+    if (cached) {
+        drawTransformGridGeometry(ctx, planeParams, cached, color);
+        return true;
+    }
+
+    const points = buildTransformGridGeometry(
+        mappedTransform, start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, tuning.toleranceSq
+    );
+    if (cache.size >= 2048) cache.clear();
+    const entry = createTransformGridGeometry(points);
+    cache.set(cacheKey, entry);
+    drawTransformGridGeometry(ctx, planeParams, entry, color);
+    return true;
+}
+
+
 function getViewportJumpThresholdSq(planeParams) {
     const xRange = getPlaneXRanges(planeParams);
     const yRange = getPlaneYRanges(planeParams);
@@ -900,7 +1237,19 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
         }
 
         for (let i = startIndex; i < endIndex; i++) {
-            const preparedPointSet = preparePointSet(pointSets[i], transformFunc, planeParams);
+            const sourcePointSet = pointSets[i];
+            if (mappedTransform && sourcePointSet &&
+                LINEAR_SOURCE_POINT_SET_ROLES.has(sourcePointSet.role) && Array.isArray(sourcePointSet.points)) {
+                const color = colorResolver(sourcePointSet);
+                const lineWidth = lineWidthResolver(sourcePointSet);
+                if (color && lineWidth) {
+                    ctx.lineWidth = lineWidth;
+                    drawTransformedLinearPointSet(ctx, planeParams, mappedTransform, sourcePointSet, color);
+                }
+                continue;
+            }
+
+            const preparedPointSet = preparePointSet(sourcePointSet, transformFunc, planeParams);
 
             if (!preparedPointSet || !Array.isArray(preparedPointSet.points)) {
                 continue;

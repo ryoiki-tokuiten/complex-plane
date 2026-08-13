@@ -3,11 +3,27 @@ import assert from 'node:assert/strict';
 
 import {
     calculateDynamicPointsForSegment,
+    drawPointSetCollectionOnPlane,
     drawPlanarTransformedLine,
     generateLinearSegmentPoints,
     getPointSetEndpoints
 } from '../js/rendering/draw-planar.js';
+import { getMappedTransformProfile, transformFunctions } from '../js/math-utils.js';
 import { state } from '../js/store/state.js';
+
+class LineCaptureContext {
+    constructor() {
+        this.paths = [];
+        this.currentPath = [];
+    }
+    save() {}
+    restore() {}
+    beginPath() { this.currentPath = []; }
+    moveTo(x, y) { this.currentPath.push(x, y); }
+    lineTo(x, y) { this.currentPath.push(x, y); }
+    stroke() { this.paths.push(this.currentPath.slice()); }
+    setLineDash() {}
+}
 
 test('linear segment generation returns fresh mutable point arrays', () => {
     const start = { re: 0, im: 0 };
@@ -167,5 +183,40 @@ test('transformed polylines emit identical subpaths with and without Path2D', ()
         else globalThis.CanvasRenderingContext2D = previousCanvasContext;
         if (previousOffscreenContext === undefined) delete globalThis.OffscreenCanvasRenderingContext2D;
         else globalThis.OffscreenCanvasRenderingContext2D = previousOffscreenContext;
+    }
+});
+
+test('transformed grid sampling cannot certify oscillatory sin lines as flat', () => {
+    const previousFunction = state.currentFunction;
+    state.currentFunction = 'sin';
+
+    try {
+        const planeParams = {
+            width: 200,
+            height: 160,
+            origin: { x: 100, y: 80 },
+            scale: { x: 50, y: 50 },
+            currentVisXRange: [-2, 2],
+            currentVisYRange: [-2, 2]
+        };
+        const capture = new LineCaptureContext();
+        const pointSet = {
+            role: 'grid-horizontal',
+            color: '#fff',
+            lineWidth: 1,
+            points: [{ re: 0, im: 0 }, { re: 32 * Math.PI, im: 0 }]
+        };
+
+        drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
+            transformFunc: transformFunctions.sin,
+            transformProfile: getMappedTransformProfile('sin', transformFunctions.sin)
+        });
+
+        const points = capture.paths.flat();
+        const xValues = points.filter((_value, index) => index % 2 === 0);
+        assert.ok(xValues.length > 64);
+        assert.ok(Math.max(...xValues) - Math.min(...xValues) > 90);
+    } finally {
+        state.currentFunction = previousFunction;
     }
 });

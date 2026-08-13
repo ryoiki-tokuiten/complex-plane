@@ -11,15 +11,11 @@ import {
 import { MAX_POLY_DEGREE, ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
     ORIGIN_GLOW_DURATION_MS,
+    PLANAR_CANVAS_SUPERSAMPLE,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { resolveActiveMap } from '../math/active-map.js';
-import {
-    drawWithWebGLCapture,
-    drawPlanarTransformedShapeHybrid,
-    drawPlanarInputShapeHybrid
-} from './webgl-planar.js';
 import { buildRasterSurfaceMesh, getImageRenderChainIndex } from './draw-image-webgl.js';
 import {
     getRasterSourceForShape,
@@ -44,6 +40,7 @@ import {
     drawCriticalPointMarker
 } from './draw-primitives.js';
 import {
+    drawPlanarInputShape,
     drawPlanarTransformedShape,
     createPlanarTransformedShapeRenderJob,
     drawPlanarProbe,
@@ -131,6 +128,7 @@ let wPlanarRenderDeadline = Infinity;
 let wPlanarWorkPerformed = false;
 
 const W_PLANAR_FRAME_BUDGET_MS = 8;
+const W_PLANAR_POINT_SET_BATCH_SIZE = 8;
 
 const zPlanarInputLayerCache = createLayerCache();
 const zFlowLayerCache = createLayerCache();
@@ -253,15 +251,10 @@ function syncWRenderContext() {
     else context.wPlanarTransformedLayerCacheList = wPlanarTransformedLayerCacheList;
 }
 
-function drawPlaneLayer(ctx, planeParams, planeKey, drawCallback) {
-    if (!ctx || !planeParams || typeof drawCallback !== 'function') {
+function drawCanvasLayer(ctx, drawCallback) {
+    if (!ctx || typeof drawCallback !== 'function') {
         return false;
     }
-
-    if (drawWithWebGLCapture(ctx, planeParams, planeKey, drawCallback)) {
-        return true;
-    }
-
     drawCallback(ctx);
     return true;
 }
@@ -280,40 +273,70 @@ function withCanvasState(ctx, draw) {
     }
 }
 
-// The cache protocol is synchronous and allocation-free on steady-state hits.
-function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, render, renderDirect = render) {
+function compositePlanarLayer(cache, targetCtx, planeParams) {
+    targetCtx.save?.();
+    try {
+        if (targetCtx.imageSmoothingEnabled !== undefined) targetCtx.imageSmoothingEnabled = true;
+        if (targetCtx.imageSmoothingQuality !== undefined) targetCtx.imageSmoothingQuality = 'high';
+        targetCtx.drawImage(
+            cache.canvas,
+            0, 0, cache.canvas.width, cache.canvas.height,
+            0, 0, planeParams.width, planeParams.height
+        );
+    } finally {
+        targetCtx.restore?.();
+    }
+}
+
+function preparePlanarLayer(cache, planeParams, renderScale, clear) {
+    const width = Math.max(1, Math.ceil(planeParams.width * renderScale));
+    const height = Math.max(1, Math.ceil(planeParams.height * renderScale));
+    const resized = cache.canvas.width !== width || cache.canvas.height !== height;
+    if (resized) {
+        cache.canvas.width = width;
+        cache.canvas.height = height;
+        invalidateCache(cache);
+    }
+    if (clear) {
+        cache.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        cache.ctx.clearRect(0, 0, width, height);
+    }
+    cache.ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+    return resized;
+}
+
+// Every cached and uncached planar vector layer uses this same supersampled Canvas path.
+function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, render, renderUncached = render) {
     if (!targetCtx || !planeParams || typeof render !== 'function') return true;
+    const renderScale = isRasterInputShape(state.currentInputShape) ? 1 : PLANAR_CANVAS_SUPERSAMPLE;
 
     if (enabled && cache?.canvas && cache.key === cacheKey) {
-        targetCtx.drawImage(cache.canvas, 0, 0);
+        compositePlanarLayer(cache, targetCtx, planeParams);
         return true;
     }
-    if (!enabled) {
-        invalidateCache(cache);
-        return renderDirect(targetCtx, cacheKey, true) !== false;
-    }
-    if (!cache || planeParams.width <= 0 || planeParams.height <= 0 || typeof document === 'undefined') {
-        return renderDirect(targetCtx, cacheKey, true) !== false;
-    }
+    if (!cache || planeParams.width <= 0 || planeParams.height <= 0 || typeof document === 'undefined') return false;
 
     if (!cache.canvas) {
         cache.canvas = document.createElement('canvas');
         cache.ctx = cache.canvas.getContext('2d');
         if (!cache.ctx) {
             cache.canvas = null;
-            return renderDirect(targetCtx, cacheKey, true) !== false;
+            return false;
         }
     }
-    if (cache.canvas.width !== planeParams.width || cache.canvas.height !== planeParams.height) {
-        cache.canvas.width = planeParams.width;
-        cache.canvas.height = planeParams.height;
+
+    if (!enabled) {
         invalidateCache(cache);
+        preparePlanarLayer(cache, planeParams, renderScale, true);
+        const complete = renderUncached(cache.ctx, cacheKey, true) !== false;
+        compositePlanarLayer(cache, targetCtx, planeParams);
+        return complete;
     }
 
-    const fresh = cache.pendingKey !== cacheKey;
+    const resized = preparePlanarLayer(cache, planeParams, renderScale, false);
+    const fresh = resized || cache.pendingKey !== cacheKey;
     if (fresh) {
-        cache.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        cache.ctx.clearRect(0, 0, cache.canvas.width, cache.canvas.height);
+        preparePlanarLayer(cache, planeParams, renderScale, true);
         cache.pendingKey = cacheKey;
     }
 
@@ -325,7 +348,7 @@ function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, re
         cache.key = null;
     }
 
-    targetCtx.drawImage(cache.canvas, 0, 0);
+    compositePlanarLayer(cache, targetCtx, planeParams);
     return complete;
 }
 
@@ -727,7 +750,7 @@ function renderZPlaneFlowLayer(targetCtx, planeParams, map, cacheMeta = null) {
     }
 
     let complete = true;
-    const rendered = drawPlaneLayer(targetCtx, planeParams, 'z', layerCtx => {
+    const rendered = drawCanvasLayer(targetCtx, layerCtx => {
         complete = drawStreamlinesOnZPlane(layerCtx, planeParams, state, map, {
             cacheKey: cacheMeta?.cacheKey || null,
             fresh: cacheMeta ? !!cacheMeta.fresh : true
@@ -762,7 +785,7 @@ export function drawZPlaneContent(timestamp) {
         if (!zCtx || !zPlaneParams) return;
         const sphereParams = sphereViewParams.z;
         fillCanvasBackground(zCtx, zPlaneParams);
-        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+        drawCanvasLayer(zCtx, layerCtx => {
             drawRiemannSphereBase(layerCtx, sphereParams);
             drawSphereGridAndShape(layerCtx, sphereParams, false);
             drawDynamicSphere(layerCtx, sphereParams, { isWPlane: false });
@@ -844,7 +867,7 @@ export function drawZPlaneContent(timestamp) {
             zPlaneParams,
             buildPlanarLayerCacheKey(false),
             shouldUseZPlanarInputLayerCache(),
-            cacheCtx => drawPlanarInputShapeHybrid(cacheCtx, zPlaneParams, 'z')
+            cacheCtx => drawPlanarInputShape(cacheCtx, zPlaneParams)
         );
         if ((state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare') || surfaceStageHasBranches(state)) {
             drawPlanarInputOverlays(zCtx, zPlaneParams);
@@ -854,12 +877,12 @@ export function drawZPlaneContent(timestamp) {
     if (state.dynamicPlotting?.enabled) drawDynamicZPlane(zCtx, zPlaneParams);
     if (!state.navigationModeEnabled) {
         if (state.showZerosPoles) {
-            drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+            drawCanvasLayer(zCtx, layerCtx => {
                 drawZerosAndPolesMarkers(layerCtx, zPlaneParams);
             });
         }
         if (state.showCriticalPoints && state.criticalPoints?.length) {
-            drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+            drawCanvasLayer(zCtx, layerCtx => {
                 drawCriticalMarkers(layerCtx, zPlaneParams, state.criticalPoints, COLOR_CRITICAL_POINT_Z);
             });
         }
@@ -867,7 +890,7 @@ export function drawZPlaneContent(timestamp) {
     if (state.graphViewEnabled) drawGraphSelectionOverlay(zCtx, zPlaneParams);
     if (state.conformalGridEnabled) {
         const indicatrices = getConformalIndicatrixData(map);
-        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+        drawCanvasLayer(zCtx, layerCtx => {
             drawConformalIndicatrices(layerCtx, zPlaneParams, indicatrices, 'source');
         });
     }
@@ -875,12 +898,12 @@ export function drawZPlaneContent(timestamp) {
         drawTaylorConvergenceOverlay(zCtx, zPlaneParams);
     }
     if (state.probeActive && !state.navigationModeEnabled && !isPanning(runtime.interaction.panZ)) {
-        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => {
+        drawCanvasLayer(zCtx, layerCtx => {
             drawPlanarProbe(layerCtx, zPlaneParams);
         });
     }
     if (state.preimageExplorerEnabled && state.preimageRoots.length) {
-        drawPlaneLayer(zCtx, zPlaneParams, 'z', layerCtx => drawPreimageMarkers(layerCtx, zPlaneParams, state.preimageRoots));
+        drawCanvasLayer(zCtx, layerCtx => drawPreimageMarkers(layerCtx, zPlaneParams, state.preimageRoots));
     }
 
     if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
@@ -993,12 +1016,12 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 cacheKey,
                 shouldUseWPlanarTransformedLayerCache(),
                 drawTaylorApproximationLayer,
-                targetCtx => drawPlaneLayer(targetCtx, wPlaneParams, 'w', drawTaylorApproximationLayer)
+                targetCtx => drawCanvasLayer(targetCtx, drawTaylorApproximationLayer)
             );
         } else if (isRiemannW) {
             const sphereParams = sphereViewParams.w;
             fillCanvasBackground(wCtx, wPlaneParams);
-            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+            drawCanvasLayer(wCtx, layerCtx => {
                 drawRiemannSphereBase(layerCtx, sphereParams);
                 drawSphereGridAndShape(layerCtx, sphereParams, true, map.evaluate);
                 drawDynamicSphere(layerCtx, sphereParams, {
@@ -1015,7 +1038,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             drawDynamicWPlane(wCtx, wPlaneParams, map.evaluate, index);
         }
         if (!isRiemannW && state.preimageExplorerEnabled && state.preimageTarget) {
-            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+            drawCanvasLayer(wCtx, layerCtx => {
                 drawPreimageMarkers(layerCtx, wPlaneParams, [state.preimageTarget], true);
                 if (state.preimageStatus) {
                     layerCtx.fillStyle = '#ffffff';
@@ -1025,19 +1048,19 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             });
         }
         if (!isRiemannW && state.continuationValues.length > 1) {
-            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => drawContinuationValues(layerCtx, wPlaneParams));
+            drawCanvasLayer(wCtx, layerCtx => drawContinuationValues(layerCtx, wPlaneParams));
         }
         if (state.showCriticalPoints
             && !state.navigationModeEnabled
             && !isRiemannW
             && Array.isArray(state.criticalValues)
             && state.criticalValues.length > 0) {
-            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+            drawCanvasLayer(wCtx, layerCtx => {
                 drawCriticalMarkers(layerCtx, wPlaneParams, state.criticalValues, COLOR_CRITICAL_VALUE_W);
             });
         }
         if (state.probeActive && !state.navigationModeEnabled) {
-            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+            drawCanvasLayer(wCtx, layerCtx => {
                 if (isRiemannW) {
                     drawSphereProbeAndNeighborhood(
                         layerCtx,
@@ -1053,7 +1076,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
         }
         if (state.conformalGridEnabled && !isRiemannW) {
             const indicatrices = getConformalIndicatrixData(map);
-            drawPlaneLayer(wCtx, wPlaneParams, 'w', layerCtx => {
+            drawCanvasLayer(wCtx, layerCtx => {
                 drawConformalIndicatrices(layerCtx, wPlaneParams, indicatrices, 'mapped');
             });
         }
@@ -1143,7 +1166,7 @@ function renderThreeWPlane(map, stageIndex) {
         const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
             currentFunction: state.currentFunction,
             zetaContinuationEnabled: state.zetaContinuationEnabled,
-            curvePoints: 250,
+            curvePoints: 1000,
             gridDensity: state.gridDensity
         });
 
@@ -1284,11 +1307,6 @@ function drawTaylorApproximationLayer(ctx) {
 function drawWTransformedShape(index, map, targetCtx, options = null) {
     const stageIndex = Number.isFinite(map?.stage) ? map.stage : index;
     const drawOptions = { ...options, index: stageIndex, map };
-
-    if (index === 0) {
-        return drawPlanarTransformedShapeHybrid(targetCtx, wPlaneParams, map.evaluate, 'w', map, drawOptions);
-    }
-
     return drawPlanarTransformedShape(targetCtx, wPlaneParams, map.evaluate, drawOptions);
 }
 
@@ -1315,7 +1333,7 @@ function drawWTransformedShapeChunk(index, map, targetCtx, fresh) {
     while (cache.nextPointSet < pointSets.length &&
         (!wPlanarWorkPerformed || performance.now() < wPlanarRenderDeadline)) {
         const startIndex = cache.nextPointSet;
-        const endIndex = startIndex + 1;
+        const endIndex = Math.min(pointSets.length, startIndex + W_PLANAR_POINT_SET_BATCH_SIZE);
 
         drawWTransformedShape(index, map, targetCtx, {
             renderJob,

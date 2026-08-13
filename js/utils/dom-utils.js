@@ -2,7 +2,6 @@ import { state, context, zPlaneParams, wPlaneParams, sphereViewParams, wPlaneIni
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT, SPHERE_INITIAL_ROT_X, SPHERE_INITIAL_ROT_Y, SPHERE_VIEW_RADIUS_FACTOR } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
-import { initializeWebGLLineSupport } from '../rendering/webgl-planar.js';
 import { initializeWebGLDomainColoringSupport } from '../rendering/webgl-domain-coloring.js';
 import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
 import { eventBus } from '../store/events.js';
@@ -38,7 +37,6 @@ export function setupDOMReferences() {
     wCtx.imageSmoothingEnabled = true;
     wCtx.imageSmoothingQuality = 'high';
 
-    initializeWebGLLineSupport();
     initializeWebGLDomainColoringSupport();
 
     registerControls(document, controls);

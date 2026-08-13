@@ -353,13 +353,6 @@ export const context = {
 
     controls: {},
 
-    webglSupport: {
-        available: false,
-        reason: 'not-initialized',
-        renderers: { z: null, w: null },
-        diagnostics: { z: null, w: null }
-    },
-
     webglDomainColorSupport: {
         available: false,
         reason: 'not-initialized',

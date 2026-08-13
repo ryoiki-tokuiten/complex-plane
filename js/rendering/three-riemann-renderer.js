@@ -33,6 +33,62 @@ function isInsideRange(value, range) {
     return !range || (value >= range[0] && value <= range[1]);
 }
 
+const FOLD_MAX_SUBDIVISION_DEPTH = 12;
+const FOLD_CURVE_TOLERANCE_RATIO = 0.00005;
+const FOLD_MAX_EXTRA_POINTS_PER_LINE = 2048;
+
+function mapFoldPoint(sourcePoint, transform) {
+    if (!Number.isFinite(sourcePoint?.re) || !Number.isFinite(sourcePoint?.im)) return null;
+    try {
+        const mapped = transform(sourcePoint.re, sourcePoint.im);
+        return Number.isFinite(mapped?.re) && Number.isFinite(mapped?.im) ? mapped : null;
+    } catch { return null; }
+}
+
+function appendRefinedFoldSegment(output, p0, p1, transform, outputXRange, outputYRange,
+    jumpThresholdSq, curveToleranceSq, budget, a, b, depth = 0) {
+    if (!Number.isFinite(p0?.re) || !Number.isFinite(p0?.im) || !Number.isFinite(p1?.re) || !Number.isFinite(p1?.im)) {
+        output.push(p1);
+        return;
+    }
+    const m = { re: (p0.re + p1.re) * 0.5, im: (p0.im + p1.im) * 0.5 };
+    const mid = mapFoldPoint(m, transform);
+    const visible = point => point && isInsideRange(point.re, outputXRange) && isInsideRange(point.im, outputYRange);
+    const jump = a && b ? (a.re - b.re) ** 2 + (a.im - b.im) ** 2 > jumpThresholdSq : false;
+    const discontinuous = !mid || visible(mid) !== visible(a) || visible(mid) !== visible(b) || jump;
+    if (discontinuous) { output.push(null, p1); return; }
+    if (!visible(a) && !visible(b) && !visible(mid)) { output.push(null, p1); return; }
+    const curveErrorSq = a && b && mid
+        ? (mid.re - (a.re + b.re) * 0.5) ** 2 + (mid.im - (a.im + b.im) * 0.5) ** 2
+        : Infinity;
+    if (curveErrorSq <= curveToleranceSq || budget.remaining <= 0) { output.push(p1); return; }
+    if (depth >= FOLD_MAX_SUBDIVISION_DEPTH) { output.push(p1); return; }
+    budget.remaining--;
+    appendRefinedFoldSegment(output, p0, m, transform, outputXRange, outputYRange,
+        jumpThresholdSq, curveToleranceSq, budget, a, mid, depth + 1);
+    appendRefinedFoldSegment(output, m, p1, transform, outputXRange, outputYRange,
+        jumpThresholdSq, curveToleranceSq, budget, mid, b, depth + 1);
+}
+
+function refineFoldLinePoints(points, transform, outputXRange, outputYRange) {
+    if (!Array.isArray(points) || points.length < 2) return points;
+    const spanX = outputXRange ? outputXRange[1] - outputXRange[0] : 1;
+    const spanY = outputYRange ? outputYRange[1] - outputYRange[0] : 1;
+    const jumpThresholdSq = 4 * (spanX * spanX + spanY * spanY);
+    const curveToleranceSq = (Math.max(spanX, spanY) * FOLD_CURVE_TOLERANCE_RATIO) ** 2;
+    const budget = { remaining: Math.min(points.length * 3, FOLD_MAX_EXTRA_POINTS_PER_LINE) };
+    const refined = [points[0]];
+    let previousMapped = mapFoldPoint(points[0], transform);
+    for (let index = 1; index < points.length; index += 1) {
+        const mapped = mapFoldPoint(points[index], transform);
+        appendRefinedFoldSegment(refined, points[index - 1], points[index], transform,
+            outputXRange, outputYRange, jumpThresholdSq, curveToleranceSq,
+            budget, previousMapped, mapped);
+        previousMapped = mapped;
+    }
+    return refined;
+}
+
 export function buildGridFoldLineData(pointSets, transform, options = {}) {
     if (!Array.isArray(pointSets) || typeof transform !== 'function') return null;
 
@@ -92,7 +148,7 @@ export function buildGridFoldLineData(pointSets, transform, options = {}) {
             line = [];
         };
 
-        for (const sourcePoint of pointSet.points) {
+        for (const sourcePoint of refineFoldLinePoints(pointSet.points, transform, outputXRange, outputYRange)) {
             if (!Number.isFinite(sourcePoint?.re) || !Number.isFinite(sourcePoint?.im)) {
                 flushLine();
                 continue;
@@ -244,8 +300,8 @@ export class ThreeRiemannRenderer {
 
         // Intrinsic Sphere Latitude/Longitude Grid
         const gridDensity = state.gridDensity !== undefined ? state.gridDensity : 12;
-        const widthSegments = Math.max(8, gridDensity * 2);
-        const heightSegments = Math.max(8, gridDensity);
+        const widthSegments = Math.max(8, gridDensity * 4);
+        const heightSegments = Math.max(8, gridDensity*2);
         
         const sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, widthSegments, heightSegments).translate(0, SPHERE_RADIUS, 0);
         const wireframeGeo = new THREE.WireframeGeometry(sphereGeo);

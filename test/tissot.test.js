@@ -6,8 +6,18 @@ import {
     selectStableTissotIndicatrices,
     getTissotViewportBounds
 } from '../js/analysis/tissot.js';
-import { PolylineCaptureContext } from '../js/rendering/webgl-planar.js';
 import { drawConformalIndicatrices } from '../js/rendering/draw-planar.js';
+
+class CanvasStrokeCounter {
+    constructor() { this.strokeCount = 0; }
+    save() {}
+    restore() {}
+    beginPath() {}
+    moveTo() {}
+    lineTo() {}
+    stroke() { this.strokeCount += 1; }
+    setLineDash() {}
+}
 
 test('Tissot indicatrices use the active map and its derivative once', () => {
     const map = {
@@ -43,22 +53,21 @@ test('Tissot indicatrices preserve the source direction and flag critical collap
     assert.deepEqual(indicatrix.mappedArrowhead, []);
 });
 
-test('conformal indicatrix lines stay within the WebGL polyline capture contract', () => {
+test('conformal indicatrix uses the unified Canvas stroke path', () => {
     const [indicatrix] = generateTissotIndicatrices({
         evaluate: (re, im) => ({ re, im }),
         derivative: () => ({ re: 1, im: 0 })
     }, [-1, 1], [-1, 1], 8, 8);
-    const capture = new PolylineCaptureContext();
+    const ctx = new CanvasStrokeCounter();
 
-    drawConformalIndicatrices(capture, {
+    drawConformalIndicatrices(ctx, {
         width: 100,
         height: 100,
         origin: { x: 50, y: 50 },
         scale: { x: 10, y: 10 }
     }, [indicatrix], 'mapped');
 
-    assert.equal(capture.isCaptureSupported(), true);
-    assert.equal(capture.getBatches().length, 3);
+    assert.equal(ctx.strokeCount, 3);
 });
 
 test('Tissot rendering excludes derivative-scale outliers and fits retained circles', () => {
