@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import { context, getStateSignal, state } from '../../store/state.js';
-import { domainPalettes, realPlotsPalettes, themes, applyTheme } from '../../ui/theme-manager.js';
+import { domainPalettes, realPlotsPalettes, themes, applyTheme, persistThemePreferences } from '../../ui/theme-manager.js';
 import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
 
 function redraw() {
@@ -15,7 +15,8 @@ export function ThemeOptions() {
         <button class={`theme-card${activeTheme === theme.id ? ' active' : ''}`}
             data-theme-id={theme.id} type="button" onClick={() => {
                 state.themeId = theme.id;
-                applyTheme(theme.id);
+                applyTheme(theme.id, { preserveGridColors: true });
+                persistThemePreferences();
                 redraw();
             }}>
             <div class="theme-preview-pill">

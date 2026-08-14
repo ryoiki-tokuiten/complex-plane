@@ -1532,11 +1532,7 @@ function installInteraction(renderer) {
       );
       renderer.modelViewDirty = true;
       redraw();
-    }, { passive: false }),
-    addDisposableListener(canvas, 'dblclick', () => {
-      resetRendererCamera(renderer);
-      redraw();
-    })
+    }, { passive: false })
   );
 
   renderer.disposeInteraction = () => {

@@ -1506,12 +1506,11 @@ input[type="range"]:focus::-moz-range-thumb {
     top: 20px;
     right: 20px;
     z-index: 2001;
-    padding: 0.5rem 0.8rem;
-    font-size: 1.5rem;
-    background: var(--card-bg-color);
+    padding: 0;
+    background: transparent;
     color: var(--text-color);
-    border: 1px solid var(--border-color);
-    border-radius: 50%;
+    border: 0;
+    border-radius: 0;
     cursor: pointer;
     width: 40px;
     height: 40px;
@@ -1521,9 +1520,14 @@ input[type="range"]:focus::-moz-range-thumb {
     line-height: 1;
 }
 
+#close_fullscreen_btn svg {
+    width: 32px;
+    height: 32px;
+}
+
 #close_fullscreen_btn:hover {
-    background: var(--border-color);
-    color: var(--bg-color);
+    background: transparent;
+    color: var(--accent-purple);
 }
 
 /* Basic Button Styling */
@@ -4076,8 +4080,8 @@ textarea.dynamic-formula-input {
 /* Refining indicator glassmorphic badge for domain coloring background calculations */
 .refining-indicator {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    bottom: 12px;
+    left: 12px;
     z-index: 40;
     display: flex;
     align-items: center;
@@ -4097,7 +4101,7 @@ textarea.dynamic-formula-input {
 
 .refining-indicator.hidden {
     opacity: 0;
-    transform: translateY(-5px);
+    transform: translateY(5px);
     pointer-events: none;
 }
 
@@ -4418,6 +4422,12 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     flex: 1 1 calc(50% - 1rem) !important;
     width: auto !important;
     max-width: 50% !important;
+}
+
+body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column:not(.hidden)):has(#contour_2d_column:not(.hidden)) > div:not(.hidden) {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: none !important;
 }
 
 #contour_2d_column:not(.hidden) {

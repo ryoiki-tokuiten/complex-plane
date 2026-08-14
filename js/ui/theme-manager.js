@@ -20,7 +20,37 @@ const hexToRgbStr = hex => {
     return `${r}, ${g}, ${b}`;
 };
 
-export function applyTheme(themeId) {
+const THEME_PREFERENCES_KEY = 'complex-plane-theme-preferences';
+const isHexColor = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+
+export function loadThemePreferences() {
+    if (typeof localStorage === 'undefined') return;
+
+    try {
+        const saved = JSON.parse(localStorage.getItem(THEME_PREFERENCES_KEY) || 'null');
+        if (saved?.themeId && themes.some(theme => theme.id === saved.themeId)) state.themeId = saved.themeId;
+        if (isHexColor(saved?.gridColor1)) state.gridColor1 = saved.gridColor1;
+        if (isHexColor(saved?.gridColor2)) state.gridColor2 = saved.gridColor2;
+    } catch {
+        // Ignore unavailable or malformed local preferences.
+    }
+}
+
+export function persistThemePreferences() {
+    if (typeof localStorage === 'undefined') return;
+
+    try {
+        localStorage.setItem(THEME_PREFERENCES_KEY, JSON.stringify({
+            themeId: state.themeId,
+            gridColor1: state.gridColor1,
+            gridColor2: state.gridColor2
+        }));
+    } catch {
+        // Ignore storage failures (for example, private browsing restrictions).
+    }
+}
+
+export function applyTheme(themeId, { preserveGridColors = false } = {}) {
     const theme = themes.find(t => t.id === themeId) || themes[0];
     const root = document.documentElement;
     root.style.setProperty('--bg-color', theme.colors.bg);
@@ -34,9 +64,10 @@ export function applyTheme(themeId) {
     root.style.setProperty('--glow-color', theme.colors.accentGlow);
     root.style.setProperty('--accent-pink', theme.colors.gridSec);
 
-    state.gridColor1 = theme.colors.gridPri;
-    state.gridColor2 = theme.colors.gridSec;
-
+    if (!preserveGridColors) {
+        state.gridColor1 = theme.colors.gridPri;
+        state.gridColor2 = theme.colors.gridSec;
+    }
 }
 
 // 3D Real Plots Palettes mapped for linear/conic gradient

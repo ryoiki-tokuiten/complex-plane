@@ -3,6 +3,7 @@ import { signal } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
 import { context, getStateSignal, state } from '../../store/state.js';
 import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { persistThemePreferences } from '../../ui/theme-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
 
 const isOpen = signal(false);
@@ -24,6 +25,7 @@ function GridColor({ index, stateKey }) {
             <div class="circle-color-picker" id={`grid_color_${index}_picker_wrapper`} style={{ backgroundColor: color }}>
                 <input type="color" id={`grid_color_${index}_input`} value={color} onInput={event => {
                     state[stateKey] = event.currentTarget.value;
+                    persistThemePreferences();
                     context.domainColoringDirty = true;
                     requestRedrawAll();
                 }} />

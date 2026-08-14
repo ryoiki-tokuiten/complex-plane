@@ -1,4 +1,4 @@
-import { state, context, subscribeState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
+import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
@@ -24,7 +24,7 @@ import { toggleAnimation } from './animation.js';
 import { initializePolynomialCoeffs } from './polynomial-ui.js';
 import { updateLaplace3DSurface, resizeLaplace3DSurface } from '../rendering/laplace-3d-surface.js';
 import { getRiemannSurfaceCanvas, resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
-import { applyTheme, domainPalettes, realPlotsPalettes } from './theme-manager.js';
+import { applyTheme, domainPalettes, realPlotsPalettes, loadThemePreferences, persistThemePreferences } from './theme-manager.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
 import {
     initializeDynamicPlottingUI,
@@ -57,6 +57,15 @@ let zCanvas;
 let wCanvas;
 let uiEventListenersBound = false;
 let transformViewportSnapshot = null;
+let algebraicChainingSourceFunction = null;
+let fractalRestoreSnapshot = null;
+
+const FRACTAL_RESTORE_KEYS = [
+    'currentFunction', 'currentFunctionPreset', 'algebraicChainingEnabled', 'chainingEnabled',
+    'chainingMode', 'chainCount', 'orbitColoringMode', 'domainColoringEnabled',
+    'currentInputShape', 'domainPalette', 'polynomialN', 'polynomialCoeffs',
+    'algebraicChainingTerms'
+];
 
 const PASSIVE_LISTENER_OPTIONS = Object.freeze({ passive: true });
 const PASSIVE_CAPTURE_LISTENER_OPTIONS = Object.freeze({ passive: true, capture: true });
@@ -418,6 +427,13 @@ function syncOrbitColoringModeControl() {
     hidden(controls.orbitColoringModeGroup, !(state.domainColoringEnabled && state.chainingEnabled));
 }
 
+function syncDomainColoringKeyVisibility() {
+    hidden(
+        controls.domainColoringKey,
+        !state.domainColoringEnabled || !state.domainColoringKeyVisible
+    );
+}
+
 function parseControlValue(control, parser = parseFloat, fallback = 0) {
     if (!control) return fallback;
     const value = parser(control.value);
@@ -569,9 +585,13 @@ function updateModePanels() {
 }
 
 function disableAlgebraicChaining() {
-    if (!state.algebraicChainingEnabled) return;
+    if (!state.algebraicChainingEnabled) {
+        algebraicChainingSourceFunction = null;
+        return;
+    }
 
     state.algebraicChainingEnabled = false;
+    algebraicChainingSourceFunction = null;
     checked('enableAlgebraicChainingCb', false);
     display(controls.algebraicChainingControlsContainer, false);
 }
@@ -662,8 +682,9 @@ function syncAlgebraicControlsFromState() {
 
 function syncDomainControlsFromState() {
     checked('enableDomainColoringCb', state.domainColoringEnabled);
+    checked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
     hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
-    hidden(controls.domainColoringKey, !state.domainColoringEnabled);
+    syncDomainColoringKeyVisibility();
     syncOrbitColoringModeControl();
     updateDomainColoringKey();
 }
@@ -672,10 +693,42 @@ function syncInputShapeControlFromState() {
     if (controls.inputShapeSelector) controls.inputShapeSelector.value = state.currentInputShape;
 }
 
+function cloneRestoreValue(value) {
+    if (Array.isArray(value)) return value.map(cloneRestoreValue);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneRestoreValue(entry)]));
+    }
+    return value;
+}
+
+function captureFractalState() {
+    return Object.fromEntries(FRACTAL_RESTORE_KEYS.map(key => [key, cloneRestoreValue(state[key])]));
+}
+
+function restoreFractalState(nextFunction) {
+    const snapshot = fractalRestoreSnapshot;
+    if (!snapshot) return false;
+
+    fractalRestoreSnapshot = null;
+    FRACTAL_RESTORE_KEYS.forEach(key => {
+        if (key !== 'currentFunction' && key !== 'currentFunctionPreset') {
+            state[key] = cloneRestoreValue(snapshot[key]);
+        }
+    });
+    state.currentFunction = nextFunction;
+    state.currentFunctionPreset = null;
+    syncChainingControlsFromState();
+    syncAlgebraicControlsFromState();
+    syncDomainControlsFromState();
+    syncInputShapeControlFromState();
+    return true;
+}
+
 function activateFractalPreset(key) {
     const leavingTransform = state.fourierModeEnabled || state.laplaceModeEnabled;
     if (state.laplaceModeEnabled) stopLaplaceAnimation();
 
+    if (!fractalRestoreSnapshot) fractalRestoreSnapshot = captureFractalState();
     const preset = applyFractalPreset(state, key);
     if (!preset) return false;
 
@@ -798,6 +851,9 @@ function activateFunctionMode(key) {
     disableRealPlots();
     if (isFractalPresetKey(key) && activateFractalPreset(key)) return;
 
+    const restoringFractalState = Boolean(fractalRestoreSnapshot);
+    if (restoringFractalState) restoreFractalState(key);
+
     const enteringFourier = key === 'fourier';
     const enteringLaplace = key === 'laplace';
     const enteringTransform = enteringFourier || enteringLaplace;
@@ -810,12 +866,14 @@ function activateFunctionMode(key) {
 
     if (enteringTransform) disableGraphView();
 
-    disableAlgebraicChaining();
-    disableOutputChaining();
+    if (!restoringFractalState) {
+        disableAlgebraicChaining();
+        disableOutputChaining();
+    }
 
     state.currentFunction = key;
     state.currentFunctionPreset = null;
-    resetOrbitColoringMode();
+    if (!restoringFractalState) resetOrbitColoringMode();
     state.fourierModeEnabled = enteringFourier;
     state.laplaceModeEnabled = enteringLaplace;
 
@@ -947,7 +1005,6 @@ function bindImageControls() {
 
     bindSlider('imageSizeSlider', 'imageSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('imageOpacitySlider', 'imageOpacity', parseFloat, () => requestDomainRedraw(true));
-    bindFoldSurfaceControl('imageSurface3DCb');
 }
 
 function bindVideoControls() {
@@ -965,7 +1022,6 @@ function bindVideoControls() {
     });
     bindSlider('videoSizeSlider', 'videoSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('videoOpacitySlider', 'videoOpacity', parseFloat, () => requestDomainRedraw(true));
-    bindFoldSurfaceControl('videoSurface3DCb');
 }
 
 function bindDomainColoringControls() {
@@ -995,10 +1051,16 @@ function bindDomainColoringControls() {
             }
         }
         hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
-        hidden(controls.domainColoringKey, !state.domainColoringEnabled);
+        syncDomainColoringKeyVisibility();
         syncOrbitColoringModeControl();
         requestDomainRedraw(true);
     });
+
+    bindCheckbox('showDomainColoringKeyCb', 'domainColoringKeyVisible', () => {
+        syncDomainColoringKeyVisibility();
+        requestUiRedraw();
+    });
+    checked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
 
     syncOrbitColoringModeControl();
     bindElementListener(controls.orbitColoringModeSelect, 'change', event => {
@@ -1015,6 +1077,7 @@ function bindDomainColoringControls() {
         bindElementListener($(inputId), 'input', event => {
             state[stateKey] = event.target.value;
             setStyles($(wrapperId), { backgroundColor: state[stateKey] });
+            persistThemePreferences();
             requestUiRedraw();
         });
     });
@@ -1192,7 +1255,11 @@ function bindViewControls() {
             }
         } else {
             state.riemannTransformationEnabled = false;
+            state.threeSphereEnabled = false;
+            state.splitViewEnabled = false;
             checked('enableRiemannTransformationCb', false);
+            checked('enableThreeSphereCb', false);
+            checked('enableSplitViewCb', false);
             hidden(controls.threeSphereOptionsDiv, true);
         }
         hidden(controls.riemannSphereOptionsDiv, !state.riemannSphereViewEnabled);
@@ -2171,7 +2238,8 @@ function bindChainingControls() {
 }
 
 function bindThemeControls() {
-    applyTheme(state.themeId);
+    loadThemePreferences();
+    applyTheme(state.themeId, { preserveGridColors: true });
     bindControlListener('themeSelectorBtn', 'click', openThemeModal);
 }
 
@@ -2343,12 +2411,29 @@ function handleFullScreenToggle(planeType, index = 0) {
 
 function bindAlgebraicChainingControls() {
     bindElementListener(controls.enableAlgebraicChainingCb, 'change', event => {
-        state.algebraicChainingEnabled = event.target.checked;
+        const enabled = event.target.checked;
+        const currentFunction = state.currentFunction === 'algebraic_chaining'
+            ? algebraicChainingSourceFunction || state.algebraicChainingTerms?.[0]?.factors?.[0]?.func || 'cos'
+            : state.currentFunction;
+
+        if (enabled && currentFunction !== 'algebraic_chaining') {
+            algebraicChainingSourceFunction = currentFunction;
+            mutateState('algebraicChainingTerms', terms => {
+                const firstFactor = terms?.[0]?.factors?.[0];
+                if (firstFactor) {
+                    firstFactor.func = currentFunction;
+                    firstFactor.chainedFunc = 'none';
+                }
+            }, 'algebraicChainingTerms.factor.func');
+        }
+
+        state.algebraicChainingEnabled = enabled;
         state.currentFunctionPreset = null;
         display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
 
-        state.currentFunction = state.algebraicChainingEnabled ? 'algebraic_chaining' : 'cos';
-        setActiveFunctionButton(state.currentFunction);
+        state.currentFunction = enabled ? 'algebraic_chaining' : (algebraicChainingSourceFunction || 'cos');
+        setActiveFunctionButton(enabled ? currentFunction : state.currentFunction);
+        if (!enabled) algebraicChainingSourceFunction = null;
 
         syncParameterControlsPanelVisibility();
         requestAlgebraicRedraw();

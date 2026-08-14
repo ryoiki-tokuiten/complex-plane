@@ -32,7 +32,7 @@ import {
     buildInputShapeGeometryConfig,
     isFoldableInputShape
 } from './shape-generators.js';
-import { drawGraphSelectionOverlay } from './transformation-graph.js';
+import { drawGraphSelectionOverlay, filterGraphFullGridPointSets } from './transformation-graph.js';
 import { hideRiemannSurface, renderRiemannSurface } from './webgl-riemann-surface.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import {
@@ -1263,6 +1263,12 @@ function renderThreeWGridFold(map) {
         JSON.stringify(geometryConfig),
         state.gridColor1,
         state.gridColor2,
+        state.graphViewEnabled,
+        state.graphFullGridEnabled,
+        state.graphGridFamily,
+        state.graphLayerLockEnabled,
+        state.graphSelectedShape,
+        state.graphSelectedLineIndex,
         outputXRange[0], outputXRange[1],
         outputYRange[0], outputYRange[1]
     ].join('|');
@@ -1271,7 +1277,10 @@ function renderThreeWGridFold(map) {
         ? threeRenderer.gridFoldSurfaceData
         : null;
     if (!surface) {
-        const pointSets = generateCurrentInputShapePointSets(zPlaneParams, geometryConfig);
+        const generatedPointSets = generateCurrentInputShapePointSets(zPlaneParams, geometryConfig);
+        const pointSets = state.graphViewEnabled && state.graphFullGridEnabled
+            ? filterGraphFullGridPointSets(generatedPointSets)
+            : generatedPointSets;
         surface = buildGridFoldLineData(pointSets, map.evaluate, {
             sourceXRange: geometryConfig.xRange,
             outputXRange,

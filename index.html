@@ -1482,14 +1482,6 @@
                                     data-tooltip="Set transparency of the drawn image points.">
                             </div>
                         </div>
-                        <div class="control-group control-group-flush">
-                            <label for="image_surface_3d_cb" class="slider-label"
-                                data-tooltip="Show the transformed raster as an interactive 3D surface so overlapping folds remain separated by their source real coordinate.">
-                                <input type="checkbox" id="image_surface_3d_cb">
-                                <span class="custom-checkbox-visual"></span>
-                                Interactive 3D Fold View
-                            </label>
-                        </div>
                         <div id="image_surface_3d_options" class="dependent-settings-block hidden">
                             <div class="control-group">
                                 <label for="image_surface_3d_height_scale_slider">
@@ -1503,10 +1495,12 @@
                                 </div>
                             </div>
                         </div>
-                        <label for="image_preimage_explorer_cb" class="slider-label">
-                            <input type="checkbox" id="image_preimage_explorer_cb">
-                            <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
-                        </label>
+                        <div class="control-group">
+                            <label for="image_preimage_explorer_cb" class="slider-label">
+                                <input type="checkbox" id="image_preimage_explorer_cb">
+                                <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
+                            </label>
+                        </div>
                     </div>
 
                     <div id="video_upload_controls" class="dependent-settings-block hidden image-upload-panel">
@@ -1560,14 +1554,6 @@
                                     data-tooltip="Set transparency of the drawn video points.">
                             </div>
                         </div>
-                        <div class="control-group control-group-flush">
-                            <label for="video_surface_3d_cb" class="slider-label"
-                                data-tooltip="Show the transformed raster as an interactive 3D surface so overlapping folds remain separated by their source real coordinate.">
-                                <input type="checkbox" id="video_surface_3d_cb">
-                                <span class="custom-checkbox-visual"></span>
-                                Interactive 3D Fold View
-                            </label>
-                        </div>
                         <div id="video_surface_3d_options" class="dependent-settings-block hidden">
                             <div class="control-group">
                                 <label for="video_surface_3d_height_scale_slider">
@@ -1581,10 +1567,12 @@
                                 </div>
                             </div>
                         </div>
-                        <label for="video_preimage_explorer_cb" class="slider-label">
-                            <input type="checkbox" id="video_preimage_explorer_cb">
-                            <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
-                        </label>
+                        <div class="control-group">
+                            <label for="video_preimage_explorer_cb" class="slider-label">
+                                <input type="checkbox" id="video_preimage_explorer_cb">
+                                <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
+                            </label>
+                        </div>
                     </div>
 
 
@@ -1956,7 +1944,7 @@
                                 </label>
                                 <div class="slider-container">
                                     <input type="range" id="taylor_series_order_slider"
-                                        name="taylor_series_order_slider" min="1" max="8" step="1" value="3"
+                                        name="taylor_series_order_slider" min="1" max="15" step="1" value="3"
                                         data-tooltip="Number of terms (0 to N) in the Taylor series approximation. Higher order is more accurate but computationally intensive.">
                                 </div>
                             </div>
@@ -2219,6 +2207,13 @@
                                             value="1.0"
                                             data-tooltip="0 disables magnitude lightness modulation; higher values add optional magnitude shading">
                                     </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="show_domain_coloring_key_cb" class="slider-label">
+                                        <input type="checkbox" id="show_domain_coloring_key_cb">
+                                        <span class="custom-checkbox-visual"></span>
+                                        Show the color key panel
+                                    </label>
                                 </div>
                             </div>
                         </div>
@@ -2756,7 +2751,9 @@
     <div id="fullscreen_container" class="hidden">
 
     </div>
-    <button id="close_fullscreen_btn" class="hidden">✖</button>
+    <button id="close_fullscreen_btn" class="hidden" type="button" aria-label="Close fullscreen">
+        <i data-lucide="circle-x" aria-hidden="true"></i>
+    </button>
 </body>
 
 </html>

@@ -1,4 +1,4 @@
-import { state, context } from '../store/state.js';
+import { state, context, subscribeState } from '../store/state.js';
 import { renderDomainColoringWithWebGL } from './webgl-domain-coloring.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
@@ -12,6 +12,19 @@ const DOMAIN_LIGHTNESS_MIN = 0.34;
 const DOMAIN_LIGHTNESS_MAX = 0.72;
 const DOMAIN_LIGHTNESS_DETAIL_BASE = 0.72;
 const DOMAIN_LIGHTNESS_DETAIL_SCALE = 0.28;
+
+subscribeState(() => {
+    context.domainColoringDirty = true;
+}, [
+    'currentFunction',
+    'mapPresentation',
+    'algebraicChainingEnabled',
+    'algebraicChainingZExpr',
+    'algebraicChainingTerms',
+    'chainingEnabled',
+    'chainingMode',
+    'chainCount'
+]);
 
 export function domainMagnitudeLightness(logMod, cycles) {
     if (!Number.isFinite(logMod)) return DOMAIN_LIGHTNESS_MAX;

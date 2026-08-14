@@ -450,6 +450,7 @@ function syncComplexParameterControls() {
     const isImage = shape === 'image';
     const isVideo = shape === 'video';
     const isGrid = isFoldableInputShape(shape);
+    const showFoldControl = isGrid || isImage || isVideo;
     const isArbitrary = shape === 'arbitrary';
     const showCommonParams = isLine || isCircle || isEllipse;
     const showMediaCenterParams = isImage || isVideo;
@@ -501,7 +502,7 @@ function syncComplexParameterControls() {
     setText('arbitraryShapeDrawStatus', drawnPointCount > 1
         ? `${drawnPointCount} sampled points. Drag again to append another stroke.`
         : 'Drag anywhere on the z-plane. New strokes are appended.');
-    setHidden('gridSurface3DControl', !isGrid);
+    setHidden('gridSurface3DControl', !showFoldControl);
     setHidden('gridSurface3DOptions', !isGrid || !state.foldSurface3dEnabled);
     setHidden('imageSurface3DOptions', !isImage || !state.foldSurface3dEnabled);
     setHidden('videoSurface3DOptions', !isVideo || !state.foldSurface3dEnabled);
@@ -1278,7 +1279,11 @@ function syncDomainColoringControls() {
         orbitSelector.value = normalized;
     }
 
-    setHidden('domainColoringKey', !state.domainColoringEnabled);
+    setChecked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
+    setHidden(
+        'domainColoringKey',
+        !state.domainColoringEnabled || !state.domainColoringKeyVisible
+    );
     if (control('domainColoringKey')) {
         updateDomainColoringKey();
     }

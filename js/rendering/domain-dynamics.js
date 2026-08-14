@@ -165,6 +165,11 @@ function workerCount() {
     return Math.max(1, Math.min(MAX_WORKERS, cores));
 }
 
+function needsAdaptiveQuality(snapshot) {
+    return !(snapshot?.chainMode === 'zero_seed' &&
+        snapshot?.functionKey !== 'algebraic_chaining' && snapshot?.functionKey !== 'c');
+}
+
 function createTileList(passWidth, passHeight, scale) {
     const tiles = [];
     for (let y = 0; y < passHeight; y += TILE_SIZE) {
@@ -182,7 +187,7 @@ function createTileList(passWidth, passHeight, scale) {
 }
 
 function tileKey(tile) {
-    return `${tile.x}:${tile.y}:${tile.width}:${tile.height}:${tile.scale}`;
+    return `${tile.x}:${tile.y}:${tile.width}:${tile.height}:${tile.scale}:${tile.qualityOnly ? 'q' : 'b'}`;
 }
 
 function createImageDataFromPixels(pixels, width, height) {
@@ -363,9 +368,14 @@ class WorkerCpuDomainDynamicsBackend {
             canvas,
             ctx,
             remaining: 0,
-            tileRetries: new Map()
+            tileRetries: new Map(),
+            qualityPhase: false,
+            refinementTiles: []
         };
         this.queue = createTileList(passWidth, passHeight, scale);
+        if (scale === 1 && needsAdaptiveQuality(job.snapshot)) {
+            this.queue = this.queue.map(tile => ({ ...tile, deferQuality: true }));
+        }
         this.queueIndex = 0;
         this.pass.remaining = this.queue.length;
 
@@ -390,12 +400,17 @@ class WorkerCpuDomainDynamicsBackend {
         this.queueIndex += 1;
 
         entry.busy = true;
-        entry.worker.postMessage({
+        const message = {
             type: 'tile',
             jobId: job.id,
             passId: this.pass.id,
             tile
-        });
+        };
+        if (tile.basePixels instanceof Uint8ClampedArray) {
+            entry.worker.postMessage(message, [tile.basePixels.buffer]);
+        } else {
+            entry.worker.postMessage(message);
+        }
     }
 
     handleWorkerMessage(entry, message) {
@@ -435,11 +450,38 @@ class WorkerCpuDomainDynamicsBackend {
             if (image) {
                 pass.ctx.putImageData(image, message.tile.x, message.tile.y);
             }
+            if (pass.scale === 1 && !pass.qualityPhase && message.tile.deferQuality) {
+                pass.refinementTiles.push({
+                    x: message.tile.x,
+                    y: message.tile.y,
+                    width: message.tile.width,
+                    height: message.tile.height,
+                    scale: 1,
+                    qualityOnly: true,
+                    basePixels: message.pixels
+                });
+            }
             pass.remaining -= 1;
         }
 
         if (pass.remaining <= 0) {
             drawPassToTarget(job, pass);
+
+            // The first scale-1 completion is immediately usable full-resolution
+            // output. Refine those exact pixels as a second worker phase so adaptive
+            // supersampling never blocks first-paint latency.
+            if (pass.scale === 1 && !pass.qualityPhase && pass.refinementTiles.length) {
+                pass.qualityPhase = true;
+                this.queue = pass.refinementTiles;
+                pass.refinementTiles = [];
+                this.queueIndex = 0;
+                pass.remaining = this.queue.length;
+                if (this.workers.length && !this.failed) {
+                    this.workers.forEach(worker => this.dispatchWorker(worker));
+                }
+                return;
+            }
+
             if (job.passIndex === PASS_SCALES.length - 1) {
                 setDomainProcessing(job.snapshot.isWPlaneColoring, false);
             }

@@ -503,8 +503,6 @@ export class ThreeRiemannRenderer {
         this.markersGroup.visible = false;
         if (this.dragPlane) this.dragPlane.visible = false;
         if (changed) {
-            this.controls.target.set(0, 0, 0);
-            this.controls.update();
             this.renderDirty = true;
         }
         return changed;
@@ -528,8 +526,6 @@ export class ThreeRiemannRenderer {
         this.foldPreimageKey = '';
         if (this.dragPlane) this.dragPlane.visible = true;
         if (changed) {
-            this.controls.target.set(0, SPHERE_RADIUS * 0.5, 0);
-            this.controls.update();
             this.renderDirty = true;
         }
         return changed;

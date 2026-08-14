@@ -24,11 +24,12 @@ self.onmessage = event => {
         }
 
         const pixels = renderTile(message.tile);
+        const { basePixels: _basePixels, ...replyTile } = message.tile;
         self.postMessage({
             type: 'tile',
             jobId: message.jobId,
             passId: message.passId,
-            tile: message.tile,
+            tile: replyTile,
             pixels
         }, [pixels.buffer]);
     } catch (error) {

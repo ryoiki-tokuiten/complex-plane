@@ -9,6 +9,7 @@ const DOMAIN_LIGHTNESS_DETAIL_SCALE = 0.28;
 // Squared magnitude is faster than Math.hypot on the color hot path; this guard
 // preserves overflow behavior before taking that fast path.
 const HYPOT_FAST_OVERFLOW_GUARD = Math.sqrt(Number.MAX_VALUE / 2);
+const IS_LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 0x04;
 import { compileExpression } from '../math/expression/evaluator.js';
 import { parseExpression } from '../math/expression/parser.js';
 import {
@@ -54,6 +55,56 @@ const NO_ACCELERATOR = Object.freeze({
 const dynamicsAcceleratorCache = new WeakMap();
 const immutableDynamicsSnapshots = new WeakSet();
 const colorContextCache = new WeakMap();
+const renderHueLutCache = [];
+const RENDER_HUE_LUT_CACHE_LIMIT = 8;
+const RENDER_HUE_LUT_SIZE = 4096;
+const INV_RENDER_HUE_LUT_SIZE = 1 / RENDER_HUE_LUT_SIZE;
+const INV_TWO_PI = 1 / TWO_PI;
+
+// Rendering uses a max-error ~2e-4 rad atan2 approximation. Public scalar color
+// helpers retain Math.atan2 exactly; only dense rasterization takes this path.
+function fastAtan2(y, x) {
+    const ax = x < 0 ? -x : x;
+    const ay = y < 0 ? -y : y;
+    const max = ax > ay ? ax : ay;
+    if (max === 0) return 0;
+    const a = (ax < ay ? ax : ay) / max;
+    const z = a * a;
+    let angle = (((-0.0464964749 * z + 0.15931422) * z - 0.327622764) * z * a) + a;
+    if (ay > ax) angle = Math.PI * 0.5 - angle;
+    if (x < 0) angle = Math.PI - angle;
+    return y < 0 ? -angle : angle;
+}
+
+function writePreSaturatedHueColor(data, idx, hue, lightness, context) {
+    const scaled = hue * RENDER_HUE_LUT_SIZE;
+    let i0 = scaled | 0;
+    if (i0 >= RENDER_HUE_LUT_SIZE) i0 = RENDER_HUE_LUT_SIZE - 1;
+    const f = scaled - i0;
+    const i1 = i0 + 1;
+    const base = i0 * 3;
+    const next = i1 * 3;
+    const lut = context.hueLut;
+    const r0 = lut[base];
+    const g0 = lut[base + 1];
+    const b0 = lut[base + 2];
+    const r = r0 + (lut[next] - r0) * f;
+    const g = g0 + (lut[next + 1] - g0) * f;
+    const b = b0 + (lut[next + 2] - b0) * f;
+    let a;
+    let bias;
+    if (lightness < 0.5) {
+        a = lightness * 2;
+        bias = 0;
+    } else {
+        bias = lightness * 2 - 1;
+        a = 1 - bias;
+    }
+    data[idx] = byteFromUnit(a * r + bias);
+    data[idx + 1] = byteFromUnit(a * g + bias);
+    data[idx + 2] = byteFromUnit(a * b + bias);
+    data[idx + 3] = 255;
+}
 
 function deepFreeze(value, seen = new WeakSet()) {
     if (!value || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) {
@@ -243,7 +294,15 @@ function complexSin(z) {
 }
 
 function complexTan(z) {
-    return complexDivide(complexSin(z), complexCos(z));
+    const value = toComplex(z);
+    const sinRe = Math.sin(value.re);
+    const cosRe = Math.cos(value.re);
+    const sinhIm = Math.sinh(value.im);
+    const coshIm = Math.cosh(value.im);
+    return complexDivide(
+        { re: sinRe * coshIm, im: cosRe * sinhIm },
+        { re: cosRe * coshIm, im: -sinRe * sinhIm }
+    );
 }
 
 function complexSec(z) {
@@ -267,7 +326,15 @@ function complexCosh(z) {
 }
 
 function complexTanh(z) {
-    return complexDivide(complexSinh(z), complexCosh(z));
+    const value = toComplex(z);
+    const sinhRe = Math.sinh(value.re);
+    const coshRe = Math.cosh(value.re);
+    const sinIm = Math.sin(value.im);
+    const cosIm = Math.cos(value.im);
+    return complexDivide(
+        { re: sinhRe * cosIm, im: coshRe * sinIm },
+        { re: coshRe * cosIm, im: sinhRe * sinIm }
+    );
 }
 
 function ensureZetaLogIntegerCache(maxN) {
@@ -1248,11 +1315,11 @@ function evaluatePrimitiveVmFunctionInto(accelerator, code, re, im, cr, ci, out)
             out[1] = Math.cos(re) * Math.sinh(im);
             return out;
         case VMF_TAN: {
-            const sinRe = Math.sin(re) * Math.cosh(im);
-            const sinIm = Math.cos(re) * Math.sinh(im);
-            const cosRe = Math.cos(re) * Math.cosh(im);
-            const cosIm = -Math.sin(re) * Math.sinh(im);
-            return divideComponents(sinRe, sinIm, cosRe, cosIm, out);
+            const sinX = Math.sin(re);
+            const cosX = Math.cos(re);
+            const sinhY = Math.sinh(im);
+            const coshY = Math.cosh(im);
+            return divideComponents(sinX * coshY, cosX * sinhY, cosX * coshY, -sinX * sinhY, out);
         }
         case VMF_SEC: {
             const cosRe = Math.cos(re) * Math.cosh(im);
@@ -1274,11 +1341,11 @@ function evaluatePrimitiveVmFunctionInto(accelerator, code, re, im, cr, ci, out)
             out[1] = Math.sinh(re) * Math.sin(im);
             return out;
         case VMF_TANH: {
-            const sinhRe = Math.sinh(re) * Math.cos(im);
-            const sinhIm = Math.cosh(re) * Math.sin(im);
-            const coshRe = Math.cosh(re) * Math.cos(im);
-            const coshIm = Math.sinh(re) * Math.sin(im);
-            return divideComponents(sinhRe, sinhIm, coshRe, coshIm, out);
+            const sinhX = Math.sinh(re);
+            const coshX = Math.cosh(re);
+            const sinY = Math.sin(im);
+            const cosY = Math.cos(im);
+            return divideComponents(sinhX * cosY, coshX * sinY, coshX * cosY, sinhX * sinY, out);
         }
         case VMF_POWER:
             return powRealComponents(re, im, accelerator ? accelerator.fractionalPowerN : DEFAULT_FRACTIONAL_POWER, out);
@@ -1402,7 +1469,35 @@ function createCompiledAlgebraicAccelerator(snapshot) {
 }
 
 function powIntegerComponents(re, im, exponent, out) {
-    let n = exponent < 0 ? -exponent : exponent;
+    const negative = exponent < 0;
+    const nAbs = negative ? -exponent : exponent;
+    let directRe;
+    let directIm;
+    switch (nAbs) {
+        case 0:
+            out[0] = 1; out[1] = 0; return out;
+        case 1:
+            directRe = re; directIm = im; break;
+        case 2:
+            directRe = re * re - im * im; directIm = 2 * re * im; break;
+        case 3: {
+            const re2 = re * re; const im2 = im * im;
+            directRe = re * (re2 - 3 * im2); directIm = im * (3 * re2 - im2); break;
+        }
+        case 4: {
+            const re2 = re * re; const im2 = im * im;
+            directRe = re2 * re2 - 6 * re2 * im2 + im2 * im2;
+            directIm = 4 * re * im * (re2 - im2); break;
+        }
+        default:
+            directRe = NaN; directIm = NaN;
+    }
+    if (nAbs <= 4) {
+        if (negative) return divideComponents(1, 0, directRe, directIm, out);
+        out[0] = directRe; out[1] = directIm; return out;
+    }
+
+    let n = nAbs;
     let accRe = 1;
     let accIm = 0;
     let baseRe = re;
@@ -1422,7 +1517,7 @@ function powIntegerComponents(re, im, exponent, out) {
         }
     }
 
-    if (exponent < 0) return divideComponents(1, 0, accRe, accIm, out);
+    if (negative) return divideComponents(1, 0, accRe, accIm, out);
     out[0] = accRe;
     out[1] = accIm;
     return out;
@@ -1481,11 +1576,11 @@ function evaluatePrimitiveFactorInto(accelerator, start, end, zr, zi, cr, ci, ou
                 break;
             }
             case VMF_TAN: {
-                const sinRe = Math.sin(ar) * Math.cosh(ai);
-                const sinIm = Math.cos(ar) * Math.sinh(ai);
-                const cosRe = Math.cos(ar) * Math.cosh(ai);
-                const cosIm = -Math.sin(ar) * Math.sinh(ai);
-                divideComponents(sinRe, sinIm, cosRe, cosIm, out);
+                const sinX = Math.sin(ar);
+                const cosX = Math.cos(ar);
+                const sinhY = Math.sinh(ai);
+                const coshY = Math.cosh(ai);
+                divideComponents(sinX * coshY, cosX * sinhY, cosX * coshY, -sinX * sinhY, out);
                 ar = out[0];
                 ai = out[1];
                 break;
@@ -1534,11 +1629,11 @@ function evaluatePrimitiveFactorInto(accelerator, start, end, zr, zi, cr, ci, ou
                 break;
             }
             case VMF_TANH: {
-                const sinhRe = Math.sinh(ar) * Math.cos(ai);
-                const sinhIm = Math.cosh(ar) * Math.sin(ai);
-                const coshRe = Math.cosh(ar) * Math.cos(ai);
-                const coshIm = Math.sinh(ar) * Math.sin(ai);
-                divideComponents(sinhRe, sinhIm, coshRe, coshIm, out);
+                const sinhX = Math.sinh(ar);
+                const coshX = Math.cosh(ar);
+                const sinY = Math.sin(ai);
+                const cosY = Math.cos(ai);
+                divideComponents(sinhX * cosY, coshX * sinY, coshX * cosY, sinhX * sinY, out);
                 ar = out[0];
                 ai = out[1];
                 break;
@@ -1603,6 +1698,7 @@ function evaluatePrimitiveFactorInto(accelerator, start, end, zr, zi, cr, ci, ou
 
 
 function evaluateCompiledAlgebraicInto(accelerator, zr, zi, cr, ci, out) {
+
     let pointRe = zr;
     let pointIm = zi;
     const scratch = accelerator.scratch;
@@ -1938,6 +2034,14 @@ function supportsComponentValueEvaluation(snapshot, accelerator) {
     return supportsBuiltinComponentEvaluation(snapshot.functionKey);
 }
 
+function supportsComponentOrbitEvaluation(snapshot, accelerator) {
+    if (!supportsComponentValueEvaluation(snapshot, accelerator)) return false;
+    if (accelerator.type !== 'none') return true;
+    if (snapshot.functionKey === 'c') return false;
+    return !(snapshot.branchCutType === 'ray' &&
+        (snapshot.functionKey === 'ln' || snapshot.functionKey === 'power'));
+}
+
 export function evaluateDomainDynamicsValue(snapshot, re, im, accelerator = createDynamicsAccelerator(snapshot)) {
     if (supportsComponentValueEvaluation(snapshot, accelerator)) {
         return evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator);
@@ -2180,10 +2284,93 @@ export function writeBlack(data, idx) {
 
 // Escape renderers are black-dominant. Preinitializing opacity lets every proven
 // bounded pixel become a zero-write fast path while preserving RGBA output.
-function createOpaqueBlackBuffer(pixelCount) {
+function createSolidRgbaBuffer(pixelCount, r, g, b, a = 255) {
     const data = new Uint8ClampedArray(pixelCount * 4);
-    for (let i = 3; i < data.length; i += 4) data[i] = 255;
+    if (IS_LITTLE_ENDIAN) {
+        const packed = (r | (g << 8) | (b << 16) | (a << 24)) >>> 0;
+        new Uint32Array(data.buffer).fill(packed);
+        return data;
+    }
+    for (let idx = 0; idx < data.length; idx += 4) {
+        data[idx] = r;
+        data[idx + 1] = g;
+        data[idx + 2] = b;
+        data[idx + 3] = a;
+    }
     return data;
+}
+
+function createOpaqueBlackBuffer(pixelCount) {
+    return createSolidRgbaBuffer(pixelCount, 0, 0, 0, 255);
+}
+
+function sharedHueLuts(palette, saturation, brightness) {
+    const length = palette.length;
+    let entry = null;
+    for (let e = renderHueLutCache.length - 1; e >= 0; e -= 1) {
+        const candidate = renderHueLutCache[e];
+        if (candidate.saturation !== saturation || candidate.length !== length) continue;
+        let same = true;
+        for (let i = 0; i < length; i += 1) {
+            const stop = palette[i];
+            const base = i * 3;
+            if (candidate.palette[base] !== stop[0] || candidate.palette[base + 1] !== stop[1] ||
+                candidate.palette[base + 2] !== stop[2]) { same = false; break; }
+        }
+        if (same) { entry = candidate; break; }
+    }
+    if (!entry) {
+        const paletteFlat = new Float64Array(length * 3);
+        for (let i = 0; i < length; i += 1) {
+            const stop = palette[i], base = i * 3;
+            paletteFlat[base] = stop[0]; paletteFlat[base + 1] = stop[1]; paletteFlat[base + 2] = stop[2];
+        }
+        const paletteLast = length - 1;
+        const hueLut = new Float32Array((RENDER_HUE_LUT_SIZE + 1) * 3);
+        const inverseSaturation = 1 - saturation;
+        for (let i = 0; i <= RENDER_HUE_LUT_SIZE; i += 1) {
+            const hue = i === RENDER_HUE_LUT_SIZE ? 0.999999 : i * INV_RENDER_HUE_LUT_SIZE;
+            const value = hue * paletteLast;
+            const p = Math.min(paletteLast - 1, Math.floor(value));
+            const blend = value - p, inverse = 1 - blend;
+            const a = p * 3, b = a + 3;
+            const r = paletteFlat[a] * inverse + paletteFlat[b] * blend;
+            const g = paletteFlat[a + 1] * inverse + paletteFlat[b + 1] * blend;
+            const blue = paletteFlat[a + 2] * inverse + paletteFlat[b + 2] * blend;
+            const gray = 0.299 * r + 0.587 * g + 0.114 * blue;
+            const out = i * 3;
+            hueLut[out] = gray * inverseSaturation + r * saturation;
+            hueLut[out + 1] = gray * inverseSaturation + g * saturation;
+            hueLut[out + 2] = gray * inverseSaturation + blue * saturation;
+        }
+        entry = { saturation, length, palette: paletteFlat, hueLut, flat: [] };
+        renderHueLutCache.push(entry);
+        if (renderHueLutCache.length > RENDER_HUE_LUT_CACHE_LIMIT) renderHueLutCache.shift();
+    }
+
+    let flatHueLut = null;
+    for (let i = entry.flat.length - 1; i >= 0; i -= 1) {
+        if (entry.flat[i].brightness === brightness) { flatHueLut = entry.flat[i].lut; break; }
+    }
+    if (!flatHueLut) {
+        const flatLightness = Math.min(0.95, Math.max(0.05, 0.5 * brightness));
+        flatHueLut = new Uint32Array(RENDER_HUE_LUT_SIZE + 1);
+        if (IS_LITTLE_ENDIAN) {
+            for (let i = 0; i <= RENDER_HUE_LUT_SIZE; i += 1) {
+                const base = i * 3;
+                let scale, bias;
+                if (flatLightness < 0.5) { scale = flatLightness * 2; bias = 0; }
+                else { bias = flatLightness * 2 - 1; scale = 1 - bias; }
+                const r = byteFromUnit(scale * entry.hueLut[base] + bias);
+                const g = byteFromUnit(scale * entry.hueLut[base + 1] + bias);
+                const b = byteFromUnit(scale * entry.hueLut[base + 2] + bias);
+                flatHueLut[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+            }
+        }
+        entry.flat.push({ brightness, lut: flatHueLut });
+        if (entry.flat.length > 4) entry.flat.shift();
+    }
+    return { hueLut: entry.hueLut, flatHueLut };
 }
 
 function colorContext(snapshot) {
@@ -2226,12 +2413,18 @@ function colorContext(snapshot) {
         paletteG[i] = stop[1];
         paletteB[i] = stop[2];
     }
+    const paletteLast = length - 1;
+    const sharedLuts = sharedHueLuts(palette, saturation, brightness);
+    const hueLut = sharedLuts.hueLut;
+    const flatHueLut = sharedLuts.flatHueLut;
     const context = {
         palette,
         paletteR,
         paletteG,
         paletteB,
-        paletteLast: length - 1,
+        paletteLast,
+        hueLut,
+        flatHueLut,
         brightness,
         contrast,
         saturation,
@@ -2283,10 +2476,11 @@ function writeDomainColorWithContext(data, idx, re, im, context) {
 
     let lightnessBase = 0.5;
     if (context.needsMagnitudeDetail) {
-        const modValue = absRe <= HYPOT_FAST_OVERFLOW_GUARD && absIm <= HYPOT_FAST_OVERFLOW_GUARD
-            ? Math.sqrt(re * re + im * im)
-            : Math.hypot(re, im);
-        if (!finite(modValue)) {
+        // Below the overflow guard, finite components mathematically guarantee a
+        // finite Euclidean norm. Avoid a redundant sqrt/hypot before the log-magnitude
+        // helper, which already performs the magnitude work needed for shading.
+        if ((absRe > HYPOT_FAST_OVERFLOW_GUARD || absIm > HYPOT_FAST_OVERFLOW_GUARD) &&
+            !finite(Math.hypot(re, im))) {
             writeBlack(data, idx);
             return;
         }
@@ -2298,23 +2492,20 @@ function writeDomainColorWithContext(data, idx, re, im, context) {
             return;
         }
     }
-    const lightness = Math.min(0.95, Math.max(0.05, (0.5 + (lightnessBase - 0.5) * context.contrast) * context.brightness));
-    let hue = Math.atan2(im, re) / TWO_PI;
+    let hue = fastAtan2(im, re) * INV_TWO_PI;
     if (hue < 0) hue += 1;
-
-    const value = Math.min(0.999999, Math.max(0, hue)) * context.paletteLast;
-    const paletteIndex = Math.min(context.paletteLast - 1, Math.floor(value));
-    const t = value - paletteIndex;
-    const inverse = 1 - t;
-    writeStyledColorComponents(
-        data,
-        idx,
-        context.paletteR[paletteIndex] * inverse + context.paletteR[paletteIndex + 1] * t,
-        context.paletteG[paletteIndex] * inverse + context.paletteG[paletteIndex + 1] * t,
-        context.paletteB[paletteIndex] * inverse + context.paletteB[paletteIndex + 1] * t,
-        lightness,
-        context.saturation
-    );
+    if (!context.needsMagnitudeDetail && IS_LITTLE_ENDIAN && (idx & 3) === 0) {
+        let lutIndex = (hue * RENDER_HUE_LUT_SIZE + 0.5) | 0;
+        if (lutIndex > RENDER_HUE_LUT_SIZE) lutIndex = RENDER_HUE_LUT_SIZE;
+        const packed = context.flatHueLut[lutIndex];
+        data[idx] = packed & 255;
+        data[idx + 1] = (packed >>> 8) & 255;
+        data[idx + 2] = (packed >>> 16) & 255;
+        data[idx + 3] = 255;
+        return;
+    }
+    const lightness = Math.min(0.95, Math.max(0.05, (0.5 + (lightnessBase - 0.5) * context.contrast) * context.brightness));
+    writePreSaturatedHueColor(data, idx, hue, lightness, context);
 }
 
 function writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, context) {
@@ -2336,6 +2527,148 @@ function writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, 
         lightness,
         context.saturation
     );
+}
+
+function writeDynamicsPhaseEventColorWithContext(data, idx, re, im, intensity, context) {
+    if (!isFiniteDomainDynamicsValue(re, im)) {
+        writeBlack(data, idx);
+        return;
+    }
+    const modValue = Math.hypot(re, im);
+    if (!finite(modValue)) {
+        writeBlack(data, idx);
+        return;
+    }
+    let hue = fastAtan2(im, re) * INV_TWO_PI;
+    if (hue < 0) hue += 1;
+    const t = intensity <= 0 ? 0 : intensity >= 1 ? 1 : intensity;
+    const lightnessBase = 0.24 + 0.58 * Math.pow(t, 0.55);
+    const lightness = Math.min(0.95, Math.max(0.05,
+        (0.5 + (lightnessBase - 0.5) * context.contrast) * context.brightness));
+    writePreSaturatedHueColor(data, idx, hue, lightness, context);
+}
+
+function renderComponentOrbitTile(snapshot, tile, accelerator) {
+    const mode = resolveOrbitColoringMode(snapshot);
+    if (mode === ORBIT_COLORING_MODES.value || !supportsComponentValueEvaluation(snapshot, accelerator)) return null;
+    const opaqueBlack = mode === ORBIT_COLORING_MODES.escape || mode === ORBIT_COLORING_MODES.attractor;
+    const frame = createDomainTileFrame(snapshot, tile, opaqueBlack);
+    const { data, width, height, xStep, yStep, xStart, yStart, colors } = frame;
+    const count = snapshotChainCount(snapshot);
+    const zeroSeed = snapshot.chainMode === 'zero_seed';
+    const detectConvergence = mode === ORBIT_COLORING_MODES.attractor || mode === ORBIT_COLORING_MODES.hybrid;
+    const scratch = accelerator.scratch || NO_ACCELERATOR.scratch;
+
+    for (let y = 0; y < height; y += 1) {
+        const ci = yStart + y * yStep;
+        for (let x = 0; x < width; x += 1) {
+            const cr = xStart + x * xStep;
+            const idx = (y * width + x) * 4;
+            let currentRe = zeroSeed ? 0 : cr;
+            let currentIm = zeroSeed ? 0 : ci;
+            let lastRe = currentRe;
+            let lastIm = currentIm;
+            let hasLast = isFiniteDomainDynamicsValue(currentRe, currentIm);
+            let event = 0; // 1 escaped, 2 converged
+            let eventIteration = count;
+            let smoothIteration = count;
+            let eventRe = lastRe;
+            let eventIm = lastIm;
+
+            for (let i = 0; i < count; i += 1) {
+                if (!evaluateComponentBaseInto(snapshot, accelerator, currentRe, currentIm, cr, ci, scratch)) {
+                    event = 1;
+                    eventIteration = i + 1;
+                    smoothIteration = i + 1;
+                    eventRe = lastRe;
+                    eventIm = lastIm;
+                    break;
+                }
+                const nextRe = scratch[0];
+                const nextIm = scratch[1];
+                const nextFinite = isFiniteDomainDynamicsValue(nextRe, nextIm);
+                const magSq = nextFinite ? nextRe * nextRe + nextIm * nextIm : DYNAMICS_ESCAPE_RADIUS_SQ;
+                const absRe = nextRe < 0 ? -nextRe : nextRe;
+                const absIm = nextIm < 0 ? -nextIm : nextIm;
+                const tooLarge = nextFinite && (
+                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
+                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE
+                );
+
+                if (!nextFinite || tooLarge) {
+                    event = 1;
+                    eventIteration = i + 1;
+                    smoothIteration = nextFinite
+                        ? domainDynamicsSmoothIteration(i, count, nextRe, nextIm)
+                        : i + 1;
+                    eventRe = nextFinite ? nextRe : lastRe;
+                    eventIm = nextFinite ? nextIm : lastIm;
+                    break;
+                }
+
+                if (detectConvergence) {
+                    const deltaRe = nextRe - currentRe;
+                    const deltaIm = nextIm - currentIm;
+                    const deltaSq = deltaRe * deltaRe + deltaIm * deltaIm;
+                    const convergenceScale = Math.max(1, magSq);
+                    if (deltaSq <= ORBIT_ATTRACTOR_CONVERGENCE_EPSILON_SQ * convergenceScale) {
+                        event = 2;
+                        eventIteration = i + 1;
+                        smoothIteration = i + 1;
+                        eventRe = nextRe;
+                        eventIm = nextIm;
+                        lastRe = nextRe;
+                        lastIm = nextIm;
+                        hasLast = true;
+                        break;
+                    }
+                }
+
+                currentRe = nextRe;
+                currentIm = nextIm;
+                lastRe = nextRe;
+                lastIm = nextIm;
+                hasLast = true;
+            }
+
+            if (mode === ORBIT_COLORING_MODES.escape) {
+                if (event === 1) writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, colors);
+                else if (!opaqueBlack) writeBlack(data, idx);
+                continue;
+            }
+            if (mode === ORBIT_COLORING_MODES.attractor) {
+                if (event === 2) {
+                    writeDynamicsPhaseEventColorWithContext(
+                        data, idx, eventRe, eventIm,
+                        1 - Math.max(0, Math.min(1, (eventIteration - 1) / Math.max(1, count))),
+                        colors
+                    );
+                } else if (!opaqueBlack) writeBlack(data, idx);
+                continue;
+            }
+            if (mode === ORBIT_COLORING_MODES.hybrid) {
+                if (event === 1) {
+                    writeDynamicsPhaseEventColorWithContext(
+                        data, idx, eventRe, eventIm,
+                        1 - Math.max(0, Math.min(1, smoothIteration / Math.max(1, count))),
+                        colors
+                    );
+                } else if (event === 2) {
+                    writeDynamicsPhaseEventColorWithContext(
+                        data, idx, eventRe, eventIm,
+                        1 - Math.max(0, Math.min(1, (eventIteration - 1) / Math.max(1, count))),
+                        colors
+                    );
+                } else if (hasLast) {
+                    writeDomainColorWithContext(data, idx, lastRe, lastIm, colors);
+                } else {
+                    writeBlack(data, idx);
+                }
+            }
+        }
+    }
+    return data;
 }
 
 function traceOrbitForPoint(snapshot, re, im, accelerator = createDynamicsAccelerator(snapshot), detectConvergence = true) {
@@ -2745,10 +3078,219 @@ function createLaurentParameterStep(accelerator) {
     return (zr, zi, cr, ci, _paramRe, _paramIm, out) => evaluateLaurentInto(accelerator, zr, zi, cr, ci, out);
 }
 
+function createBuiltinComponentStep(functionKey, snapshot) {
+    switch (functionKey) {
+        case 'exp':
+            return (re, im, out) => expComponents(re, im, out);
+        case 'ln':
+            return (re, im, out) => lnComponents(re, im, out);
+        case 'sin':
+            return (re, im, out) => {
+                out[0] = Math.sin(re) * Math.cosh(im);
+                out[1] = Math.cos(re) * Math.sinh(im);
+                return out;
+            };
+        case 'cos':
+            return (re, im, out) => {
+                out[0] = Math.cos(re) * Math.cosh(im);
+                out[1] = -Math.sin(re) * Math.sinh(im);
+                return out;
+            };
+        case 'tan':
+            return (re, im, out) => {
+                const sinX = Math.sin(re);
+                const cosX = Math.cos(re);
+                const sinhY = Math.sinh(im);
+                const coshY = Math.cosh(im);
+                return divideComponents(sinX * coshY, cosX * sinhY, cosX * coshY, -sinX * sinhY, out);
+            };
+        case 'sec':
+            return (re, im, out) => {
+                const cosRe = Math.cos(re) * Math.cosh(im);
+                const cosIm = -Math.sin(re) * Math.sinh(im);
+                return divideComponents(1, 0, cosRe, cosIm, out);
+            };
+        case 'reciprocal':
+            return (re, im, out) => divideComponents(1, 0, re, im, out);
+        case 'sinh':
+            return (re, im, out) => {
+                out[0] = Math.sinh(re) * Math.cos(im);
+                out[1] = Math.cosh(re) * Math.sin(im);
+                return out;
+            };
+        case 'cosh':
+            return (re, im, out) => {
+                out[0] = Math.cosh(re) * Math.cos(im);
+                out[1] = Math.sinh(re) * Math.sin(im);
+                return out;
+            };
+        case 'tanh':
+            return (re, im, out) => {
+                const sinhX = Math.sinh(re);
+                const coshX = Math.cosh(re);
+                const sinY = Math.sin(im);
+                const cosY = Math.cos(im);
+                return divideComponents(sinhX * cosY, coshX * sinY, coshX * cosY, sinhX * sinY, out);
+            };
+        case 'power': {
+            const exponent = Number(snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER);
+            return (re, im, out) => powRealComponents(re, im, exponent, out);
+        }
+        case 'poincare':
+            return (re, im, out) => {
+                if (im <= 1e-9) { out[0] = NaN; out[1] = NaN; return out; }
+                const sqrtIm = Math.sqrt(im);
+                out[0] = re / sqrtIm;
+                out[1] = sqrtIm;
+                return out;
+            };
+        case 'zeta': {
+            const continuation = !!snapshot.zetaContinuationEnabled;
+            return (re, im, out) => zetaComponents(re, im, continuation, out);
+        }
+        default:
+            return null;
+    }
+}
+
+function separableBuiltinKind(functionKey) {
+    switch (functionKey) {
+        case 'sin': case 'cos': case 'tan': case 'sec':
+        case 'exp': case 'sinh': case 'cosh': case 'tanh': case 'poincare':
+            return functionKey;
+        default:
+            return null;
+    }
+}
+
+function buildSeparableAxisTable(kind, start, step, count, axis) {
+    const values = new Float64Array(count * 2);
+    for (let i = 0; i < count; i += 1) {
+        const v = start + i * step;
+        const j = i << 1;
+        if (axis === 'x') {
+            switch (kind) {
+                case 'sin': case 'cos': case 'tan': case 'sec':
+                    values[j] = Math.sin(v); values[j + 1] = Math.cos(v); break;
+                case 'exp':
+                    values[j] = expSafe(v); values[j + 1] = 0; break;
+                case 'sinh': case 'cosh': case 'tanh':
+                    values[j] = Math.sinh(v); values[j + 1] = Math.cosh(v); break;
+                case 'poincare':
+                    values[j] = v; values[j + 1] = 0; break;
+                default: break;
+            }
+        } else {
+            switch (kind) {
+                case 'sin': case 'cos': case 'tan': case 'sec':
+                    values[j] = Math.sinh(v); values[j + 1] = Math.cosh(v); break;
+                case 'exp': case 'sinh': case 'cosh': case 'tanh':
+                    values[j] = Math.sin(v); values[j + 1] = Math.cos(v); break;
+                case 'poincare': {
+                    const root = v > 1e-9 ? Math.sqrt(v) : NaN;
+                    values[j] = root; values[j + 1] = v; break;
+                }
+                default: break;
+            }
+        }
+    }
+    return values;
+}
+
+function writeConstantTileColor(snapshot, tile, re, im) {
+    const sample = new Uint8ClampedArray(4);
+    writeDomainColorWithContext(sample, 0, re, im, colorContext(snapshot));
+    return createSolidRgbaBuffer(tile.width * tile.height, sample[0], sample[1], sample[2], sample[3]);
+}
+
+function renderSeparableBuiltinValueTile(snapshot, tile, kind, step, axisCache, scratch) {
+    const mode = snapshot.chainMode || 'recursion';
+    if (mode !== 'recursion' && mode !== 'zero_seed') return null;
+    const count = snapshotChainCount(snapshot);
+
+    if (mode === 'zero_seed') {
+        let zr = 0, zi = 0, lastRe = NaN, lastIm = NaN;
+        const detectFixedPoint = count >= 64;
+        for (let i = 0; i < count; i += 1) {
+            const previousRe = zr, previousIm = zi;
+            step(zr, zi, scratch);
+            zr = scratch[0]; zi = scratch[1];
+            const absRe = zr < 0 ? -zr : zr;
+            const absIm = zi < 0 ? -zi : zi;
+            if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) || !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
+            lastRe = zr; lastIm = zi;
+            if (detectFixedPoint && Object.is(zr, previousRe) && Object.is(zi, previousIm)) break;
+            if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE || absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+        }
+        return writeConstantTileColor(snapshot, tile, lastRe, lastIm);
+    }
+
+    const frame = createDomainTileFrame(snapshot, tile);
+    const { data, width, height, xStep, yStep, xStart, yStart, colors } = frame;
+    const xKey = `${kind}:x:${tile.scale}:${tile.x}:${width}`;
+    const yKey = `${kind}:y:${tile.scale}:${tile.y}:${height}`;
+    let xValues = axisCache.get(xKey);
+    if (!xValues) { xValues = buildSeparableAxisTable(kind, xStart, xStep, width, 'x'); axisCache.set(xKey, xValues); }
+    let yValues = axisCache.get(yKey);
+    if (!yValues) { yValues = buildSeparableAxisTable(kind, yStart, yStep, height, 'y'); axisCache.set(yKey, yValues); }
+    const iterations = snapshot.chainingEnabled ? count : 1;
+    const detectFixedPoint = count >= 64;
+
+    for (let y = 0; y < height; y += 1) {
+        const yj = y << 1;
+        const ya = yValues[yj], yb = yValues[yj + 1];
+        for (let x = 0; x < width; x += 1) {
+            const xj = x << 1;
+            const xa = xValues[xj], xb = xValues[xj + 1];
+            let zr, zi;
+            switch (kind) {
+                case 'sin': zr = xa * yb; zi = xb * ya; break;
+                case 'cos': zr = xb * yb; zi = -xa * ya; break;
+                case 'tan': divideComponents(xa * yb, xb * ya, xb * yb, -xa * ya, scratch); zr = scratch[0]; zi = scratch[1]; break;
+                case 'sec': divideComponents(1, 0, xb * yb, -xa * ya, scratch); zr = scratch[0]; zi = scratch[1]; break;
+                case 'exp': zr = xa * yb; zi = xa * ya; break;
+                case 'sinh': zr = xa * yb; zi = xb * ya; break;
+                case 'cosh': zr = xb * yb; zi = xa * ya; break;
+                case 'tanh': divideComponents(xa * yb, xb * ya, xb * yb, xa * ya, scratch); zr = scratch[0]; zi = scratch[1]; break;
+                case 'poincare': zr = xa / ya; zi = ya; break;
+                default: zr = NaN; zi = NaN; break;
+            }
+
+            let lastRe = NaN, lastIm = NaN;
+            let absRe = zr < 0 ? -zr : zr;
+            let absIm = zi < 0 ? -zi : zi;
+            if (absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE && absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) {
+                lastRe = zr; lastIm = zi;
+                const cr = xStart + x * xStep;
+                const ci = yStart + y * yStep;
+                if (!(detectFixedPoint && Object.is(zr, cr) && Object.is(zi, ci)) &&
+                    absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE && absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) {
+                    for (let i = 1; i < iterations; i += 1) {
+                        step(zr, zi, scratch);
+                        zr = scratch[0]; zi = scratch[1];
+                        absRe = zr < 0 ? -zr : zr;
+                        absIm = zi < 0 ? -zi : zi;
+                        if (!(absRe < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE) || !(absIm < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)) break;
+                        if (detectFixedPoint && Object.is(zr, lastRe) && Object.is(zi, lastIm)) break;
+                        lastRe = zr; lastIm = zi;
+                        if (absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE || absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) break;
+                    }
+                }
+            }
+            writeDomainColorWithContext(data, (y * width + x) * 4, lastRe, lastIm, colors);
+        }
+    }
+    return data;
+}
+
 function createAcceleratedTileRenderer(snapshot, accelerator) {
     const value = snapshotUsesValueColoring(snapshot);
     const escape = snapshotUsesEscapeColoring(snapshot);
-    if (!value && !escape) return null;
+    if (!value && !escape) {
+        return supportsComponentOrbitEvaluation(snapshot, accelerator)
+            ? tile => renderComponentOrbitTile(snapshot, tile, accelerator)
+            : null;
+    }
 
     if (accelerator.type === 'polynomial-parameter') {
         const quadratic = accelerator.degree === 2;
@@ -2808,12 +3350,10 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
             out[1] = ni;
             return out;
         };
-        return value
-            ? tile => renderSimpleValueTile(snapshot, tile, step, {
-                incrementalX: true,
-                scratch: accelerator.scratch
-            })
-            : null;
+        if (value) return tile => renderSimpleValueTile(snapshot, tile, step, {
+            incrementalX: true,
+            scratch: accelerator.scratch
+        });
     }
 
     if (accelerator.type === 'direct-mobius') {
@@ -2825,26 +3365,33 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
             const denIm = cRe * zi + cIm * zr + dIm;
             return divideComponents(nr, ni, denRe, denIm, out);
         };
-        return value
-            ? tile => renderSimpleValueTile(snapshot, tile, step, {
-                incrementalX: true,
-                scratch: accelerator.scratch
-            })
-            : null;
+        if (value) return tile => renderSimpleValueTile(snapshot, tile, step, {
+            incrementalX: true,
+            scratch: accelerator.scratch
+        });
     }
 
     if (accelerator.type === 'direct-zeta') {
-        return value ? tile => renderDirectZetaValueTile(snapshot, tile, accelerator) : null;
+        if (value) return tile => renderDirectZetaValueTile(snapshot, tile, accelerator);
     }
 
     if (accelerator.type === 'none' && supportsBuiltinComponentEvaluation(snapshot.functionKey)) {
-        const step = (zr, zi, _cr, _ci, _paramRe, _paramIm, out) =>
-            evaluateBuiltinComponents(snapshot.functionKey, zr, zi, snapshot, out);
-        return value
-            ? tile => renderFixedPointValueTile(snapshot, tile, step, { scratch: accelerator.scratch })
-            : null;
+        const componentStep = createBuiltinComponentStep(snapshot.functionKey, snapshot);
+        if (!componentStep) return null;
+        const step = (zr, zi, _cr, _ci, _paramRe, _paramIm, out) => componentStep(zr, zi, out);
+        const separable = separableBuiltinKind(snapshot.functionKey);
+        if (value && separable) {
+            const axisCache = new Map();
+            return tile => renderSeparableBuiltinValueTile(
+                snapshot, tile, separable, componentStep, axisCache, accelerator.scratch
+            );
+        }
+        if (value) return tile => renderFixedPointValueTile(snapshot, tile, step, { scratch: accelerator.scratch });
     }
 
+    if (!value && supportsComponentOrbitEvaluation(snapshot, accelerator)) {
+        return tile => renderComponentOrbitTile(snapshot, tile, accelerator);
+    }
     return null;
 }
 
@@ -2861,13 +3408,309 @@ function getAcceleratedTileRenderer(snapshot, accelerator) {
     return createAcceleratedTileRenderer(snapshot, accelerator);
 }
 
+function evaluateRasterValueInto(snapshot, re, im, accelerator, out) {
+    if (!supportsComponentValueEvaluation(snapshot, accelerator)) return false;
+    const scratch = accelerator.scratch || NO_ACCELERATOR.scratch;
+    const count = snapshotChainCount(snapshot);
+    const mode = snapshot.chainMode || 'recursion';
+    const detectFixedPoint = count >= 64;
+
+    if (!snapshot.chainingEnabled || (count <= 1 && mode !== 'zero_seed')) {
+        if (!evaluateComponentBaseInto(snapshot, accelerator, re, im, re, im, scratch)) return false;
+        const vr = scratch[0], vi = scratch[1];
+        if (!isFiniteDomainDynamicsValue(vr, vi)) return false;
+        out[0] = vr; out[1] = vi;
+        return true;
+    }
+
+    if (mode === 'zero_seed') {
+        let zr = 0, zi = 0, lastRe = NaN, lastIm = NaN, hasLast = false;
+        for (let i = 0; i < count; i += 1) {
+            const previousRe = zr, previousIm = zi;
+            if (!evaluateComponentBaseInto(snapshot, accelerator, zr, zi, re, im, scratch)) break;
+            const nr = scratch[0], ni = scratch[1];
+            if (!isFiniteDomainDynamicsValue(nr, ni)) break;
+            zr = nr; zi = ni; lastRe = nr; lastIm = ni; hasLast = true;
+            if ((detectFixedPoint && Object.is(nr, previousRe) && Object.is(ni, previousIm)) ||
+                domainDynamicsChainBailsOut(nr, ni)) break;
+        }
+        if (!hasLast) return false;
+        out[0] = lastRe; out[1] = lastIm;
+        return true;
+    }
+
+    if (!evaluateComponentBaseInto(snapshot, accelerator, re, im, re, im, scratch)) return false;
+    let zr = scratch[0], zi = scratch[1];
+    if (!isFiniteDomainDynamicsValue(zr, zi)) return false;
+    let lastRe = zr, lastIm = zi;
+    if ((detectFixedPoint && Object.is(zr, re) && Object.is(zi, im)) || domainDynamicsChainBailsOut(zr, zi)) {
+        out[0] = zr; out[1] = zi;
+        return true;
+    }
+    for (let i = 1; i < count; i += 1) {
+        if (!evaluateComponentBaseInto(snapshot, accelerator, zr, zi, re, im, scratch)) break;
+        const nr = scratch[0], ni = scratch[1];
+        if (!isFiniteDomainDynamicsValue(nr, ni)) break;
+        if (detectFixedPoint && Object.is(nr, lastRe) && Object.is(ni, lastIm)) {
+            lastRe = nr; lastIm = ni;
+            break;
+        }
+        zr = nr; zi = ni; lastRe = nr; lastIm = ni;
+        if (domainDynamicsChainBailsOut(nr, ni)) break;
+    }
+    out[0] = lastRe; out[1] = lastIm;
+    return true;
+}
+
+const ADAPTIVE_AA_EDGE_THRESHOLD = 80;
+const ADAPTIVE_AA_CHAOTIC_FRACTION = 0.18;
+const ADAPTIVE_AA_ITERATION_BUDGET = 2048;
+const ADAPTIVE_AA_SUBPIXEL_OFFSET = 0.25;
+
+// Rendering quality is complexity-adaptive rather than function-specific. Smooth
+// tiles keep the one-sample hot path; sparse discontinuities receive true 2x2
+// subpixel integration; highly chaotic tiles use a bounded-cost reconstruction so
+// quality cannot turn into an unbounded 4x transform bill. Only the final scale=1
+// pass is refined, preserving the latency of the coarse interaction passes.
+function estimatedRasterStepCost(accelerator) {
+    if (!accelerator) return 1;
+    switch (accelerator.type) {
+        case 'compiled-algebraic':
+            return Math.max(1, accelerator.ops?.length || 1);
+        case 'polynomial-parameter':
+        case 'direct-polynomial':
+            return Math.max(1, Math.min(16, accelerator.degree ?? accelerator.polynomialDegree ?? 1));
+        case 'laurent-parameter': {
+            const positive = accelerator.positivePowers?.length || accelerator.positiveExponents?.length || 0;
+            const negative = accelerator.negativePowers?.length || accelerator.negativeExponents?.length || 0;
+            return Math.max(1, Math.min(16, positive + negative || 1));
+        }
+        case 'direct-zeta':
+            return 8;
+        default:
+            return 1;
+    }
+}
+
+function createAdaptiveQualityEnhancer(snapshot, accelerator) {
+    let mask = new Uint8Array(0);
+    let source = new Uint8ClampedArray(0);
+    const subpixelRgba = new Uint8ClampedArray(16);
+    const subpixelValue = new Float64Array(2);
+    const valueColoring = snapshotUsesValueColoring(snapshot);
+    const componentValue = valueColoring && supportsComponentValueEvaluation(snapshot, accelerator);
+    const colors = colorContext(snapshot);
+    const stepCost = estimatedRasterStepCost(accelerator);
+
+    function ensureCapacity(pixelCount, byteCount) {
+        if (mask.length < pixelCount) mask = new Uint8Array(pixelCount);
+        if (source.length < byteCount) source = new Uint8ClampedArray(byteCount);
+    }
+
+    function hasProbedEdge(data, width, height) {
+        const threshold = ADAPTIVE_AA_EDGE_THRESHOLD;
+        const rowStep = 8;
+        const stride = width << 2;
+        // Scan complete sparse rows/columns rather than a point lattice. Long thin
+        // discontinuities (branch cuts, basin boundaries, poles) are therefore
+        // detected reliably while smooth tiles avoid the full four-neighbor pass.
+        for (let y = 0; y < height; y += rowStep) {
+            let i = (y * width) << 2;
+            for (let x = 1; x < width; x += 1, i += 4) {
+                const j = i + 4;
+                let d0 = data[i] - data[j]; if (d0 < 0) d0 = -d0;
+                let d1 = data[i + 1] - data[j + 1]; if (d1 < 0) d1 = -d1;
+                let d2 = data[i + 2] - data[j + 2]; if (d2 < 0) d2 = -d2;
+                if (d0 >= threshold || d1 >= threshold || d2 >= threshold) return true;
+            }
+        }
+        for (let x = 0; x < width; x += rowStep) {
+            let i = x << 2;
+            for (let y = 1; y < height; y += 1, i += stride) {
+                const j = i + stride;
+                let d0 = data[i] - data[j]; if (d0 < 0) d0 = -d0;
+                let d1 = data[i + 1] - data[j + 1]; if (d1 < 0) d1 = -d1;
+                let d2 = data[i + 2] - data[j + 2]; if (d2 < 0) d2 = -d2;
+                if (d0 >= threshold || d1 >= threshold || d2 >= threshold) return true;
+            }
+        }
+        return false;
+    }
+
+    function markEdges(data, width, height) {
+        const pixels = width * height;
+        mask.fill(0, 0, pixels);
+        let count = 0;
+        const threshold = ADAPTIVE_AA_EDGE_THRESHOLD;
+
+        // Visit each horizontal/vertical pixel pair exactly once and mark both
+        // endpoints. This is equivalent to four-neighbor edge detection but halves
+        // the comparison work and removes Math.max/Math.abs call overhead.
+        for (let y = 0; y < height; y += 1) {
+            let p = y * width;
+            let i = p << 2;
+            for (let x = 1; x < width; x += 1, p += 1, i += 4) {
+                const j = i + 4;
+                let d0 = data[i] - data[j]; if (d0 < 0) d0 = -d0;
+                let d1 = data[i + 1] - data[j + 1]; if (d1 < 0) d1 = -d1;
+                let d2 = data[i + 2] - data[j + 2]; if (d2 < 0) d2 = -d2;
+                if (d0 >= threshold || d1 >= threshold || d2 >= threshold) {
+                    if (!mask[p]) { mask[p] = 1; count += 1; }
+                    if (!mask[p + 1]) { mask[p + 1] = 1; count += 1; }
+                }
+            }
+        }
+        for (let y = 1; y < height; y += 1) {
+            let top = (y - 1) * width;
+            let bottom = y * width;
+            let i = top << 2;
+            let j = bottom << 2;
+            for (let x = 0; x < width; x += 1, top += 1, bottom += 1, i += 4, j += 4) {
+                let d0 = data[i] - data[j]; if (d0 < 0) d0 = -d0;
+                let d1 = data[i + 1] - data[j + 1]; if (d1 < 0) d1 = -d1;
+                let d2 = data[i + 2] - data[j + 2]; if (d2 < 0) d2 = -d2;
+                if (d0 >= threshold || d1 >= threshold || d2 >= threshold) {
+                    if (!mask[top]) { mask[top] = 1; count += 1; }
+                    if (!mask[bottom]) { mask[bottom] = 1; count += 1; }
+                }
+            }
+        }
+        return count;
+    }
+
+    function reconstructChaoticEdges(data, width, height) {
+        source.set(data.subarray(0, width * height * 4), 0);
+        const stride = width << 2;
+        for (let y = 1; y + 1 < height; y += 1) {
+            for (let x = 1; x + 1 < width; x += 1) {
+                const p = y * width + x;
+                if (!mask[p]) continue;
+                const i = p << 2;
+                const left = i - 4;
+                const right = i + 4;
+                const up = i - stride;
+                const down = i + stride;
+                data[i] = (4 * source[i] + source[left] + source[right] + source[up] + source[down] + 4) >> 3;
+                data[i + 1] = (4 * source[i + 1] + source[left + 1] + source[right + 1] + source[up + 1] + source[down + 1] + 4) >> 3;
+                data[i + 2] = (4 * source[i + 2] + source[left + 2] + source[right + 2] + source[up + 2] + source[down + 2] + 4) >> 3;
+            }
+        }
+    }
+
+    function supersampleSparseEdges(data, tile) {
+        const width = tile.width;
+        const height = tile.height;
+        const xRange = snapshot.viewport.xRange;
+        const yRange = snapshot.viewport.yRange;
+        const spanX = xRange[1] - xRange[0];
+        const spanY = yRange[1] - yRange[0];
+        const xStep = tile.scale * spanX / snapshot.viewport.width;
+        const yStep = -tile.scale * spanY / snapshot.viewport.height;
+        const xStart = xRange[0] + (tile.x + 0.5) * tile.scale * spanX / snapshot.viewport.width;
+        const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
+        const dx = xStep * ADAPTIVE_AA_SUBPIXEL_OFFSET;
+        const dy = yStep * ADAPTIVE_AA_SUBPIXEL_OFFSET;
+
+        for (let y = 0; y < height; y += 1) {
+            const im = yStart + y * yStep;
+            for (let x = 0; x < width; x += 1) {
+                const p = y * width + x;
+                if (!mask[p]) continue;
+                const re = xStart + x * xStep;
+                if (componentValue) {
+                    const xs0 = re - dx, xs1 = re + dx;
+                    const ys0 = im - dy, ys1 = im + dy;
+                    if (evaluateRasterValueInto(snapshot, xs0, ys0, accelerator, subpixelValue))
+                        writeDomainColorWithContext(subpixelRgba, 0, subpixelValue[0], subpixelValue[1], colors);
+                    else writeBlack(subpixelRgba, 0);
+                    if (evaluateRasterValueInto(snapshot, xs1, ys0, accelerator, subpixelValue))
+                        writeDomainColorWithContext(subpixelRgba, 4, subpixelValue[0], subpixelValue[1], colors);
+                    else writeBlack(subpixelRgba, 4);
+                    if (evaluateRasterValueInto(snapshot, xs0, ys1, accelerator, subpixelValue))
+                        writeDomainColorWithContext(subpixelRgba, 8, subpixelValue[0], subpixelValue[1], colors);
+                    else writeBlack(subpixelRgba, 8);
+                    if (evaluateRasterValueInto(snapshot, xs1, ys1, accelerator, subpixelValue))
+                        writeDomainColorWithContext(subpixelRgba, 12, subpixelValue[0], subpixelValue[1], colors);
+                    else writeBlack(subpixelRgba, 12);
+                } else {
+                    const c0 = colorDomainDynamicsPoint(snapshot, re - dx, im - dy, accelerator);
+                    const c1 = colorDomainDynamicsPoint(snapshot, re + dx, im - dy, accelerator);
+                    const c2 = colorDomainDynamicsPoint(snapshot, re - dx, im + dy, accelerator);
+                    const c3 = colorDomainDynamicsPoint(snapshot, re + dx, im + dy, accelerator);
+                    subpixelRgba[0] = c0[0]; subpixelRgba[1] = c0[1]; subpixelRgba[2] = c0[2];
+                    subpixelRgba[4] = c1[0]; subpixelRgba[5] = c1[1]; subpixelRgba[6] = c1[2];
+                    subpixelRgba[8] = c2[0]; subpixelRgba[9] = c2[1]; subpixelRgba[10] = c2[2];
+                    subpixelRgba[12] = c3[0]; subpixelRgba[13] = c3[1]; subpixelRgba[14] = c3[2];
+                }
+                const i = p << 2;
+                data[i] = (subpixelRgba[0] + subpixelRgba[4] + subpixelRgba[8] + subpixelRgba[12] + 2) >> 2;
+                data[i + 1] = (subpixelRgba[1] + subpixelRgba[5] + subpixelRgba[9] + subpixelRgba[13] + 2) >> 2;
+                data[i + 2] = (subpixelRgba[2] + subpixelRgba[6] + subpixelRgba[10] + subpixelRgba[14] + 2) >> 2;
+                data[i + 3] = 255;
+            }
+        }
+    }
+
+    return (data, tile) => {
+        if (!data || tile.scale !== 1 || tile.width < 2 || tile.height < 2) return data;
+        if (!hasProbedEdge(data, tile.width, tile.height)) return data;
+        const pixelCount = tile.width * tile.height;
+        ensureCapacity(pixelCount, pixelCount << 2);
+        const edgeCount = markEdges(data, tile.width, tile.height);
+        if (edgeCount === 0) return data;
+        const iterationCost = snapshot.chainingEnabled
+            ? Math.max(1, snapshotChainCount(snapshot))
+            : 1;
+        const refinementCost = edgeCount * iterationCost * stepCost;
+        if (edgeCount / pixelCount >= ADAPTIVE_AA_CHAOTIC_FRACTION ||
+            refinementCost > ADAPTIVE_AA_ITERATION_BUDGET) {
+            reconstructChaoticEdges(data, tile.width, tile.height);
+        } else {
+            supersampleSparseEdges(data, tile);
+        }
+        return data;
+    };
+}
+
 export function createDomainDynamicsTileRenderer(snapshot) {
     const accelerator = createDynamicsAccelerator(snapshot);
     const accelerated = getAcceleratedTileRenderer(snapshot, accelerator);
-    return tile => {
+    const enhanceQuality = createAdaptiveQualityEnhancer(snapshot, accelerator);
+    const spatiallyConstantZeroSeed = snapshot?.chainMode === 'zero_seed' &&
+        snapshot?.functionKey !== 'algebraic_chaining' && snapshot?.functionKey !== 'c';
+    let constantRgba = null;
+
+    function renderBaseTile(tile) {
+        if (spatiallyConstantZeroSeed) {
+            if (!constantRgba) {
+                const rgb = colorDomainDynamicsPoint(snapshot, 0, 0, accelerator);
+                constantRgba = [rgb[0], rgb[1], rgb[2], 255];
+            }
+            return createSolidRgbaBuffer(
+                tile.width * tile.height,
+                constantRgba[0], constantRgba[1], constantRgba[2], constantRgba[3]
+            );
+        }
         const duplicateSampleTile = renderDuplicateSampleValueTile(snapshot, tile, accelerator);
-        if (duplicateSampleTile) return duplicateSampleTile;
-        return accelerated?.(tile) || renderGenericDomainDynamicsTile(snapshot, tile, accelerator);
+        return duplicateSampleTile || accelerated?.(tile) || renderGenericDomainDynamicsTile(snapshot, tile, accelerator);
+    }
+
+    return tile => {
+        // Internal progressive-quality protocol. Existing callers never set these
+        // fields and therefore retain the synchronous high-quality result.
+        if (tile?.qualityOnly) {
+            const pixels = tile.basePixels;
+            if (spatiallyConstantZeroSeed) {
+                return pixels instanceof Uint8ClampedArray ? pixels : renderBaseTile(tile);
+            }
+            if (pixels instanceof Uint8ClampedArray && pixels.length === tile.width * tile.height * 4) {
+                return enhanceQuality(pixels, tile);
+            }
+            return enhanceQuality(renderBaseTile(tile), tile);
+        }
+        const data = renderBaseTile(tile);
+        if (spatiallyConstantZeroSeed || tile?.deferQuality) return data;
+        return enhanceQuality(data, tile);
     };
 }
 
@@ -2927,11 +3770,11 @@ function evaluateBuiltinComponents(functionKey, re, im, snapshot, out) {
             out[1] = -Math.sin(re) * Math.sinh(im);
             return out;
         case 'tan': {
-            const sinRe = Math.sin(re) * Math.cosh(im);
-            const sinIm = Math.cos(re) * Math.sinh(im);
-            const cosRe = Math.cos(re) * Math.cosh(im);
-            const cosIm = -Math.sin(re) * Math.sinh(im);
-            return divideComponents(sinRe, sinIm, cosRe, cosIm, out);
+            const sinX = Math.sin(re);
+            const cosX = Math.cos(re);
+            const sinhY = Math.sinh(im);
+            const coshY = Math.cosh(im);
+            return divideComponents(sinX * coshY, cosX * sinhY, cosX * coshY, -sinX * sinhY, out);
         }
         case 'sec': {
             const cosRe = Math.cos(re) * Math.cosh(im);
@@ -2949,11 +3792,11 @@ function evaluateBuiltinComponents(functionKey, re, im, snapshot, out) {
             out[1] = Math.sinh(re) * Math.sin(im);
             return out;
         case 'tanh': {
-            const sinhRe = Math.sinh(re) * Math.cos(im);
-            const sinhIm = Math.cosh(re) * Math.sin(im);
-            const coshRe = Math.cosh(re) * Math.cos(im);
-            const coshIm = Math.sinh(re) * Math.sin(im);
-            return divideComponents(sinhRe, sinhIm, coshRe, coshIm, out);
+            const sinhX = Math.sinh(re);
+            const coshX = Math.cosh(re);
+            const sinY = Math.sin(im);
+            const cosY = Math.cos(im);
+            return divideComponents(sinhX * cosY, coshX * sinY, coshX * cosY, sinhX * sinY, out);
         }
         case 'power': {
             const exponent = Number(snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER);
@@ -3070,96 +3913,165 @@ function renderDirectZetaValueTile(snapshot, tile, accelerator) {
     const height = tile.height;
     const colors = colorContext(snapshot);
     const continuation = !!snapshot.zetaContinuationEnabled;
-
-    // ζ(s) is separable per term: exp(-x log n) · cis(-y log n). Tiles vary x by
-    // column and y by row, so cache the expensive transcendental pieces once per
-    // column/row instead of inside every pixel × series-term iteration.
     const termCount = continuation ? NUM_ZETA_HASSE_LEVELS : NUM_ZETA_TERMS_DIRECT_SUM;
-    const coeffs = continuation ? zetaHasseCollapsedTerms(NUM_ZETA_HASSE_LEVELS).coeffs : null;
-    const logs = continuation ? zetaHasseCollapsedTerms(NUM_ZETA_HASSE_LEVELS).logs : null;
+    const collapsed = continuation ? zetaHasseCollapsedTerms(NUM_ZETA_HASSE_LEVELS) : null;
+    const coeffs = collapsed?.coeffs || null;
+    const logs = collapsed?.logs || null;
     if (!continuation) ensureZetaLogIntegerCache(NUM_ZETA_TERMS_DIRECT_SUM);
 
+    // Axis transcendental tables are invariant across sibling tiles. Persist them
+    // on the snapshot accelerator, keyed by exact tile geometry, so progressive
+    // 64x64 tiling computes each x-column and y-row basis only once per pass.
     const cache = accelerator?.type === 'direct-zeta' ? accelerator : null;
-    const magLength = width * termCount;
-    const phaseLength = height * termCount * 2;
-    if (cache && (!cache.magByX || cache.magByX.length < magLength)) cache.magByX = new Float64Array(magLength);
-    if (cache && (!cache.cosSinByY || cache.cosSinByY.length < phaseLength)) cache.cosSinByY = new Float64Array(phaseLength);
-    const magByX = cache ? cache.magByX : new Float64Array(magLength);
-    const cosSinByY = cache ? cache.cosSinByY : new Float64Array(phaseLength);
+    if (cache && !cache.axisTables) cache.axisTables = new Map();
+    const xKey = cache ? `${continuation ? 1 : 0}:x:${tile.scale}:${tile.x}:${width}` : null;
+    const yKey = cache ? `${continuation ? 1 : 0}:y:${tile.scale}:${tile.y}:${height}` : null;
 
-    for (let x = 0; x < width; x += 1) {
-        const re = xStart + x * xStep;
-        const base = x * termCount;
-        for (let t = 0; t < termCount; t += 1) {
-            const logN = continuation ? logs[t] : zetaLogIntegerCache[t + 1];
-            const coeff = continuation ? coeffs[t] : 1;
-            magByX[base + t] = coeff * expSafe(-re * logN);
+    let xTable = xKey ? cache.axisTables.get(xKey) : null;
+    if (!xTable) {
+        const magByX = new Float64Array(width * termCount);
+        for (let x = 0; x < width; x += 1) {
+            const re = xStart + x * xStep;
+            const base = x * termCount;
+            for (let t = 0; t < termCount; t += 1) {
+                const logN = continuation ? logs[t] : zetaLogIntegerCache[t + 1];
+                const coeff = continuation ? coeffs[t] : 1;
+                magByX[base + t] = coeff * expSafe(-re * logN);
+            }
         }
+        let denMagX = null;
+        if (continuation) {
+            const log2 = Math.log(2);
+            denMagX = new Float64Array(width);
+            for (let x = 0; x < width; x += 1) denMagX[x] = expSafe((1 - (xStart + x * xStep)) * log2);
+        }
+        xTable = { magByX, denMagX };
+        if (xKey) cache.axisTables.set(xKey, xTable);
     }
 
-    for (let y = 0; y < height; y += 1) {
-        const im = yStart + y * yStep;
-        const base = y * termCount * 2;
-        for (let t = 0; t < termCount; t += 1) {
-            const logN = continuation ? logs[t] : zetaLogIntegerCache[t + 1];
-            const angle = -im * logN;
-            cosSinByY[base + (t << 1)] = Math.cos(angle);
-            cosSinByY[base + (t << 1) + 1] = Math.sin(angle);
-        }
-    }
-
-    const log2 = Math.log(2);
-    if (continuation && cache && (!cache.denMagX || cache.denMagX.length < width)) cache.denMagX = new Float64Array(width);
-    if (continuation && cache && (!cache.denCosSinY || cache.denCosSinY.length < height * 2)) cache.denCosSinY = new Float64Array(height * 2);
-    const denMagX = continuation ? (cache ? cache.denMagX : new Float64Array(width)) : null;
-    const denCosSinY = continuation ? (cache ? cache.denCosSinY : new Float64Array(height * 2)) : null;
-    if (continuation) {
-        for (let x = 0; x < width; x += 1) denMagX[x] = expSafe((1 - (xStart + x * xStep)) * log2);
+    let yTable = yKey ? cache.axisTables.get(yKey) : null;
+    if (!yTable) {
+        const cosSinByY = new Float64Array(height * termCount * 2);
         for (let y = 0; y < height; y += 1) {
-            const angle = -(yStart + y * yStep) * log2;
-            denCosSinY[y << 1] = Math.cos(angle);
-            denCosSinY[(y << 1) + 1] = Math.sin(angle);
+            const im = yStart + y * yStep;
+            const base = y * termCount * 2;
+            for (let t = 0; t < termCount; t += 1) {
+                const logN = continuation ? logs[t] : zetaLogIntegerCache[t + 1];
+                const angle = -im * logN;
+                cosSinByY[base + (t << 1)] = Math.cos(angle);
+                cosSinByY[base + (t << 1) + 1] = Math.sin(angle);
+            }
         }
+        let denCosSinY = null;
+        if (continuation) {
+            const log2 = Math.log(2);
+            denCosSinY = new Float64Array(height * 2);
+            for (let y = 0; y < height; y += 1) {
+                const angle = -(yStart + y * yStep) * log2;
+                denCosSinY[y << 1] = Math.cos(angle);
+                denCosSinY[(y << 1) + 1] = Math.sin(angle);
+            }
+        }
+        yTable = { cosSinByY, denCosSinY };
+        if (yKey) cache.axisTables.set(yKey, yTable);
     }
 
-    let idx = 0;
+    const magByX = xTable.magByX;
+    const cosSinByY = yTable.cosSinByY;
+    const denMagX = xTable.denMagX;
+    const denCosSinY = yTable.denCosSinY;
     const scratch = continuation ? (cache?.scratch || new Float64Array(2)) : null;
+
+    // Four-column blocking keeps four independent complex sums in registers while
+    // sharing each row-phase load. Each pixel still accumulates t=0..N-1 in the
+    // original order, so the byte output remains deterministic and unchanged.
     for (let y = 0; y < height; y += 1) {
         const phaseBase = y * termCount * 2;
+        let x = 0;
         let re = xStart;
-        for (let x = 0; x < width; x += 1, re += xStep, idx += 4) {
-            if (!continuation && re <= ZETA_REFLECTION_POINT_RE) {
-                writeBlack(data, idx);
-                continue;
+        for (; x + 3 < width; x += 4) {
+            const b0 = x * termCount;
+            const b1 = b0 + termCount;
+            const b2 = b1 + termCount;
+            const b3 = b2 + termCount;
+            let sr0 = 0, si0 = 0, sr1 = 0, si1 = 0;
+            let sr2 = 0, si2 = 0, sr3 = 0, si3 = 0;
+            for (let t = 0; t < termCount; t += 1) {
+                const phase = phaseBase + (t << 1);
+                const c = cosSinByY[phase];
+                const q = cosSinByY[phase + 1];
+                let m = magByX[b0 + t]; sr0 += m * c; si0 += m * q;
+                m = magByX[b1 + t]; sr1 += m * c; si1 += m * q;
+                m = magByX[b2 + t]; sr2 += m * c; si2 += m * q;
+                m = magByX[b3 + t]; sr3 += m * c; si3 += m * q;
             }
 
+            const re0 = re;
+            const re1 = re0 + xStep;
+            const re2 = re1 + xStep;
+            const re3 = re2 + xStep;
+            if (continuation) {
+                const denPhase = y << 1;
+                const dc = denCosSinY[denPhase];
+                const ds = denCosSinY[denPhase + 1];
+                let denMag = denMagX[x];
+                let denRe = 1 - denMag * dc, denIm = -denMag * ds;
+                if (denRe * denRe + denIm * denIm < 1e-28) zetaComponents(re0, yStart + y * yStep, true, scratch);
+                else divideComponents(sr0, si0, denRe, denIm, scratch);
+                sr0 = scratch[0]; si0 = scratch[1];
+
+                denMag = denMagX[x + 1]; denRe = 1 - denMag * dc; denIm = -denMag * ds;
+                if (denRe * denRe + denIm * denIm < 1e-28) zetaComponents(re1, yStart + y * yStep, true, scratch);
+                else divideComponents(sr1, si1, denRe, denIm, scratch);
+                sr1 = scratch[0]; si1 = scratch[1];
+
+                denMag = denMagX[x + 2]; denRe = 1 - denMag * dc; denIm = -denMag * ds;
+                if (denRe * denRe + denIm * denIm < 1e-28) zetaComponents(re2, yStart + y * yStep, true, scratch);
+                else divideComponents(sr2, si2, denRe, denIm, scratch);
+                sr2 = scratch[0]; si2 = scratch[1];
+
+                denMag = denMagX[x + 3]; denRe = 1 - denMag * dc; denIm = -denMag * ds;
+                if (denRe * denRe + denIm * denIm < 1e-28) zetaComponents(re3, yStart + y * yStep, true, scratch);
+                else divideComponents(sr3, si3, denRe, denIm, scratch);
+                sr3 = scratch[0]; si3 = scratch[1];
+            }
+
+            let idx = (y * width + x) * 4;
+            if (!continuation && re0 <= ZETA_REFLECTION_POINT_RE) writeBlack(data, idx);
+            else writeDomainColorWithContext(data, idx, sr0, si0, colors);
+            idx += 4;
+            if (!continuation && re1 <= ZETA_REFLECTION_POINT_RE) writeBlack(data, idx);
+            else writeDomainColorWithContext(data, idx, sr1, si1, colors);
+            idx += 4;
+            if (!continuation && re2 <= ZETA_REFLECTION_POINT_RE) writeBlack(data, idx);
+            else writeDomainColorWithContext(data, idx, sr2, si2, colors);
+            idx += 4;
+            if (!continuation && re3 <= ZETA_REFLECTION_POINT_RE) writeBlack(data, idx);
+            else writeDomainColorWithContext(data, idx, sr3, si3, colors);
+            re = re3 + xStep;
+        }
+
+        for (; x < width; x += 1, re += xStep) {
             const magBase = x * termCount;
-            let sumRe = 0;
-            let sumIm = 0;
+            let sumRe = 0, sumIm = 0;
             for (let t = 0; t < termCount; t += 1) {
-                const magnitude = magByX[magBase + t];
                 const phase = phaseBase + (t << 1);
+                const magnitude = magByX[magBase + t];
                 sumRe += magnitude * cosSinByY[phase];
                 sumIm += magnitude * cosSinByY[phase + 1];
             }
-
             if (continuation) {
-                const denMag = denMagX[x];
                 const denPhase = y << 1;
+                const denMag = denMagX[x];
                 const denRe = 1 - denMag * denCosSinY[denPhase];
                 const denIm = -denMag * denCosSinY[denPhase + 1];
-                if (denRe * denRe + denIm * denIm < 1e-28) {
-                    zetaComponents(re, yStart + y * yStep, true, scratch);
-                    sumRe = scratch[0];
-                    sumIm = scratch[1];
-                } else {
-                    divideComponents(sumRe, sumIm, denRe, denIm, scratch);
-                    sumRe = scratch[0];
-                    sumIm = scratch[1];
-                }
+                if (denRe * denRe + denIm * denIm < 1e-28) zetaComponents(re, yStart + y * yStep, true, scratch);
+                else divideComponents(sumRe, sumIm, denRe, denIm, scratch);
+                sumRe = scratch[0]; sumIm = scratch[1];
             }
-
-            writeDomainColorWithContext(data, idx, sumRe, sumIm, colors);
+            const idx = (y * width + x) * 4;
+            if (!continuation && re <= ZETA_REFLECTION_POINT_RE) writeBlack(data, idx);
+            else writeDomainColorWithContext(data, idx, sumRe, sumIm, colors);
         }
     }
 

@@ -56,6 +56,7 @@ const rawState = {
     foldSurface3dEnabled: false,
     foldSurfaceHeightScale: 1.0,
     domainColoringEnabled: false,
+    domainColoringKeyVisible: false,
     gridDensity: 15,
     riemannSurfaceResolution: 50,
     showZerosPoles: false,
