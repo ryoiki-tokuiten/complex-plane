@@ -245,6 +245,14 @@ function setDomainProcessing(isWPlane, isProcessing) {
     }
 }
 
+function setDomainFullResolution(isWPlane, isReady) {
+    if (isWPlane) {
+        runtime.rendering.wDomainDynamicsHasFullResolution = isReady;
+    } else {
+        runtime.rendering.zDomainDynamicsHasFullResolution = isReady;
+    }
+}
+
 class WorkerCpuDomainDynamicsBackend {
     constructor() {
         this.id = 'worker-cpu';
@@ -465,6 +473,11 @@ class WorkerCpuDomainDynamicsBackend {
         }
 
         if (pass.remaining <= 0) {
+            if (pass.scale === 1) {
+                // Keep the refining indicator active, but stop softening the image
+                // once a native-resolution frame is available.
+                setDomainFullResolution(job.snapshot.isWPlaneColoring, true);
+            }
             drawPassToTarget(job, pass);
 
             // The first scale-1 completion is immediately usable full-resolution
@@ -558,6 +571,7 @@ export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
 
     activeSignature = signature;
     clearTarget(targetCtx, snapshot.viewport);
+    setDomainFullResolution(snapshot.isWPlaneColoring, false);
 
     activeJobId = nextJobId;
     nextJobId += 1;

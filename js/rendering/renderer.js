@@ -565,7 +565,10 @@ function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
             const isProcessing = !planeParams.currentVisXRange
                 ? runtime.rendering.processingWDomainDynamics
                 : runtime.rendering.processingZDomainDynamics;
-            if (isProcessing) {
+            const hasFullResolution = !planeParams.currentVisXRange
+                ? runtime.rendering.wDomainDynamicsHasFullResolution
+                : runtime.rendering.zDomainDynamicsHasFullResolution;
+            if (isProcessing && !hasFullResolution) {
                 ctx.filter = 'blur(3px)';
             }
             fillCanvasBackground(ctx, planeParams);

@@ -2548,127 +2548,145 @@ function writeDynamicsPhaseEventColorWithContext(data, idx, re, im, intensity, c
     writePreSaturatedHueColor(data, idx, hue, lightness, context);
 }
 
-function renderComponentOrbitTile(snapshot, tile, accelerator) {
+function createComponentOrbitPointWriter(snapshot, accelerator, colors = colorContext(snapshot)) {
     const mode = resolveOrbitColoringMode(snapshot);
-    if (mode === ORBIT_COLORING_MODES.value || !supportsComponentValueEvaluation(snapshot, accelerator)) return null;
-    const opaqueBlack = mode === ORBIT_COLORING_MODES.escape || mode === ORBIT_COLORING_MODES.attractor;
-    const frame = createDomainTileFrame(snapshot, tile, opaqueBlack);
-    const { data, width, height, xStep, yStep, xStart, yStart, colors } = frame;
+    if (mode === ORBIT_COLORING_MODES.value || !supportsComponentOrbitEvaluation(snapshot, accelerator)) return null;
     const count = snapshotChainCount(snapshot);
     const zeroSeed = snapshot.chainMode === 'zero_seed';
     const detectConvergence = mode === ORBIT_COLORING_MODES.attractor || mode === ORBIT_COLORING_MODES.hybrid;
     const scratch = accelerator.scratch || NO_ACCELERATOR.scratch;
+
+    return (data, idx, cr, ci, targetIsOpaqueBlack = false) => {
+        let currentRe = zeroSeed ? 0 : cr;
+        let currentIm = zeroSeed ? 0 : ci;
+        let lastRe = currentRe;
+        let lastIm = currentIm;
+        let hasLast = isFiniteDomainDynamicsValue(currentRe, currentIm);
+        let event = 0; // 1 escaped, 2 converged
+        let eventIteration = count;
+        let smoothIteration = count;
+        let eventRe = lastRe;
+        let eventIm = lastIm;
+
+        for (let i = 0; i < count; i += 1) {
+            if (!evaluateComponentBaseInto(snapshot, accelerator, currentRe, currentIm, cr, ci, scratch)) {
+                event = 1;
+                eventIteration = i + 1;
+                smoothIteration = i + 1;
+                eventRe = lastRe;
+                eventIm = lastIm;
+                break;
+            }
+            const nextRe = scratch[0];
+            const nextIm = scratch[1];
+            const nextFinite = isFiniteDomainDynamicsValue(nextRe, nextIm);
+            const magSq = nextFinite ? nextRe * nextRe + nextIm * nextIm : DYNAMICS_ESCAPE_RADIUS_SQ;
+            const absRe = nextRe < 0 ? -nextRe : nextRe;
+            const absIm = nextIm < 0 ? -nextIm : nextIm;
+            const tooLarge = nextFinite && (
+                magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
+                absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
+                absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE
+            );
+
+            if (!nextFinite || tooLarge) {
+                event = 1;
+                eventIteration = i + 1;
+                smoothIteration = nextFinite
+                    ? domainDynamicsSmoothIteration(i, count, nextRe, nextIm)
+                    : i + 1;
+                eventRe = nextFinite ? nextRe : lastRe;
+                eventIm = nextFinite ? nextIm : lastIm;
+                break;
+            }
+
+            if (detectConvergence) {
+                const deltaRe = nextRe - currentRe;
+                const deltaIm = nextIm - currentIm;
+                const deltaSq = deltaRe * deltaRe + deltaIm * deltaIm;
+                const convergenceScale = Math.max(1, magSq);
+                if (deltaSq <= ORBIT_ATTRACTOR_CONVERGENCE_EPSILON_SQ * convergenceScale) {
+                    event = 2;
+                    eventIteration = i + 1;
+                    smoothIteration = i + 1;
+                    eventRe = nextRe;
+                    eventIm = nextIm;
+                    lastRe = nextRe;
+                    lastIm = nextIm;
+                    hasLast = true;
+                    break;
+                }
+            }
+
+            currentRe = nextRe;
+            currentIm = nextIm;
+            lastRe = nextRe;
+            lastIm = nextIm;
+            hasLast = true;
+        }
+
+        if (mode === ORBIT_COLORING_MODES.escape) {
+            if (event === 1) writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, colors);
+            else if (!targetIsOpaqueBlack) writeBlack(data, idx);
+            return;
+        }
+        if (mode === ORBIT_COLORING_MODES.attractor) {
+            if (event === 2) {
+                writeDynamicsPhaseEventColorWithContext(
+                    data, idx, eventRe, eventIm,
+                    1 - Math.max(0, Math.min(1, (eventIteration - 1) / Math.max(1, count))),
+                    colors
+                );
+            } else if (!targetIsOpaqueBlack) {
+                writeBlack(data, idx);
+            }
+            return;
+        }
+        if (event === 1) {
+            writeDynamicsPhaseEventColorWithContext(
+                data, idx, eventRe, eventIm,
+                1 - Math.max(0, Math.min(1, smoothIteration / Math.max(1, count))),
+                colors
+            );
+        } else if (event === 2) {
+            writeDynamicsPhaseEventColorWithContext(
+                data, idx, eventRe, eventIm,
+                1 - Math.max(0, Math.min(1, (eventIteration - 1) / Math.max(1, count))),
+                colors
+            );
+        } else if (hasLast) {
+            writeDomainColorWithContext(data, idx, lastRe, lastIm, colors);
+        } else {
+            writeBlack(data, idx);
+        }
+    };
+}
+
+function renderComponentOrbitTile(snapshot, tile, accelerator, writePoint = null) {
+    const mode = resolveOrbitColoringMode(snapshot);
+    if (mode === ORBIT_COLORING_MODES.value || !supportsComponentOrbitEvaluation(snapshot, accelerator)) return null;
+    const opaqueBlack = mode === ORBIT_COLORING_MODES.escape || mode === ORBIT_COLORING_MODES.attractor;
+    const frame = createDomainTileFrame(snapshot, tile, opaqueBlack);
+    const { data, width, height, xStep, yStep, xStart, yStart, colors } = frame;
+    const pointWriter = writePoint || createComponentOrbitPointWriter(snapshot, accelerator, colors);
 
     for (let y = 0; y < height; y += 1) {
         const ci = yStart + y * yStep;
         for (let x = 0; x < width; x += 1) {
             const cr = xStart + x * xStep;
             const idx = (y * width + x) * 4;
-            let currentRe = zeroSeed ? 0 : cr;
-            let currentIm = zeroSeed ? 0 : ci;
-            let lastRe = currentRe;
-            let lastIm = currentIm;
-            let hasLast = isFiniteDomainDynamicsValue(currentRe, currentIm);
-            let event = 0; // 1 escaped, 2 converged
-            let eventIteration = count;
-            let smoothIteration = count;
-            let eventRe = lastRe;
-            let eventIm = lastIm;
-
-            for (let i = 0; i < count; i += 1) {
-                if (!evaluateComponentBaseInto(snapshot, accelerator, currentRe, currentIm, cr, ci, scratch)) {
-                    event = 1;
-                    eventIteration = i + 1;
-                    smoothIteration = i + 1;
-                    eventRe = lastRe;
-                    eventIm = lastIm;
-                    break;
-                }
-                const nextRe = scratch[0];
-                const nextIm = scratch[1];
-                const nextFinite = isFiniteDomainDynamicsValue(nextRe, nextIm);
-                const magSq = nextFinite ? nextRe * nextRe + nextIm * nextIm : DYNAMICS_ESCAPE_RADIUS_SQ;
-                const absRe = nextRe < 0 ? -nextRe : nextRe;
-                const absIm = nextIm < 0 ? -nextIm : nextIm;
-                const tooLarge = nextFinite && (
-                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ ||
-                    absRe >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE ||
-                    absIm >= DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE
-                );
-
-                if (!nextFinite || tooLarge) {
-                    event = 1;
-                    eventIteration = i + 1;
-                    smoothIteration = nextFinite
-                        ? domainDynamicsSmoothIteration(i, count, nextRe, nextIm)
-                        : i + 1;
-                    eventRe = nextFinite ? nextRe : lastRe;
-                    eventIm = nextFinite ? nextIm : lastIm;
-                    break;
-                }
-
-                if (detectConvergence) {
-                    const deltaRe = nextRe - currentRe;
-                    const deltaIm = nextIm - currentIm;
-                    const deltaSq = deltaRe * deltaRe + deltaIm * deltaIm;
-                    const convergenceScale = Math.max(1, magSq);
-                    if (deltaSq <= ORBIT_ATTRACTOR_CONVERGENCE_EPSILON_SQ * convergenceScale) {
-                        event = 2;
-                        eventIteration = i + 1;
-                        smoothIteration = i + 1;
-                        eventRe = nextRe;
-                        eventIm = nextIm;
-                        lastRe = nextRe;
-                        lastIm = nextIm;
-                        hasLast = true;
-                        break;
-                    }
-                }
-
-                currentRe = nextRe;
-                currentIm = nextIm;
-                lastRe = nextRe;
-                lastIm = nextIm;
-                hasLast = true;
-            }
-
-            if (mode === ORBIT_COLORING_MODES.escape) {
-                if (event === 1) writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, colors);
-                else if (!opaqueBlack) writeBlack(data, idx);
-                continue;
-            }
-            if (mode === ORBIT_COLORING_MODES.attractor) {
-                if (event === 2) {
-                    writeDynamicsPhaseEventColorWithContext(
-                        data, idx, eventRe, eventIm,
-                        1 - Math.max(0, Math.min(1, (eventIteration - 1) / Math.max(1, count))),
-                        colors
-                    );
-                } else if (!opaqueBlack) writeBlack(data, idx);
-                continue;
-            }
-            if (mode === ORBIT_COLORING_MODES.hybrid) {
-                if (event === 1) {
-                    writeDynamicsPhaseEventColorWithContext(
-                        data, idx, eventRe, eventIm,
-                        1 - Math.max(0, Math.min(1, smoothIteration / Math.max(1, count))),
-                        colors
-                    );
-                } else if (event === 2) {
-                    writeDynamicsPhaseEventColorWithContext(
-                        data, idx, eventRe, eventIm,
-                        1 - Math.max(0, Math.min(1, (eventIteration - 1) / Math.max(1, count))),
-                        colors
-                    );
-                } else if (hasLast) {
-                    writeDomainColorWithContext(data, idx, lastRe, lastIm, colors);
-                } else {
-                    writeBlack(data, idx);
-                }
-            }
+            pointWriter(data, idx, cr, ci, opaqueBlack);
         }
     }
     return data;
+}
+
+function createComponentOrbitTileRenderer(snapshot, accelerator) {
+    const writePoint = createComponentOrbitPointWriter(snapshot, accelerator);
+    if (!writePoint) return null;
+    const renderTile = tile => renderComponentOrbitTile(snapshot, tile, accelerator, writePoint);
+    renderTile.writePoint = writePoint;
+    return renderTile;
 }
 
 function traceOrbitForPoint(snapshot, re, im, accelerator = createDynamicsAccelerator(snapshot), detectConvergence = true) {
@@ -2940,66 +2958,78 @@ function renderFixedPointValueTile(snapshot, tile, step, options = {}) {
     return data;
 }
 
-function renderEscapeTile(snapshot, tile, step, options = {}) {
+function createEscapePointWriter(snapshot, step, options = {}) {
     const zeroSeed = snapshot.chainMode === 'zero_seed';
-    const opaqueBlack = !!options.opaqueBlack && zeroSeed;
-    const frame = createDomainTileFrame(snapshot, tile, opaqueBlack);
-    const { data, width, height, xStep, yStep, xStart, yStart, colors } = frame;
     const count = snapshotChainCount(snapshot);
     const out = options.scratch || new Float64Array(2);
     const parameterMode = !!options.parameterMode;
+    const colors = colorContext(snapshot);
 
-    for (let y = 0; y < height; y += 1) {
-        const ci = yStart + y * yStep;
-        for (let x = 0; x < width; x += 1) {
-            const cr = xStart + x * xStep;
-            let paramRe = 0;
-            let paramIm = 0;
-            if (parameterMode) {
-                paramRe = options.cCoeffRe * cr - options.cCoeffIm * ci;
-                paramIm = options.cCoeffRe * ci + options.cCoeffIm * cr;
-            }
-            const idx = (y * width + x) * 4;
-            if (options.skipCardioid && zeroSeed && definitelyInsideUnitQuadraticCardioidOrBulb(paramRe, paramIm)) {
-                if (!opaqueBlack) writeBlack(data, idx);
-                continue;
-            }
+    return (data, idx, cr, ci, targetIsOpaqueBlack = false) => {
+        let paramRe = 0;
+        let paramIm = 0;
+        if (parameterMode) {
+            paramRe = options.cCoeffRe * cr - options.cCoeffIm * ci;
+            paramIm = options.cCoeffRe * ci + options.cCoeffIm * cr;
+        }
+        if (options.skipCardioid && zeroSeed && definitelyInsideUnitQuadraticCardioidOrBulb(paramRe, paramIm)) {
+            if (!targetIsOpaqueBlack) writeBlack(data, idx);
+            return;
+        }
 
-            let zr = zeroSeed ? 0 : cr;
-            let zi = zeroSeed ? 0 : ci;
-            let smoothIteration = count;
-            let escaped = false;
+        let zr = zeroSeed ? 0 : cr;
+        let zi = zeroSeed ? 0 : ci;
+        let smoothIteration = count;
+        let escaped = false;
 
-            for (let i = 0; i < count; i += 1) {
-                step(zr, zi, cr, ci, paramRe, paramIm, out);
-                const nr = out[0];
-                const ni = out[1];
-                const magSq = nr * nr + ni * ni;
-                const absRe = nr < 0 ? -nr : nr;
-                const absIm = ni < 0 ? -ni : ni;
-                const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
-                    !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
-                    magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
+        for (let i = 0; i < count; i += 1) {
+            step(zr, zi, cr, ci, paramRe, paramIm, out);
+            const nr = out[0];
+            const ni = out[1];
+            const magSq = nr * nr + ni * ni;
+            const absRe = nr < 0 ? -nr : nr;
+            const absIm = ni < 0 ? -ni : ni;
+            const tooLarge = !(absRe < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                !(absIm < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
+                magSq > DYNAMICS_ESCAPE_RADIUS_SQ;
 
-                if (tooLarge) {
-                    smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
-                    escaped = true;
-                    break;
-                }
-
-                zr = nr;
-                zi = ni;
+            if (tooLarge) {
+                smoothIteration = domainDynamicsSmoothIteration(i, count, nr, ni);
+                escaped = true;
+                break;
             }
 
-            if (escaped) {
-                writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, colors);
-            } else if (!opaqueBlack) {
-                writeBlack(data, idx);
+            zr = nr;
+            zi = ni;
+        }
+
+        if (escaped) {
+            writeDynamicsEscapeColorWithContext(data, idx, smoothIteration, count, colors);
+        } else if (!targetIsOpaqueBlack) {
+            writeBlack(data, idx);
+        }
+    };
+}
+
+function createEscapeTileRenderer(snapshot, step, options = {}) {
+    const opaqueBlack = !!options.opaqueBlack && snapshot.chainMode === 'zero_seed';
+    const writePoint = createEscapePointWriter(snapshot, step, options);
+    const renderTile = tile => {
+        const frame = createDomainTileFrame(snapshot, tile, opaqueBlack);
+        const { data, width, height, xStep, yStep, xStart, yStart } = frame;
+
+        for (let y = 0; y < height; y += 1) {
+            const ci = yStart + y * yStep;
+            for (let x = 0; x < width; x += 1) {
+                const cr = xStart + x * xStep;
+                writePoint(data, (y * width + x) * 4, cr, ci, opaqueBlack);
             }
         }
-    }
 
-    return data;
+        return data;
+    };
+    renderTile.writePoint = writePoint;
+    return renderTile;
 }
 
 function createPolynomialParameterStep(accelerator, quadratic = false) {
@@ -3288,7 +3318,7 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
     const escape = snapshotUsesEscapeColoring(snapshot);
     if (!value && !escape) {
         return supportsComponentOrbitEvaluation(snapshot, accelerator)
-            ? tile => renderComponentOrbitTile(snapshot, tile, accelerator)
+            ? createComponentOrbitTileRenderer(snapshot, accelerator)
             : null;
     }
 
@@ -3304,7 +3334,7 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
             skipCardioid: quadratic && accelerator.canonicalUnitQuadratic
         };
         return escape
-            ? tile => renderEscapeTile(snapshot, tile, step, options)
+            ? createEscapeTileRenderer(snapshot, step, options)
             : tile => renderSimpleValueTile(snapshot, tile, step, options);
     }
 
@@ -3324,7 +3354,7 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
             }
             : { scratch: accelerator.scratch };
         return escape
-            ? tile => renderEscapeTile(snapshot, tile, step, options)
+            ? createEscapeTileRenderer(snapshot, step, options)
             : tile => renderSimpleValueTile(snapshot, tile, step, options);
     }
 
@@ -3332,7 +3362,7 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
         const step = (zr, zi, cr, ci, _paramRe, _paramIm, out) =>
             evaluateCompiledAlgebraicInto(accelerator, zr, zi, cr, ci, out);
         return escape
-            ? tile => renderEscapeTile(snapshot, tile, step, { scratch: accelerator.scratch })
+            ? createEscapeTileRenderer(snapshot, step, { scratch: accelerator.scratch })
             : tile => renderFixedPointValueTile(snapshot, tile, step, { scratch: accelerator.scratch });
     }
 
@@ -3390,7 +3420,7 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
     }
 
     if (!value && supportsComponentOrbitEvaluation(snapshot, accelerator)) {
-        return tile => renderComponentOrbitTile(snapshot, tile, accelerator);
+        return createComponentOrbitTileRenderer(snapshot, accelerator);
     }
     return null;
 }
@@ -3463,78 +3493,31 @@ function evaluateRasterValueInto(snapshot, re, im, accelerator, out) {
 }
 
 const ADAPTIVE_AA_EDGE_THRESHOLD = 80;
-const ADAPTIVE_AA_CHAOTIC_FRACTION = 0.18;
-const ADAPTIVE_AA_ITERATION_BUDGET = 2048;
-const ADAPTIVE_AA_SUBPIXEL_OFFSET = 0.25;
+const ADAPTIVE_AA_SUBPIXEL_GRID_SIZE = 4;
+const ADAPTIVE_AA_SUBPIXEL_SAMPLE_COUNT = ADAPTIVE_AA_SUBPIXEL_GRID_SIZE ** 2;
+const ADAPTIVE_AA_SUBPIXEL_OFFSETS = Object.freeze(
+    Array.from(
+        { length: ADAPTIVE_AA_SUBPIXEL_GRID_SIZE },
+        (_, index) => (index + 0.5) / ADAPTIVE_AA_SUBPIXEL_GRID_SIZE - 0.5
+    )
+);
 
-// Rendering quality is complexity-adaptive rather than function-specific. Smooth
-// tiles keep the one-sample hot path; sparse discontinuities receive true 2x2
-// subpixel integration; highly chaotic tiles use a bounded-cost reconstruction so
-// quality cannot turn into an unbounded 4x transform bill. Only the final scale=1
-// pass is refined, preserving the latency of the coarse interaction passes.
-function estimatedRasterStepCost(accelerator) {
-    if (!accelerator) return 1;
-    switch (accelerator.type) {
-        case 'compiled-algebraic':
-            return Math.max(1, accelerator.ops?.length || 1);
-        case 'polynomial-parameter':
-        case 'direct-polynomial':
-            return Math.max(1, Math.min(16, accelerator.degree ?? accelerator.polynomialDegree ?? 1));
-        case 'laurent-parameter': {
-            const positive = accelerator.positivePowers?.length || accelerator.positiveExponents?.length || 0;
-            const negative = accelerator.negativePowers?.length || accelerator.negativeExponents?.length || 0;
-            return Math.max(1, Math.min(16, positive + negative || 1));
-        }
-        case 'direct-zeta':
-            return 8;
-        default:
-            return 1;
-    }
-}
-
-function createAdaptiveQualityEnhancer(snapshot, accelerator) {
+// Smooth pixels keep the one-sample result. Every detected discontinuity receives
+// the same 4x4 subpixel integration, independent of which worker tile contains it;
+// this avoids quality-tier boundaries becoming visible as a tile grid.
+function createAdaptiveQualityEnhancer(snapshot, accelerator, acceleratedPointWriter = null) {
     let mask = new Uint8Array(0);
-    let source = new Uint8ClampedArray(0);
-    const subpixelRgba = new Uint8ClampedArray(16);
+    const subpixelRgba = new Uint8ClampedArray(4);
     const subpixelValue = new Float64Array(2);
     const valueColoring = snapshotUsesValueColoring(snapshot);
     const componentValue = valueColoring && supportsComponentValueEvaluation(snapshot, accelerator);
     const colors = colorContext(snapshot);
-    const stepCost = estimatedRasterStepCost(accelerator);
+    const componentOrbitPoint = !valueColoring
+        ? acceleratedPointWriter || createComponentOrbitPointWriter(snapshot, accelerator, colors)
+        : null;
 
-    function ensureCapacity(pixelCount, byteCount) {
+    function ensureCapacity(pixelCount) {
         if (mask.length < pixelCount) mask = new Uint8Array(pixelCount);
-        if (source.length < byteCount) source = new Uint8ClampedArray(byteCount);
-    }
-
-    function hasProbedEdge(data, width, height) {
-        const threshold = ADAPTIVE_AA_EDGE_THRESHOLD;
-        const rowStep = 8;
-        const stride = width << 2;
-        // Scan complete sparse rows/columns rather than a point lattice. Long thin
-        // discontinuities (branch cuts, basin boundaries, poles) are therefore
-        // detected reliably while smooth tiles avoid the full four-neighbor pass.
-        for (let y = 0; y < height; y += rowStep) {
-            let i = (y * width) << 2;
-            for (let x = 1; x < width; x += 1, i += 4) {
-                const j = i + 4;
-                let d0 = data[i] - data[j]; if (d0 < 0) d0 = -d0;
-                let d1 = data[i + 1] - data[j + 1]; if (d1 < 0) d1 = -d1;
-                let d2 = data[i + 2] - data[j + 2]; if (d2 < 0) d2 = -d2;
-                if (d0 >= threshold || d1 >= threshold || d2 >= threshold) return true;
-            }
-        }
-        for (let x = 0; x < width; x += rowStep) {
-            let i = x << 2;
-            for (let y = 1; y < height; y += 1, i += stride) {
-                const j = i + stride;
-                let d0 = data[i] - data[j]; if (d0 < 0) d0 = -d0;
-                let d1 = data[i + 1] - data[j + 1]; if (d1 < 0) d1 = -d1;
-                let d2 = data[i + 2] - data[j + 2]; if (d2 < 0) d2 = -d2;
-                if (d0 >= threshold || d1 >= threshold || d2 >= threshold) return true;
-            }
-        }
-        return false;
     }
 
     function markEdges(data, width, height) {
@@ -3578,25 +3561,6 @@ function createAdaptiveQualityEnhancer(snapshot, accelerator) {
         return count;
     }
 
-    function reconstructChaoticEdges(data, width, height) {
-        source.set(data.subarray(0, width * height * 4), 0);
-        const stride = width << 2;
-        for (let y = 1; y + 1 < height; y += 1) {
-            for (let x = 1; x + 1 < width; x += 1) {
-                const p = y * width + x;
-                if (!mask[p]) continue;
-                const i = p << 2;
-                const left = i - 4;
-                const right = i + 4;
-                const up = i - stride;
-                const down = i + stride;
-                data[i] = (4 * source[i] + source[left] + source[right] + source[up] + source[down] + 4) >> 3;
-                data[i + 1] = (4 * source[i + 1] + source[left + 1] + source[right + 1] + source[up + 1] + source[down + 1] + 4) >> 3;
-                data[i + 2] = (4 * source[i + 2] + source[left + 2] + source[right + 2] + source[up + 2] + source[down + 2] + 4) >> 3;
-            }
-        }
-    }
-
     function supersampleSparseEdges(data, tile) {
         const width = tile.width;
         const height = tile.height;
@@ -3608,8 +3572,9 @@ function createAdaptiveQualityEnhancer(snapshot, accelerator) {
         const yStep = -tile.scale * spanY / snapshot.viewport.height;
         const xStart = xRange[0] + (tile.x + 0.5) * tile.scale * spanX / snapshot.viewport.width;
         const yStart = yRange[1] - (tile.y + 0.5) * tile.scale * spanY / snapshot.viewport.height;
-        const dx = xStep * ADAPTIVE_AA_SUBPIXEL_OFFSET;
-        const dy = yStep * ADAPTIVE_AA_SUBPIXEL_OFFSET;
+        const sampleOffsets = ADAPTIVE_AA_SUBPIXEL_OFFSETS;
+        const sampleCount = ADAPTIVE_AA_SUBPIXEL_SAMPLE_COUNT;
+        const sampleGridSize = ADAPTIVE_AA_SUBPIXEL_GRID_SIZE;
 
         for (let y = 0; y < height; y += 1) {
             const im = yStart + y * yStep;
@@ -3617,35 +3582,45 @@ function createAdaptiveQualityEnhancer(snapshot, accelerator) {
                 const p = y * width + x;
                 if (!mask[p]) continue;
                 const re = xStart + x * xStep;
-                if (componentValue) {
-                    const xs0 = re - dx, xs1 = re + dx;
-                    const ys0 = im - dy, ys1 = im + dy;
-                    if (evaluateRasterValueInto(snapshot, xs0, ys0, accelerator, subpixelValue))
-                        writeDomainColorWithContext(subpixelRgba, 0, subpixelValue[0], subpixelValue[1], colors);
-                    else writeBlack(subpixelRgba, 0);
-                    if (evaluateRasterValueInto(snapshot, xs1, ys0, accelerator, subpixelValue))
-                        writeDomainColorWithContext(subpixelRgba, 4, subpixelValue[0], subpixelValue[1], colors);
-                    else writeBlack(subpixelRgba, 4);
-                    if (evaluateRasterValueInto(snapshot, xs0, ys1, accelerator, subpixelValue))
-                        writeDomainColorWithContext(subpixelRgba, 8, subpixelValue[0], subpixelValue[1], colors);
-                    else writeBlack(subpixelRgba, 8);
-                    if (evaluateRasterValueInto(snapshot, xs1, ys1, accelerator, subpixelValue))
-                        writeDomainColorWithContext(subpixelRgba, 12, subpixelValue[0], subpixelValue[1], colors);
-                    else writeBlack(subpixelRgba, 12);
-                } else {
-                    const c0 = colorDomainDynamicsPoint(snapshot, re - dx, im - dy, accelerator);
-                    const c1 = colorDomainDynamicsPoint(snapshot, re + dx, im - dy, accelerator);
-                    const c2 = colorDomainDynamicsPoint(snapshot, re - dx, im + dy, accelerator);
-                    const c3 = colorDomainDynamicsPoint(snapshot, re + dx, im + dy, accelerator);
-                    subpixelRgba[0] = c0[0]; subpixelRgba[1] = c0[1]; subpixelRgba[2] = c0[2];
-                    subpixelRgba[4] = c1[0]; subpixelRgba[5] = c1[1]; subpixelRgba[6] = c1[2];
-                    subpixelRgba[8] = c2[0]; subpixelRgba[9] = c2[1]; subpixelRgba[10] = c2[2];
-                    subpixelRgba[12] = c3[0]; subpixelRgba[13] = c3[1]; subpixelRgba[14] = c3[2];
+                let sumR = 0;
+                let sumG = 0;
+                let sumB = 0;
+                for (let sampleY = 0; sampleY < sampleGridSize; sampleY += 1) {
+                    const sampleIm = im + yStep * sampleOffsets[sampleY];
+                    for (let sampleX = 0; sampleX < sampleGridSize; sampleX += 1) {
+                        const sampleRe = re + xStep * sampleOffsets[sampleX];
+                        if (componentValue) {
+                            if (evaluateRasterValueInto(snapshot, sampleRe, sampleIm, accelerator, subpixelValue)) {
+                                writeDomainColorWithContext(
+                                    subpixelRgba,
+                                    0,
+                                    subpixelValue[0],
+                                    subpixelValue[1],
+                                    colors
+                                );
+                            } else {
+                                writeBlack(subpixelRgba, 0);
+                            }
+                            sumR += subpixelRgba[0];
+                            sumG += subpixelRgba[1];
+                            sumB += subpixelRgba[2];
+                        } else if (componentOrbitPoint) {
+                            componentOrbitPoint(subpixelRgba, 0, sampleRe, sampleIm);
+                            sumR += subpixelRgba[0];
+                            sumG += subpixelRgba[1];
+                            sumB += subpixelRgba[2];
+                        } else {
+                            const rgb = colorDomainDynamicsPoint(snapshot, sampleRe, sampleIm, accelerator);
+                            sumR += rgb[0];
+                            sumG += rgb[1];
+                            sumB += rgb[2];
+                        }
+                    }
                 }
                 const i = p << 2;
-                data[i] = (subpixelRgba[0] + subpixelRgba[4] + subpixelRgba[8] + subpixelRgba[12] + 2) >> 2;
-                data[i + 1] = (subpixelRgba[1] + subpixelRgba[5] + subpixelRgba[9] + subpixelRgba[13] + 2) >> 2;
-                data[i + 2] = (subpixelRgba[2] + subpixelRgba[6] + subpixelRgba[10] + subpixelRgba[14] + 2) >> 2;
+                data[i] = Math.floor((sumR + sampleCount * 0.5) / sampleCount);
+                data[i + 1] = Math.floor((sumG + sampleCount * 0.5) / sampleCount);
+                data[i + 2] = Math.floor((sumB + sampleCount * 0.5) / sampleCount);
                 data[i + 3] = 255;
             }
         }
@@ -3653,21 +3628,11 @@ function createAdaptiveQualityEnhancer(snapshot, accelerator) {
 
     return (data, tile) => {
         if (!data || tile.scale !== 1 || tile.width < 2 || tile.height < 2) return data;
-        if (!hasProbedEdge(data, tile.width, tile.height)) return data;
         const pixelCount = tile.width * tile.height;
-        ensureCapacity(pixelCount, pixelCount << 2);
+        ensureCapacity(pixelCount);
         const edgeCount = markEdges(data, tile.width, tile.height);
         if (edgeCount === 0) return data;
-        const iterationCost = snapshot.chainingEnabled
-            ? Math.max(1, snapshotChainCount(snapshot))
-            : 1;
-        const refinementCost = edgeCount * iterationCost * stepCost;
-        if (edgeCount / pixelCount >= ADAPTIVE_AA_CHAOTIC_FRACTION ||
-            refinementCost > ADAPTIVE_AA_ITERATION_BUDGET) {
-            reconstructChaoticEdges(data, tile.width, tile.height);
-        } else {
-            supersampleSparseEdges(data, tile);
-        }
+        supersampleSparseEdges(data, tile);
         return data;
     };
 }
@@ -3675,7 +3640,7 @@ function createAdaptiveQualityEnhancer(snapshot, accelerator) {
 export function createDomainDynamicsTileRenderer(snapshot) {
     const accelerator = createDynamicsAccelerator(snapshot);
     const accelerated = getAcceleratedTileRenderer(snapshot, accelerator);
-    const enhanceQuality = createAdaptiveQualityEnhancer(snapshot, accelerator);
+    const enhanceQuality = createAdaptiveQualityEnhancer(snapshot, accelerator, accelerated?.writePoint);
     const spatiallyConstantZeroSeed = snapshot?.chainMode === 'zero_seed' &&
         snapshot?.functionKey !== 'algebraic_chaining' && snapshot?.functionKey !== 'c';
     let constantRgba = null;
@@ -3695,6 +3660,90 @@ export function createDomainDynamicsTileRenderer(snapshot) {
         return duplicateSampleTile || accelerated?.(tile) || renderGenericDomainDynamicsTile(snapshot, tile, accelerator);
     }
 
+    function enhanceQualityWithHalo(pixels, tile) {
+        if (tile.scale !== 1 || tile.width < 2 || tile.height < 2) {
+            return pixels;
+        }
+        const viewportWidth = Math.max(1, Math.floor(snapshot.viewport.width));
+        const viewportHeight = Math.max(1, Math.floor(snapshot.viewport.height));
+        const leftHalo = tile.x > 0 ? 1 : 0;
+        const topHalo = tile.y > 0 ? 1 : 0;
+        const rightHalo = tile.x + tile.width < viewportWidth ? 1 : 0;
+        const bottomHalo = tile.y + tile.height < viewportHeight ? 1 : 0;
+
+        if (!(leftHalo || topHalo || rightHalo || bottomHalo)) {
+            return enhanceQuality(pixels, tile);
+        }
+
+        const paddedTile = {
+            x: tile.x - leftHalo,
+            y: tile.y - topHalo,
+            width: tile.width + leftHalo + rightHalo,
+            height: tile.height + topHalo + bottomHalo,
+            scale: 1,
+            deferQuality: true
+        };
+        const paddedStride = paddedTile.width << 2;
+        const sourceStride = tile.width << 2;
+        const padded = new Uint8ClampedArray(paddedStride * paddedTile.height);
+
+        if (topHalo) {
+            padded.set(renderBaseTile({ ...paddedTile, height: 1 }), 0);
+        }
+        if (bottomHalo) {
+            const bottom = renderBaseTile({
+                ...paddedTile,
+                y: tile.y + tile.height,
+                height: 1
+            });
+            padded.set(bottom, (paddedTile.height - 1) * paddedStride);
+        }
+        if (leftHalo) {
+            const left = renderBaseTile({
+                x: paddedTile.x,
+                y: tile.y,
+                width: 1,
+                height: tile.height,
+                scale: 1,
+                deferQuality: true
+            });
+            for (let y = 0; y < tile.height; y += 1) {
+                const sourceOffset = y << 2;
+                const targetOffset = (y + topHalo) * paddedStride;
+                padded.set(left.subarray(sourceOffset, sourceOffset + 4), targetOffset);
+            }
+        }
+        if (rightHalo) {
+            const right = renderBaseTile({
+                x: tile.x + tile.width,
+                y: tile.y,
+                width: 1,
+                height: tile.height,
+                scale: 1,
+                deferQuality: true
+            });
+            const targetX = paddedTile.width - 1;
+            for (let y = 0; y < tile.height; y += 1) {
+                const sourceOffset = y << 2;
+                const targetOffset = ((y + topHalo) * paddedTile.width + targetX) << 2;
+                padded.set(right.subarray(sourceOffset, sourceOffset + 4), targetOffset);
+            }
+        }
+        for (let y = 0; y < tile.height; y += 1) {
+            const sourceOffset = y * sourceStride;
+            const targetOffset = (y + topHalo) * paddedStride + (leftHalo << 2);
+            padded.set(pixels.subarray(sourceOffset, sourceOffset + sourceStride), targetOffset);
+        }
+
+        enhanceQuality(padded, paddedTile);
+        for (let y = 0; y < tile.height; y += 1) {
+            const sourceOffset = (y + topHalo) * paddedStride + (leftHalo << 2);
+            const targetOffset = y * sourceStride;
+            pixels.set(padded.subarray(sourceOffset, sourceOffset + sourceStride), targetOffset);
+        }
+        return pixels;
+    }
+
     return tile => {
         // Internal progressive-quality protocol. Existing callers never set these
         // fields and therefore retain the synchronous high-quality result.
@@ -3704,13 +3753,13 @@ export function createDomainDynamicsTileRenderer(snapshot) {
                 return pixels instanceof Uint8ClampedArray ? pixels : renderBaseTile(tile);
             }
             if (pixels instanceof Uint8ClampedArray && pixels.length === tile.width * tile.height * 4) {
-                return enhanceQuality(pixels, tile);
+                return enhanceQualityWithHalo(pixels, tile);
             }
-            return enhanceQuality(renderBaseTile(tile), tile);
+            return enhanceQualityWithHalo(renderBaseTile(tile), tile);
         }
         const data = renderBaseTile(tile);
         if (spatiallyConstantZeroSeed || tile?.deferQuality) return data;
-        return enhanceQuality(data, tile);
+        return enhanceQualityWithHalo(data, tile);
     };
 }
 

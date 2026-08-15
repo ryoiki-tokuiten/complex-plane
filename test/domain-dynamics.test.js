@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { applyFractalPreset } from '../js/analysis/fractal-presets.js';
+import { runtime } from '../js/store/runtime.js';
 import { state } from '../js/store/state.js';
 import {
     evaluateDomainColoringMappedTransform,
@@ -16,6 +17,7 @@ import {
 } from '../js/rendering/domain-dynamics.js';
 import {
     colorDomainDynamicsPoint,
+    createDomainDynamicsTileRenderer,
     evaluateDomainDynamicsValue,
     renderDomainDynamicsTile
 } from '../js/rendering/domain-dynamics-core.js';
@@ -471,6 +473,91 @@ test('domain dynamics tile rendering produces opaque full tile data', () => {
     }
 });
 
+test('quality-only refinement preserves the tile contract for sparse edges', () => {
+    const snapshot = makeAlgebraicDynamicsSnapshot({
+        viewport: {
+            width: 64,
+            height: 64,
+            xRange: [-2, 2],
+            yRange: [-2, 2]
+        }
+    });
+    const renderTile = createDomainDynamicsTileRenderer(snapshot);
+    const basePixels = new Uint8ClampedArray(64 * 64 * 4);
+
+    for (let y = 0; y < 64; y += 1) {
+        for (let x = 0; x < 64; x += 1) {
+            const index = (y * 64 + x) * 4;
+            const value = x < 32 ? 0 : 255;
+            basePixels[index] = value;
+            basePixels[index + 1] = value;
+            basePixels[index + 2] = value;
+            basePixels[index + 3] = 255;
+        }
+    }
+    const originalPixels = new Uint8ClampedArray(basePixels);
+
+    const refined = renderTile({
+        x: 0,
+        y: 0,
+        width: 64,
+        height: 64,
+        scale: 1,
+        qualityOnly: true,
+        basePixels
+    });
+
+    assert.equal(refined.length, basePixels.length);
+    for (let index = 3; index < refined.length; index += 4) {
+        assert.equal(refined[index], 255);
+    }
+    assert.notDeepEqual(Array.from(refined), Array.from(originalPixels));
+});
+
+test('Mandelbrot refinement is identical across worker tile boundaries', () => {
+    const before = snapshotState();
+
+    try {
+        applyFractalPreset(state, 'mandelbrot');
+        const plane = {
+            width: 128,
+            height: 32,
+            currentVisXRange: [-0.45, -0.25],
+            currentVisYRange: [0.63, 0.655]
+        };
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane, { isWPlaneColoring: false });
+        const renderTile = createDomainDynamicsTileRenderer(snapshot);
+        const refine = tile => {
+            const basePixels = renderTile({ ...tile, deferQuality: true });
+            const originalPixels = new Uint8ClampedArray(basePixels);
+            return {
+                originalPixels,
+                pixels: renderTile({ ...tile, qualityOnly: true, basePixels })
+            };
+        };
+
+        const whole = refine({ x: 0, y: 0, width: 128, height: 32, scale: 1 });
+        const left = refine({ x: 0, y: 0, width: 64, height: 32, scale: 1 });
+        const right = refine({ x: 64, y: 0, width: 64, height: 32, scale: 1 });
+        assert.equal(whole.pixels.some((value, index) => value !== whole.originalPixels[index]), true);
+
+        for (let y = 0; y < plane.height; y += 1) {
+            for (let x = 62; x <= 65; x += 1) {
+                const tiled = x < 64 ? left.pixels : right.pixels;
+                const tiledX = x < 64 ? x : x - 64;
+                const tiledIndex = (y * 64 + tiledX) * 4;
+                const wholeIndex = (y * plane.width + x) * 4;
+                assert.deepEqual(
+                    Array.from(tiled.subarray(tiledIndex, tiledIndex + 4)),
+                    Array.from(whole.pixels.subarray(wholeIndex, wholeIndex + 4))
+                );
+            }
+        }
+    } finally {
+        restoreState(before);
+    }
+});
+
 test('unknown algebraic functions are invalid instead of implicit identity', () => {
     const snapshot = makeAlgebraicDynamicsSnapshot({
         algebraicChainingTerms: [{
@@ -538,10 +625,12 @@ test('async renderer reaches final scale one without another redraw trigger', as
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
 
         assert.equal(renderPlanarDomainDynamics(targetCtx, PLANE, snapshot), true);
-        await waitFor(() => targetCtx.draws.some(draw => draw.width === PLANE.width && draw.height === PLANE.height));
-        assert.ok(targetCtx.draws.length <= 3);
+        await waitFor(() => targetCtx.draws.some(draw => draw.width === PLANE.width && draw.height === PLANE.height) &&
+            selectDomainDynamicsBackend().queue.length === 0);
+        assert.ok(targetCtx.draws.length <= 4);
         assert.equal(selectDomainDynamicsBackend().queue.length, 0);
         assert.equal(selectDomainDynamicsBackend().queueIndex, 0);
+        assert.equal(runtime.rendering.zDomainDynamicsHasFullResolution, true);
     } finally {
         cancelPlanarDomainDynamics();
         restoreGlobals();

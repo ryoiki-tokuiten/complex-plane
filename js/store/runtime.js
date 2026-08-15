@@ -27,6 +27,8 @@ export const runtime = {
     rendering: {
         processingZDomainDynamics: false,
         processingWDomainDynamics: false,
+        zDomainDynamicsHasFullResolution: false,
+        wDomainDynamicsHasFullResolution: false,
         wOriginGlowTime: 0,
         previousWindingNumber: null
     },
