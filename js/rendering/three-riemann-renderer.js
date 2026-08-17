@@ -2,222 +2,19 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
 import { requestRedrawAll } from './redraw-scheduler.js';
-import { getChainedTransformFunction } from '../math-utils.js';
-import { normalizeDomainDynamicsChainCount } from '../constants/domain-dynamics.js';
+import {
+    buildNativeFoldPreimageMarkers,
+    buildNativeRiemannProbe,
+    buildNativeRiemannSphereGeometry,
+    buildNativeRiemannSpherePositions,
+    interpolateNativeGeometry,
+    nativeMapOptions
+} from '../native/complex-engine.js';
 import { disposeThreeObject } from './three-utils.js';
 
 
 const COLOR_BACKGROUND = 0x0b0914;
 const SPHERE_RADIUS = 5.0;
-
-function getSphereCoordinate(u, v, radius = SPHERE_RADIUS) {
-    const r2 = u * u + v * v;
-    const R2 = radius * radius;
-    const denom = r2 + 4 * R2 + 1e-10; 
-    
-    const x = (4 * R2 * u) / denom;
-    const y = (2 * radius * r2) / denom;
-    const z = (4 * R2 * v) / denom;
-    
-    return { x, y, z };
-}
-
-function usableRange(range) {
-    return Array.isArray(range) && range.length >= 2 &&
-        Number.isFinite(range[0]) && Number.isFinite(range[1]) && range[1] > range[0]
-        ? range
-        : null;
-}
-
-function isInsideRange(value, range) {
-    return !range || (value >= range[0] && value <= range[1]);
-}
-
-const FOLD_MAX_SUBDIVISION_DEPTH = 12;
-const FOLD_CURVE_TOLERANCE_RATIO = 0.00005;
-const FOLD_MAX_EXTRA_POINTS_PER_LINE = 2048;
-
-function mapFoldPoint(sourcePoint, transform) {
-    if (!Number.isFinite(sourcePoint?.re) || !Number.isFinite(sourcePoint?.im)) return null;
-    try {
-        const mapped = transform(sourcePoint.re, sourcePoint.im);
-        return Number.isFinite(mapped?.re) && Number.isFinite(mapped?.im) ? mapped : null;
-    } catch { return null; }
-}
-
-function appendRefinedFoldSegment(output, p0, p1, transform, outputXRange, outputYRange,
-    jumpThresholdSq, curveToleranceSq, budget, a, b, depth = 0) {
-    if (!Number.isFinite(p0?.re) || !Number.isFinite(p0?.im) || !Number.isFinite(p1?.re) || !Number.isFinite(p1?.im)) {
-        output.push(p1);
-        return;
-    }
-    const m = { re: (p0.re + p1.re) * 0.5, im: (p0.im + p1.im) * 0.5 };
-    const mid = mapFoldPoint(m, transform);
-    const visible = point => point && isInsideRange(point.re, outputXRange) && isInsideRange(point.im, outputYRange);
-    const jump = a && b ? (a.re - b.re) ** 2 + (a.im - b.im) ** 2 > jumpThresholdSq : false;
-    const discontinuous = !mid || visible(mid) !== visible(a) || visible(mid) !== visible(b) || jump;
-    if (discontinuous) { output.push(null, p1); return; }
-    if (!visible(a) && !visible(b) && !visible(mid)) { output.push(null, p1); return; }
-    const curveErrorSq = a && b && mid
-        ? (mid.re - (a.re + b.re) * 0.5) ** 2 + (mid.im - (a.im + b.im) * 0.5) ** 2
-        : Infinity;
-    if (curveErrorSq <= curveToleranceSq || budget.remaining <= 0) { output.push(p1); return; }
-    if (depth >= FOLD_MAX_SUBDIVISION_DEPTH) { output.push(p1); return; }
-    budget.remaining--;
-    appendRefinedFoldSegment(output, p0, m, transform, outputXRange, outputYRange,
-        jumpThresholdSq, curveToleranceSq, budget, a, mid, depth + 1);
-    appendRefinedFoldSegment(output, m, p1, transform, outputXRange, outputYRange,
-        jumpThresholdSq, curveToleranceSq, budget, mid, b, depth + 1);
-}
-
-function refineFoldLinePoints(points, transform, outputXRange, outputYRange) {
-    if (!Array.isArray(points) || points.length < 2) return points;
-    const spanX = outputXRange ? outputXRange[1] - outputXRange[0] : 1;
-    const spanY = outputYRange ? outputYRange[1] - outputYRange[0] : 1;
-    const jumpThresholdSq = 4 * (spanX * spanX + spanY * spanY);
-    const curveToleranceSq = (Math.max(spanX, spanY) * FOLD_CURVE_TOLERANCE_RATIO) ** 2;
-    const budget = { remaining: Math.min(points.length * 3, FOLD_MAX_EXTRA_POINTS_PER_LINE) };
-    const refined = [points[0]];
-    let previousMapped = mapFoldPoint(points[0], transform);
-    for (let index = 1; index < points.length; index += 1) {
-        const mapped = mapFoldPoint(points[index], transform);
-        appendRefinedFoldSegment(refined, points[index - 1], points[index], transform,
-            outputXRange, outputYRange, jumpThresholdSq, curveToleranceSq,
-            budget, previousMapped, mapped);
-        previousMapped = mapped;
-    }
-    return refined;
-}
-
-export function buildGridFoldLineData(pointSets, transform, options = {}) {
-    if (!Array.isArray(pointSets) || typeof transform !== 'function') return null;
-
-    const sourceXRange = usableRange(options.sourceXRange);
-    const outputXRange = usableRange(options.outputXRange);
-    const outputYRange = usableRange(options.outputYRange);
-    const rawLines = [];
-    const rawPointGroups = new Map();
-    let minMappedX = Infinity;
-    let maxMappedX = -Infinity;
-    let minMappedY = Infinity;
-    let maxMappedY = -Infinity;
-    let minSourceX = Infinity;
-    let maxSourceX = -Infinity;
-
-    for (const pointSet of pointSets) {
-        if (!Array.isArray(pointSet?.points)) continue;
-
-        if (pointSet.role === 'grid-dots') {
-            for (const sourcePoint of pointSet.points) {
-                if (!Number.isFinite(sourcePoint?.re) || !Number.isFinite(sourcePoint?.im)) continue;
-                let mappedPoint;
-                try { mappedPoint = transform(sourcePoint.re, sourcePoint.im); } catch { mappedPoint = null; }
-                if (!Number.isFinite(mappedPoint?.re) || !Number.isFinite(mappedPoint?.im) ||
-                    !isInsideRange(mappedPoint.re, outputXRange) || !isInsideRange(mappedPoint.im, outputYRange)) continue;
-                const point = {
-                    sourceRe: sourcePoint.re, sourceIm: sourcePoint.im,
-                    mappedRe: mappedPoint.re, mappedIm: mappedPoint.im
-                };
-                const color = pointSet.color || 0xa78bfa;
-                const group = rawPointGroups.get(color);
-                if (group) group.push(point);
-                else rawPointGroups.set(color, [point]);
-                minMappedX = Math.min(minMappedX, mappedPoint.re);
-                maxMappedX = Math.max(maxMappedX, mappedPoint.re);
-                minMappedY = Math.min(minMappedY, mappedPoint.im);
-                maxMappedY = Math.max(maxMappedY, mappedPoint.im);
-                minSourceX = Math.min(minSourceX, sourcePoint.re);
-                maxSourceX = Math.max(maxSourceX, sourcePoint.re);
-            }
-            continue;
-        }
-
-        let line = [];
-        const flushLine = () => {
-            if (line.length >= 2) {
-                rawLines.push({ points: line, color: pointSet.color });
-                for (const point of line) {
-                    minMappedX = Math.min(minMappedX, point.mappedRe);
-                    maxMappedX = Math.max(maxMappedX, point.mappedRe);
-                    minMappedY = Math.min(minMappedY, point.mappedIm);
-                    maxMappedY = Math.max(maxMappedY, point.mappedIm);
-                    minSourceX = Math.min(minSourceX, point.sourceRe);
-                    maxSourceX = Math.max(maxSourceX, point.sourceRe);
-                }
-            }
-            line = [];
-        };
-
-        for (const sourcePoint of refineFoldLinePoints(pointSet.points, transform, outputXRange, outputYRange)) {
-            if (!Number.isFinite(sourcePoint?.re) || !Number.isFinite(sourcePoint?.im)) {
-                flushLine();
-                continue;
-            }
-
-            let mappedPoint = null;
-            try {
-                mappedPoint = transform(sourcePoint.re, sourcePoint.im);
-            } catch {
-                mappedPoint = null;
-            }
-
-            if (!Number.isFinite(mappedPoint?.re) || !Number.isFinite(mappedPoint?.im) ||
-                !isInsideRange(mappedPoint.re, outputXRange) ||
-                !isInsideRange(mappedPoint.im, outputYRange)) {
-                flushLine();
-                continue;
-            }
-
-            line.push({
-                sourceRe: sourcePoint.re,
-                mappedRe: mappedPoint.re,
-                mappedIm: mappedPoint.im
-            });
-        }
-        flushLine();
-    }
-
-    if (rawLines.length === 0 && rawPointGroups.size === 0) return { lines: [], points: [] };
-
-    const sourceMin = sourceXRange?.[0] ?? minSourceX;
-    const sourceMax = sourceXRange?.[1] ?? maxSourceX;
-    const sourceCenter = (sourceMin + sourceMax) * 0.5;
-    const mappedCenterX = (minMappedX + maxMappedX) * 0.5;
-    const mappedCenterY = (minMappedY + maxMappedY) * 0.5;
-    const span = Math.max(
-        maxMappedX - minMappedX,
-        maxMappedY - minMappedY,
-        sourceMax - sourceMin,
-        1e-6
-    );
-    const scale = (2 * SPHERE_RADIUS) / span;
-
-    return {
-        lines: rawLines.map(rawLine => {
-            const positions = new Float32Array(rawLine.points.length * 3);
-            for (let index = 0; index < rawLine.points.length; index += 1) {
-                const point = rawLine.points[index];
-                const offset = index * 3;
-                positions[offset] = (point.mappedRe - mappedCenterX) * scale;
-                positions[offset + 1] = (point.sourceRe - sourceCenter) * scale;
-                positions[offset + 2] = (point.mappedIm - mappedCenterY) * scale;
-            }
-            return { positions, color: rawLine.color };
-        }).filter(line => line.positions.length >= 6),
-        points: Array.from(rawPointGroups, ([color, points]) => {
-            const positions = new Float32Array(points.length * 3);
-            for (let index = 0; index < points.length; index += 1) {
-                const point = points[index];
-                const offset = index * 3;
-                positions[offset] = (point.mappedRe - mappedCenterX) * scale;
-                positions[offset + 1] = (point.sourceRe - sourceCenter) * scale;
-                positions[offset + 2] = (point.mappedIm - mappedCenterY) * scale;
-            }
-            return { positions, color };
-        }),
-        mapping: { mappedCenterX, mappedCenterY, sourceCenter, scale }
-    };
-}
 
 export class ThreeRiemannRenderer {
     constructor(containerElement, planeType = 'z') {
@@ -230,9 +27,9 @@ export class ThreeRiemannRenderer {
         this.renderDirty = true;
         this.lastGeometryProgress = null;
         this.lastGeometryStateKey = '';
-        this.transformFunction = null;
+        this.mapOptions = null;
         this.transformKey = null;
-        this.chainCount = 1;
+        this.sphereGeometryData = null;
         this.rasterSurfaceMesh = null;
         this.rasterSurfaceData = null;
         this.rasterSurfaceSource = null;
@@ -477,14 +274,15 @@ export class ThreeRiemannRenderer {
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     }
 
-    setTransform(transformFunction, chainCount = 1, transformKey = null) {
-        const nextTransform = typeof transformFunction === 'function' ? transformFunction : null;
-        const nextChainCount = normalizeDomainDynamicsChainCount(chainCount);
-        const nextTransformKey = transformKey === null ? nextTransform : transformKey;
-        const changed = this.transformKey !== nextTransformKey || this.chainCount !== nextChainCount;
-        this.transformFunction = nextTransform;
+    setTransform(map = null) {
+        const nextTransformKey = map?.signature || null;
+        const changed = this.transformKey !== nextTransformKey;
+        this.mapOptions = map ? nativeMapOptions(state, {
+            stage: map.stage,
+            derivativeMode: map.presentation === 'derivative',
+            ...(map.evaluate?.nativeMapOptions || map.nativeMapOptions || {})
+        }) : null;
         this.transformKey = nextTransformKey;
-        this.chainCount = nextChainCount;
         if (changed) this.renderDirty = true;
         return changed;
     }
@@ -559,49 +357,16 @@ export class ThreeRiemannRenderer {
             this.rasterSurfaceData = data;
             this.rasterSurfaceHeightScale = nextHeightScale;
         } else if (this.rasterSurfaceData !== data || this.rasterSurfaceHeightScale !== nextHeightScale) {
-            const { bounds, sourceCenter, sourceSize, vertices, mappedPositions, indices } = data;
-            let minX = Infinity;
-            let maxX = -Infinity;
-            let minY = Infinity;
-            let maxY = -Infinity;
-
-            for (let i = 0; i < mappedPositions.length; i += 2) {
-                const x = bounds.x0 + (mappedPositions[i] + 1) * bounds.xSpan * 0.5;
-                const y = bounds.y0 + (mappedPositions[i + 1] + 1) * bounds.ySpan * 0.5;
-                minX = Math.min(minX, x);
-                maxX = Math.max(maxX, x);
-                minY = Math.min(minY, y);
-                maxY = Math.max(maxY, y);
-            }
-
-            const outputSpan = Math.max(maxX - minX, maxY - minY, sourceSize.width, 1e-6);
-            const scale = (2 * SPHERE_RADIUS) / outputSpan;
-            const centerX = (minX + maxX) * 0.5;
-            const centerY = (minY + maxY) * 0.5;
-            const positions = new Float32Array(vertices.length / 2 * 3);
-            const uvs = new Float32Array(vertices.length);
-
-            for (let i = 0; i < vertices.length; i += 2) {
-                const vertexIndex = (i / 2) * 3;
-                const mappedX = bounds.x0 + (mappedPositions[i] + 1) * bounds.xSpan * 0.5;
-                const mappedY = bounds.y0 + (mappedPositions[i + 1] + 1) * bounds.ySpan * 0.5;
-                const sourceRe = sourceCenter.re + (vertices[i] * 2 - 1) * sourceSize.width * 0.5;
-                positions[vertexIndex] = (mappedX - centerX) * scale;
-                positions[vertexIndex + 1] = (sourceRe - sourceCenter.re) * scale * nextHeightScale;
-                positions[vertexIndex + 2] = (mappedY - centerY) * scale;
-                uvs[i] = vertices[i];
-                uvs[i + 1] = 1 - vertices[i + 1];
-            }
+            const { foldPositions, foldUvs, foldMapping, indices } = data;
 
             const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+            geometry.setAttribute('position', new THREE.BufferAttribute(foldPositions, 3));
+            geometry.setAttribute('uv', new THREE.BufferAttribute(foldUvs, 2));
             geometry.setIndex(new THREE.BufferAttribute(indices, 1));
             geometry.computeBoundingSphere();
             this.rasterSurfaceMesh.geometry.dispose();
             this.rasterSurfaceMesh.geometry = geometry;
-            this.foldMapping = { mappedCenterX: centerX, mappedCenterY: centerY, scale };
-            this.foldMapping.sourceCenter = sourceCenter.re;
+            this.foldMapping = foldMapping;
             this.rasterSurfaceData = data;
             this.rasterSurfaceHeightScale = nextHeightScale;
         }
@@ -633,14 +398,14 @@ export class ThreeRiemannRenderer {
         return true;
     }
 
-    setFoldPreimageMarkers(roots, target, transform) {
+    setFoldPreimageMarkers(roots, target, map) {
         const mapping = this.foldMapping;
         const heightScale = this.foldSurfaceMode === 'raster' ? this.rasterSurfaceHeightScale : this.gridFoldHeightScale;
         const nextKey = state.preimageExplorerEnabled && mapping?.scale && target && Array.isArray(roots) && roots.length
             ? [
                 this.foldSurfaceMode, heightScale, mapping.mappedCenterX, mapping.mappedCenterY,
                 mapping.sourceCenter, mapping.scale, target.re, target.im,
-                ...roots.flatMap(root => [root?.re, root?.im])
+                map?.signature || '', ...roots.flatMap(root => [root?.re, root?.im])
             ].join('|')
             : '';
         if (this.foldPreimageKey === nextKey) return;
@@ -657,24 +422,21 @@ export class ThreeRiemannRenderer {
             this.renderDirty = true;
             return;
         }
-        const sourceCenter = Number(mapping.sourceCenter) || 0;
-        const positions = new Float32Array(roots.length * 3);
-        let count = 0;
-        for (const root of roots) {
-            let mapped = target;
-            try { mapped = typeof transform === 'function' ? transform(root.re, root.im) : target; } catch {}
-            if (!Number.isFinite(mapped?.re) || !Number.isFinite(mapped?.im)) continue;
-            const offset = count++ * 3;
-            positions[offset] = (mapped.re - mapping.mappedCenterX) * mapping.scale;
-            positions[offset + 1] = (root.re - sourceCenter) * mapping.scale * heightScale;
-            positions[offset + 2] = (mapped.im - mapping.mappedCenterY) * mapping.scale;
-        }
-        if (!count) {
+        const positions = buildNativeFoldPreimageMarkers({
+            mapOptions: nativeMapOptions(state, {
+                stage: map?.stage,
+                derivativeMode: map?.presentation === 'derivative',
+                ...(map?.evaluate?.nativeMapOptions || map?.nativeMapOptions || {})
+            }),
+            mapping,
+            heightScale
+        }, roots);
+        if (!positions.length) {
             this.foldPreimageGroup.visible = false;
             return;
         }
         const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(count === roots.length ? positions : positions.slice(0, count * 3), 3));
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         this.foldPreimageGroup.add(new THREE.Points(geometry, new THREE.PointsMaterial({
             color: 0xfacc15, size: 0.2, sizeAttenuation: true, depthTest: false
         })));
@@ -699,11 +461,7 @@ export class ThreeRiemannRenderer {
             if (!(lineData.positions instanceof Float32Array) || lineData.positions.length < 6) continue;
 
             const geometry = new THREE.BufferGeometry();
-            const positions = lineData.positions.slice();
-            for (let index = 1; index < positions.length; index += 3) {
-                positions[index] *= nextHeightScale;
-            }
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('position', new THREE.BufferAttribute(lineData.positions, 3));
 
             let color = 0xa78bfa;
             if (lineData.color) {
@@ -723,9 +481,7 @@ export class ThreeRiemannRenderer {
         for (const pointData of data.points || []) {
             if (!(pointData.positions instanceof Float32Array) || pointData.positions.length < 3) continue;
             const geometry = new THREE.BufferGeometry();
-            const positions = pointData.positions.slice();
-            for (let index = 1; index < positions.length; index += 3) positions[index] *= nextHeightScale;
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('position', new THREE.BufferAttribute(pointData.positions, 3));
             const material = new THREE.PointsMaterial({ color: pointData.color || 0xa78bfa, size: 0.09, sizeAttenuation: true });
             this.gridFoldSurfaceGroup.add(new THREE.Points(geometry, material));
         }
@@ -739,28 +495,24 @@ export class ThreeRiemannRenderer {
     buildGridFromPointSets(pointSets, progressOverride = undefined) {
         this.resize();
         this.setSphereMode();
-
-        // Clear lines
-        while(this.linesGroup.children.length > 0) {
-            const child = this.linesGroup.children[0];
-            child.geometry.dispose();
-            child.material.dispose();
-            this.linesGroup.remove(child);
-        }
-
-        // Constant mathematical scale factor where unit circle projects to equator
+        disposeThreeObject(this.linesGroup);
+        this.linesGroup.clear();
         this.scale = 2 * SPHERE_RADIUS;
+        const drawableSets = (pointSets || []).filter(pointSet => pointSet?.points?.length >=
+            (pointSet.role === 'grid-dots' ? 1 : 2));
+        const progress = progressOverride !== undefined
+            ? progressOverride
+            : (this.planeType === 'z' ? state.riemannTransformationProgressZ : state.riemannTransformationProgressW);
+        const nativeGeometry = buildNativeRiemannSphereGeometry({
+            mapPoints: this.planeType === 'w',
+            mapOptions: this.mapOptions,
+            scale: this.scale,
+            radius: SPHERE_RADIUS,
+            progress
+        }, drawableSets);
+        this.sphereGeometryData = nativeGeometry;
 
-        const transformFunc = this.planeType === 'w'
-            ? (this.transformFunction || getChainedTransformFunction())
-            : null;
-
-        for (const pointSet of pointSets) {
-            if (!pointSet || !pointSet.points || pointSet.points.length < (pointSet.role === 'grid-dots' ? 1 : 2)) continue;
-            
-            const pts = pointSet.points;
-            const count = pts.length;
-
+        drawableSets.forEach((pointSet, setIndex) => {
             let colorHex = 0xa78bfa;
             if (pointSet.color) {
                 try {
@@ -786,56 +538,20 @@ export class ThreeRiemannRenderer {
                 });
 
             const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(count * 3);
-            const startPositions = new Float32Array(count * 3);
-            const targetPositions = new Float32Array(count * 3);
-
-            for (let i = 0; i < count; i++) {
-                const pt = pts[i];
-                const mappedPt = transformFunc && pt && Number.isFinite(pt.re) && Number.isFinite(pt.im) 
-                    ? transformFunc(pt.re, pt.im) 
-                    : pt;
-
-                let u = NaN;
-                let v = NaN;
-                let tx = NaN;
-                let ty = NaN;
-                let tz = NaN;
-
-                if (mappedPt && Number.isFinite(mappedPt.re) && Number.isFinite(mappedPt.im)) {
-                    u = mappedPt.re * this.scale;
-                    v = mappedPt.im * this.scale;
-                    const target = getSphereCoordinate(u, v, SPHERE_RADIUS);
-                    tx = target.x;
-                    ty = target.y;
-                    tz = target.z;
-                }
-
-                startPositions[i * 3] = Number.isFinite(u) ? u : NaN;
-                startPositions[i * 3 + 1] = 0;
-                startPositions[i * 3 + 2] = Number.isFinite(v) ? v : NaN;
-
-                targetPositions[i * 3] = Number.isFinite(tx) ? tx : NaN;
-                targetPositions[i * 3 + 1] = Number.isFinite(ty) ? ty : NaN;
-                targetPositions[i * 3 + 2] = Number.isFinite(tz) ? tz : NaN;
-            }
-
+            const start = nativeGeometry.offsets[setIndex] * 3;
+            const end = nativeGeometry.offsets[setIndex + 1] * 3;
+            const positions = new Float32Array(nativeGeometry.positions.subarray(start, end));
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.userData = { start: startPositions, target: targetPositions };
+            geometry.userData = { start, end };
             
             const object = pointSet.role === 'grid-dots'
                 ? new THREE.Points(geometry, material)
                 : new THREE.Line(geometry, material);
             this.linesGroup.add(object);
-        }
+        });
 
-        // Apply geometry snapping
-        const progress = progressOverride !== undefined 
-            ? progressOverride 
-            : (this.planeType === 'z' ? state.riemannTransformationProgressZ : state.riemannTransformationProgressW);
-        this.lastGeometryProgress = null;
+        this.lastGeometryProgress = progress;
         this.lastGeometryStateKey = '';
-        this.updateGeometry(progress);
         this.render();
     }
 
@@ -855,26 +571,18 @@ export class ThreeRiemannRenderer {
             return true;
         }
 
-        const spherePositions = values => {
-            const positions = [];
-            for (const value of values || []) {
-                if (!Number.isFinite(value?.re) || !Number.isFinite(value?.im)) continue;
-                const projected = getSphereCoordinate(
-                    value.re * this.scale,
-                    value.im * this.scale,
-                    SPHERE_RADIUS
-                );
-                positions.push(projected.x, projected.y, projected.z);
-            }
-            return positions;
-        };
+        const spherePositions = values => buildNativeRiemannSpherePositions(
+            (values || []).filter(value => Number.isFinite(value?.re) && Number.isFinite(value?.im)),
+            this.scale,
+            SPHERE_RADIUS
+        );
 
         const pointPositions = spherePositions(data.points);
         if (pointPositions.length > 0) {
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute(
                 'position',
-                new THREE.Float32BufferAttribute(pointPositions, 3)
+                new THREE.BufferAttribute(pointPositions, 3)
             );
             const material = new THREE.PointsMaterial({
                 color: 0xd8dee9,
@@ -893,7 +601,7 @@ export class ThreeRiemannRenderer {
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute(
                 'position',
-                new THREE.Float32BufferAttribute(pathPositions, 3)
+                new THREE.BufferAttribute(pathPositions, 3)
             );
             const material = new THREE.LineBasicMaterial({
                 color: 0xa78bfa,
@@ -909,7 +617,7 @@ export class ThreeRiemannRenderer {
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute(
                 'position',
-                new THREE.Float32BufferAttribute(finalPositions, 3)
+                new THREE.BufferAttribute(finalPositions, 3)
             );
             const material = new THREE.PointsMaterial({
                 color: 0x5fc7a0,
@@ -947,24 +655,18 @@ export class ThreeRiemannRenderer {
 
     updateProbeGeometry() {
         if (!this.probePoint) return;
-        
-        const u = this.probePoint.re * this.scale;
-        const v = this.probePoint.im * this.scale;
-
-        const flatPos = new THREE.Vector3(u, 0, v);
-        const sphereTarget = getSphereCoordinate(u, v, SPHERE_RADIUS);
-        const spherePos = new THREE.Vector3(sphereTarget.x, sphereTarget.y, sphereTarget.z);
-
         const progress = this.planeType === 'z' ? state.riemannTransformationProgressZ : state.riemannTransformationProgressW;
-        const easedProgress = -(Math.cos(Math.PI * progress) - 1) / 2;
-
-        this.activeMarker.position.lerpVectors(flatPos, spherePos, easedProgress);
-        this.sphereMarker.position.copy(spherePos);
-
+        const geometry = buildNativeRiemannProbe({
+            mapPoints: this.planeType === 'w',
+            mapOptions: this.mapOptions,
+            scale: this.scale,
+            radius: SPHERE_RADIUS,
+            progress
+        }, this.probePoint);
+        this.activeMarker.position.fromArray(geometry.active);
+        this.sphereMarker.position.fromArray(geometry.sphere);
         const positions = this.projectionRay.geometry.attributes.position.array;
-        positions[0] = 0; positions[1] = SPHERE_RADIUS * 2; positions[2] = 0;
-        positions[3] = u; positions[4] = 0; positions[5] = v;
-        
+        positions.set(geometry.ray);
         this.projectionRay.geometry.attributes.position.needsUpdate = true;
         this.projectionRay.computeLineDistances();
     }
@@ -974,15 +676,15 @@ export class ThreeRiemannRenderer {
         const progressChanged = this.lastGeometryProgress !== progress;
         let changed = progressChanged;
 
-        if (progressChanged) {
+        if (progressChanged && this.sphereGeometryData) {
+            const positions = interpolateNativeGeometry(
+                this.sphereGeometryData.start,
+                this.sphereGeometryData.target,
+                progress
+            );
             this.linesGroup.children.forEach(line => {
-                const positions = line.geometry.attributes.position.array;
-                const start = line.geometry.userData.start;
-                const target = line.geometry.userData.target;
-
-                for (let i = 0; i < positions.length; i++) {
-                    positions[i] = start[i] + (target[i] - start[i]) * easedProgress;
-                }
+                const { start, end } = line.geometry.userData;
+                line.geometry.attributes.position.array.set(positions.subarray(start, end));
                 line.geometry.attributes.position.needsUpdate = true;
             });
         }

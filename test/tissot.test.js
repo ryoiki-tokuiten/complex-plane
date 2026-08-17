@@ -19,10 +19,10 @@ class CanvasStrokeCounter {
     setLineDash() {}
 }
 
-test('Tissot indicatrices use the active map and its derivative once', () => {
+test('native Tissot geometry uses the active map and derivative', () => {
     const map = {
-        evaluate: (re, im) => ({ re, im }),
-        derivative: () => ({ re: 2, im: 0 })
+        functionKey: 'polynomial', chainCount: 1, polynomialN: 1,
+        polynomialCoeffs: [{ re: 0, im: 0 }, { re: 2, im: 0 }]
     };
     const indicatrices = generateTissotIndicatrices(map, [-1, 1], [-1, 1], 8, 8);
 
@@ -42,8 +42,8 @@ test('Tissot indicatrices use the active map and its derivative once', () => {
 
 test('Tissot indicatrices preserve the source direction and flag critical collapse', () => {
     const map = {
-        evaluate: (re, im) => ({ re: re + 2, im: im - 1 }),
-        derivative: () => ({ re: 0, im: 0 })
+        functionKey: 'polynomial', chainCount: 1, polynomialN: 0,
+        polynomialCoeffs: [{ re: 2, im: -1 }]
     };
     const [indicatrix] = generateTissotIndicatrices(map, [-1, 1], [-1, 1], 8, 8);
 
@@ -55,8 +55,7 @@ test('Tissot indicatrices preserve the source direction and flag critical collap
 
 test('conformal indicatrix uses the unified Canvas stroke path', () => {
     const [indicatrix] = generateTissotIndicatrices({
-        evaluate: (re, im) => ({ re, im }),
-        derivative: () => ({ re: 1, im: 0 })
+        functionKey: 'identity', chainCount: 1
     }, [-1, 1], [-1, 1], 8, 8);
     const ctx = new CanvasStrokeCounter();
 

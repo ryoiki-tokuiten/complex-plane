@@ -310,7 +310,7 @@ export function drawDynamicWPlane(ctx, planeParams, transform, stageIndex = 0) {
 function spherePath(ctx, sphereParams, points, color) {
     const validPoints = points.filter(finitePoint);
     if (validPoints.length < 2) return;
-    drawMappedLineSetOnSphere(ctx, sphereParams, [validPoints], color, false, null);
+    drawMappedLineSetOnSphere(ctx, sphereParams, [validPoints], color);
 }
 
 export function drawDynamicSphere(ctx, sphereParams, options = {}) {

@@ -8,7 +8,7 @@ import {
     generateLinearSegmentPoints,
     getPointSetEndpoints
 } from '../js/rendering/draw-planar.js';
-import { getMappedTransformProfile, transformFunctions } from '../js/math-utils.js';
+import { getMappedTransformProfile, transformFunctions } from '../js/native/map-runtime.js';
 import { state } from '../js/store/state.js';
 
 class LineCaptureContext {

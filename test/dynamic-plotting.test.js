@@ -11,6 +11,7 @@ import {
 } from '../js/analysis/dynamic-plotting.js';
 import { buildDynamicAggregateGLSL, compileCustomExpressionToGLSL } from '../js/math/expression/glsl.js';
 import { getGLSLComplexMathLibrary } from '../js/rendering/webgl-shared.js';
+import { transformFunctions } from '../js/native/map-runtime.js';
 import {
     dynamicExpressionHasBranches,
     surfaceStageHasBranches
@@ -53,8 +54,13 @@ test('dynamic mapping keeps source, input, term, and partial values synchronized
         playback: { visibleCount: 2, playing: false, speed: 10, loop: false }
     });
 
-    const transform = (re, im) => ({ re: re * re - im * im, im: 2 * re * im });
-    const result = getDynamicPlotResult({ transform });
+    const previousN = state.polynomialN;
+    const previousCoefficients = state.polynomialCoeffs;
+    state.polynomialN = 2;
+    state.polynomialCoeffs = [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }];
+    const result = getDynamicPlotResult({ transform: transformFunctions.polynomial });
+    state.polynomialN = previousN;
+    state.polynomialCoeffs = previousCoefficients;
     assert.equal(result.visibleSamples.length, 2);
     assert.deepEqual(result.samples.map(sample => sample.termValue), [
         { re: 1, im: 0 },
@@ -125,8 +131,7 @@ test('point formulas can use s and selected-function mode ignores inactive formu
         playback: { visibleCount: 2, playing: false, speed: 10, loop: false }
     });
 
-    const identity = (re, im) => ({ re, im });
-    const result = getDynamicPlotResult({ transform: identity });
+    const result = getDynamicPlotResult({ transform: transformFunctions.identity });
     assert.deepEqual(result.visibleSamples.map(sample => sample.inputPoint), [
         { re: 3, im: 0 },
         { re: 4, im: 0 }
@@ -220,7 +225,7 @@ test('active transform provider exposes aggregate functions to existing transfor
     });
     initializeDynamicPlottingEngine();
 
-    const { getEffectiveBaseTransformFunction } = await import('../js/math-utils.js');
+    const { getEffectiveBaseTransformFunction } = await import('../js/native/map-runtime.js');
     const transform = getEffectiveBaseTransformFunction('cos');
     const value = transform(0.5, 0);
     assert.ok(Math.abs(value.re - 0.9375) < 1e-12);

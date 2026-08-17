@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
+import { buildNativeLaplaceSurface } from '../native/complex-engine.js';
 import { disposeThreeObject } from './three-utils.js';
 
 const BACKGROUND = 0x0b0914;
@@ -11,11 +12,6 @@ const SURFACE_HEIGHT = 4.4;
 const rendererByContainer = new WeakMap();
 
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-
-function valueKey(value) {
-    return Number(finite(value)).toFixed(9);
-}
 
 function clearGroup(group) {
     while (group.children.length) {
@@ -23,35 +19,6 @@ function clearGroup(group) {
         group.remove(child);
         disposeThreeObject(child);
     }
-}
-
-function buildGrid(surface) {
-    const sigmas = [...new Set(surface.map(point => valueKey(point.sigma)))].map(Number).sort((a, b) => a - b);
-    const omegas = [...new Set(surface.map(point => valueKey(point.omega)))].map(Number).sort((a, b) => a - b);
-    const points = new Map(surface.map(point => [`${valueKey(point.sigma)}:${valueKey(point.omega)}`, point]));
-    return { sigmas, omegas, points };
-}
-
-function surfaceValue(point, mode, clipHeight) {
-    if (!point) return { height: -SURFACE_HEIGHT * 0.5, color: new THREE.Color(0x111827) };
-
-    const phase = finite(point.phase);
-    const magnitude = Math.min(Math.max(0, finite(point.magnitude)), clipHeight);
-    const magnitudeRatio = Math.log1p(magnitude) / Math.log1p(clipHeight);
-    const height = mode === 'phase'
-        ? clamp(phase / Math.PI, -1, 1) * (SURFACE_HEIGHT * 0.5)
-        : magnitudeRatio * SURFACE_HEIGHT;
-
-    const color = new THREE.Color();
-    if (mode === 'combined' || mode === 'phase') {
-        color.setHSL((phase / (Math.PI * 2) + 1) % 1, 0.82, mode === 'combined'
-            ? 0.32 + magnitudeRatio * 0.33
-            : 0.53);
-    } else {
-        color.setHSL(0.66 - magnitudeRatio * 0.72, 0.82, 0.28 + magnitudeRatio * 0.34);
-    }
-
-    return { height, color };
 }
 
 function coordinate(value, min, max, span) {
@@ -186,47 +153,17 @@ class LaplaceSurfaceRenderer {
         clearGroup(this.overlayGroup);
         this.setHeightAxisLabel(options.mode);
 
-        const { sigmas, omegas, points } = buildGrid(surface);
-        if (sigmas.length < 2 || omegas.length < 2) return;
-
-        const vertexCount = sigmas.length * omegas.length;
-        const positions = new Float32Array(vertexCount * 3);
-        const colors = new Float32Array(vertexCount * 3);
-        const minSigma = sigmas[0];
-        const maxSigma = sigmas.at(-1);
-        const minOmega = omegas[0];
-        const maxOmega = omegas.at(-1);
-
-        omegas.forEach((omega, row) => {
-            sigmas.forEach((sigma, column) => {
-                const index = row * sigmas.length + column;
-                const point = points.get(`${valueKey(sigma)}:${valueKey(omega)}`);
-                const value = surfaceValue(point, options.mode, options.clipHeight);
-                positions[index * 3] = coordinate(sigma, minSigma, maxSigma, SURFACE_WIDTH);
-                positions[index * 3 + 1] = value.height;
-                positions[index * 3 + 2] = coordinate(omega, minOmega, maxOmega, SURFACE_DEPTH);
-                colors[index * 3] = value.color.r;
-                colors[index * 3 + 1] = value.color.g;
-                colors[index * 3 + 2] = value.color.b;
-            });
-        });
-
-        const indices = [];
-        for (let row = 0; row < omegas.length - 1; row += 1) {
-            for (let column = 0; column < sigmas.length - 1; column += 1) {
-                const a = row * sigmas.length + column;
-                const b = a + 1;
-                const c = a + sigmas.length;
-                const d = c + 1;
-                indices.push(a, c, b, b, c, d);
-            }
-        }
+        const geometryData = buildNativeLaplaceSurface(surface, options);
+        const {
+            positions, normals, colors, indices,
+            minSigma, maxSigma, minOmega, maxOmega
+        } = geometryData;
 
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         geometry.setIndex(indices);
-        geometry.computeVertexNormals();
 
         const material = new THREE.MeshStandardMaterial({
             vertexColors: true,
@@ -362,7 +299,7 @@ export function drawLaplace3DSurface(containerId) {
     if (!container) return;
 
     const surface = state.laplaceSurface;
-    if (!Array.isArray(surface) || surface.length === 0) {
+    if (!surface) {
         const existing = rendererByContainer.get(container);
         if (existing) existing.dispose();
         rendererByContainer.delete(container);

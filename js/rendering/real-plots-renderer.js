@@ -1,12 +1,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state, zPlaneParams } from '../store/state.js';
-import { buildMappedTransformProfileKey, getChainedTransformFunction } from '../math-utils.js';
-import { compileExpression } from '../math/expression/evaluator.js';
+import { buildMappedTransformProfileKey, getMappedTransformProfile } from '../native/map-runtime.js';
+import { parseExpression } from '../math/expression/parser.js';
+import {
+    buildNativeRealSurface,
+    compileNativeExpressionProgram,
+    nativeMapOptions
+} from '../native/complex-engine.js';
 import {
     MAX_STATE_ZOOM_LEVEL,
     MIN_STATE_ZOOM_LEVEL,
-    POLE_MAGNITUDE_THRESHOLD,
     ZOOM_IN_FACTOR,
     ZOOM_OUT_FACTOR
 } from '../constants/numerical.js';
@@ -22,15 +26,7 @@ const DEFAULT_SAMPLE_SEGMENTS = 96;
 const RENDER_SEGMENTS = 192;
 const HALF_SURFACE = SURFACE_SIZE * 0.5;
 const HALF_HEIGHT = SURFACE_HEIGHT * 0.5;
-const CLAMP_LIMIT = 8.0;
-const INV_TWO_PI = 1 / (2 * Math.PI);
 const PALETTE_LUT_SIZE = 1024;
-const PALETTE_LUT_MASK = PALETTE_LUT_SIZE - 1;
-const COMPLEX_ZERO_EPSILON = 1e-15;
-const RECIPROCAL_POLE_CAP = POLE_MAGNITUDE_THRESHOLD * 2;
-const HYPOT_FAST_OVERFLOW_GUARD = Math.sqrt(Number.MAX_VALUE / 2);
-const INPUT_EVALUATOR_CACHE_LIMIT = 64;
-const SCALAR_FIELD_CACHE_LIMIT = 8;
 
 const INPUT_PRESET = Object.freeze({
     GENERIC: 0,
@@ -51,16 +47,6 @@ const OUTPUT_COMPONENT = Object.freeze({
     MAGNITUDE: 2
 });
 
-const TRANSFORM_KERNEL = Object.freeze({
-    CALL: 0,
-    IDENTITY: 1,
-    SQUARE: 2,
-    RECIPROCAL: 3,
-    EXP: 4,
-    SIN: 5,
-    COS: 6
-});
-
 const PALETTE_HEX = Object.freeze({
     ocean: [0x001b2e, 0x005f73, 0x0a9396, 0x94d2bd, 0xe9d8a6],
     cyberpunk: [0x11001c, 0x3a0ca3, 0xf72585, 0x4cc9f0, 0xfaff00],
@@ -71,14 +57,6 @@ const PALETTE_HEX = Object.freeze({
 });
 
 export let active3DRenderer = null;
-
-function isFiniteNumber(value) {
-    return typeof value === 'number' && value === value && value !== Infinity && value !== -Infinity;
-}
-
-function clamp01(value) {
-    return value <= 0 ? 0 : value >= 1 ? 1 : value;
-}
 
 function hexChannel(hex, shift) {
     return ((hex >> shift) & 255) / 255;
@@ -118,13 +96,6 @@ const PALETTE_LUTS = Object.freeze(Object.fromEntries(
 
 export function paletteLutFor(name) {
     return PALETTE_LUTS[name] || PALETTE_LUTS.sunset;
-}
-
-function writePaletteColor(lut, ratio, colors, offset) {
-    const lutOffset = ((clamp01(ratio) * PALETTE_LUT_MASK + 0.5) | 0) * 3;
-    colors[offset] = lut[lutOffset];
-    colors[offset + 1] = lut[lutOffset + 1];
-    colors[offset + 2] = lut[lutOffset + 2];
 }
 
 function makeAxisLabel(text, color) {
@@ -177,181 +148,26 @@ function presetType(expr) {
     }
 }
 
-const inputEvaluatorCache = new Map();
-
-class InputEvaluator {
-    static for(expression) {
-        const key = expression === undefined || expression === null ? 'x' : String(expression);
-        let evaluator = inputEvaluatorCache.get(key);
-        if (!evaluator) {
-            evaluator = new InputEvaluator(key);
-            if (inputEvaluatorCache.size >= INPUT_EVALUATOR_CACHE_LIMIT) {
-                inputEvaluatorCache.delete(inputEvaluatorCache.keys().next().value);
-            }
-        } else {
-            inputEvaluatorCache.delete(key);
-        }
-        inputEvaluatorCache.set(key, evaluator);
-        return evaluator;
-    }
-
-    constructor(expression) {
-        this.expression = expression === undefined || expression === null ? 'x' : String(expression);
-        this.type = presetType(this.expression);
-        this.compiled = null;
-        if (this.type === INPUT_PRESET.GENERIC) {
-            try {
-                this.compiled = compileExpression(this.expression, { allowedVariables: ['x', 'y'] });
-            } catch {
-                this.compiled = null;
-            }
-        }
-        this.scope = {
-            x: { re: 0, im: 0 },
-            y: { re: 0, im: 0 }
-        };
-    }
-
-    write(x, y, out) {
-        if (this.type !== INPUT_PRESET.GENERIC) {
-            out[0] = evalScalarInput(this.type, x, y);
-            out[1] = 0;
-            return;
-        }
-        this.writeCompiled(x, y, out);
-    }
-
-    writeCompiled(x, y, out) {
-        const compiled = this.compiled;
-        if (!compiled) {
-            out[0] = NaN;
-            out[1] = NaN;
-            return;
-        }
-
-        const scope = this.scope;
-        scope.x.re = x;
-        scope.x.im = 0;
-        scope.y.re = y;
-        scope.y.im = 0;
-
-        try {
-            const result = compiled(scope);
-            if (typeof result === 'number') {
-                if (!isFiniteNumber(result)) {
-                    out[0] = NaN;
-                    out[1] = NaN;
-                    return;
-                }
-                out[0] = result;
-                out[1] = 0;
-            } else if (result && typeof result === 'object') {
-                const re = result.re;
-                const im = result.im;
-                if (!isFiniteNumber(re) || !isFiniteNumber(im)) {
-                    out[0] = NaN;
-                    out[1] = NaN;
-                    return;
-                }
-                out[0] = re;
-                out[1] = im;
-            } else {
-                out[0] = NaN;
-                out[1] = NaN;
-            }
-        } catch {
-            out[0] = NaN;
-            out[1] = NaN;
-        }
-    }
-}
-
 export function validateRealPlotExpression(expression) {
     const source = String(expression ?? '').trim();
     if (!source) return 'Expression cannot be empty';
     try {
-        compileExpression(source, { allowedVariables: ['x', 'y'] });
+        compileNativeExpressionProgram(parseExpression(source), ['x', 'y']);
         return null;
     } catch (error) {
         return error instanceof Error ? error.message : 'Invalid expression';
     }
 }
 
-class StaticSurfaceTopology {
-    constructor(segments = DEFAULT_SAMPLE_SEGMENTS) {
-        this.segments = Math.max(1, segments | 0);
-        this.stride = this.segments + 1;
-        this.vertexCount = this.stride * this.stride;
-        const indexCount = this.segments * this.segments * 6;
-        const IndexArray = this.vertexCount > 65535 ? Uint32Array : Uint16Array;
-        this.indices = new IndexArray(indexCount);
-        this.gridX = new Float32Array(this.vertexCount);
-        this.gridZ = new Float32Array(this.vertexCount);
-        this.#buildGrid();
-        this.#buildIndices();
-    }
-
-    #buildGrid() {
-        const scale = SURFACE_SIZE / this.segments;
-        let index = 0;
-        for (let j = 0; j <= this.segments; j += 1) {
-            const z = j * scale - HALF_SURFACE;
-            for (let i = 0; i <= this.segments; i += 1) {
-                this.gridX[index] = i * scale - HALF_SURFACE;
-                this.gridZ[index] = z;
-                index += 1;
-            }
-        }
-    }
-
-    #buildIndices() {
-        let write = 0;
-        const stride = this.stride;
-        for (let j = 0; j < this.segments; j += 1) {
-            const row = j * stride;
-            const next = row + stride;
-            for (let i = 0; i < this.segments; i += 1) {
-                const a = row + i;
-                const b = a + 1;
-                const c = next + i;
-                const d = c + 1;
-                this.indices[write++] = a;
-                this.indices[write++] = c;
-                this.indices[write++] = b;
-                this.indices[write++] = b;
-                this.indices[write++] = c;
-                this.indices[write++] = d;
-            }
-        }
-    }
-}
-
-const topologyCache = new Map();
-
-function topologyFor(segments) {
-    const safeSegments = Math.max(1, Math.floor(Number(segments) || DEFAULT_SAMPLE_SEGMENTS));
-    let topology = topologyCache.get(safeSegments);
-    if (!topology) {
-        topology = new StaticSurfaceTopology(safeSegments);
-        topologyCache.set(safeSegments, topology);
-    }
-    return topology;
-}
-
 class SurfaceMeshStore {
     constructor(segments = RENDER_SEGMENTS) {
-        this.topology = topologyFor(segments);
-        this.segments = this.topology.segments;
-        this.vertexCount = this.topology.vertexCount;
-        this.indices = this.topology.indices;
+        this.segments = Math.max(1, segments | 0);
+        this.vertexCount = (this.segments + 1) ** 2;
+        this.indices = new Uint32Array(this.segments * this.segments * 6);
         this.positions = new Float32Array(this.vertexCount * 3);
         this.normals = new Float32Array(this.vertexCount * 3);
         this.colors = new Float32Array(this.vertexCount * 3);
         this.rawValues = new Float32Array(this.vertexCount);
-        this.values = new Float64Array(this.vertexCount);
-        this.phases = new Float32Array(this.vertexCount);
-        this.u = new Float64Array(2);
-        this.v = new Float64Array(2);
 
         this.contourUniforms = {
             uContoursEnabled: { value: 0.0 },
@@ -527,539 +343,38 @@ function realPlotSurfaceKey() {
     ].join('|');
 }
 
-function isScalarInputType(type) {
-    return type !== INPUT_PRESET.GENERIC;
+function expressionProgram(source, preset) {
+    if (preset !== INPUT_PRESET.GENERIC) return null;
+    return compileNativeExpressionProgram(parseExpression(String(source)), ['x', 'y']);
 }
 
-function evalScalarInput(type, x, y) {
-    switch (type) {
-        case INPUT_PRESET.X: return x;
-        case INPUT_PRESET.Y: return y;
-        case INPUT_PRESET.ZERO: return 0;
-        case INPUT_PRESET.X_PLUS_Y: return x + y;
-        case INPUT_PRESET.X_MINUS_Y: return x - y;
-        case INPUT_PRESET.X_TIMES_Y: return x * y;
-        case INPUT_PRESET.TWO_X_PLUS_Y: return 2 * x + y;
-        case INPUT_PRESET.SIN_X_PLUS_COS_Y: return Math.sin(x) + Math.cos(y);
-        case INPUT_PRESET.X2_MINUS_Y2: return x * x - y * y;
-        default: return x;
-    }
-}
-
-function softClampHeight(value) {
-    const abs = Math.abs(value);
-    if (abs <= CLAMP_LIMIT) return value;
-    return (value < 0 ? -1 : 1) * (CLAMP_LIMIT + Math.tanh(abs - CLAMP_LIMIT));
-}
-
-function expSafeForPlot(value) {
-    if (value > 700) return Math.exp(700);
-    if (value < -745) return 0;
-    return Math.exp(value);
-}
-
-function writeReciprocalKernel(re, im, out) {
-    if (re === 0 && im === 0) {
-        out[0] = NaN;
-        out[1] = NaN;
-        return out;
-    }
-
-    const absRe = Math.abs(re);
-    const absIm = Math.abs(im);
-    const scale = Math.max(absRe, absIm);
-
-    if (scale < COMPLEX_ZERO_EPSILON) {
-        const normalizedMagnitude = Math.hypot(re / scale, im / scale);
-        if (!(normalizedMagnitude > 0)) {
-            out[0] = NaN;
-            out[1] = NaN;
-            return out;
-        }
-        out[0] = (re / scale / normalizedMagnitude) * RECIPROCAL_POLE_CAP;
-        out[1] = (-im / scale / normalizedMagnitude) * RECIPROCAL_POLE_CAP;
-        return out;
-    }
-
-    if (absRe >= absIm) {
-        const ratio = im / re;
-        const divisor = re + im * ratio;
-        out[0] = 1 / divisor;
-        out[1] = -ratio / divisor;
-        return out;
-    }
-
-    const ratio = re / im;
-    const divisor = im + re * ratio;
-    out[0] = ratio / divisor;
-    out[1] = -1 / divisor;
-    return out;
-}
-
-function transformKernelKind(transformFunc) {
-    const meta = transformFunc?.realPlotsKernel ?? transformFunc?.realPlotKernel ?? transformFunc?.kernel;
-    const kind = typeof meta === 'string' ? meta : meta?.kind;
-    switch (String(kind || '').toLowerCase()) {
-        case 'identity': case 'id': return TRANSFORM_KERNEL.IDENTITY;
-        case 'square': case 'z2': return TRANSFORM_KERNEL.SQUARE;
-        case 'reciprocal': case 'inverse': case 'inv': return TRANSFORM_KERNEL.RECIPROCAL;
-        case 'exp': case 'exponential': return TRANSFORM_KERNEL.EXP;
-        case 'sin': return TRANSFORM_KERNEL.SIN;
-        case 'cos': return TRANSFORM_KERNEL.COS;
-        default: break;
-    }
-
-    const name = String(transformFunc?.name || '').toLowerCase();
-    if (name === 'identity' || name === 'id') return TRANSFORM_KERNEL.IDENTITY;
-    if (name === 'square' || name === 'z2') return TRANSFORM_KERNEL.SQUARE;
-    if (name === 'reciprocal' || name === 'inverse' || name === 'complexreciprocal') return TRANSFORM_KERNEL.RECIPROCAL;
-    if (name === 'expc' || name === 'exp' || name === 'complexexp') return TRANSFORM_KERNEL.EXP;
-    if (name === 'complexsin') return TRANSFORM_KERNEL.SIN;
-    if (name === 'complexcos') return TRANSFORM_KERNEL.COS;
-    return TRANSFORM_KERNEL.CALL;
-}
-
-function writeHeightfieldNormals(positions, normals, segments, gridStep) {
-    const stride = segments + 1;
-    for (let j = 0; j <= segments; j += 1) {
-        const row = j * stride;
-        const prevRow = (j === 0 ? 0 : j - 1) * stride;
-        const nextRow = (j === segments ? segments : j + 1) * stride;
-        for (let i = 0; i <= segments; i += 1) {
-            const iPrev = i === 0 ? 0 : i - 1;
-            const iNext = i === segments ? segments : i + 1;
-            const index = row + i;
-            const centerOffset = index * 3;
-            const xDivisor = i === 0 || i === segments ? gridStep : 2 * gridStep;
-            const zDivisor = j === 0 || j === segments ? gridStep : 2 * gridStep;
-            const nx = -(positions[(row + iNext) * 3 + 1] - positions[(row + iPrev) * 3 + 1]) / xDivisor;
-            const nz = -(positions[(nextRow + i) * 3 + 1] - positions[(prevRow + i) * 3 + 1]) / zDivisor;
-            const invLen = 1 / Math.hypot(nx, nz, 1);
-            normals[centerOffset] = nx * invLen;
-            normals[centerOffset + 1] = invLen;
-            normals[centerOffset + 2] = nz * invLen;
-        }
-    }
-}
-
-function selectRawValue(re, im, outputMode) {
-    if (outputMode === OUTPUT_COMPONENT.IMAG) return im;
-    if (outputMode === OUTPUT_COMPONENT.MAGNITUDE) {
-        const magnitude = Math.abs(re) <= HYPOT_FAST_OVERFLOW_GUARD && Math.abs(im) <= HYPOT_FAST_OVERFLOW_GUARD
-            ? Math.sqrt(re * re + im * im)
-            : Math.hypot(re, im);
-        return magnitude < Infinity ? magnitude : NaN;
-    }
-    return re;
-}
-
-function validSurfaceIndices(topology, values, finiteResultCount) {
-    if (finiteResultCount === topology.vertexCount) return topology.indices;
-
-    const segments = topology.segments;
-    const stride = segments + 1;
-    const IndexArray = topology.indices instanceof Uint32Array ? Uint32Array : Uint16Array;
-    const indices = new IndexArray(topology.indices.length);
-    let write = 0;
-    for (let j = 0; j < segments; j += 1) {
-        const row = j * stride;
-        const next = row + stride;
-        for (let i = 0; i < segments; i += 1) {
-            const a = row + i;
-            const b = a + 1;
-            const c = next + i;
-            const d = c + 1;
-            if (!isFiniteNumber(values[a]) || !isFiniteNumber(values[b]) ||
-                !isFiniteNumber(values[c]) || !isFiniteNumber(values[d])) continue;
-            indices[write++] = a;
-            indices[write++] = c;
-            indices[write++] = b;
-            indices[write++] = b;
-            indices[write++] = c;
-            indices[write++] = d;
-        }
-    }
-    return indices.subarray(0, write);
-}
-
-function finishSampleGeometry({ segments, vertexCount, topology, positions, normals, colors, rawValues, values, phases, minZ, maxZ, usePhaseColor, paletteLut, heightFactor }) {
-    const spanZ = maxZ - minZ || 1.0;
-    const inverseSpanZ = 1 / spanZ;
-    for (let index = 0, offset = 0; index < vertexCount; index += 1, offset += 3) {
-        const rawValue = values[index];
-        rawValues[index] = rawValue;
-        positions[offset] = topology.gridX[index];
-        positions[offset + 2] = topology.gridZ[index];
-        if (!isFiniteNumber(rawValue)) {
-            positions[offset + 1] = 0;
-            continue;
-        }
-        positions[offset + 1] = softClampHeight(rawValue) * heightFactor;
-        writePaletteColor(
-            paletteLut,
-            usePhaseColor ? phases[index] : (rawValue - minZ) * inverseSpanZ,
-            colors,
-            offset
-        );
-    }
-    writeHeightfieldNormals(positions, normals, segments, SURFACE_SIZE / segments);
-}
-
-function sampleValuesPass(transformFunc, config, catchPerVertex) {
-    const {
-        segments, values, phases, u, v, xMin, yMin, xScale, yScale,
-        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
-        kernelKind
-    } = config;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    let finiteResultCount = 0;
-    let vertex = 0;
-    const fastXY = scalarInputs && inputUType === INPUT_PRESET.X && inputVType === INPUT_PRESET.Y;
-    const fastX0 = scalarInputs && inputUType === INPUT_PRESET.X && inputVType === INPUT_PRESET.ZERO;
-    const fastInputFinite = (fastXY || fastX0) &&
-        isFiniteNumber(xMin) && isFiniteNumber(yMin) &&
-        isFiniteNumber(xScale) && isFiniteNumber(yScale);
-    const hasKernel = kernelKind !== TRANSFORM_KERNEL.CALL;
-    const kernelOut = hasKernel ? (config.kernelOut || (config.kernelOut = new Float64Array(2))) : null;
-
-    for (let j = 0; j <= segments; j += 1) {
-        const yVal = yMin + j * yScale;
-        for (let i = 0; i <= segments; i += 1) {
-            const xVal = xMin + i * xScale;
-            let zInRe;
-            let zInIm;
-            if (fastXY) {
-                zInRe = xVal;
-                zInIm = yVal;
-            } else if (fastX0) {
-                zInRe = xVal;
-                zInIm = 0;
-            } else if (scalarInputs) {
-                zInRe = evalScalarInput(inputUType, xVal, yVal);
-                zInIm = evalScalarInput(inputVType, xVal, yVal);
-            } else {
-                inputU.write(xVal, yVal, u);
-                inputV.write(xVal, yVal, v);
-                zInRe = u[0] - v[1];
-                zInIm = u[1] + v[0];
-            }
-
-            let rawValue = NaN;
-            let phase = 0.5;
-            const inputValid = fastInputFinite || (isFiniteNumber(zInRe) && isFiniteNumber(zInIm));
-            let resultRe;
-            let resultIm;
-            if (inputValid && hasKernel) {
-                switch (kernelKind) {
-                    case TRANSFORM_KERNEL.IDENTITY:
-                        resultRe = zInRe; resultIm = zInIm; break;
-                    case TRANSFORM_KERNEL.SQUARE:
-                        resultRe = zInRe * zInRe - zInIm * zInIm; resultIm = 2 * zInRe * zInIm; break;
-                    case TRANSFORM_KERNEL.RECIPROCAL: {
-                        writeReciprocalKernel(zInRe, zInIm, kernelOut);
-                        resultRe = kernelOut[0];
-                        resultIm = kernelOut[1];
-                        break;
-                    }
-                    case TRANSFORM_KERNEL.EXP: {
-                        const expRe = expSafeForPlot(zInRe);
-                        resultRe = expRe * Math.cos(zInIm); resultIm = expRe * Math.sin(zInIm); break;
-                    }
-                    case TRANSFORM_KERNEL.SIN:
-                        resultRe = Math.sin(zInRe) * Math.cosh(zInIm); resultIm = Math.cos(zInRe) * Math.sinh(zInIm); break;
-                    case TRANSFORM_KERNEL.COS:
-                        resultRe = Math.cos(zInRe) * Math.cosh(zInIm); resultIm = -Math.sin(zInRe) * Math.sinh(zInIm); break;
-                    default:
-                        resultRe = 0; resultIm = 0;
-                }
-            } else if (inputValid) {
-                if (catchPerVertex) {
-                    try {
-                        const result = transformFunc(zInRe, zInIm);
-                        resultRe = result?.re;
-                        resultIm = result?.im;
-                    } catch {
-                        resultRe = undefined;
-                        resultIm = undefined;
-                    }
-                } else {
-                    const result = transformFunc(zInRe, zInIm);
-                    resultRe = result?.re;
-                    resultIm = result?.im;
-                }
-            }
-
-            if (isFiniteNumber(resultRe) && isFiniteNumber(resultIm)) {
-                rawValue = selectRawValue(resultRe, resultIm, outputMode);
-                if (rawValue === rawValue) {
-                    finiteResultCount += 1;
-                    phase = (Math.atan2(resultIm, resultRe) + Math.PI) * INV_TWO_PI;
-                }
-            }
-
-            values[vertex] = rawValue;
-            if (phases) phases[vertex] = phase;
-            if (rawValue === rawValue) {
-                if (rawValue < minZ) minZ = rawValue;
-                if (rawValue > maxZ) maxZ = rawValue;
-            }
-            vertex += 1;
-        }
-    }
-
-    return { minZ, maxZ, finiteResultCount };
-}
-
-const transformFieldIds = new WeakMap();
-let nextTransformFieldId = 1;
-const scalarFieldCache = new Map();
-
-function transformFieldKey(transformFunc) {
-    if (typeof transformFunc !== 'function') return 'transform:invalid';
-
-    let id = transformFieldIds.get(transformFunc);
-    if (id === undefined) {
-        id = nextTransformFieldId++;
-        transformFieldIds.set(transformFunc, id);
-    }
-
-    let profile = '';
-    try {
-        profile = buildMappedTransformProfileKey(state.currentFunction);
-    } catch {
-        profile = String(state.currentFunction || '');
-    }
-    return `${profile}|transform:${id}`;
-}
-
-function scalarFieldBaseKey(transformFunc, inputExpr, imagExpr, outputMode, xRange, yRange) {
-    return [
-        transformFieldKey(transformFunc),
-        String(inputExpr ?? 'x'),
-        String(imagExpr ?? '0'),
-        outputMode,
-        xRange[0],
-        xRange[1],
-        yRange[0],
-        yRange[1]
-    ].join('|');
-}
-
-function touchScalarField(entry) {
-    scalarFieldCache.delete(entry.key);
-    scalarFieldCache.set(entry.key, entry);
-    return entry;
-}
-
-function rememberScalarField(entry) {
-    const existing = scalarFieldCache.get(entry.key);
-    if (existing) return touchScalarField(existing);
-
-    if (scalarFieldCache.size >= SCALAR_FIELD_CACHE_LIMIT) {
-        scalarFieldCache.delete(scalarFieldCache.keys().next().value);
-    }
-    scalarFieldCache.set(entry.key, entry);
-    return entry;
-}
-
-function copyScalarField(entry, values, phases) {
-    values.set(entry.values);
-    if (phases && entry.phases) phases.set(entry.phases);
-    return {
-        minZ: entry.minValue,
-        maxZ: entry.maxValue,
-        finiteResultCount: entry.finiteResultCount
-    };
-}
-
-function getReusableScalarField(baseKey, segments, values, phases) {
-    const exactKey = `${baseKey}|segments:${segments}`;
-    const exact = scalarFieldCache.get(exactKey);
-    if (exact) return copyScalarField(touchScalarField(exact), values, phases);
-
-    let source = null;
-    for (const entry of scalarFieldCache.values()) {
-        if (entry.baseKey !== baseKey || entry.segments <= segments) continue;
-        if (!source || entry.segments < source.segments) source = entry;
-    }
-    if (!source) return null;
-
-    const sourceStride = source.segments + 1;
-    const targetStride = segments + 1;
-    const derivedValues = new Float64Array(targetStride * targetStride);
-    const derivedPhases = new Float32Array(targetStride * targetStride);
-    for (let row = 0; row < targetStride; row += 1) {
-        const sourceY = row * source.segments / segments;
-        const sourceRow0 = Math.floor(sourceY);
-        const sourceRow1 = Math.min(source.segments, sourceRow0 + 1);
-        const yWeight = sourceY - sourceRow0;
-        for (let column = 0; column < targetStride; column += 1) {
-            const targetIndex = row * targetStride + column;
-            const sourceX = column * source.segments / segments;
-            const sourceColumn0 = Math.floor(sourceX);
-            const sourceColumn1 = Math.min(source.segments, sourceColumn0 + 1);
-            const xWeight = sourceX - sourceColumn0;
-            const topLeft = source.values[sourceRow0 * sourceStride + sourceColumn0];
-            const topRight = source.values[sourceRow0 * sourceStride + sourceColumn1];
-            const bottomLeft = source.values[sourceRow1 * sourceStride + sourceColumn0];
-            const bottomRight = source.values[sourceRow1 * sourceStride + sourceColumn1];
-            if ([topLeft, topRight, bottomLeft, bottomRight].every(isFiniteNumber)) {
-                const top = topLeft + (topRight - topLeft) * xWeight;
-                const bottom = bottomLeft + (bottomRight - bottomLeft) * xWeight;
-                derivedValues[targetIndex] = top + (bottom - top) * yWeight;
-            } else {
-                derivedValues[targetIndex] = NaN;
-            }
-
-            const nearestRow = Math.round(sourceY);
-            const nearestColumn = Math.round(sourceX);
-            derivedPhases[targetIndex] = source.phases[nearestRow * sourceStride + nearestColumn];
-        }
-    }
-
-    const derived = rememberScalarField({
-        key: exactKey,
-        baseKey,
-        segments,
-        values: derivedValues,
-        phases: derivedPhases,
-        minValue: NaN,
-        maxValue: NaN,
-        finiteResultCount: 0
-    });
-    let finiteResultCount = 0;
-    let minValue = Infinity;
-    let maxValue = -Infinity;
-    for (const value of derived.values) {
-        if (!isFiniteNumber(value)) continue;
-        finiteResultCount += 1;
-        minValue = Math.min(minValue, value);
-        maxValue = Math.max(maxValue, value);
-    }
-    derived.finiteResultCount = finiteResultCount;
-    derived.minValue = finiteResultCount ? minValue : NaN;
-    derived.maxValue = finiteResultCount ? maxValue : NaN;
-    return copyScalarField(touchScalarField(derived), values, phases);
-}
-
-
-export function sampleRealPlotSurface(transformFunc, options = {}) {
-    const segments = Math.max(1, Math.floor(Number(options.segments) || DEFAULT_SAMPLE_SEGMENTS));
-    const valuesOnly = options.valuesOnly === true;
-    const topology = valuesOnly ? null : options.topology || topologyFor(segments);
-    const stride = segments + 1;
-    const vertexCount = valuesOnly ? stride * stride : topology.vertexCount;
-    const positions = valuesOnly ? null : options.positions || new Float32Array(vertexCount * 3);
-    const normals = valuesOnly ? null : options.normals || new Float32Array(vertexCount * 3);
-    const colors = valuesOnly ? null : options.colors || new Float32Array(vertexCount * 3);
-    const rawValues = valuesOnly ? null : options.rawValues || new Float32Array(vertexCount);
-    const values = options.values || new Float64Array(vertexCount);
-    const phases = valuesOnly ? null : options.phases || new Float32Array(vertexCount);
-    const sampledPhases = phases || new Float32Array(vertexCount);
-    const u = options.u || new Float64Array(2);
-    const v = options.v || new Float64Array(2);
+export function buildRealPlotSurface(options = {}) {
+    const inputExpr = options.inputExpr ?? state.realPlotsInputExpr ?? 'x';
+    const imagExpr = options.imagExpr ?? state.realPlotsImagExpr ?? '0';
+    const inputUPreset = presetType(inputExpr);
+    const inputVPreset = presetType(imagExpr);
     const xRange = options.xRange || zPlaneParams.currentVisXRange;
     const yRange = options.yRange || zPlaneParams.currentVisYRange;
-    const xMin = xRange[0];
-    const yMin = yRange[0];
-    const xScale = (xRange[1] - xMin) / segments;
-    const yScale = (yRange[1] - yMin) / segments;
-    const inputU = InputEvaluator.for(options.inputExpr ?? state.realPlotsInputExpr);
-    const inputV = InputEvaluator.for(options.imagExpr ?? state.realPlotsImagExpr);
-    const inputUType = inputU.type;
-    const inputVType = inputV.type;
-    const scalarInputs = isScalarInputType(inputUType) && isScalarInputType(inputVType);
-    const outputMode = outputComponentMode(options.outputComponent ?? state.realPlotsOutputComponent);
-    const heightScale = options.heightScale !== undefined
-        ? options.heightScale
-        : state.realPlotsHeightScale !== undefined ? state.realPlotsHeightScale : 1.0;
-    const usePhaseColor = (options.colorMode ?? state.realPlotsColorMode) === 'phase';
-    const paletteLut = paletteLutFor(options.palette || state.realPlotsPalette || 'sunset');
-    const heightFactor = (HALF_HEIGHT * heightScale) / CLAMP_LIMIT;
-    const kernelKind = transformKernelKind(transformFunc);
-    const baseScalarKey = scalarFieldBaseKey(
-        transformFunc,
-        options.inputExpr ?? state.realPlotsInputExpr,
-        options.imagExpr ?? state.realPlotsImagExpr,
-        outputMode,
-        xRange,
-        yRange
-    );
-    const cachedSample = getReusableScalarField(baseScalarKey, segments, values, sampledPhases);
-
-    const config = {
-        segments, values, phases: sampledPhases, u, v, xMin, yMin, xScale, yScale,
-        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
-        kernelKind
-    };
-
-    let sample = cachedSample;
-    if (!sample) {
-        try {
-            sample = sampleValuesPass(transformFunc, config, false);
-        } catch {
-            sample = sampleValuesPass(transformFunc, config, true);
-        }
-
-        rememberScalarField({
-            key: `${baseScalarKey}|segments:${segments}`,
-            baseKey: baseScalarKey,
-            segments,
-            values: values.slice(),
-            phases: sampledPhases.slice(),
-            minValue: sample.finiteResultCount > 0 ? sample.minZ : NaN,
-            maxValue: sample.finiteResultCount > 0 ? sample.maxZ : NaN,
-            finiteResultCount: sample.finiteResultCount
-        });
-    }
-
-    const minValue = sample.finiteResultCount > 0 ? sample.minZ : NaN;
-    const maxValue = sample.finiteResultCount > 0 ? sample.maxZ : NaN;
-
-    if (valuesOnly) {
-        return {
-            segments,
-            vertexCount,
-            values,
-            minValue,
-            maxValue,
-            finiteResultCount: sample.finiteResultCount
-        };
-    }
-
-    const indices = validSurfaceIndices(topology, values, sample.finiteResultCount);
-    finishSampleGeometry({
-        segments,
-        vertexCount,
-        topology,
-        positions,
-        normals,
-        colors,
-        rawValues,
-        values,
-        phases: sampledPhases,
-        minZ: sample.finiteResultCount > 0 ? sample.minZ : 0,
-        maxZ: sample.finiteResultCount > 0 ? sample.maxZ : 0,
-        usePhaseColor,
-        paletteLut,
-        heightFactor
+    const activeMap = getMappedTransformProfile(state.currentFunction);
+    const mapOptions = nativeMapOptions(state, {
+        ...(activeMap.nativeMapOptions || {}),
+        ...(options.mapOptions || {})
     });
-
-    return {
-        segments,
-        vertexCount,
-        positions,
-        normals,
-        colors,
-        values,
-        rawValues,
-        phases,
-        indices,
-        minValue,
-        maxValue,
-        finiteResultCount: sample.finiteResultCount
-    };
+    return buildNativeRealSurface({
+        mapOptions,
+        segments: Math.max(1, Math.floor(Number(options.segments) || DEFAULT_SAMPLE_SEGMENTS)),
+        xRange,
+        yRange,
+        inputUPreset,
+        inputVPreset,
+        inputUProgram: expressionProgram(inputExpr, inputUPreset),
+        inputVProgram: expressionProgram(imagExpr, inputVPreset),
+        component: outputComponentMode(options.outputComponent ?? state.realPlotsOutputComponent),
+        heightScale: options.heightScale ?? state.realPlotsHeightScale ?? 1,
+        phaseColor: (options.colorMode ?? state.realPlotsColorMode) === 'phase',
+        palette: paletteLutFor(options.palette || state.realPlotsPalette || 'sunset'),
+        valuesOnly: options.valuesOnly === true
+    });
 }
 
 class RealPlots3DRenderer {
@@ -1277,7 +592,7 @@ class RealPlots3DRenderer {
         requestRedrawAll();
     }
 
-    updateSurface(transformFunc, surfaceKey) {
+    updateSurface(surfaceKey) {
         const store = this.surfaceStore;
         store.contourUniforms.uContoursEnabled.value = state.contoursEnabled ? 1.0 : 0.0;
         store.contourUniforms.uContourInterval.value = state.contourInterval !== undefined ? +state.contourInterval : 0.5;
@@ -1290,7 +605,7 @@ class RealPlots3DRenderer {
 
         this.#syncOutputLabel();
         this.#syncCoordinateLabels();
-        this.#sampleSurface(transformFunc);
+        this.#sampleSurface();
         this.surfaceKey = surfaceKey;
         this.surfaceStore.markDirty();
         this.render();
@@ -1326,20 +641,13 @@ class RealPlots3DRenderer {
         this.coordLabels.topRight.updateText(`(${fXMax}, ${fYMax})`);
     }
 
-    #sampleSurface(transformFunc) {
+    #sampleSurface() {
         const store = this.surfaceStore;
-        const result = sampleRealPlotSurface(transformFunc, {
-            segments: store.segments,
-            topology: store.topology,
-            positions: store.positions,
-            normals: store.normals,
-            colors: store.colors,
-            rawValues: store.rawValues,
-            values: store.values,
-            phases: store.phases,
-            u: store.u,
-            v: store.v
-        });
+        const result = buildRealPlotSurface({ segments: store.segments });
+        store.positions.set(result.positions);
+        store.normals.set(result.normals);
+        store.colors.set(result.colors);
+        store.rawValues.set(result.rawValues);
         store.setIndices(result.indices);
         store.minValue = result.minValue;
         store.maxValue = result.maxValue;
@@ -1362,8 +670,7 @@ export function drawRealPlot() {
         active3DRenderer = new RealPlots3DRenderer(container3d);
     }
 
-    const transformFunc = getChainedTransformFunction(state.currentFunction);
-    active3DRenderer?.updateSurface(transformFunc, realPlotSurfaceKey());
+    active3DRenderer?.updateSurface(realPlotSurfaceKey());
 }
 
 export function disposeRealPlotsRenderer() {

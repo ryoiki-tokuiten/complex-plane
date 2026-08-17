@@ -2,7 +2,7 @@ import { state, context, zPlaneParams, wPlaneParams } from './store/state.js';
 import { runtime } from './store/runtime.js';
 import { eventBus } from './store/events.js';
 import { ROCKET_DATA_URIS } from './rocket-assets.js';
-import { getChainedTransformFunction } from './math-utils.js';
+import { getChainedTransformFunction } from './native/map-runtime.js';
 import { updatePlaneViewportRanges } from './utils/canvas-utils.js';
 import { drawImageWithWebGL } from './rendering/draw-image-webgl.js';
 import { drawPlanarTransformedLine, drawComplexLineSetOnPlane } from './rendering/draw-planar.js';

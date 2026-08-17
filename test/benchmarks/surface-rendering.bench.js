@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 
 import { runBenchmark } from './utils.js';
 import { state } from '../../js/store/state.js';
-import { getChainedTransformFunction } from '../../js/math-utils.js';
-import { sampleRealPlotSurface } from '../../js/rendering/real-plots-renderer.js';
+import { buildRealPlotSurface } from '../../js/rendering/real-plots-renderer.js';
 import {
     buildRiemannSurfaceMathLibrary,
     getRiemannSurfaceGridData
@@ -67,12 +66,9 @@ export async function runSurfaceRenderingBenchmarks() {
         'real 3D plot heightfield sampling from algebraic output chain',
         ({ profile }) => {
             configureSurfaceState();
-            return {
-                transform: getChainedTransformFunction('algebraic_chaining'),
-                segments: REAL_PLOT_SEGMENTS[profile]
-            };
+            return { segments: REAL_PLOT_SEGMENTS[profile] };
         },
-        ({ transform, segments }) => sampleRealPlotSurface(transform, {
+        ({ segments }) => buildRealPlotSurface({
             segments,
             xRange: [-1.25, 1.25],
             yRange: [-1.25, 1.25],

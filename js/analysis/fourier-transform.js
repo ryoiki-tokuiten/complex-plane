@@ -1,4 +1,5 @@
 import { state } from '../store/state.js';
+import { buildNativeFourierWinding, computeNativeDft } from '../native/complex-engine.js';
 
 // Fourier Transform Analysis Module
 // Handles time domain signal generation and Fourier transform calculations
@@ -119,70 +120,6 @@ export function generateTimeDomainSignal(funcType, frequency, amplitude, timeWin
  * @param {Array} real - Array of real values
  * @returns {Array} Array of {re, im} complex objects
  */
-function customFFT(real) {
-    const N = real.length;
-    if (N <= 1) return [{ re: real[0] || 0, im: 0 }];
-
-    // Pad to next power of 2
-    let n2 = 1;
-    while (n2 < N) n2 *= 2;
-    
-    const re = new Array(n2).fill(0);
-    const im = new Array(n2).fill(0);
-    for (let i = 0; i < N; i++) {
-        re[i] = real[i];
-    }
-    
-    // Bit reversal
-    let j = 0;
-    for (let i = 0; i < n2 - 1; i++) {
-        if (i < j) {
-            let temp = re[i]; re[i] = re[j]; re[j] = temp;
-            temp = im[i]; im[i] = im[j]; im[j] = temp;
-        }
-        let k = n2 >> 1;
-        while (k <= j) { j -= k; k >>= 1; }
-        j += k;
-    }
-
-    // Cooley-Tukey
-    for (let size = 2; size <= n2; size *= 2) {
-        const half = size / 2;
-        const angle = -2 * Math.PI / size;
-        const wRe = Math.cos(angle);
-        const wIm = Math.sin(angle);
-
-        for (let i = 0; i < n2; i += size) {
-            let uRe = 1;
-            let uIm = 0;
-            for (let k = 0; k < half; k++) {
-                const evenRe = re[i + k];
-                const evenIm = im[i + k];
-                const oddRe = re[i + k + half];
-                const oddIm = im[i + k + half];
-
-                const tRe = uRe * oddRe - uIm * oddIm;
-                const tIm = uRe * oddIm + uIm * oddRe;
-
-                re[i + k] = evenRe + tRe;
-                im[i + k] = evenIm + tIm;
-                re[i + k + half] = evenRe - tRe;
-                im[i + k + half] = evenIm - tIm;
-
-                const nextURe = uRe * wRe - uIm * wIm;
-                uIm = uRe * wIm + uIm * wRe;
-                uRe = nextURe;
-            }
-        }
-    }
-    
-    const result = new Array(N);
-    for (let i = 0; i < N; i++) {
-        result[i] = { re: re[i], im: im[i] };
-    }
-    return result;
-}
-
 /**
  * Compute Discrete Fourier Transform (DFT)
  * @param {Array} signal - Array of time domain values
@@ -191,11 +128,7 @@ function customFFT(real) {
 export function computeDFT(signal) {
     if (!signal || signal.length === 0) return [];
     
-    // Extract real values
-    const values = signal.map(s => s.value);
-    
-    // Perform FFT using custom implementation
-    const fftResult = customFFT(values);
+    const fftResult = computeNativeDft(signal.map(sample => Number(sample?.value) || 0));
     
     const N = signal.length;
     const dft = [];
@@ -203,9 +136,8 @@ export function computeDFT(signal) {
     for (let k = 0; k < fftResult.length; k++) {
         const comp = fftResult[k];
         
-        // Normalize by N
-        const real = (comp.re || 0) / N;
-        const imag = (comp.im || 0) / N;
+        const real = comp.re || 0;
+        const imag = comp.im || 0;
         
         const magnitude = Math.sqrt(real * real + imag * imag);
         const phase = Math.atan2(imag, real);
@@ -251,9 +183,7 @@ export function buildFourierWinding(signal, options = {}) {
         ? Math.max(Number.EPSILON, options.timeWindow)
         : Math.max(Number.EPSILON, state.fourierTimeWindow || signal.at(-1)?.t || 1);
     const cutoff = progress * timeWindow;
-    const points = [];
-    let centerRe = 0;
-    let centerIm = 0;
+    const selected = [];
     let maxAmplitude = 0;
 
     for (let index = 0; index < signal.length; index += 1) {
@@ -264,22 +194,14 @@ export function buildFourierWinding(signal, options = {}) {
         maxAmplitude = Math.max(maxAmplitude, Math.abs(value));
         if (t > cutoff) continue;
 
-        const angle = -2 * Math.PI * windingFrequency * t;
-        const re = value * Math.cos(angle);
-        const im = value * Math.sin(angle);
-        points.push({ re, im, t, value });
-        centerRe += re;
-        centerIm += im;
+        selected.push({ t, value });
     }
-
-    if (points.length > 0) {
-        centerRe /= points.length;
-        centerIm /= points.length;
-    }
+    const native = buildNativeFourierWinding(selected, windingFrequency);
+    const points = native.values.map((value, index) => ({ ...value, ...selected[index] }));
 
     return {
         points,
-        centerOfMass: { re: centerRe, im: centerIm },
+        centerOfMass: native.center,
         referenceRadius: Math.max(Number.EPSILON, maxAmplitude * 1.1),
         vectorStep: Math.max(1, Math.floor(points.length / 50))
     };

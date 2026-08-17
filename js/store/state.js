@@ -17,7 +17,8 @@ export const zPlaneParams = {
     origin: { x: 0, y: 0 },
     scale: { x: 1, y: 1 },
     currentVisXRange: [...zPlaneInitialRanges.x],
-    currentVisYRange: [...zPlaneInitialRanges.y]
+    currentVisYRange: [...zPlaneInitialRanges.y],
+    preciseViewport: null
 };
 
 export const wPlaneParams = {
@@ -26,7 +27,8 @@ export const wPlaneParams = {
     origin: { x: 0, y: 0 },
     scale: { x: 1, y: 1 },
     xRange: [...wPlaneInitialRanges.x],
-    yRange: [...wPlaneInitialRanges.y]
+    yRange: [...wPlaneInitialRanges.y],
+    preciseViewport: null
 };
 
 export const sphereViewParams = {
@@ -198,7 +200,7 @@ const rawState = {
     laplaceAnimationSpeed: 3.0,
     laplaceAnimationLoop: true,
     laplaceTimeDomainSignal: [],
-    laplaceSurface: [],
+    laplaceSurface: null,
     laplacePoles: [],
     laplaceZeros: [],
     laplaceCurrentValue: null,

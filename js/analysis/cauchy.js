@@ -1,15 +1,8 @@
 import { state, context } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import {
-    getChainedTransformFunction,
-    getContourPoints,
-    numericalLineIntegral,
-    isPointInsideContour,
-    estimateResidue,
-    complexAdd,
-    complexMul,
-    buildMappedTransformProfileKey
-} from '../math-utils.js';
+import { buildMappedTransformProfileKey } from '../native/map-runtime.js';
+import { getContourPoints, isPointInsideContour } from './contours.js';
+import { analyzeNativeContour, estimateNativeResidue, nativeMapOptions } from '../native/complex-engine.js';
 import {
     NUM_INTEGRAL_STEPS,
     RESIDUE_CALC_EPSILON_RADIUS,
@@ -17,7 +10,7 @@ import {
     NUM_RESIDUE_INTEGRAL_STEPS
 } from '../constants/numerical.js';
 import { createSafeMarkupFragment } from '../ui/dom-components.js';
-import { buildInputShapeGeometryConfig, generateArbitraryShapePointSets } from '../rendering/shape-generators.js';
+import { buildInputShapeGeometryConfig, generateInputShapePointSets } from '../rendering/shape-generators.js';
 
 const { controls } = context;
 
@@ -107,11 +100,7 @@ export function performCauchyAnalysis() {
         return;
     }
 
-    const func = getChainedTransformFunction(state.currentFunction);
-    if (!func) {
-        publish(`${analysisKey}|missing-function`, { text: 'Error: Current function not found.' });
-        return;
-    }
+    const map = nativeMapOptions(state);
     if (state.currentFunction === 'poincare') { 
         publish(`${analysisKey}|poincare`, { text: 'Cauchy/Residue analysis not applicable for Poincare map.' });
         return;
@@ -143,7 +132,7 @@ export function performCauchyAnalysis() {
             publish(`${analysisKey}|open-arbitrary-shape`, { text: 'Cauchy mode: Close the arbitrary shape before integrating.' });
             return;
         }
-        contourCPointSets = generateArbitraryShapePointSets(buildInputShapeGeometryConfig(null, {
+        contourCPointSets = generateInputShapePointSets(buildInputShapeGeometryConfig(null, {
             currentInputShape: 'arbitrary',
             curvePoints: NUM_INTEGRAL_STEPS
         })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
@@ -165,7 +154,7 @@ export function performCauchyAnalysis() {
     }
 
     const integralValue = (contourCPointSets || [contourC_points]).reduce((sum, points) => {
-        const value = numericalLineIntegral(func, points);
+        const value = analyzeNativeContour(map, points)?.integral || { re: NaN, im: NaN };
         return { re: sum.re + value.re, im: sum.im + value.im };
     }, { re: 0, im: 0 });
     let resultsHTML = `∮<sub>C</sub> f(z)dz ≈ `;
@@ -247,7 +236,9 @@ export function performCauchyAnalysis() {
                         residueSource = "pre-calc";
                     } else {
                         
-                        const estimatedRes = estimateResidue(func, pole, RESIDUE_CALC_EPSILON_RADIUS, NUM_RESIDUE_INTEGRAL_STEPS);
+                        const estimatedRes = estimateNativeResidue(
+                            map, pole, RESIDUE_CALC_EPSILON_RADIUS, NUM_RESIDUE_INTEGRAL_STEPS
+                        );
                         if (typeof estimatedRes.re === 'number' && typeof estimatedRes.im === 'number' &&
                             isFinite(estimatedRes.re) && isFinite(estimatedRes.im)) {
                             displayResidue = estimatedRes;
@@ -256,7 +247,7 @@ export function performCauchyAnalysis() {
                     }
 
                     if (!isNaN(displayResidue.re) && !isNaN(displayResidue.im)) {
-                        sumResidues = complexAdd(sumResidues, displayResidue);
+                        sumResidues = { re: sumResidues.re + displayResidue.re, im: sumResidues.im + displayResidue.im };
                         resultsHTML += ` &nbsp;&nbsp;Res ≈ ${displayResidue.re.toFixed(2)} + ${displayResidue.im.toFixed(2)}i`;
                         if (residueSource === "estimated") resultsHTML += ` (est.)`;
                     } else {
@@ -272,8 +263,7 @@ export function performCauchyAnalysis() {
             });
 
             if (!hasEssentialSingularityInside) {
-                const twoPiI = { re: 0, im: 2 * Math.PI };
-                const residueTheoremSum = complexMul(twoPiI, sumResidues);
+                const residueTheoremSum = { re: -2 * Math.PI * sumResidues.im, im: 2 * Math.PI * sumResidues.re };
                 resultsHTML += `<br/>2πi ΣRes ≈ ${residueTheoremSum.re.toFixed(3)} + ${residueTheoremSum.im.toFixed(3)}i`;
             } else {
                 resultsHTML += `<br/>2πi ΣRes: N/A (Presence of essential singularity or branch point; theorem requires careful application).`;
@@ -296,7 +286,7 @@ export function performCauchyAnalysis() {
     publish(analysisKey, { html: resultsHTML });
 }
 
-export function updateWindingNumberDisplay(tf) {
+export function updateWindingNumberDisplay() {
     controls.wPlaneAnalysisInfo.replaceChildren();
     let contourC_points = null;
     let contourParams = {};
@@ -313,7 +303,7 @@ export function updateWindingNumberDisplay(tf) {
             contourParams = { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
             if (state.ellipseA <= 0 || state.ellipseB <= 0) canCalculateWinding = false;
         } else {
-            const contours = generateArbitraryShapePointSets(buildInputShapeGeometryConfig(null, {
+            const contours = generateInputShapePointSets(buildInputShapeGeometryConfig(null, {
                 currentInputShape: 'arbitrary', curvePoints: N_winding_num_pts
             })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
             contourParams = { type: 'contours', contours };
@@ -331,26 +321,13 @@ export function updateWindingNumberDisplay(tf) {
     
     if (canCalculateWinding && !contourC_points) {contourC_points = getContourPoints(contourParams.type, contourParams, N_winding_num_pts);}
     if (contourC_points && contourC_points.length > 1) {
-        let totalAngleChange = 0;let prev_w_arg = null;let pathCrossesOrigin = false;let pathHasNaN = false;
-        for (let i = 0; i < contourC_points.length; i++) { 
-            const z_on_C = contourC_points[i];
-            if (!z_on_C) { prev_w_arg = null; continue; }
-            const w = tf(z_on_C.re, z_on_C.im);
-            if (isNaN(w.re) || isNaN(w.im) || !isFinite(w.re) || !isFinite(w.im)) {prev_w_arg = null; pathHasNaN = true; break; }
-            if (Math.abs(w.re) < 1e-9 && Math.abs(w.im) < 1e-9) { pathCrossesOrigin = true; break; }
-            const current_w_arg = Math.atan2(w.im, w.re);
-            if (prev_w_arg !== null) {
-                let angleDiff = current_w_arg - prev_w_arg;
-                if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-                if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-                totalAngleChange += angleDiff;
-            }
-            prev_w_arg = current_w_arg;
-        }
+        const analysis = analyzeNativeContour(nativeMapOptions(state), contourC_points);
+        const pathHasNaN = !!(analysis.status & 1);
+        const pathCrossesOrigin = !!(analysis.status & 2);
         let windingNumber;
         if (pathCrossesOrigin) {windingNumber = "N/A (f(C) intersects w=0)";} 
         else if (pathHasNaN) {windingNumber = "N/A (f(z) undefined on C)";} 
-        else {windingNumber = Math.round(totalAngleChange / (2 * Math.PI));}
+        else {windingNumber = Math.round(analysis.winding);}
         
         let Z_in_C = 0, P_in_C = 0;let argumentPrincipleText = "";
         if (state.cauchyIntegralModeEnabled && state.showZerosPoles && state.zeros && state.poles && !pathCrossesOrigin && !pathHasNaN && typeof windingNumber === 'number') {

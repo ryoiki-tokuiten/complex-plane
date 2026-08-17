@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { branchCutCrossingForSegment, continuationSheetForPath, evaluateOnSheet } from '../js/analysis/branch-continuation.js';
 import { findPreimages } from '../js/analysis/preimage.js';
-import { isPointInsideContour } from '../js/math-utils.js';
+import { isPointInsideContour } from '../js/analysis/contours.js';
 
 test('continuation counts oriented crossings of ray and drawn branch cuts', () => {
     const path = [{ re: -1, im: -1 }, { re: -1, im: 1 }];
@@ -75,7 +75,10 @@ test('continued algebraic custom expressions use the active sheet', () => {
 });
 
 test('preimage explorer finds and deduplicates both square roots', () => {
-    const roots = findPreimages({ re: 1, im: 0 }, (re, im) => ({ re: re * re - im * im, im: 2 * re * im }), {
+    const roots = findPreimages({ re: 1, im: 0 }, {
+        functionKey: 'polynomial', chainCount: 1, polynomialN: 2,
+        polynomialCoeffs: [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }]
+    }, {
         xRange: [-2, 2], yRange: [-2, 2]
     });
     assert.equal(roots.length, 2);

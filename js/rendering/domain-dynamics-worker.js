@@ -1,4 +1,4 @@
-import { createDomainDynamicsTileRenderer } from './domain-dynamics-core.js';
+import { createDomainDynamicsTileRenderer } from '../native/domain-engine.js';
 
 const renderers = new Map();
 

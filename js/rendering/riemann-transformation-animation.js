@@ -94,7 +94,7 @@ class PlaneController {
         if (!this.renderer) return;
         this.cache.map = this.id === 'w' ? resolveActiveMap() : null;
         this.cache.mapSignature = this.cache.map?.signature || 'source';
-        this.renderer.setTransform(this.cache.map?.evaluate || null);
+        this.renderer.setTransform(this.cache.map);
         const pointSets = this.config.generator(zPlaneParams, {
             currentFunction: state.currentFunction,
             zetaContinuationEnabled: state.zetaContinuationEnabled,
@@ -143,10 +143,7 @@ class PlaneController {
             return;
         }
         
-        const mappedProbe = this.id === 'w'
-            ? this.cache.map?.evaluate?.(probeZ.re, probeZ.im)
-            : probeZ;
-        this.renderer.updateProbe(mappedProbe);
+        this.renderer.updateProbe(probeZ);
     }
 
     /**

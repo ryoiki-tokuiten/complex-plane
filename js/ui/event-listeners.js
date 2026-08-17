@@ -4,6 +4,13 @@ import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
+import {
+    anchorPreciseViewport,
+    leavePreciseViewport,
+    panPreciseViewport,
+    synchronizePreciseViewport,
+    zoomPreciseViewportAt
+} from '../native/precise-viewport.js';
 import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
 import { updateLaplaceTransform, updateLaplaceEvaluationPoint } from '../analysis/laplace-transform.js';
@@ -1619,8 +1626,16 @@ function panPlane(ctx, pos) {
     if (Math.hypot(pos.x - ctx.clickStart.x, pos.y - ctx.clickStart.y) > 3) {
         ctx.hasDragged = true;
     }
-    ctx.params.origin.x = ctx.pan.panStartOrigin.x + (pos.x - ctx.pan.panStart.x);
-    ctx.params.origin.y = ctx.pan.panStartOrigin.y + (pos.y - ctx.pan.panStart.y);
+    const deltaX = pos.x - ctx.pan.panStart.x;
+    const deltaY = pos.y - ctx.pan.panStart.y;
+    if (ctx.params.preciseViewport) {
+        Object.assign(ctx.params.preciseViewport, ctx.precisePanStart);
+        panPreciseViewport(ctx.params, deltaX, deltaY);
+        requestDomainRedraw(true);
+        return;
+    }
+    ctx.params.origin.x = ctx.pan.panStartOrigin.x + deltaX;
+    ctx.params.origin.y = ctx.pan.panStartOrigin.y + deltaY;
     updatePlaneViewportRanges(ctx.params);
     requestDomainRedraw(true);
 }
@@ -1652,6 +1667,7 @@ function startPan(ctx, pos) {
     ctx.hasDragged = false;
     ctx.pan.panStartOrigin.x = ctx.params.origin.x;
     ctx.pan.panStartOrigin.y = ctx.params.origin.y;
+    ctx.precisePanStart = ctx.params.preciseViewport ? { ...ctx.params.preciseViewport } : null;
     ctx.canvas.style.cursor = 'grabbing';
     updateProbe(ctx, pos, false);
     requestUiRedraw();
@@ -1831,10 +1847,29 @@ function zoomPlaneAt(ctx, pos, factor) {
     const zoomKey = ctx.isZ ? 'zPlaneZoom' : 'wPlaneZoom';
     const oldZoom = state[zoomKey] || 1;
     const nextZoom = clamp(oldZoom * factor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
-    const applied = nextZoom / oldZoom;
     const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
 
     state[zoomKey] = nextZoom;
+    if (ctx.params.preciseViewport) {
+        if (factor < 1 && ctx.params.preciseViewport.zoomPower === 14) {
+            leavePreciseViewport(ctx.params, 13);
+            state[zoomKey] = 1e13;
+            setupVisualParameters(ctx.isZ, !ctx.isZ);
+            requestDomainRedraw(true);
+            return;
+        }
+        const power = zoomPreciseViewportAt(ctx.params, pos.x, pos.y, factor > 1 ? 1 : -1);
+        state[zoomKey] = 10 ** power;
+        requestDomainRedraw(true);
+        return;
+    }
+    if (synchronizePreciseViewport(ctx.params, nextZoom)) {
+        anchorPreciseViewport(ctx.params, world.x, world.y, pos.x, pos.y);
+        state[zoomKey] = 10 ** ctx.params.preciseViewport.zoomPower;
+        requestDomainRedraw(true);
+        return;
+    }
+    const applied = nextZoom / oldZoom;
     ctx.params.scale.x *= applied;
     ctx.params.scale.y *= applied;
     ctx.params.origin.x = pos.x - world.x * ctx.params.scale.x;
@@ -1960,7 +1995,7 @@ function onCanvasClick(event) {
         const xRange = zPlaneParams.currentVisXRange || zPlaneParams.xRange;
         const yRange = zPlaneParams.currentVisYRange || zPlaneParams.yRange;
         state.preimageTarget = { re: target.x, im: target.y };
-        state.preimageRoots = findPreimages(state.preimageTarget, map.evaluate, { xRange, yRange });
+        state.preimageRoots = findPreimages(state.preimageTarget, map, { xRange, yRange });
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
         requestUiRedraw();
         return;

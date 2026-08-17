@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { BENCH_PROFILE, runBenchmark } from './utils.js';
 import { compileExpression } from '../../js/math/expression/index.js';
 import { state } from '../../js/store/state.js';
-import { getChainedTransformFunction } from '../../js/math-utils.js';
+import { getChainedTransformFunction } from '../../js/native/map-runtime.js';
 
 const TILE_SIZES = Object.freeze({
     smoke: 48,

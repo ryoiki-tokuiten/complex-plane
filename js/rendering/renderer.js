@@ -26,7 +26,8 @@ import {
 } from '../utils/raster-media.js';
 import { drawWindingVisualization, drawTimeDomainSignal } from './draw-fourier-winding.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
-import { ThreeRiemannRenderer, buildGridFoldLineData } from './three-riemann-renderer.js';
+import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
+import { buildNativeGridFold, nativeMapOptions } from '../native/complex-engine.js';
 import {
     generateCurrentInputShapePointSets,
     buildInputShapeGeometryConfig,
@@ -1026,7 +1027,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             fillCanvasBackground(wCtx, wPlaneParams);
             drawCanvasLayer(wCtx, layerCtx => {
                 drawRiemannSphereBase(layerCtx, sphereParams);
-                drawSphereGridAndShape(layerCtx, sphereParams, true, map.evaluate);
+                drawSphereGridAndShape(layerCtx, sphereParams, true, map);
                 drawDynamicSphere(layerCtx, sphereParams, {
                     isWPlane: true,
                     transform: map.evaluate,
@@ -1070,7 +1071,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                         sphereViewParams.w,
                         state.probeZ,
                         state.probeNeighborhoodSize,
-                        map.evaluate
+                        map
                     );
                 } else {
                     drawPlanarTransformedProbe(layerCtx, wPlaneParams, map);
@@ -1083,7 +1084,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 drawConformalIndicatrices(layerCtx, wPlaneParams, indicatrices, 'mapped');
             });
         }
-        if (!isRiemannW && index === 0) updateWindingNumberDisplay(map.evaluate);
+        if (!isRiemannW && index === 0) updateWindingNumberDisplay();
     } finally {
         wCanvas = previousCanvas;
         wCtx = previousCtx;
@@ -1098,6 +1099,23 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
     if (!state.riemannSurfaceEnabled) {
         hideRiemannSurface(wCanvas);
         return false;
+    }
+
+    if (wPlaneParams?.preciseViewport) {
+        hideRiemannSurface(wCanvas);
+        setWThreeHidden(true);
+        setWPresentation('canvas');
+        fillCanvasBackground(wCtx, wPlaneParams);
+        wCtx.save();
+        wCtx.fillStyle = COLOR_TEXT_ON_CANVAS;
+        wCtx.font = '13px sans-serif';
+        wCtx.textAlign = 'center';
+        wCtx.fillText('Riemann surface is unavailable beyond GPU precision.', wPlaneParams.width * 0.5, 28);
+        wCtx.restore();
+        if (controls.riemannSurfaceStatus) {
+            controls.riemannSurfaceStatus.textContent = 'Unsupported at arbitrary precision (GPU surface)';
+        }
+        return true;
     }
 
     setWThreeHidden(true);
@@ -1134,7 +1152,7 @@ function prepareThreeWRenderer() {
         const xRange = zPlaneParams.currentVisXRange || zPlaneParams.xRange;
         const yRange = zPlaneParams.currentVisYRange || zPlaneParams.yRange;
         state.preimageTarget = target;
-        state.preimageRoots = findPreimages(target, map.evaluate, { xRange, yRange });
+        state.preimageRoots = findPreimages(target, map, { xRange, yRange });
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
         requestRedrawAll();
     };
@@ -1147,10 +1165,7 @@ function renderThreeWPlane(map, stageIndex) {
 
     threeRenderer.setSphereMode();
 
-    const stage = state.chainingEnabled && state.chainCount > 25
-        ? Math.max(0, state.chainCount - 1)
-        : stageIndex;
-    const transformChanged = threeRenderer.setTransform(map.evaluate, stage + 1, map.signature);
+    const transformChanged = threeRenderer.setTransform(map);
 
     const gridConfigObj = buildInputShapeGeometryConfig(zPlaneParams, {
         currentFunction: state.currentFunction,
@@ -1184,8 +1199,7 @@ function renderThreeWPlane(map, stageIndex) {
 
     let probeChanged = false;
     if (state.probeActive && state.probeZ) {
-        const wProbe = map.evaluate(state.probeZ.re, state.probeZ.im);
-        probeChanged = threeRenderer.updateProbe(wProbe);
+        probeChanged = threeRenderer.updateProbe(state.probeZ);
     } else {
         probeChanged = threeRenderer.updateProbe(null);
     }
@@ -1222,6 +1236,7 @@ function renderThreeWRasterSurface(map, stageIndex) {
         state.b0,
         rasterSize,
         rasterAspectRatio,
+        state.foldSurfaceHeightScale,
         xRange[0], xRange[1], yRange[0], yRange[1]
     ].join('|');
 
@@ -1244,7 +1259,7 @@ function renderThreeWRasterSurface(map, stageIndex) {
         return;
     }
 
-    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map.evaluate);
+    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map);
 
     threeRenderer.render();
 }
@@ -1272,6 +1287,7 @@ function renderThreeWGridFold(map) {
         state.graphLayerLockEnabled,
         state.graphSelectedShape,
         state.graphSelectedLineIndex,
+        state.foldSurfaceHeightScale,
         outputXRange[0], outputXRange[1],
         outputYRange[0], outputYRange[1]
     ].join('|');
@@ -1284,11 +1300,17 @@ function renderThreeWGridFold(map) {
         const pointSets = state.graphViewEnabled && state.graphFullGridEnabled
             ? filterGraphFullGridPointSets(generatedPointSets)
             : generatedPointSets;
-        surface = buildGridFoldLineData(pointSets, map.evaluate, {
+        surface = buildNativeGridFold({
+            mapOptions: nativeMapOptions(state, {
+                stage: map.stage,
+                derivativeMode: map.presentation === 'derivative',
+                ...(map.evaluate?.nativeMapOptions || map.nativeMapOptions || {})
+            }),
             sourceXRange: geometryConfig.xRange,
             outputXRange,
-            outputYRange
-        });
+            outputYRange,
+            heightScale: state.foldSurfaceHeightScale
+        }, pointSets);
         if (surface) threeRenderer.gridFoldSurfaceKey = surfaceKey;
     }
 
@@ -1298,7 +1320,7 @@ function renderThreeWGridFold(map) {
         return;
     }
 
-    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map.evaluate);
+    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map);
 
     threeRenderer.render();
 }

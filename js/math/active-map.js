@@ -1,5 +1,5 @@
 import { state } from '../store/state.js';
-import { getChainedStageTransformFunction } from '../math-utils.js';
+import { getChainedStageTransformFunction } from '../native/map-runtime.js';
 
 export const MAP_PRESENTATION = Object.freeze({
     function: 'function',

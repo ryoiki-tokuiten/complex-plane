@@ -1,12 +1,16 @@
 import { context, state, mutateState } from '../store/state.js';
-import { setActiveTransformProvider, transformFunctions } from '../math-utils.js';
+import { setActiveTransformProvider, transformFunctions } from '../native/map-runtime.js';
 import {
     asComplex,
-    compileExpression,
     finiteComplex
 } from '../math/expression/index.js';
+import {
+    compileNativeDynamicAggregate,
+    evaluateNativeDynamic,
+    evaluateNativePoints,
+    nativeMapOptions
+} from '../native/complex-engine.js';
 import { generateDiscreteSource } from './discrete-sources.js';
-import { reduceComplexTerms } from './reducers.js';
 import {
     freeParameterSymbols,
     generateSequenceBindingSeries,
@@ -15,7 +19,6 @@ import {
 
 const DEFAULT_POINT_EXPRESSION = 'd';
 const DEFAULT_CUSTOM_TERM_EXPRESSION = 'z';
-const SELECTED_TERM_EXPRESSION = 'selected(z)';
 const RESULT_CACHE_LIMIT = 24;
 const transformIds = new WeakMap();
 let nextTransformId = 1;
@@ -220,8 +223,6 @@ const PRESETS = Object.freeze({
 function cache() {
     if (!context.dynamicPlotting) {
         context.dynamicPlotting = {
-            compilationSignature: null,
-            compiled: null,
             sourceSignature: null,
             source: null,
             results: new Map()
@@ -281,48 +282,6 @@ function termBindings() {
     );
 }
 
-function allowedVariables(baseVariables) {
-    return [
-        ...baseVariables,
-        ...parameterNames(),
-        ...termBindings().map(binding => binding.symbol)
-    ];
-}
-
-function compilationSignature() {
-    const config = dynamicConfig();
-    return stableStringify({
-        pointExpression: config.pointExpression,
-        term: config.term,
-        parameterNames: (config.parameters || []).map(parameter => parameter?.name),
-        bindingSymbols: termBindings().map(binding => binding.symbol)
-    });
-}
-
-function compilePipelineExpressions() {
-    const runtime = cache();
-    const signature = compilationSignature();
-    if (runtime.compilationSignature === signature && runtime.compiled) {
-        return runtime.compiled;
-    }
-
-    const pointSource = String(dynamicConfig().pointExpression ?? DEFAULT_POINT_EXPRESSION);
-    const termSource = dynamicConfig().term?.kind === 'selected-function'
-        ? SELECTED_TERM_EXPRESSION
-        : String(dynamicConfig().term?.expression ?? DEFAULT_CUSTOM_TERM_EXPRESSION);
-    const point = compileExpression(pointSource, {
-        allowedVariables: allowedVariables(['c', 'd', 'j', 's'])
-    });
-    const term = compileExpression(termSource, {
-        allowedVariables: allowedVariables(['c', 'd', 'j', 'z', 's'])
-    });
-
-    runtime.compilationSignature = signature;
-    runtime.compiled = { point, term };
-    runtime.results.clear();
-    return runtime.compiled;
-}
-
 function sourceSignature() {
     const source = dynamicConfig().source || {};
     return stableStringify({
@@ -363,67 +322,71 @@ function classifyInvalid(value, error) {
     return 'not-finite';
 }
 
-function evaluatePoint(
-    record,
-    compiled,
-    environment,
-    symbolEnvironment,
-    selectedFunction,
-    aggregateParameter
-) {
-    return asComplex(compiled.point({
-        ...environment,
-        ...symbolEnvironment,
-        d: record.domainValue,
-        j: { re: record.ordinal, im: 0 },
-        s: aggregateParameter,
-        c: aggregateParameter,
-        selectedFunction
-    }));
+const REDUCTION_STATUS = Object.freeze(['included', 'skipped', 'stopped', 'not-evaluated']);
+
+function selectedNativeMap(selectedFunction) {
+    const metadata = selectedFunction?.nativeMapOptions || {};
+    const functionKey = metadata.functionKey || selectedFunction?.nativeFunctionKey || state.currentFunction;
+    if (!transformFunctions[functionKey]) {
+        throw new Error('Dynamic selected functions must be owned by the native engine.');
+    }
+    return nativeMapOptions(state, {
+        ...metadata,
+        functionKey,
+        chainingEnabled: metadata.chainingEnabled ?? false,
+        chainCount: metadata.chainCount ?? 1,
+        derivativeMode: metadata.derivativeMode ?? false
+    });
 }
 
-function evaluateTerm(
-    record,
-    inputPoint,
-    compiled,
-    environment,
-    symbolEnvironment,
-    selectedFunction,
-    aggregateParameter
-) {
-    const termConfig = dynamicConfig().term || {};
-    if (termConfig.kind === 'selected-function') {
-        return asComplex(selectedFunction(inputPoint.re, inputPoint.im));
-    }
-
-    return asComplex(compiled.term({
-        ...environment,
-        ...symbolEnvironment,
-        d: record.domainValue,
-        j: { re: record.ordinal, im: 0 },
-        z: inputPoint,
-        s: aggregateParameter,
-        c: aggregateParameter,
-        selectedFunction
-    }));
+function nativeAggregateDefinition(source, bindings, bindingResult, count) {
+    const config = dynamicConfig();
+    const aggregate = {
+        pointExpression: String(config.pointExpression ?? DEFAULT_POINT_EXPRESSION),
+        term: clonePlain(config.term || { kind: 'expression', expression: DEFAULT_CUSTOM_TERM_EXPRESSION }),
+        bindings: clonePlain(bindings),
+        reductionKind: config.reduction?.kind || 'none',
+        invalidPolicy: config.reduction?.invalidPolicy === 'skip' ? 'skip' : 'stop',
+        parameters: parameterEnvironment(),
+        sourceRecords: source.records.slice(0, count).map(record => ({
+            ordinal: record.ordinal,
+            domainValue: record.domainValue
+        })),
+        bindingSeries: bindingResult.series
+    };
+    aggregate.native = compileNativeDynamicAggregate(aggregate);
+    return aggregate;
 }
 
 function evaluateSamples(selectedFunction, aggregateParameter, limit = null) {
     const source = getSource();
-    const compiled = compilePipelineExpressions();
-    const environment = parameterEnvironment();
     const count = limit === null
         ? source.records.length
         : Math.max(0, Math.min(source.records.length, limit));
-    const samples = [];
-    const bindingResult = generateSequenceBindingSeries(termBindings(), count, {
+    const bindings = termBindings();
+    const bindingResult = generateSequenceBindingSeries(bindings, count, {
         aggregateParameter,
-        parameters: environment
+        parameters: parameterEnvironment()
     });
-
-    for (let index = 0; index < count; index += 1) {
+    const aggregate = nativeAggregateDefinition(source, bindings, bindingResult, count);
+    const evaluated = evaluateNativeDynamic(
+        selectedNativeMap(selectedFunction), aggregate, aggregateParameter
+    );
+    const reductionKind = dynamicConfig().reduction?.kind || 'none';
+    const samples = Array.from({ length: count }, (_, index) => {
         const sourceRecord = source.records[index];
         const symbolEnvironment = bindingResult.environments[index] || {};
+        const errorCode = evaluated.errors[index];
+        const reductionStatus = REDUCTION_STATUS[evaluated.reductionStatus[index]] || 'not-evaluated';
+        const point = evaluated.pointValues[index];
+        const term = evaluated.termValues[index];
+        const valid = !errorCode && finiteComplex(point) && finiteComplex(term);
+        const partialValue = evaluated.partialValues[index];
+        let partial = null;
+        if (reductionKind === 'sum') partial = { value: partialValue };
+        else if (reductionKind === 'product') {
+            partial = { value: partialValue, ...evaluated.partialProducts[index] };
+        }
         const sample = {
             id: `${source.kind}:${sourceRecord.ordinal}:${sourceRecord.label}`,
             ordinal: sourceRecord.ordinal,
@@ -431,58 +394,29 @@ function evaluateSamples(selectedFunction, aggregateParameter, limit = null) {
             label: sourceRecord.label,
             metadata: sourceRecord.metadata,
             symbolValues: symbolEnvironment,
-            inputPoint: null,
-            termValue: null,
-            status: 'valid',
-            error: null,
-            partial: null
+            inputPoint: point,
+            termValue: term,
+            status: valid ? 'valid' : classifyInvalid(term, errorCode),
+            error: errorCode ? `Native expression error ${errorCode}` : null,
+            reductionStatus,
+            partial
         };
-
-        try {
-            sample.inputPoint = evaluatePoint(
-                sourceRecord,
-                compiled,
-                environment,
-                symbolEnvironment,
-                selectedFunction,
-                aggregateParameter
-            );
-            if (!finiteComplex(sample.inputPoint)) {
-                sample.status = classifyInvalid(sample.inputPoint);
-                samples.push(sample);
-                continue;
-            }
-
-            sample.termValue = evaluateTerm(
-                sourceRecord,
-                sample.inputPoint,
-                compiled,
-                environment,
-                symbolEnvironment,
-                selectedFunction,
-                aggregateParameter
-            );
-            if (!finiteComplex(sample.termValue)) {
-                sample.status = classifyInvalid(sample.termValue);
-            }
-        } catch (error) {
-            sample.status = classifyInvalid(null, error);
-            sample.error = error?.message || String(error);
-        }
-
-        samples.push(sample);
-    }
-
-    const reduction = reduceComplexTerms(samples, {
-        kind: dynamicConfig().reduction?.kind || 'none',
-        invalidPolicy: dynamicConfig().reduction?.invalidPolicy || 'stop'
+        return sample;
     });
+
+    const reduction = {
+        kind: reductionKind,
+        stopped: samples.some(sample => sample.reductionStatus === 'stopped'),
+        finalValue: evaluated.finalValue,
+        product: evaluated.product
+    };
 
     return {
         source,
         samples,
         reduction,
-        bindingDiagnostics: bindingResult.diagnostics
+        bindingDiagnostics: bindingResult.diagnostics,
+        nativeAggregate: aggregate.native
     };
 }
 
@@ -632,9 +566,28 @@ export function evaluateDynamicAggregateAt(value, selectedFunction) {
 }
 
 export function createDynamicAggregateTransform(selectedFunction) {
-    const transform = (re, im) => evaluateDynamicAggregateAt({ re, im }, selectedFunction);
+    const source = getSource();
+    const count = visibleCount(source.records.length);
+    const bindings = termBindings();
+    const bindingResult = generateSequenceBindingSeries(bindings, count, {
+        aggregateParameter: { re: 0, im: 0 },
+        parameters: parameterEnvironment()
+    });
+    const aggregate = nativeAggregateDefinition(source, bindings, bindingResult, count);
+    const metadata = {
+        ...selectedNativeMap(selectedFunction),
+        chainingEnabled: false,
+        chainCount: 1,
+        dynamic: aggregate.native
+    };
+    const transform = (re, im) => {
+        const result = evaluateNativePoints(metadata, [{ re, im }]);
+        return result.valid[0] ? result.values[0] : { re: NaN, im: NaN };
+    };
     transform.dynamicPlottingTransform = true;
     transform.dynamicPlottingBaseTransform = selectedFunction;
+    Object.defineProperty(transform, 'nativeMapOptions', { value: metadata });
+    Object.defineProperty(transform, 'nativeFunctionKey', { value: metadata.functionKey });
     return transform;
 }
 
@@ -678,8 +631,6 @@ export function initializeDynamicPlottingEngine() {
 
 export function invalidateDynamicPlotting() {
     const runtime = cache();
-    runtime.compilationSignature = null;
-    runtime.compiled = null;
     runtime.sourceSignature = null;
     runtime.source = null;
     runtime.activeTransformSignature = null;

@@ -2,16 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    generateCartesianGridPointSets,
-    generatePolarGridPointSets,
-    generateLogPolarGridPointSets,
-    generateLogCartesianGridPointSets,
-    generateDotsPointSets,
-    generateArbitraryShapePointSets,
+    generateInputShapePointSets,
     generateCurrentInputShapePointSets
 } from '../js/rendering/shape-generators.js';
 import { state } from '../js/store/state.js';
 import { drawAxes, drawGrid } from '../js/rendering/canvas-primitives.js';
+
+const generate = (currentInputShape, config) => generateInputShapePointSets({
+    currentInputShape,
+    currentFunction: 'identity',
+    zetaContinuationEnabled: false,
+    ...config
+});
 
 test('Cartesian grid lines are evenly distributed across the visible range', () => {
     const config = {
@@ -23,7 +25,7 @@ test('Cartesian grid lines are evenly distributed across the visible range', () 
         zetaContinuationEnabled: false
     };
 
-    const pointSets = generateCartesianGridPointSets(config);
+    const pointSets = generate('grid_cartesian', config);
     
     // Check that we got line sets
     assert.ok(pointSets.length > 0);
@@ -78,8 +80,8 @@ test('Cartesian grid line count scales with gridDensity', () => {
         zetaContinuationEnabled: false
     };
 
-    const sets1 = generateCartesianGridPointSets(config1);
-    const sets2 = generateCartesianGridPointSets(config2);
+    const sets1 = generate('grid_cartesian', config1);
+    const sets2 = generate('grid_cartesian', config2);
 
     const xCount1 = sets1.filter(s => s.role === 'grid-vertical').length;
     const xCount2 = sets2.filter(s => s.role === 'grid-vertical').length;
@@ -91,12 +93,12 @@ test('Cartesian grid line count scales with gridDensity', () => {
 
 test('Dots grid density controls the two-dimensional point count', () => {
     const base = { xRange: [-2, 2], yRange: [-1, 1], curvePoints: 50 };
-    assert.equal(generateDotsPointSets({ ...base, gridDensity: 5 })[0].points.length, 36);
-    assert.equal(generateDotsPointSets({ ...base, gridDensity: 20 })[0].points.length, 441);
+    assert.equal(generate('grid_dots', { ...base, gridDensity: 5 })[0].points.length, 36);
+    assert.equal(generate('grid_dots', { ...base, gridDensity: 20 })[0].points.length, 441);
 });
 
 test('parametric and drawn arbitrary shapes share the closed point-set contract', () => {
-    const parametric = generateArbitraryShapePointSets({
+    const parametric = generate('arbitrary', {
         arbitraryShapeMode: 'parametric', arbitraryShapeExpression: 'cos(t)+i*sin(t)',
         arbitraryShapeTMin: 0, arbitraryShapeTMax: Math.PI * 2, arbitraryShapeClosed: true,
         curvePoints: 64, gridDensity: 5
@@ -105,7 +107,7 @@ test('parametric and drawn arbitrary shapes share the closed point-set contract'
     assert.ok(Math.hypot(parametric[0].points[0].re - parametric[0].points.at(-1).re,
         parametric[0].points[0].im - parametric[0].points.at(-1).im) < 1e-9);
 
-    const drawn = generateArbitraryShapePointSets({
+    const drawn = generate('arbitrary', {
         arbitraryShapeMode: 'draw', arbitraryShapePoints: [{ re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 1 }],
         arbitraryShapeClosed: true, curvePoints: 32, gridDensity: 5
     });
@@ -113,7 +115,7 @@ test('parametric and drawn arbitrary shapes share the closed point-set contract'
 });
 
 test('drawn arbitrary shapes preserve appended strokes without connecting them', () => {
-    const drawn = generateArbitraryShapePointSets({
+    const drawn = generate('arbitrary', {
         arbitraryShapeMode: 'draw',
         arbitraryShapePoints: [
             { re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 1 }, null,
@@ -134,7 +136,7 @@ test('Polar grid radial circles are evenly distributed up to max radius', () => 
         curvePoints: 100
     };
 
-    const pointSets = generatePolarGridPointSets(config);
+    const pointSets = generate('grid_polar', config);
     const radialCircles = pointSets.filter(s => s.role === 'polar-radial');
 
     assert.ok(radialCircles.length > 0);
@@ -170,15 +172,15 @@ test('Grid-style input shapes use active grid theme colors', () => {
             curvePoints: 32
         };
 
-        const polarSets = generatePolarGridPointSets(baseConfig);
+        const polarSets = generate('grid_polar', baseConfig);
         assert.equal(polarSets.find(set => set.role === 'polar-angular').color, state.gridColor1);
         assert.equal(polarSets.find(set => set.role === 'polar-radial').color, state.gridColor2);
 
-        const logPolarSets = generateLogPolarGridPointSets(baseConfig);
+        const logPolarSets = generate('grid_logpolar', baseConfig);
         assert.equal(logPolarSets.find(set => set.role === 'logpolar-angular').color, state.gridColor1);
         assert.equal(logPolarSets.find(set => set.role === 'logpolar-radial').color, state.gridColor2);
 
-        const logCartesianSets = generateLogCartesianGridPointSets(baseConfig);
+        const logCartesianSets = generate('grid_logcartesian', baseConfig);
         assert.equal(logCartesianSets.find(set => set.role === 'grid-horizontal').color, state.gridColor1);
         assert.equal(logCartesianSets.find(set => set.role === 'grid-vertical').color, state.gridColor2);
     } finally {
@@ -195,7 +197,7 @@ test('Log-Cartesian grid lines are exponentially distributed and scale with dens
         curvePoints: 100
     };
 
-    const pointSets = generateLogCartesianGridPointSets(config);
+    const pointSets = generate('grid_logcartesian', config);
     assert.ok(pointSets.length > 0);
 
     const xCoords = [];

@@ -1,6 +1,6 @@
 import { state, context } from '../store/state.js';
 import { findZerosAndPoles, findCriticalPoints } from '../analysis/feature-detection.js';
-import { updateTaylorSeriesCenterAndRadius } from '../math-utils.js';
+import { updateTaylorSeriesCenterAndRadius } from '../native/map-runtime.js';
 import { performCauchyAnalysis } from '../analysis/cauchy.js';
 import { drawZPlaneContent, drawWPlaneContent } from './renderer.js';
 import { updateProbeInfo } from '../ui/ui-updates.js';

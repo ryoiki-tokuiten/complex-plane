@@ -1,7 +1,6 @@
 import { state, context, zPlaneParams } from '../store/state.js';
 import { getFinalMapStageIndex, resolveActiveMap } from '../math/active-map.js';
-import { getChainedTransformFunction } from '../math-utils.js';
-import { paletteLutFor, sampleRealPlotSurface } from './real-plots-renderer.js';
+import { buildRealPlotSurface } from './real-plots-renderer.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import { domainColorForValue } from './domain-coloring.js';
 
@@ -181,13 +180,7 @@ function sampleRiemannHeightField(width, height) {
 function sampleRealPlotHeightField(width, height) {
     if (!state.realPlotsEnabled) return null;
     const side = contourSampleLength(Math.max(width, height));
-    const surface = sampleRealPlotSurface(
-        getChainedTransformFunction(state.currentFunction),
-        {
-            segments: side - 1,
-            valuesOnly: true
-        }
-    );
+    const surface = buildRealPlotSurface({ segments: side - 1, valuesOnly: true });
 
     if (!surface?.values || surface.values.length !== side * side) return null;
     return {

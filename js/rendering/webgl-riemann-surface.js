@@ -1,5 +1,5 @@
 import { state, zPlaneParams } from '../store/state.js';
-import { computeTaylorSeriesCoefficients } from '../math-utils.js';
+import { computeTaylorSeriesCoefficients } from '../native/map-runtime.js';
 import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
   GLSL_COMPLEX_MATH_LIBRARY_BASE,

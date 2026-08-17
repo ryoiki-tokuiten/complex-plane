@@ -6,7 +6,7 @@ import {
     buildMappedTransformProfileKey,
     buildTaylorSeriesCoefficientCacheKey,
     getChainedTransformFunction
-} from '../js/math-utils.js';
+} from '../js/native/map-runtime.js';
 
 function snapshotState(keys) {
     return Object.fromEntries(keys.map(key => [key, state[key]]));

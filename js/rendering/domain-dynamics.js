@@ -2,23 +2,23 @@ import { eventBus } from '../store/events.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import { runtime } from '../store/runtime.js';
 import { generateDiscreteSource } from '../analysis/discrete-sources.js';
-import { synchronizeSequenceBindings } from '../analysis/sequence-bindings.js';
-import { computeTaylorSeriesCoefficients } from '../math-utils.js';
+import { generateSequenceBindingSeries, synchronizeSequenceBindings } from '../analysis/sequence-bindings.js';
+import { computeTaylorSeriesCoefficients } from '../native/map-runtime.js';
+import { compileNativeDynamicAggregate } from '../native/complex-engine.js';
 import {
-    createDomainDynamicsTileRenderer,
     domainDynamicsSignature,
     freezeDomainDynamicsSnapshot,
     isDomainDynamicsSnapshot
-} from './domain-dynamics-core.js';
+} from '../native/domain-engine.js';
 import {
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
 import { normalizeDomainDynamicsChainCount } from '../constants/domain-dynamics.js';
+import { preciseViewportSnapshot } from '../native/precise-viewport.js';
 
 const PASS_SCALES = Object.freeze([16, 4, 1]);
 const TILE_SIZE = 64;
 const MAX_WORKERS = 16;
-const MAX_TILE_RETRIES = 2;
 const SUPPORTED_FUNCTIONS = new Set([
     'cos',
     'sin',
@@ -127,7 +127,16 @@ function dynamicAggregateSnapshot(runtimeState) {
     const termExpression = String(config.term?.expression ?? 'z');
     const bindings = synchronizeSequenceBindings(termExpression, config.term?.bindings || []);
 
-    return {
+    const bindingResult = generateSequenceBindingSeries(bindings, visibleCount, {
+        aggregateParameter: { re: 0, im: 0 },
+        parameters: Object.fromEntries((config.parameters || [])
+            .map(parameter => [String(parameter?.name || ''), {
+                re: Number(parameter?.value) || 0,
+                im: 0
+            }])
+            .filter(([name]) => name))
+    });
+    const aggregate = {
         pointExpression: String(config.pointExpression ?? 'd'),
         term: clonePlainData(config.term || { kind: 'expression', expression: 'z', bindings: [] }),
         bindings: clonePlainData(bindings),
@@ -142,8 +151,11 @@ function dynamicAggregateSnapshot(runtimeState) {
         sourceRecords: source.records.slice(0, visibleCount).map(record => ({
             ordinal: record.ordinal,
             domainValue: cloneComplex(record.domainValue)
-        }))
+        })),
+        bindingSeries: clonePlainData(bindingResult.series)
     };
+    aggregate.native = compileNativeDynamicAggregate(aggregate);
+    return aggregate;
 }
 
 function taylorSnapshot(runtimeState, functionKey) {
@@ -170,7 +182,8 @@ function taylorSnapshot(runtimeState, functionKey) {
 
 export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, options = null) {
     const ranges = planeRanges(planeParams);
-    if (!runtimeState || !planeParams || !ranges) return null;
+    const preciseViewport = preciseViewportSnapshot(planeParams);
+    if (!runtimeState || !planeParams || (!ranges && !preciseViewport)) return null;
 
     const functionKey = runtimeState.currentFunction;
     if (!SUPPORTED_FUNCTIONS.has(functionKey)) return null;
@@ -209,7 +222,7 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
             lightnessCycles: Number(runtimeState.domainLightnessCycles) || 0
         },
         paletteStops: paletteStops(runtimeState.domainPalette),
-        viewport: {
+        viewport: preciseViewport || {
             width: Math.max(1, Math.floor(Number(planeParams.width) || 1)),
             height: Math.max(1, Math.floor(Number(planeParams.height) || 1)),
             xRange: ranges.xRange,
@@ -250,10 +263,6 @@ function createTileList(passWidth, passHeight, scale) {
         }
     }
     return tiles;
-}
-
-function tileKey(tile) {
-    return `${tile.x}:${tile.y}:${tile.width}:${tile.height}:${tile.scale}:${tile.qualityOnly ? 'q' : 'b'}`;
 }
 
 function createImageDataFromPixels(pixels, width, height) {
@@ -327,8 +336,6 @@ class WorkerCpuDomainDynamicsBackend {
         this.queueIndex = 0;
         this.activeJob = null;
         this.pass = null;
-        this.inlineTimer = null;
-        this.failed = false;
     }
 
     start(job) {
@@ -336,8 +343,7 @@ class WorkerCpuDomainDynamicsBackend {
         this.activeJob = {
             ...job,
             cancelled: false,
-            passIndex: -1,
-            renderTile: createDomainDynamicsTileRenderer(job.snapshot)
+            passIndex: -1
         };
         this.ensureWorkers();
         this.initializeWorkerJobs(this.activeJob);
@@ -354,41 +360,28 @@ class WorkerCpuDomainDynamicsBackend {
         this.queue = [];
         this.queueIndex = 0;
         this.pass = null;
-        if (this.inlineTimer) {
-            clearTimeout(this.inlineTimer);
-            this.inlineTimer = null;
-        }
         if (cancelledJobId) {
             this.workers.forEach(entry => entry.worker.postMessage({ type: 'cancel', jobId: cancelledJobId }));
         }
     }
 
     ensureWorkers() {
-        if (!canUseWorker() || this.failed || this.workers.length) return;
-        try {
-            const count = workerCount();
-            for (let i = 0; i < count; i += 1) {
-                const worker = new Worker(new URL('./domain-dynamics-worker.js', import.meta.url), { type: 'module' });
-                const entry = { worker, busy: false };
-                worker.onmessage = event => this.handleWorkerMessage(entry, event.data);
-                worker.onerror = error => {
-                    console.warn('Domain dynamics worker failed; falling back to inline tiles.', error?.message || error);
-                    this.failed = true;
-                    this.workers.forEach(item => item.worker.terminate());
-                    this.workers = [];
-                    this.restartInline();
-                };
-                this.workers.push(entry);
-            }
-        } catch (error) {
-            console.warn('Domain dynamics workers unavailable; falling back to inline tiles.', error?.message || error);
-            this.failed = true;
-            this.workers = [];
+        if (this.workers.length) return;
+        if (!canUseWorker()) throw new Error('Domain dynamics requires a module Worker.');
+        const count = workerCount();
+        for (let i = 0; i < count; i += 1) {
+            const worker = new Worker(new URL('./domain-dynamics-worker.js', import.meta.url), { type: 'module' });
+            const entry = { worker, busy: false };
+            worker.onmessage = event => this.handleWorkerMessage(entry, event.data);
+            worker.onerror = error => {
+                this.cancel();
+                throw new Error(`Native domain worker failed: ${error?.message || error}`);
+            };
+            this.workers.push(entry);
         }
     }
 
     initializeWorkerJobs(job) {
-        if (!this.workers.length || this.failed) return;
         this.workers.forEach(entry => {
             entry.worker.postMessage({
                 type: 'start',
@@ -396,18 +389,6 @@ class WorkerCpuDomainDynamicsBackend {
                 snapshot: job.snapshot
             });
         });
-    }
-
-    restartInline() {
-        const job = this.activeJob;
-        if (!job || job.cancelled) return;
-        const currentScale = this.pass?.scale || PASS_SCALES[0];
-        const startIndex = Math.max(0, PASS_SCALES.indexOf(currentScale));
-        job.passIndex = startIndex - 1;
-        this.queue = [];
-        this.queueIndex = 0;
-        this.pass = null;
-        this.startNextPass();
     }
 
     startNextPass() {
@@ -442,7 +423,6 @@ class WorkerCpuDomainDynamicsBackend {
             canvas,
             ctx,
             remaining: 0,
-            tileRetries: new Map(),
             qualityPhase: false,
             refinementTiles: []
         };
@@ -458,11 +438,7 @@ class WorkerCpuDomainDynamicsBackend {
             return;
         }
 
-        if (this.workers.length && !this.failed) {
-            this.workers.forEach(worker => this.dispatchWorker(worker));
-        } else {
-            this.processInlineTiles();
-        }
+        this.workers.forEach(worker => this.dispatchWorker(worker));
     }
 
     dispatchWorker(entry) {
@@ -499,16 +475,6 @@ class WorkerCpuDomainDynamicsBackend {
         if (!job || job.cancelled || !pass || message.jobId !== job.id || message.passId !== pass.id) return;
 
         if (message.type === 'error') {
-            console.warn('Domain dynamics tile failed:', message.message);
-            const key = tileKey(message.tile);
-            const retries = pass.tileRetries.get(key) || 0;
-            if (retries < MAX_TILE_RETRIES) {
-                pass.tileRetries.set(key, retries + 1);
-                this.queue.push(message.tile);
-                return;
-            }
-
-            console.warn('Domain dynamics render invalidated after repeated tile failure.');
             this.cancel(job.id);
             if (pendingJobTimeout) {
                 clearTimeout(pendingJobTimeout);
@@ -518,6 +484,7 @@ class WorkerCpuDomainDynamicsBackend {
                 activeSignature = null;
                 activeJobId = 0;
             }
+            queueMicrotask(() => { throw new Error(`Native domain tile failed: ${message.message}`); });
             return;
         } else if (message.type === 'tile') {
             const image = createImageDataFromPixels(message.pixels, message.tile.width, message.tile.height);
@@ -555,9 +522,7 @@ class WorkerCpuDomainDynamicsBackend {
                 pass.refinementTiles = [];
                 this.queueIndex = 0;
                 pass.remaining = this.queue.length;
-                if (this.workers.length && !this.failed) {
-                    this.workers.forEach(worker => this.dispatchWorker(worker));
-                }
+                this.workers.forEach(worker => this.dispatchWorker(worker));
                 return;
             }
 
@@ -570,46 +535,6 @@ class WorkerCpuDomainDynamicsBackend {
         }
     }
 
-    processInlineTiles() {
-        const job = this.activeJob;
-        const pass = this.pass;
-        if (!job || job.cancelled || !pass) return;
-
-        const runOne = () => {
-            const currentJob = this.activeJob;
-            const currentPass = this.pass;
-            if (!currentJob || currentJob.cancelled || currentPass !== pass) return;
-
-            const tile = this.queue[this.queueIndex];
-            if (!tile) return;
-            this.queueIndex += 1;
-
-            try {
-                const pixels = currentJob.renderTile(tile);
-                this.handleTileMessage({
-                    type: 'tile',
-                    jobId: currentJob.id,
-                    passId: currentPass.id,
-                    tile,
-                    pixels
-                });
-            } catch (error) {
-                this.handleTileMessage({
-                    type: 'error',
-                    jobId: currentJob.id,
-                    passId: currentPass.id,
-                    tile,
-                    message: error?.message || String(error)
-                });
-            }
-
-            if (this.queueIndex < this.queue.length && this.pass === currentPass && !currentJob.cancelled) {
-                this.inlineTimer = setTimeout(runOne, 0);
-            }
-        };
-
-        this.inlineTimer = setTimeout(runOne, 0);
-    }
 }
 
 const workerBackend = new WorkerCpuDomainDynamicsBackend();
@@ -651,10 +576,7 @@ export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
 
     const selected = selectDomainDynamicsBackend(snapshot);
     activeBackend = selected;
-    if (!selected.start(job)) {
-        activeBackend = workerBackend;
-        workerBackend.start(job);
-    }
+    selected.start(job);
 
     setDomainProcessing(snapshot.isWPlaneColoring, true);
 

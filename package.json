@@ -5,13 +5,16 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/ensure-wasm.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/ensure-wasm.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
     "test:e2e": "playwright test",
     "benchmark": "node --expose-gc test/benchmarks/index.js",
-    "benchmark:smoke": "BENCH_PROFILE=smoke node --expose-gc test/benchmarks/index.js"
+    "benchmark:smoke": "BENCH_PROFILE=smoke node --expose-gc test/benchmarks/index.js",
+    "build:wasm": "node scripts/ensure-wasm.mjs --force"
   },
   "repository": {
     "type": "git",

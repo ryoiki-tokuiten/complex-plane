@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { runBenchmark } from './utils.js';
 import { state } from '../../js/store/state.js';
 import { buildPlanarDomainDynamicsSnapshot } from '../../js/rendering/domain-dynamics.js';
-import { renderDomainDynamicsTile } from '../../js/rendering/domain-dynamics-core.js';
+import { renderDomainDynamicsTile } from '../../js/native/domain-engine.js';
 
 const TILE_SIZES = Object.freeze({
     smoke: 32,

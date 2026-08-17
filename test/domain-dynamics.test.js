@@ -8,7 +8,7 @@ import {
     evaluateDomainColoringMappedTransform,
     getEffectiveBaseTransformFunction,
     getMappedTransformProfile
-} from '../js/math-utils.js';
+} from '../js/native/map-runtime.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
     cancelPlanarDomainDynamics,
@@ -21,7 +21,9 @@ import {
     createDomainDynamicsTileRenderer,
     evaluateDomainDynamicsValue,
     renderDomainDynamicsTile
-} from '../js/rendering/domain-dynamics-core.js';
+} from '../js/native/domain-engine.js';
+import { precisePixelCoordinate, projectNativePrecisePixels } from '../js/native/complex-engine.js';
+import { panPreciseViewport } from '../js/native/precise-viewport.js';
 import {
     DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
     domainDynamicsLogMagnitude,
@@ -139,6 +141,46 @@ function makeFakeCanvasEnvironment(targetCtx) {
         }
     }
 
+    class FakeWorker {
+        constructor() {
+            this.renderers = new Map();
+            this.onmessage = null;
+            this.onerror = null;
+        }
+
+        postMessage(message) {
+            if (message.type === 'start') {
+                this.renderers.set(message.jobId, createDomainDynamicsTileRenderer(message.snapshot));
+                return;
+            }
+            if (message.type === 'cancel') {
+                this.renderers.delete(message.jobId);
+                return;
+            }
+            if (message.type !== 'tile') return;
+            setTimeout(() => {
+                try {
+                    const renderer = this.renderers.get(message.jobId);
+                    if (!renderer) return;
+                    const pixels = renderer(message.tile);
+                    this.onmessage?.({ data: {
+                        type: 'tile', jobId: message.jobId, passId: message.passId,
+                        tile: message.tile, pixels
+                    } });
+                } catch (error) {
+                    this.onmessage?.({ data: {
+                        type: 'error', jobId: message.jobId, passId: message.passId,
+                        tile: message.tile, message: error.message
+                    } });
+                }
+            }, 0);
+        }
+
+        terminate() {
+            this.renderers.clear();
+        }
+    }
+
     function makeContext(canvas) {
         return {
             canvas,
@@ -159,7 +201,7 @@ function makeFakeCanvasEnvironment(targetCtx) {
     }
 
     globalThis.ImageData = FakeImageData;
-    globalThis.Worker = undefined;
+    globalThis.Worker = FakeWorker;
     globalThis.document = {
         createElement(type) {
             assert.equal(type, 'canvas');
@@ -452,6 +494,46 @@ test('domain dynamics shared helpers cover boundary, overflow, and smoothing fix
     assert.ok(smooth >= 0 && smooth <= 17);
     assert.equal(domainDynamicsSmoothIteration(3, 17, NaN, 0), 4);
     assert.equal(domainDynamicsSmoothIteration(3, 17, 1e30, 0), 4);
+});
+
+test('precise viewport keeps neighboring pixels and center digits distinct at 10^125', () => {
+    const viewport = {
+        centerRe: '-0.743643887037151000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
+        centerIm: '0.131825904205330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
+        zoomPower: 125,
+        precisionBits: 512,
+        width: 800,
+        height: 600
+    };
+    const upperLeft = precisePixelCoordinate(viewport, 399, 299);
+    const upperRight = precisePixelCoordinate(viewport, 400, 299);
+    const lowerLeft = precisePixelCoordinate(viewport, 399, 300);
+
+    assert.notEqual(upperLeft.re, upperRight.re);
+    assert.notEqual(upperLeft.im, lowerLeft.im);
+    assert.match(upperLeft.re, /7\.43643887037151/);
+    assert.match(upperLeft.im, /1\.31825904205330/);
+});
+
+test('native precise planar projection keeps neighboring source pixels distinct at 10^125', () => {
+    const viewport = {
+        centerRe: '-0.743643887037151000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
+        centerIm: '0.131825904205330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
+        zoomPower: 125,
+        precisionBits: 640,
+        width: 800,
+        height: 600
+    };
+    const output = projectNativePrecisePixels({
+        inputViewport: viewport,
+        outputViewport: viewport,
+        mapPoints: true,
+        mapOptions: { functionKey: 'identity', chainingEnabled: false, chainCount: 1 }
+    }, new Float32Array([399, 299, 400, 299, 399, 300]));
+    assert.equal(output[0], 399.5);
+    assert.equal(output[2], 400.5);
+    assert.equal(output[1], 299.5);
+    assert.equal(output[5], 300.5);
 });
 
 test('orbit coloring modes distinguish escape and attractor observables', () => {
@@ -850,35 +932,37 @@ test('worker zeta continuation chains match the main mapped transform in the cri
     }
 });
 
-test('collapsed sub-ulp viewport ranges render deterministically uniform tiles', () => {
+test('deep domain snapshots render from exact centers and preserve digits while panning', () => {
     const before = snapshotState();
-    const center = { re: 0.3, im: -0.2 };
-    const delta = 1e-50;
     const plane = {
-        width: 8,
-        height: 8,
-        currentVisXRange: [center.re, center.re + delta],
-        currentVisYRange: [center.im, center.im + delta]
+        width: 4,
+        height: 4,
+        currentVisXRange: [-1, 1],
+        currentVisYRange: [-1, 1],
+        preciseViewport: {
+            centerRe: '-0.7436438870371510000000000000000000000001',
+            centerIm: '0.1318259042053300000000000000000000000001',
+            zoomPower: 125,
+            precisionBits: 512,
+            width: 4,
+            height: 4
+        }
     };
 
     try {
-        configureDynamics({
-            currentFunction: 'exp',
-            chainingEnabled: true,
-            chainingMode: 'recursion',
-            chainCount: 2
-        });
-
-        assert.equal(plane.currentVisXRange[0], plane.currentVisXRange[1]);
-        assert.equal(plane.currentVisYRange[0], plane.currentVisYRange[1]);
-
+        applyFractalPreset(state, 'mandelbrot');
+        state.chainCount = 64;
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane, { isWPlaneColoring: false });
+        assert.equal(snapshot.viewport.centerRe, plane.preciseViewport.centerRe);
+        assert.equal(Object.hasOwn(snapshot.viewport, 'xRange'), false);
         const pixels = renderDomainDynamicsTile(snapshot, { x: 0, y: 0, width: plane.width, height: plane.height, scale: 1 });
-        const firstPixel = Array.from(pixels.slice(0, 4));
+        assert.equal(pixels.length, 64);
+        assert.equal(pixels.every((value, index) => index % 4 !== 3 || value === 255), true);
 
-        for (let offset = 0; offset < pixels.length; offset += 4) {
-            assert.deepEqual(Array.from(pixels.slice(offset, offset + 4)), firstPixel);
-        }
+        const oldCenter = plane.preciseViewport.centerRe;
+        panPreciseViewport(plane, 1, 0);
+        assert.notEqual(plane.preciseViewport.centerRe, oldCenter);
+        assert.match(plane.preciseViewport.centerRe, /7\.43643887037151/);
     } finally {
         restoreState(before);
     }

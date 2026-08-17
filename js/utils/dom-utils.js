@@ -2,6 +2,7 @@ import { state, context, zPlaneParams, wPlaneParams, sphereViewParams, wPlaneIni
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT, SPHERE_INITIAL_ROT_X, SPHERE_INITIAL_ROT_Y, SPHERE_VIEW_RADIUS_FACTOR } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
+import { synchronizePreciseViewport } from '../native/precise-viewport.js';
 import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
 import { eventBus } from '../store/events.js';
 import { registerControls } from '../ui/control-registry.js';
@@ -142,50 +143,62 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
         setupCanvasBaseParams(wPlaneParams, wCanvas, sphereViewParams.w, wIsFullscreen);
     }
 
+    let zIsPrecise = !!zPlaneParams.preciseViewport;
     if (updateZFromSlider) { 
         const zoomZ = state.zPlaneZoom;
-        const initialXSpanZ = zPlaneInitialRanges.x[1] - zPlaneInitialRanges.x[0];
-        const initialYSpanZ = zPlaneInitialRanges.y[1] - zPlaneInitialRanges.y[0];
-        const currentXSpanZ = initialXSpanZ / zoomZ;
-        const currentYSpanZ = initialYSpanZ / zoomZ;
-        zPlaneParams.currentVisXRange[0] = zWorldCenterX - currentXSpanZ / 2;
-        zPlaneParams.currentVisXRange[1] = zWorldCenterX + currentXSpanZ / 2;
-        zPlaneParams.currentVisYRange[0] = zWorldCenterY - currentYSpanZ / 2;
-        zPlaneParams.currentVisYRange[1] = zWorldCenterY + currentYSpanZ / 2;
+        zIsPrecise = synchronizePreciseViewport(zPlaneParams, zoomZ);
+        if (!zIsPrecise) {
+            const initialXSpanZ = zPlaneInitialRanges.x[1] - zPlaneInitialRanges.x[0];
+            const initialYSpanZ = zPlaneInitialRanges.y[1] - zPlaneInitialRanges.y[0];
+            const currentXSpanZ = initialXSpanZ / zoomZ;
+            const currentYSpanZ = initialYSpanZ / zoomZ;
+            zPlaneParams.currentVisXRange[0] = zWorldCenterX - currentXSpanZ / 2;
+            zPlaneParams.currentVisXRange[1] = zWorldCenterX + currentXSpanZ / 2;
+            zPlaneParams.currentVisYRange[0] = zWorldCenterY - currentYSpanZ / 2;
+            zPlaneParams.currentVisYRange[1] = zWorldCenterY + currentYSpanZ / 2;
+        }
     }
-    const xSpanZ = zPlaneParams.currentVisXRange[1] - zPlaneParams.currentVisXRange[0];
-    const ySpanZ = zPlaneParams.currentVisYRange[1] - zPlaneParams.currentVisYRange[0];
-    if (xSpanZ === 0 || ySpanZ === 0) { return; }
-    const scaleXZ = zPlaneParams.width / xSpanZ;
-    const scaleYZ = zPlaneParams.height / ySpanZ;
-    zPlaneParams.scale.x = zPlaneParams.scale.y = Math.min(scaleXZ, scaleYZ); 
-    zPlaneParams.origin.x = (zPlaneParams.width / 2) - zWorldCenterX * zPlaneParams.scale.x;
-    zPlaneParams.origin.y = (zPlaneParams.height / 2) + zWorldCenterY * zPlaneParams.scale.y; 
-    updatePlaneViewportRanges(zPlaneParams); 
+    if (!zIsPrecise) {
+        const xSpanZ = zPlaneParams.currentVisXRange[1] - zPlaneParams.currentVisXRange[0];
+        const ySpanZ = zPlaneParams.currentVisYRange[1] - zPlaneParams.currentVisYRange[0];
+        if (xSpanZ === 0 || ySpanZ === 0) { return; }
+        const scaleXZ = zPlaneParams.width / xSpanZ;
+        const scaleYZ = zPlaneParams.height / ySpanZ;
+        zPlaneParams.scale.x = zPlaneParams.scale.y = Math.min(scaleXZ, scaleYZ); 
+        zPlaneParams.origin.x = (zPlaneParams.width / 2) - zWorldCenterX * zPlaneParams.scale.x;
+        zPlaneParams.origin.y = (zPlaneParams.height / 2) + zWorldCenterY * zPlaneParams.scale.y; 
+        updatePlaneViewportRanges(zPlaneParams);
+    }
 
+    let wIsPrecise = !!wPlaneParams.preciseViewport;
     if (updateWFromSlider) { 
         const zoomW = state.wPlaneZoom;
-        const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
-        const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
-        const currentXSpanW = initialXSpanW / zoomW;
-        const currentYSpanW = initialYSpanW / zoomW;
-        wPlaneParams.xRange[0] = wWorldCenterX - currentXSpanW / 2;
-        wPlaneParams.xRange[1] = wWorldCenterX + currentXSpanW / 2;
-        wPlaneParams.yRange[0] = wWorldCenterY - currentYSpanW / 2;
-        wPlaneParams.yRange[1] = wWorldCenterY + currentYSpanW / 2;
+        wIsPrecise = synchronizePreciseViewport(wPlaneParams, zoomW);
+        if (!wIsPrecise) {
+            const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
+            const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
+            const currentXSpanW = initialXSpanW / zoomW;
+            const currentYSpanW = initialYSpanW / zoomW;
+            wPlaneParams.xRange[0] = wWorldCenterX - currentXSpanW / 2;
+            wPlaneParams.xRange[1] = wWorldCenterX + currentXSpanW / 2;
+            wPlaneParams.yRange[0] = wWorldCenterY - currentYSpanW / 2;
+            wPlaneParams.yRange[1] = wWorldCenterY + currentYSpanW / 2;
+        }
     }
     const xSpanW = wPlaneParams.xRange[1] - wPlaneParams.xRange[0];
     const ySpanW = wPlaneParams.yRange[1] - wPlaneParams.yRange[0];
-    if (xSpanW === 0 || ySpanW === 0) { return; }
-    const scaleXW = wPlaneParams.width / xSpanW;
-    const scaleYW = wPlaneParams.height / ySpanW;
-    wPlaneParams.scale.x = wPlaneParams.scale.y = Math.min(scaleXW, scaleYW);
-    wPlaneParams.origin.x = (wPlaneParams.width / 2) - wWorldCenterX * wPlaneParams.scale.x;
-    wPlaneParams.origin.y = (wPlaneParams.height / 2) + wWorldCenterY * wPlaneParams.scale.y;
-    updatePlaneViewportRanges(wPlaneParams);
+    if (!wIsPrecise) {
+        if (xSpanW === 0 || ySpanW === 0) { return; }
+        const scaleXW = wPlaneParams.width / xSpanW;
+        const scaleYW = wPlaneParams.height / ySpanW;
+        wPlaneParams.scale.x = wPlaneParams.scale.y = Math.min(scaleXW, scaleYW);
+        wPlaneParams.origin.x = (wPlaneParams.width / 2) - wWorldCenterX * wPlaneParams.scale.x;
+        wPlaneParams.origin.y = (wPlaneParams.height / 2) + wWorldCenterY * wPlaneParams.scale.y;
+        updatePlaneViewportRanges(wPlaneParams);
+    }
 
     // Propagate zoom/pan to all recursive planes
-    if (wPlaneParamsList && wPlaneParamsList.length > 1) {
+    if (!wIsPrecise && wPlaneParamsList && wPlaneParamsList.length > 1) {
         for (let i = 1; i < wPlaneParamsList.length; i++) {
             const p = wPlaneParamsList[i];
             p.xRange = [...wPlaneParams.xRange];

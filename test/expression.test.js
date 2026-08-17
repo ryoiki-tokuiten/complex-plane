@@ -9,6 +9,7 @@ import {
     parseExpression
 } from '../js/math/expression/index.js';
 import { state } from '../js/store/state.js';
+import { transformFunctions } from '../js/native/map-runtime.js';
 
 function closeComplex(actual, expected, tolerance = 1e-10) {
     assert.ok(Math.abs(actual.re - expected.re) <= tolerance, `real ${actual.re} != ${expected.re}`);
@@ -102,12 +103,13 @@ test('conditionals, predicates, factorial, gcd, and custom parameters work', () 
     closeComplex(expression({ j: { re: 6, im: 0 }, k: { re: 4, im: 0 } }), { re: 0, im: 0 });
 });
 
-test('selected function calls are supplied by the evaluation environment', () => {
+test('selected function calls execute the supplied native map', () => {
     const expression = compileExpression('selected(z) + f(z)', { allowedVariables: ['z'] });
-    const selectedFunction = (re, im) => ({ re: re * 2, im: im * 2 });
+    const selectedFunction = transformFunctions.sin;
+    const selected = selectedFunction(2, -1);
     closeComplex(
         expression({ z: { re: 2, im: -1 }, selectedFunction }),
-        { re: 8, im: -4 }
+        { re: selected.re * 2, im: selected.im * 2 }
     );
 });
 
