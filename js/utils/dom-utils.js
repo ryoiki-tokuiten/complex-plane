@@ -2,7 +2,6 @@ import { state, context, zPlaneParams, wPlaneParams, sphereViewParams, wPlaneIni
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT, SPHERE_INITIAL_ROT_X, SPHERE_INITIAL_ROT_Y, SPHERE_VIEW_RADIUS_FACTOR } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
-import { initializeWebGLDomainColoringSupport } from '../rendering/webgl-domain-coloring.js';
 import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
 import { eventBus } from '../store/events.js';
 import { registerControls } from '../ui/control-registry.js';
@@ -36,8 +35,6 @@ export function setupDOMReferences() {
     wCtx = wCanvas.getContext('2d');
     wCtx.imageSmoothingEnabled = true;
     wCtx.imageSmoothingQuality = 'high';
-
-    initializeWebGLDomainColoringSupport();
 
     registerControls(document, controls);
     controls.cauchy_integral_results_info = controls.cauchyIntegralResultsInfo;

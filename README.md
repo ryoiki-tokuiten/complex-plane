@@ -32,6 +32,6 @@ The core mathematical operations live in the `js/analysis/` and `js/math-utils.j
 The rendering engine (`js/rendering/`) is highly modular, splitting responsibilities between 2D Canvas contexts, WebGL, and Three.js depending on the performance and topological requirements:
 
 *   **HTML5 Canvas (2D):** Used for lightweight, interactive rendering. It parses UI inputs to draw Cartesian/polar/log-Cartesian grids, user-defined shapes (circles, lines), contour endpoints, and hover-probe info overlays on both the z-plane and w-plane.
-*   **WebGL:** Essential for continuous plane evaluations, particularly **Domain Coloring**. WebGL shaders map the argument (angle) of a complex number to a hue, and its magnitude to lightness/saturation. WebGL is also utilized for drawing densely transformed user-images mapping from the z-plane to the w-plane, ensuring 60fps performance during heavy pixel mathematical operations.
+*   **WebGL:** Used for drawing densely transformed user-images mapping from the z-plane to the w-plane, ensuring 60fps performance during heavy pixel mathematical operations.
 *   **Three.js (3D):** Drives interactive Riemann spheres and the Laplace transform surface ($|F(s)|$), with a shared WebGL scene and interaction model.
 *   **Animation System:** Handles time-domain progressions. Frame-requested loops drive particle flows through vector fields, simulate drawing out Taylor series approximations, and animate winding frequencies for integral transforms.

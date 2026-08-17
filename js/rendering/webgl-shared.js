@@ -312,7 +312,7 @@ function generateAlgebraicDirectEvaluationGLSL(funcName, valVar, outVar) {
     }
 }
 
-export function getWebGLDomainColorFunctionIdShared(functionName, ignoreDynamic = false) {
+export function getWebGLFunctionIdShared(functionName, ignoreDynamic = false) {
     if (!ignoreDynamic && isDynamicAggregateGLSLActive(state)) return 17;
     switch (functionName) {
         case 'cos': return 1;
@@ -343,7 +343,7 @@ export function getWebGLDomainColorFunctionIdShared(functionName, ignoreDynamic 
 
 export function setComplexFunctionUniformsShared(gl, locs, state) {
     if (locs.uFunctionId !== undefined && locs.uFunctionId !== null) {
-        gl.uniform1f(locs.uFunctionId, getWebGLDomainColorFunctionIdShared(state.currentFunction));
+        gl.uniform1f(locs.uFunctionId, getWebGLFunctionIdShared(state.currentFunction));
     }
 
     const a = state.mobiusA || { re: 1, im: 0 }, b = state.mobiusB || { re: 0, im: 0 };
@@ -556,13 +556,13 @@ function getGLSLComplexMathLibraryCacheKey(appState, dynamicActive, dynamicSigna
 function buildGLSLComplexMathLibraryUncached(appState) {
     const dynamic = buildDynamicAggregateGLSL(
         appState,
-        functionName => getWebGLDomainColorFunctionIdShared(functionName, true)
+        functionName => getWebGLFunctionIdShared(functionName, true)
     );
     const hasCustomZExpr = !!(appState?.algebraicChainingZExpr && appState.algebraicChainingZExpr !== 'z');
     const zCustomExprGLSL = hasCustomZExpr
         ? compileCustomExpressionToGLSL(
             appState.algebraicChainingZExpr,
-            functionName => getWebGLDomainColorFunctionIdShared(functionName, true)
+            functionName => getWebGLFunctionIdShared(functionName, true)
         )
         : 'z';
 

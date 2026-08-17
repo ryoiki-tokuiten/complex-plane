@@ -1,8 +1,6 @@
 import { state, context, subscribeState } from '../store/state.js';
-import { renderDomainColoringWithWebGL } from './webgl-domain-coloring.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
-    cancelPlanarDomainDynamics,
     renderPlanarDomainDynamics
 } from './domain-dynamics.js';
 import { hslToRgb } from './canvas-primitives.js';
@@ -18,12 +16,32 @@ subscribeState(() => {
 }, [
     'currentFunction',
     'mapPresentation',
+    'expBase',
+    'logBase',
+    'besselOrder',
     'algebraicChainingEnabled',
     'algebraicChainingZExpr',
     'algebraicChainingTerms',
     'chainingEnabled',
     'chainingMode',
-    'chainCount'
+    'chainCount',
+    'orbitColoringMode',
+    'polynomialN',
+    'polynomialCoeffs',
+    'fractionalPowerN',
+    'branchCutType',
+    'branchCutAngle',
+    'zetaContinuationEnabled',
+    'taylorSeriesEnabled',
+    'taylorSeriesOrder',
+    'taylorSeriesCenter',
+    'taylorSeriesConvergenceRadius',
+    'dynamicPlotting',
+    'domainBrightness',
+    'domainContrast',
+    'domainSaturation',
+    'domainLightnessCycles',
+    'domainPalette'
 ]);
 
 export function domainMagnitudeLightness(logMod, cycles) {
@@ -39,52 +57,16 @@ export function domainMagnitudeLightness(logMod, cycles) {
     return DOMAIN_LIGHTNESS_MIN + (DOMAIN_LIGHTNESS_MAX - DOMAIN_LIGHTNESS_MIN) * tone;
 }
 
-function getDomainColoringEvaluator(isWPC, map) {
-    if (isWPC) {
-        return (x, y) => ({ re: x, im: y });
-    }
-    return typeof map?.evaluate === 'function'
-        ? map.evaluate
-        : () => ({ re: NaN, im: NaN });
-}
-
-function cancelZPlaneDynamicsIfNeeded(isWPlaneColoring) {
-    if (!isWPlaneColoring) cancelPlanarDomainDynamics();
-}
-
-export function getDomainColorPlaneKey(targetCtx) {
-    if (targetCtx === context.zDomainColorCtx) return 'z';
-    if (targetCtx === context.wDomainColorCtx) return 'w';
-    return 'z';
-}
-
 export function renderPlanarDomainColoring(tCtx, pP, isWPC, map) {
     const w = pP.width; const h = pP.height; if (w === 0 || h === 0) return;
 
-    if (context.domainColoringDirty) {
-        cancelPlanarDomainDynamics();
-    }
-
-    const dynamicsSnapshot = map?.presentation === 'derivative'
-        ? null
-        : buildPlanarDomainDynamicsSnapshot(state, pP, { isWPlaneColoring: !!isWPC });
-    if (dynamicsSnapshot && renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot)) {
-        return;
-    }
-
-    const ok = renderDomainColoringWithWebGL(tCtx, pP, {
-        planeKey: getDomainColorPlaneKey(tCtx),
+    const dynamicsSnapshot = buildPlanarDomainDynamicsSnapshot(state, pP, {
         isWPlaneColoring: !!isWPC,
-        sphereParams: null,
-        map
+        mapPresentation: map?.presentation
     });
-    if (ok) {
-        cancelZPlaneDynamicsIfNeeded(isWPC);
-        return;
+    if (!dynamicsSnapshot || !renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot)) {
+        throw new Error('The CPU domain-coloring pipeline cannot render the current function state.');
     }
-
-    cancelZPlaneDynamicsIfNeeded(isWPC);
-    renderPlanarDomainColoringCPU(tCtx, pP, isWPC, map);
 }
 
 
@@ -163,51 +145,4 @@ export function domainColorForValue(re, im, runtimeState) {
     const paletteId = (runtimeState && runtimeState.domainPalette) ? runtimeState.domainPalette : 'calming';
     const baseColor = getPaletteColor(paletteId, h);
     return applyLightnessAndSaturation(baseColor, lFinal, sFinal);
-}
-
-export function renderPlanarDomainColoringCPU(tCtx, pP, isWPC, map) {
-    const targetW = pP.width;
-    const targetH = pP.height;
-    const w = Math.max(1, Math.floor(targetW));
-    const h = Math.max(1, Math.floor(targetH));
-
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = w;
-    tempCanvas.height = h;
-    const tempCtx = tempCanvas.getContext('2d');
-    const imgData = tempCtx.createImageData(w, h);
-    const data = imgData.data;
-
-    const xRange = pP.currentVisXRange || pP.xRange;
-    const yRange = pP.currentVisYRange || pP.yRange;
-
-    const evalFunc = getDomainColoringEvaluator(isWPC, map);
-
-    for (let py = 0; py < h; py++) {
-        const unitY = py / h;
-        const imZ = yRange[1] - unitY * (yRange[1] - yRange[0]);
-        for (let px = 0; px < w; px++) {
-            const unitX = px / w;
-            const reZ = xRange[0] + unitX * (xRange[1] - xRange[0]);
-
-            const mapped = evalFunc(reZ, imZ);
-            const rgb = (!mapped || isNaN(mapped.re) || isNaN(mapped.im) || !isFinite(mapped.re) || !isFinite(mapped.im))
-                ? [0, 0, 0]
-                : domainColorForValue(mapped.re, mapped.im, state);
-
-            const idx = (py * w + px) * 4;
-            data[idx] = rgb[0];
-            data[idx + 1] = rgb[1];
-            data[idx + 2] = rgb[2];
-            data[idx + 3] = 255;
-        }
-    }
-    tempCtx.putImageData(imgData, 0, 0);
-
-    tCtx.save();
-    tCtx.setTransform(1, 0, 0, 1, 0, 0);
-    tCtx.clearRect(0, 0, targetW, targetH);
-    tCtx.imageSmoothingEnabled = true;
-    tCtx.drawImage(tempCanvas, 0, 0, w, h, 0, 0, targetW, targetH);
-    tCtx.restore();
 }

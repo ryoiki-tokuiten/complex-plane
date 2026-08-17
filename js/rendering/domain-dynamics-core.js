@@ -28,6 +28,14 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
+import {
+    complexAsin,
+    complexAtan,
+    complexBesselJ,
+    complexGamma,
+    complexLogGamma
+} from '../math-utils.js';
+import { generateSequenceBindingSeries } from '../analysis/sequence-bindings.js';
 
 const ORBIT_ATTRACTOR_CONVERGENCE_EPSILON = 1e-7;
 const ORBIT_ATTRACTOR_CONVERGENCE_EPSILON_SQ =
@@ -53,6 +61,7 @@ const NO_ACCELERATOR = Object.freeze({
     scratch: new Float64Array(2)
 });
 const dynamicsAcceleratorCache = new WeakMap();
+const dynamicAggregateEvaluatorCache = new WeakMap();
 const immutableDynamicsSnapshots = new WeakSet();
 const colorContextCache = new WeakMap();
 const renderHueLutCache = [];
@@ -235,6 +244,23 @@ function complexLn(z, snapshot = null) {
         re: Math.log(Math.hypot(value.re, value.im)),
         im: argument
     };
+}
+
+function complexExpWithBase(z, snapshot) {
+    const value = toComplex(z);
+    const base = toComplex(snapshot?.expBase ?? { re: Math.E, im: 0 });
+    const baseLog = complexLn(base);
+    return complexExp({
+        re: value.re * baseLog.re - value.im * baseLog.im,
+        im: value.re * baseLog.im + value.im * baseLog.re
+    });
+}
+
+function complexLnWithBase(z, snapshot) {
+    const value = toComplex(z);
+    const logarithm = complexLn(value, snapshot);
+    const baseLog = complexLn(toComplex(snapshot?.logBase ?? { re: Math.E, im: 0 }));
+    return complexDivide(logarithm, baseLog);
 }
 
 function complexIntegerPow(base, exponent) {
@@ -476,12 +502,17 @@ function evaluateBuiltin(functionKey, z, snapshot, evalContext) {
         case 'sin': return complexSin(z);
         case 'tan': return complexTan(z);
         case 'sec': return complexSec(z);
-        case 'exp': return complexExp(z);
-        case 'ln': return complexLn(z, snapshot);
+        case 'exp': return complexExpWithBase(z, snapshot);
+        case 'ln': return complexLnWithBase(z, snapshot);
         case 'reciprocal': return complexReciprocal(z);
         case 'sinh': return complexSinh(z);
         case 'cosh': return complexCosh(z);
         case 'tanh': return complexTanh(z);
+        case 'asin': return complexAsin(z.re, z.im);
+        case 'atan': return complexAtan(z.re, z.im);
+        case 'gamma': return complexGamma(z.re, z.im);
+        case 'loggamma': return complexLogGamma(z.re, z.im);
+        case 'bessel': return complexBesselJ(z.re, z.im, snapshot.besselOrder);
         case 'power': return complexPow(z, { re: snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER, im: 0 }, snapshot);
         case 'mobius': return complexMobius(z, snapshot);
         case 'polynomial': return complexPolynomial(z, snapshot);
@@ -515,8 +546,8 @@ function evaluateFunctionBlock(block, z, snapshot, context) {
 
     if (block.power !== undefined && block.power !== 1) value = complexPow(value, { re: Number(block.power), im: 0 }, snapshot);
     if (block.reciprocal) value = complexReciprocal(value);
-    if (block.log) value = complexLn(value, snapshot);
-    if (block.exp) value = complexExp(value);
+    if (block.log) value = complexLnWithBase(value, snapshot);
+    if (block.exp) value = complexExpWithBase(value, snapshot);
 
     return value;
 }
@@ -909,6 +940,11 @@ const VMF_MOBIUS = 13;
 const VMF_POLYNOMIAL = 14;
 const VMF_POINCARE = 15;
 const VMF_ZETA = 16;
+const VMF_ASIN = 17;
+const VMF_ATAN = 18;
+const VMF_GAMMA = 19;
+const VMF_LOGGAMMA = 20;
+const VMF_BESSEL = 21;
 const VMF_APPLY_POWER = 32;
 
 const EXPR_PUSH_Z = 1;
@@ -944,6 +980,11 @@ function vmFunctionCode(functionKey) {
         case 'polynomial': return VMF_POLYNOMIAL;
         case 'poincare': return VMF_POINCARE;
         case 'zeta': return VMF_ZETA;
+        case 'asin': return VMF_ASIN;
+        case 'atan': return VMF_ATAN;
+        case 'gamma': return VMF_GAMMA;
+        case 'loggamma': return VMF_LOGGAMMA;
+        case 'bessel': return VMF_BESSEL;
         default: return -1;
     }
 }
@@ -1140,7 +1181,7 @@ function powComplexComponents(baseRe, baseIm, expRe, expIm, out) {
     return out;
 }
 
-function evaluatePrimitiveExpressionInto(expr, zr, zi, cr, ci, out) {
+function evaluatePrimitiveExpressionInto(expr, zr, zi, cr, ci, out, accelerator = null) {
     const stackRe = expr.stackRe;
     const stackIm = expr.stackIm;
     const constants = expr.constants;
@@ -1206,7 +1247,7 @@ function evaluatePrimitiveExpressionInto(expr, zr, zi, cr, ci, out) {
                 if ((args[i] | 0) === VMF_APPLY_POWER) {
                     powRealComponents(stackRe[sp - 1], stackIm[sp - 1], 0.5, expr.scratch);
                 } else {
-                    evaluatePrimitiveVmFunctionInto(null, args[i] | 0, stackRe[sp - 1], stackIm[sp - 1], cr, ci, expr.scratch);
+                    evaluatePrimitiveVmFunctionInto(accelerator, args[i] | 0, stackRe[sp - 1], stackIm[sp - 1], cr, ci, expr.scratch);
                 }
                 stackRe[sp - 1] = expr.scratch[0];
                 stackIm[sp - 1] = expr.scratch[1];
@@ -1327,9 +1368,13 @@ function evaluatePrimitiveVmFunctionInto(accelerator, code, re, im, cr, ci, out)
             return divideComponents(1, 0, cosRe, cosIm, out);
         }
         case VMF_EXP:
-            return expComponents(re, im, out);
+            return accelerator
+                ? expBaseComponents(re, im, accelerator.expBaseRe, accelerator.expBaseIm, out)
+                : expComponents(re, im, out);
         case VMF_LN:
-            return lnComponents(re, im, out);
+            return accelerator
+                ? lnBaseComponents(re, im, accelerator.logBaseRe, accelerator.logBaseIm, out)
+                : lnComponents(re, im, out);
         case VMF_RECIPROCAL:
             return divideComponents(1, 0, re, im, out);
         case VMF_SINH:
@@ -1364,6 +1409,36 @@ function evaluatePrimitiveVmFunctionInto(accelerator, code, re, im, cr, ci, out)
             return out;
         case VMF_ZETA:
             return zetaComponents(re, im, !!accelerator?.zetaContinuationEnabled, out);
+        case VMF_ASIN: {
+            const value = complexAsin(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case VMF_ATAN: {
+            const value = complexAtan(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case VMF_GAMMA: {
+            const value = complexGamma(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case VMF_LOGGAMMA: {
+            const value = complexLogGamma(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case VMF_BESSEL: {
+            const value = complexBesselJ(re, im, accelerator?.besselOrder || { re: 0, im: 0 });
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
         case VMF_APPLY_POWER:
             return powRealComponents(re, im, DEFAULT_FRACTIONAL_POWER, out);
         default:
@@ -1453,6 +1528,11 @@ function createCompiledAlgebraicAccelerator(snapshot) {
         polynomialDegree: degree,
         polynomialCoeffsRe,
         polynomialCoeffsIm,
+        expBaseRe: scalarRe(snapshot.expBase ?? { re: Math.E, im: 0 }),
+        expBaseIm: scalarIm(snapshot.expBase),
+        logBaseRe: scalarRe(snapshot.logBase ?? { re: Math.E, im: 0 }),
+        logBaseIm: scalarIm(snapshot.logBase),
+        besselOrder: toComplex(snapshot.besselOrder),
         mobiusARe: mobiusA.re,
         mobiusAIm: mobiusA.im,
         mobiusBRe: mobiusB.re,
@@ -1594,21 +1674,15 @@ function evaluatePrimitiveFactorInto(accelerator, start, end, zr, zi, cr, ci, ou
                 break;
             }
             case VMF_EXP: {
-                const magnitude = expSafe(ar);
-                const nr = magnitude * Math.cos(ai);
-                ai = magnitude * Math.sin(ai);
-                ar = nr;
+                expBaseComponents(ar, ai, accelerator.expBaseRe, accelerator.expBaseIm, out);
+                ar = out[0];
+                ai = out[1];
                 break;
             }
             case VMF_LN: {
-                if (ar === 0 && ai === 0) {
-                    ar = -Infinity;
-                    ai = 0;
-                } else {
-                    const nr = Math.log(Math.hypot(ar, ai));
-                    ai = Math.atan2(ai, ar);
-                    ar = nr;
-                }
+                lnBaseComponents(ar, ai, accelerator.logBaseRe, accelerator.logBaseIm, out);
+                ar = out[0];
+                ai = out[1];
                 break;
             }
             case VMF_RECIPROCAL:
@@ -1680,6 +1754,36 @@ function evaluatePrimitiveFactorInto(accelerator, start, end, zr, zi, cr, ci, ou
                 ar = out[0];
                 ai = out[1];
                 break;
+            case VMF_ASIN: {
+                const value = complexAsin(ar, ai);
+                ar = value.re;
+                ai = value.im;
+                break;
+            }
+            case VMF_ATAN: {
+                const value = complexAtan(ar, ai);
+                ar = value.re;
+                ai = value.im;
+                break;
+            }
+            case VMF_GAMMA: {
+                const value = complexGamma(ar, ai);
+                ar = value.re;
+                ai = value.im;
+                break;
+            }
+            case VMF_LOGGAMMA: {
+                const value = complexLogGamma(ar, ai);
+                ar = value.re;
+                ai = value.im;
+                break;
+            }
+            case VMF_BESSEL: {
+                const value = complexBesselJ(ar, ai, accelerator.besselOrder);
+                ar = value.re;
+                ai = value.im;
+                break;
+            }
             case VMF_APPLY_POWER:
                 powRealComponents(ar, ai, args[i], out);
                 ar = out[0];
@@ -1703,7 +1807,7 @@ function evaluateCompiledAlgebraicInto(accelerator, zr, zi, cr, ci, out) {
     let pointIm = zi;
     const scratch = accelerator.scratch;
     if (accelerator.zExpr) {
-        evaluatePrimitiveExpressionInto(accelerator.zExpr, zr, zi, cr, ci, scratch);
+        evaluatePrimitiveExpressionInto(accelerator.zExpr, zr, zi, cr, ci, scratch, accelerator);
         pointRe = scratch[0];
         pointIm = scratch[1];
         if (!isFiniteDomainDynamicsValue(pointRe, pointIm)) {
@@ -1850,7 +1954,175 @@ function evaluatePolynomialParameterAccelerator(accelerator, z, c) {
         : acc;
 }
 
-function evaluateBase(snapshot, value, c, accelerator = NO_ACCELERATOR) {
+function dynamicExpressionFunctions(snapshot) {
+    return {
+        exp: value => complexExpWithBase(value, snapshot),
+        ln: value => complexLnWithBase(value, snapshot),
+        log: value => complexLnWithBase(value, snapshot),
+        bessel: (value, _environment, args) => {
+            const order = args?.length > 1 ? toComplex(args[0]) : snapshot.besselOrder;
+            const point = toComplex(value);
+            return complexBesselJ(point.re, point.im, order);
+        }
+    };
+}
+
+function createDynamicAggregateEvaluator(snapshot) {
+    if (!snapshot.dynamicAggregate) return null;
+    const cached = dynamicAggregateEvaluatorCache.get(snapshot);
+    if (cached) return cached;
+
+    const dynamic = snapshot.dynamicAggregate;
+    const bindingSymbols = (dynamic.bindings || [])
+        .map(binding => String(binding?.symbol || '').trim())
+        .filter(Boolean);
+    const parameterSymbols = Object.keys(dynamic.parameters || {});
+    const allowedVariables = [
+        'c', 'd', 'j', 's', 'z',
+        ...parameterSymbols,
+        ...bindingSymbols
+    ];
+
+    let point;
+    let term = null;
+    try {
+        point = compileExpression(dynamic.pointExpression, { allowedVariables });
+        if (dynamic.term?.kind !== 'selected-function') {
+            term = compileExpression(String(dynamic.term?.expression ?? 'z'), { allowedVariables });
+        }
+    } catch {
+        point = null;
+    }
+
+    const evaluator = { dynamic, point, term };
+    dynamicAggregateEvaluatorCache.set(snapshot, evaluator);
+    return evaluator;
+}
+
+function evaluateDynamicAggregate(snapshot, value, accelerator) {
+    const evaluator = createDynamicAggregateEvaluator(snapshot);
+    if (!evaluator?.point || (evaluator.dynamic.term?.kind !== 'selected-function' && !evaluator.term)) {
+        return null;
+    }
+
+    const dynamic = evaluator.dynamic;
+    const point = toComplex(value);
+    const selectedFunction = (re, im) => evaluateBase(
+        snapshot,
+        { re, im },
+        { re, im },
+        accelerator,
+        true
+    );
+    const functions = dynamicExpressionFunctions(snapshot);
+    let bindings;
+    try {
+        bindings = generateSequenceBindingSeries(
+            dynamic.bindings || [],
+            dynamic.sourceRecords.length,
+            {
+                aggregateParameter: point,
+                parameters: dynamic.parameters || {}
+            }
+        );
+    } catch {
+        return null;
+    }
+
+    let sumRe = 0;
+    let sumIm = 0;
+    let compensationRe = 0;
+    let compensationIm = 0;
+    let productRe = 1;
+    let productIm = 0;
+
+    for (let index = 0; index < dynamic.sourceRecords.length; index += 1) {
+        const record = dynamic.sourceRecords[index];
+        const environment = {
+            ...(dynamic.parameters || {}),
+            ...(bindings.environments[index] || {}),
+            d: record.domainValue,
+            j: { re: record.ordinal, im: 0 },
+            s: point,
+            c: point,
+            selectedFunction,
+            functions
+        };
+
+        let inputPoint;
+        let termValue;
+        try {
+            inputPoint = toComplex(evaluator.point(environment));
+            termValue = evaluator.dynamic.term?.kind === 'selected-function'
+                ? selectedFunction(inputPoint.re, inputPoint.im)
+                : toComplex(evaluator.term({ ...environment, z: inputPoint }));
+        } catch {
+            inputPoint = null;
+            termValue = null;
+        }
+
+        if (!validComplex(inputPoint) || !validComplex(termValue)) {
+            if (dynamic.invalidPolicy === 'skip') continue;
+            return null;
+        }
+
+        if (dynamic.reductionKind === 'sum') {
+            const nextRe = sumRe + termValue.re;
+            const nextIm = sumIm + termValue.im;
+            compensationRe += Math.abs(sumRe) >= Math.abs(termValue.re)
+                ? sumRe - nextRe + termValue.re
+                : termValue.re - nextRe + sumRe;
+            compensationIm += Math.abs(sumIm) >= Math.abs(termValue.im)
+                ? sumIm - nextIm + termValue.im
+                : termValue.im - nextIm + sumIm;
+            sumRe = nextRe;
+            sumIm = nextIm;
+        } else {
+            const nextRe = productRe * termValue.re - productIm * termValue.im;
+            productIm = productRe * termValue.im + productIm * termValue.re;
+            productRe = nextRe;
+            if (!Number.isFinite(productRe) || !Number.isFinite(productIm)) return null;
+        }
+    }
+
+    return dynamic.reductionKind === 'sum'
+        ? { re: sumRe + compensationRe, im: sumIm + compensationIm }
+        : { re: productRe, im: productIm };
+}
+
+function evaluateTaylorApproximation(snapshot, value) {
+    const taylor = snapshot.taylor;
+    if (!taylor || !Array.isArray(taylor.coefficients) || taylor.coefficients.length === 0) {
+        return null;
+    }
+
+    const point = toComplex(value);
+    const center = toComplex(taylor.center);
+    const radius = Number(taylor.radius);
+    const deltaRe = point.re - center.re;
+    const deltaIm = point.im - center.im;
+    if (Number.isFinite(radius) && deltaRe * deltaRe + deltaIm * deltaIm > radius * radius * 1.000001) {
+        return null;
+    }
+
+    let sumRe = 0;
+    let sumIm = 0;
+    for (let index = taylor.coefficients.length - 1; index >= 0; index -= 1) {
+        const coefficient = taylor.coefficients[index];
+        const nextRe = sumRe * deltaRe - sumIm * deltaIm + scalarRe(coefficient);
+        sumIm = sumRe * deltaIm + sumIm * deltaRe + scalarIm(coefficient);
+        sumRe = nextRe;
+    }
+    return validComplex({ re: sumRe, im: sumIm }) ? { re: sumRe, im: sumIm } : null;
+}
+
+function evaluateBase(snapshot, value, c, accelerator = NO_ACCELERATOR, skipDynamic = false) {
+    if (snapshot.dynamicAggregate && !skipDynamic) {
+        return evaluateDynamicAggregate(snapshot, value, accelerator);
+    }
+    if (snapshot.taylor) {
+        return evaluateTaylorApproximation(snapshot, value);
+    }
     if (accelerator.type === 'polynomial-parameter') {
         return evaluatePolynomialParameterAccelerator(accelerator, value, c);
     }
@@ -1896,6 +2168,7 @@ function snapshotSupportsOrbitTrace(snapshot) {
 }
 
 function resolveOrbitColoringMode(snapshot) {
+    if (snapshot?.derivativeMode) return ORBIT_COLORING_MODES.value;
     const mode = normalizeOrbitColoringMode(snapshot?.orbitColoringMode);
     if (mode === ORBIT_COLORING_MODES.value) return mode;
     return snapshotSupportsOrbitTrace(snapshot) ? mode : ORBIT_COLORING_MODES.value;
@@ -2022,6 +2295,7 @@ function evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator) {
 }
 
 function supportsComponentValueEvaluation(snapshot, accelerator) {
+    if (snapshot.dynamicAggregate || snapshot.taylor) return false;
     if (accelerator.type === 'compiled-algebraic' ||
         accelerator.type === 'laurent-parameter' ||
         accelerator.type === 'polynomial-parameter' ||
@@ -2042,7 +2316,20 @@ function supportsComponentOrbitEvaluation(snapshot, accelerator) {
         (snapshot.functionKey === 'ln' || snapshot.functionKey === 'power'));
 }
 
-export function evaluateDomainDynamicsValue(snapshot, re, im, accelerator = createDynamicsAccelerator(snapshot)) {
+export function evaluateDomainDynamicsValue(snapshot, re, im, accelerator = createDynamicsAccelerator(snapshot), skipDerivative = false) {
+    if (snapshot.derivativeMode && !skipDerivative) {
+        const h = 1e-6 * Math.max(1, Math.abs(re), Math.abs(im));
+        const left = evaluateDomainDynamicsValue(snapshot, re - h, im, accelerator, true);
+        const right = evaluateDomainDynamicsValue(snapshot, re + h, im, accelerator, true);
+        if (!left || !right) return null;
+        const scale = 0.5 / h;
+        const derivativeRe = (right.re - left.re) * scale;
+        const derivativeIm = (right.im - left.im) * scale;
+        return isFiniteDomainDynamicsValue(derivativeRe, derivativeIm)
+            ? { re: derivativeRe, im: derivativeIm }
+            : null;
+    }
+
     if (supportsComponentValueEvaluation(snapshot, accelerator)) {
         return evaluateDomainDynamicsValueComponents(snapshot, re, im, accelerator);
     }
@@ -3111,9 +3398,21 @@ function createLaurentParameterStep(accelerator) {
 function createBuiltinComponentStep(functionKey, snapshot) {
     switch (functionKey) {
         case 'exp':
-            return (re, im, out) => expComponents(re, im, out);
+            return (re, im, out) => expBaseComponents(
+                re,
+                im,
+                scalarRe(snapshot.expBase ?? { re: Math.E, im: 0 }),
+                scalarIm(snapshot.expBase),
+                out
+            );
         case 'ln':
-            return (re, im, out) => lnComponents(re, im, out);
+            return (re, im, out) => lnBaseComponents(
+                re,
+                im,
+                scalarRe(snapshot.logBase ?? { re: Math.E, im: 0 }),
+                scalarIm(snapshot.logBase),
+                out
+            );
         case 'sin':
             return (re, im, out) => {
                 out[0] = Math.sin(re) * Math.cosh(im);
@@ -3162,6 +3461,41 @@ function createBuiltinComponentStep(functionKey, snapshot) {
                 const cosY = Math.cos(im);
                 return divideComponents(sinhX * cosY, coshX * sinY, coshX * cosY, sinhX * sinY, out);
             };
+        case 'asin':
+            return (re, im, out) => {
+                const value = complexAsin(re, im);
+                out[0] = value.re;
+                out[1] = value.im;
+                return out;
+            };
+        case 'atan':
+            return (re, im, out) => {
+                const value = complexAtan(re, im);
+                out[0] = value.re;
+                out[1] = value.im;
+                return out;
+            };
+        case 'gamma':
+            return (re, im, out) => {
+                const value = complexGamma(re, im);
+                out[0] = value.re;
+                out[1] = value.im;
+                return out;
+            };
+        case 'loggamma':
+            return (re, im, out) => {
+                const value = complexLogGamma(re, im);
+                out[0] = value.re;
+                out[1] = value.im;
+                return out;
+            };
+        case 'bessel':
+            return (re, im, out) => {
+                const value = complexBesselJ(re, im, snapshot.besselOrder);
+                out[0] = value.re;
+                out[1] = value.im;
+                return out;
+            };
         case 'power': {
             const exponent = Number(snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER);
             return (re, im, out) => powRealComponents(re, im, exponent, out);
@@ -3183,7 +3517,12 @@ function createBuiltinComponentStep(functionKey, snapshot) {
     }
 }
 
-function separableBuiltinKind(functionKey) {
+function separableBuiltinKind(functionKey, snapshot = null) {
+    if (functionKey === 'exp') {
+        const base = snapshot?.expBase;
+        if (Math.abs(scalarRe(base ?? { re: Math.E, im: 0 }) - Math.E) > 1e-12 ||
+            Math.abs(scalarIm(base)) > 1e-12) return null;
+    }
     switch (functionKey) {
         case 'sin': case 'cos': case 'tan': case 'sec':
         case 'exp': case 'sinh': case 'cosh': case 'tanh': case 'poincare':
@@ -3314,6 +3653,8 @@ function renderSeparableBuiltinValueTile(snapshot, tile, kind, step, axisCache, 
 }
 
 function createAcceleratedTileRenderer(snapshot, accelerator) {
+    if (snapshot.derivativeMode || snapshot.dynamicAggregate || snapshot.taylor) return null;
+
     const value = snapshotUsesValueColoring(snapshot);
     const escape = snapshotUsesEscapeColoring(snapshot);
     if (!value && !escape) {
@@ -3409,7 +3750,7 @@ function createAcceleratedTileRenderer(snapshot, accelerator) {
         const componentStep = createBuiltinComponentStep(snapshot.functionKey, snapshot);
         if (!componentStep) return null;
         const step = (zr, zi, _cr, _ci, _paramRe, _paramIm, out) => componentStep(zr, zi, out);
-        const separable = separableBuiltinKind(snapshot.functionKey);
+        const separable = separableBuiltinKind(snapshot.functionKey, snapshot);
         if (value && separable) {
             const axisCache = new Map();
             return tile => renderSeparableBuiltinValueTile(
@@ -3793,6 +4134,16 @@ function expComponents(re, im, out) {
     return out;
 }
 
+function expBaseComponents(re, im, baseRe, baseIm, out) {
+    const baseLogRe = Math.log(Math.hypot(baseRe, baseIm));
+    const baseLogIm = Math.atan2(baseIm, baseRe);
+    return expComponents(
+        re * baseLogRe - im * baseLogIm,
+        re * baseLogIm + im * baseLogRe,
+        out
+    );
+}
+
 function lnComponents(re, im, out) {
     if (re === 0 && im === 0) {
         out[0] = -Infinity;
@@ -3804,12 +4155,31 @@ function lnComponents(re, im, out) {
     return out;
 }
 
+function lnBaseComponents(re, im, baseRe, baseIm, out) {
+    lnComponents(re, im, out);
+    const baseLogRe = Math.log(Math.hypot(baseRe, baseIm));
+    const baseLogIm = Math.atan2(baseIm, baseRe);
+    return divideComponents(out[0], out[1], baseLogRe, baseLogIm, out);
+}
+
 function evaluateBuiltinComponents(functionKey, re, im, snapshot, out) {
     switch (functionKey) {
         case 'exp':
-            return expComponents(re, im, out);
+            return expBaseComponents(
+                re,
+                im,
+                scalarRe(snapshot.expBase ?? { re: Math.E, im: 0 }),
+                scalarIm(snapshot.expBase),
+                out
+            );
         case 'ln':
-            return lnComponents(re, im, out);
+            return lnBaseComponents(
+                re,
+                im,
+                scalarRe(snapshot.logBase ?? { re: Math.E, im: 0 }),
+                scalarIm(snapshot.logBase),
+                out
+            );
         case 'sin':
             out[0] = Math.sin(re) * Math.cosh(im);
             out[1] = Math.cos(re) * Math.sinh(im);
@@ -3846,6 +4216,36 @@ function evaluateBuiltinComponents(functionKey, re, im, snapshot, out) {
             const sinY = Math.sin(im);
             const cosY = Math.cos(im);
             return divideComponents(sinhX * cosY, coshX * sinY, coshX * cosY, sinhX * sinY, out);
+        }
+        case 'asin': {
+            const value = complexAsin(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case 'atan': {
+            const value = complexAtan(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case 'gamma': {
+            const value = complexGamma(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case 'loggamma': {
+            const value = complexLogGamma(re, im);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
+        }
+        case 'bessel': {
+            const value = complexBesselJ(re, im, snapshot.besselOrder);
+            out[0] = value.re;
+            out[1] = value.im;
+            return out;
         }
         case 'power': {
             const exponent = Number(snapshot.fractionalPowerN ?? DEFAULT_FRACTIONAL_POWER);
@@ -3918,6 +4318,11 @@ function supportsBuiltinComponentEvaluation(functionKey) {
         case 'sinh':
         case 'cosh':
         case 'tanh':
+        case 'asin':
+        case 'atan':
+        case 'gamma':
+        case 'loggamma':
+        case 'bessel':
         case 'power':
         case 'mobius':
         case 'polynomial':
@@ -4168,7 +4573,9 @@ function renderGenericDomainDynamicsTile(snapshot, tile, accelerator) {
 }
 
 export function renderDomainDynamicsTile(snapshot, tile, accelerator = createDynamicsAccelerator(snapshot)) {
-    const duplicateSampleTile = renderDuplicateSampleValueTile(snapshot, tile, accelerator);
+    const duplicateSampleTile = snapshot.derivativeMode
+        ? null
+        : renderDuplicateSampleValueTile(snapshot, tile, accelerator);
     if (duplicateSampleTile) return duplicateSampleTile;
     const accelerated = getAcceleratedTileRenderer(snapshot, accelerator);
     return accelerated?.(tile) || renderGenericDomainDynamicsTile(snapshot, tile, accelerator);
@@ -4177,6 +4584,10 @@ export function renderDomainDynamicsTile(snapshot, tile, accelerator = createDyn
 export function domainDynamicsSignature(snapshot) {
     return JSON.stringify({
         functionKey: snapshot.functionKey,
+        derivativeMode: !!snapshot.derivativeMode,
+        expBase: snapshot.expBase,
+        logBase: snapshot.logBase,
+        besselOrder: snapshot.besselOrder,
         chainingEnabled: snapshot.chainingEnabled,
         chainMode: snapshot.chainMode,
         chainCount: snapshot.chainCount,
@@ -4194,6 +4605,8 @@ export function domainDynamicsSignature(snapshot) {
         branchCutType: snapshot.branchCutType,
         branchCutAngle: snapshot.branchCutAngle,
         zetaContinuationEnabled: snapshot.zetaContinuationEnabled,
+        taylor: snapshot.taylor,
+        dynamicAggregate: snapshot.dynamicAggregate,
         style: snapshot.style,
         paletteStops: snapshot.paletteStops,
         viewport: snapshot.viewport
@@ -4204,8 +4617,6 @@ export function isDomainDynamicsSnapshot(snapshot) {
     const mode = resolveOrbitColoringMode(snapshot);
     return !!snapshot &&
         !snapshot.isWPlaneColoring &&
-        snapshot.chainingEnabled &&
-        (snapshot.chainCount > 1 || snapshot.chainMode === 'zero_seed') &&
         (
             mode === ORBIT_COLORING_MODES.value ||
             snapshot.chainMode === 'recursion' ||

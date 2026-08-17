@@ -1,7 +1,7 @@
 import { state } from '../store/state.js';
 import {
     createWebGLProgramShared,
-    getWebGLDomainColorFunctionIdShared,
+    getWebGLFunctionIdShared,
     GLSL_COMPLEX_INVERSE_LIBRARY,
     getGLSLComplexMathLibrary,
     collectAlgebraicUniformLocationsShared,
@@ -509,7 +509,7 @@ function bindImageGeometryUniforms(gl, locs, planeParams, currentShape, isWP, sn
 }
 
 function bindComplexImageUniforms(gl, locs, snapshot) {
-    gl.uniform1f(locs.uFunctionId, getWebGLDomainColorFunctionIdShared(snapshot.currentFunction));
+    gl.uniform1f(locs.uFunctionId, getWebGLFunctionIdShared(snapshot.currentFunction));
     bindMobiusUniforms(gl, locs, snapshot);
     bindPolynomialUniforms(gl, locs, snapshot);
     bindFractionalPowerUniform(gl, locs, snapshot);

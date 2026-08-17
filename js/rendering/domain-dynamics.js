@@ -1,6 +1,9 @@
 import { eventBus } from '../store/events.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import { runtime } from '../store/runtime.js';
+import { generateDiscreteSource } from '../analysis/discrete-sources.js';
+import { synchronizeSequenceBindings } from '../analysis/sequence-bindings.js';
+import { computeTaylorSeriesCoefficients } from '../math-utils.js';
 import {
     createDomainDynamicsTileRenderer,
     domainDynamicsSignature,
@@ -27,6 +30,11 @@ const SUPPORTED_FUNCTIONS = new Set([
     'sinh',
     'cosh',
     'tanh',
+    'asin',
+    'atan',
+    'gamma',
+    'loggamma',
+    'bessel',
     'power',
     'mobius',
     'zeta',
@@ -34,7 +42,6 @@ const SUPPORTED_FUNCTIONS = new Set([
     'poincare',
     'algebraic_chaining'
 ]);
-const WORKER_UNSUPPORTED_FUNCTIONS = new Set(['asin', 'atan', 'gamma', 'loggamma', 'bessel']);
 
 let nextJobId = 1;
 let activeSignature = null;
@@ -93,29 +100,89 @@ function normalizeChainMode(mode) {
     return mode === 'zero_seed' ? 'zero_seed' : 'recursion';
 }
 
+function dynamicAggregateSnapshot(runtimeState) {
+    const config = runtimeState?.dynamicPlotting;
+    const reductionKind = config?.reduction?.kind;
+    if (!config?.enabled || config.mode !== 'aggregate' ||
+        (reductionKind !== 'sum' && reductionKind !== 'product')) return null;
+
+    let source;
+    try {
+        const parameters = Object.fromEntries((config.parameters || [])
+            .map(parameter => [String(parameter?.name || ''), {
+                re: Number(parameter?.value) || 0,
+                im: 0
+            }])
+            .filter(([name]) => name));
+        source = generateDiscreteSource(clonePlainData(config.source || {}), { parameters });
+    } catch {
+        return null;
+    }
+
+    const requestedVisibleCount = Number(config.playback?.visibleCount);
+    const visibleCount = Number.isFinite(requestedVisibleCount)
+        ? Math.max(0, Math.min(source.records.length, Math.floor(requestedVisibleCount)))
+        : source.records.length;
+
+    const termExpression = String(config.term?.expression ?? 'z');
+    const bindings = synchronizeSequenceBindings(termExpression, config.term?.bindings || []);
+
+    return {
+        pointExpression: String(config.pointExpression ?? 'd'),
+        term: clonePlainData(config.term || { kind: 'expression', expression: 'z', bindings: [] }),
+        bindings: clonePlainData(bindings),
+        reductionKind,
+        invalidPolicy: config.reduction?.invalidPolicy === 'skip' ? 'skip' : 'stop',
+        parameters: Object.fromEntries((config.parameters || [])
+            .map(parameter => [String(parameter?.name || ''), {
+                re: Number(parameter?.value) || 0,
+                im: 0
+            }])
+            .filter(([name]) => name)),
+        sourceRecords: source.records.slice(0, visibleCount).map(record => ({
+            ordinal: record.ordinal,
+            domainValue: cloneComplex(record.domainValue)
+        }))
+    };
+}
+
+function taylorSnapshot(runtimeState, functionKey) {
+    if (!runtimeState?.taylorSeriesEnabled) return null;
+
+    const center = cloneComplex(runtimeState.taylorSeriesCenter, { re: 0, im: 0 });
+    const order = Math.max(0, Math.floor(Number(runtimeState.taylorSeriesOrder) || 0));
+    let coefficients = null;
+    try {
+        coefficients = computeTaylorSeriesCoefficients(functionKey, center, order);
+    } catch {
+        coefficients = null;
+    }
+
+    return {
+        center,
+        order,
+        radius: Number.isFinite(Number(runtimeState.taylorSeriesConvergenceRadius))
+            ? Number(runtimeState.taylorSeriesConvergenceRadius)
+            : Infinity,
+        coefficients: clonePlainData(coefficients)
+    };
+}
+
 export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, options = null) {
     const ranges = planeRanges(planeParams);
     if (!runtimeState || !planeParams || !ranges) return null;
 
     const functionKey = runtimeState.currentFunction;
     if (!SUPPORTED_FUNCTIONS.has(functionKey)) return null;
-    const naturalBase = value => Math.abs((value?.re ?? Math.E) - Math.E) < 1e-12 && Math.abs(value?.im || 0) < 1e-12;
-    const terms = runtimeState.algebraicChainingTerms || [];
-    const algebraicUses = predicate => terms.some(term => (term?.factors || []).some(factor =>
-        factor && factor.func !== 'none' && predicate(factor)
-    ));
-    if (functionKey === 'algebraic_chaining' && algebraicUses(factor =>
-        WORKER_UNSUPPORTED_FUNCTIONS.has(factor.func) || WORKER_UNSUPPORTED_FUNCTIONS.has(factor.chainedFunc)
-    )) return null;
-    if (!naturalBase(runtimeState.expBase) && (functionKey === 'exp' ||
-        (functionKey === 'algebraic_chaining' && algebraicUses(factor => factor.func === 'exp' || factor.chainedFunc === 'exp' || factor.exp)))) return null;
-    if (!naturalBase(runtimeState.logBase) && (functionKey === 'ln' ||
-        (functionKey === 'algebraic_chaining' && algebraicUses(factor => factor.func === 'ln' || factor.chainedFunc === 'ln' || factor.log)))) return null;
     const orbitColoringMode = normalizeOrbitColoringMode(runtimeState.orbitColoringMode);
 
     const snapshot = {
         isWPlaneColoring: !!options?.isWPlaneColoring,
+        derivativeMode: options?.mapPresentation === 'derivative',
         functionKey,
+        expBase: cloneComplex(runtimeState.expBase, { re: Math.E, im: 0 }),
+        logBase: cloneComplex(runtimeState.logBase, { re: Math.E, im: 0 }),
+        besselOrder: cloneComplex(runtimeState.besselOrder),
         chainingEnabled: !!runtimeState.chainingEnabled,
         chainMode: normalizeChainMode(runtimeState.chainingMode),
         chainCount: normalizeDomainDynamicsChainCount(runtimeState.chainCount),
@@ -133,8 +200,8 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         branchCutType: runtimeState.branchCutType === 'ray' ? 'ray' : 'draw',
         branchCutAngle: Number.isFinite(Number(runtimeState.branchCutAngle)) ? Number(runtimeState.branchCutAngle) : Math.PI,
         zetaContinuationEnabled: !!runtimeState.zetaContinuationEnabled,
-        taylorSeriesEnabled: !!runtimeState.taylorSeriesEnabled,
-        dynamicAggregateEnabled: !!runtimeState.dynamicPlotting?.enabled,
+        taylor: taylorSnapshot(runtimeState, functionKey),
+        dynamicAggregate: dynamicAggregateSnapshot(runtimeState),
         style: {
             brightness: Number(runtimeState.domainBrightness) || 1,
             contrast: Number(runtimeState.domainContrast) || 1,
@@ -150,7 +217,6 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         }
     };
 
-    if (snapshot.taylorSeriesEnabled || snapshot.dynamicAggregateEnabled) return null;
     return isDomainDynamicsSnapshot(snapshot) ? freezeDomainDynamicsSnapshot(snapshot) : null;
 }
 

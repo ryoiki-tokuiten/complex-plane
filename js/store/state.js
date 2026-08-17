@@ -352,14 +352,5 @@ export const context = {
     domainColoringDirty: true,
     domainColoringDirtyQueued: false,
 
-    controls: {},
-
-    webglDomainColorSupport: {
-        available: false,
-        reason: 'not-initialized',
-        renderers: { z: null, w: null },
-        diagnostics: { z: null, w: null },
-        warnedFunctionFallbacks: new Set(),
-        warnedRuntimeFallback: false
-    }
+    controls: {}
 };

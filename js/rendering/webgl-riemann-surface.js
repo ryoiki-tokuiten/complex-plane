@@ -5,7 +5,7 @@ import {
   GLSL_COMPLEX_MATH_LIBRARY_BASE,
   createWebGLProgramShared,
   getWebGLBackendInfoShared,
-  getWebGLDomainColorFunctionIdShared
+  getWebGLFunctionIdShared
 } from './webgl-shared.js';
 import {
   buildDynamicAggregateGLSL,
@@ -265,7 +265,7 @@ const algebraicFactorInfoUniformName = (termIndex, factorIndex) => `u_algFactorI
 function algebraicFunctionUniformId(functionName) {
   if (!functionName || functionName === 'none') return 0;
   if (functionName === 'c') return ALGEBRAIC_C_FUNCTION_ID;
-  const functionId = getWebGLDomainColorFunctionIdShared(functionName, true);
+  const functionId = getWebGLFunctionIdShared(functionName, true);
   return functionId || ALGEBRAIC_INVALID_FUNCTION_ID;
 }
 
@@ -366,7 +366,7 @@ function buildAlgebraicBranchBody(appState) {
   if (zExpr !== 'z') {
     const zCustomExprGLSL = compileCustomExpressionToGLSL(
       zExpr,
-      functionName => getWebGLDomainColorFunctionIdShared(functionName, true),
+      functionName => getWebGLFunctionIdShared(functionName, true),
       { sheet: true }
     );
     if (!zCustomExprGLSL) {
@@ -941,7 +941,7 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
 function buildRiemannSurfaceMathLibraryUncached(appState) {
   const dynamic = buildDynamicAggregateGLSL(
     appState,
-    functionName => getWebGLDomainColorFunctionIdShared(functionName, true)
+    functionName => getWebGLFunctionIdShared(functionName, true)
   );
   const dynamicSource = dynamic.source || EMPTY_DYNAMIC_AGGREGATE_GLSL;
   return `${GLSL_COMPLEX_MATH_LIBRARY_BASE}
@@ -1297,7 +1297,7 @@ function validateDynamicAggregate(appState, signature) {
 
   const dynamic = buildDynamicAggregateGLSL(
     appState,
-    functionName => getWebGLDomainColorFunctionIdShared(functionName, true)
+    functionName => getWebGLFunctionIdShared(functionName, true)
   );
   const valid = Boolean(dynamic.source && !dynamic.error);
   rememberBounded(DYNAMIC_VALIDATION_CACHE, signature, valid, DYNAMIC_VALIDATION_CACHE_LIMIT);
@@ -1687,7 +1687,7 @@ function setTaylorUniforms(renderer) {
 
 
 function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
-  const functionId = getWebGLDomainColorFunctionIdShared(appState.currentFunction);
+  const functionId = getWebGLFunctionIdShared(appState.currentFunction);
   gl.uniform4f(
     locations.uFunctionParams,
     functionId,

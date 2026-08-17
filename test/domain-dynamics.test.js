@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { applyFractalPreset } from '../js/analysis/fractal-presets.js';
 import { runtime } from '../js/store/runtime.js';
-import { state } from '../js/store/state.js';
+import { context, state } from '../js/store/state.js';
 import {
     evaluateDomainColoringMappedTransform,
     getEffectiveBaseTransformFunction,
@@ -15,6 +15,7 @@ import {
     renderPlanarDomainDynamics,
     selectDomainDynamicsBackend
 } from '../js/rendering/domain-dynamics.js';
+import { renderPlanarDomainColoring } from '../js/rendering/domain-coloring.js';
 import {
     colorDomainDynamicsPoint,
     createDomainDynamicsTileRenderer,
@@ -297,6 +298,40 @@ test('dynamics snapshots represent Mandelbrot, Newton, and generic output chains
         assert.equal(snapshot.chainMode, 'recursion');
         assert.equal(snapshot.chainCount, 7);
         assert.equal(snapshot.orbitColoringMode, 'value');
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('domain dynamics accepts single functions and derivative presentation without a GPU branch', () => {
+    const before = snapshotState();
+
+    try {
+        configureDynamics({
+            currentFunction: 'sin',
+            chainingEnabled: false,
+            chainCount: 1
+        });
+
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, {
+            isWPlaneColoring: false,
+            mapPresentation: 'function'
+        });
+        assert.ok(snapshot);
+        approxComplex(evaluateDomainDynamicsValue(snapshot, 0.5, 0.2), {
+            re: Math.sin(0.5) * Math.cosh(0.2),
+            im: Math.cos(0.5) * Math.sinh(0.2)
+        }, 1e-8);
+
+        const derivativeSnapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, {
+            isWPlaneColoring: false,
+            mapPresentation: 'derivative'
+        });
+        assert.ok(derivativeSnapshot);
+        approxComplex(evaluateDomainDynamicsValue(derivativeSnapshot, 0.5, 0.2), {
+            re: Math.cos(0.5) * Math.cosh(0.2),
+            im: -Math.sin(0.5) * Math.sinh(0.2)
+        }, 1e-6);
     } finally {
         restoreState(before);
     }
@@ -634,6 +669,32 @@ test('async renderer reaches final scale one without another redraw trigger', as
     } finally {
         cancelPlanarDomainDynamics();
         restoreGlobals();
+        restoreState(before);
+    }
+});
+
+test('domain-coloring redraws reuse an active CPU job while dirty state is being drained', () => {
+    const before = snapshotState();
+    const previousDirty = context.domainColoringDirty;
+    const targetCtx = makeTargetCtx();
+    const restoreGlobals = makeFakeCanvasEnvironment(targetCtx);
+
+    try {
+        cancelPlanarDomainDynamics();
+        configureDynamics({ currentFunction: 'sin', chainCount: 2 });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        assert.ok(snapshot);
+
+        context.domainColoringDirty = true;
+        renderPlanarDomainColoring(targetCtx, PLANE, false, null);
+        const firstJobId = selectDomainDynamicsBackend().activeJob?.id;
+
+        renderPlanarDomainColoring(targetCtx, PLANE, false, null);
+        assert.equal(selectDomainDynamicsBackend().activeJob?.id, firstJobId);
+    } finally {
+        cancelPlanarDomainDynamics();
+        restoreGlobals();
+        context.domainColoringDirty = previousDirty;
         restoreState(before);
     }
 });
