@@ -5,13 +5,125 @@
 
 #define CE_TWO_PI 6.283185307179586476925286766559
 
-int32_t ce_compute_dft(const ce_complex *input, uint32_t count, ce_complex *output) {
-    if (!input || !output || !count) return -1;
+int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, double amplitude,
+                                  double time_window, uint32_t sample_count, uint32_t random_seed,
+                                  double *times, double *values) {
+    if (!times || !values || !sample_count || time_window <= 0.0) return -1;
+    const double dt = time_window / (double)sample_count;
+    const double omega = CE_TWO_PI * frequency;
+    uint32_t lcg_state = random_seed ? random_seed : 123456789u;
+
+    for (uint32_t i = 0; i < sample_count; ++i) {
+        const double t = (double)i * dt;
+        times[i] = t;
+        double value = 0.0;
+
+        switch (signal_type) {
+            case 0: // sine
+                value = amplitude * sin(omega * t);
+                break;
+            case 1: // cosine
+                value = amplitude * cos(omega * t);
+                break;
+            case 2: { // square
+                const double s = sin(omega * t);
+                value = amplitude * (s > 0.0 ? 1.0 : (s < 0.0 ? -1.0 : 0.0));
+                break;
+            }
+            case 3: { // sawtooth
+                const double phase = fmod(omega * t / CE_TWO_PI, 1.0);
+                const double normalized = phase < 0.0 ? phase + 1.0 : phase;
+                value = amplitude * (2.0 * normalized - 1.0);
+                break;
+            }
+            case 4: { // triangle
+                const double phase = fmod(omega * t / CE_TWO_PI, 1.0);
+                const double normalized = phase < 0.0 ? phase + 1.0 : phase;
+                value = amplitude * (4.0 * fabs(normalized - 0.5) - 1.0);
+                break;
+            }
+            case 5: { // am
+                const double carrier = omega;
+                const double modulation = omega / 4.0;
+                value = amplitude * (1.0 + 0.5 * sin(modulation * t)) * sin(carrier * t);
+                break;
+            }
+            case 6: { // fm
+                const double modulation_index = 2.0;
+                const double mod_freq = omega / 5.0;
+                value = amplitude * sin(omega * t + modulation_index * sin(mod_freq * t));
+                break;
+            }
+            case 7: { // chirp
+                const double start_freq = omega;
+                const double end_freq = omega * 3.0;
+                const double instant_freq = start_freq + (end_freq - start_freq) * (t / time_window);
+                value = amplitude * sin(instant_freq * t);
+                break;
+            }
+            case 8: { // damped_sine
+                const double damping_factor = 1.5 / time_window;
+                value = amplitude * exp(-damping_factor * t) * sin(omega * t);
+                break;
+            }
+            case 9: { // exponential
+                const double decay_rate = 2.0 / time_window;
+                value = amplitude * exp(-decay_rate * t);
+                break;
+            }
+            case 10: { // gaussian
+                const double sigma = time_window / 8.0;
+                const double center = time_window / 2.0;
+                const double delta = t - center;
+                value = amplitude * exp(-(delta * delta) / (2.0 * sigma * sigma));
+                break;
+            }
+            case 11: { // pulse
+                const double pulse_start = time_window * 0.3;
+                const double pulse_end = time_window * 0.7;
+                value = (t >= pulse_start && t <= pulse_end) ? amplitude : 0.0;
+                break;
+            }
+            case 12: { // harmonics
+                value = 0.0;
+                for (int h = 1; h <= 5; ++h) {
+                    value += (amplitude / (double)h) * sin((double)h * omega * t);
+                }
+                break;
+            }
+            case 13: { // beat
+                const double freq1 = omega;
+                const double freq2 = omega * 1.1;
+                value = amplitude * 0.5 * (sin(freq1 * t) + sin(freq2 * t));
+                break;
+            }
+            case 14: { // noise
+                lcg_state = lcg_state * 1664525u + 1013904223u;
+                const double unit = (double)(lcg_state & 0x00ffffffu) / (double)0x00ffffffu;
+                value = amplitude * (2.0 * unit - 1.0);
+                break;
+            }
+            default:
+                value = amplitude * sin(omega * t);
+                break;
+        }
+        values[i] = value;
+    }
+    return 0;
+}
+
+int32_t ce_compute_fourier_spectrum(const double *values, uint32_t count,
+                                   double *frequencies, double *reals, double *imags,
+                                   double *magnitudes, double *phases) {
+    if (!values || !count || !frequencies || !reals || !imags || !magnitudes || !phases) return -1;
     uint32_t padded = 1;
     while (padded < count) padded <<= 1u;
     ce_complex *data = calloc(padded, sizeof(ce_complex));
     if (!data) return -2;
-    for (uint32_t i = 0; i < count; ++i) data[i] = input[i];
+    for (uint32_t i = 0; i < count; ++i) {
+        data[i].re = values[i];
+        data[i].im = 0.0;
+    }
     uint32_t reversed = 0;
     for (uint32_t i = 0; i + 1 < padded; ++i) {
         if (i < reversed) {
@@ -42,52 +154,58 @@ int32_t ce_compute_dft(const ce_complex *input, uint32_t count, ce_complex *outp
             }
         }
     }
-    const double inverse_count = 1.0 / count;
+    const double inverse_count = 1.0 / (double)count;
     for (uint32_t i = 0; i < count; ++i) {
-        output[i].re = data[i].re * inverse_count;
-        output[i].im = data[i].im * inverse_count;
+        const double real = data[i].re * inverse_count;
+        const double imag = data[i].im * inverse_count;
+        frequencies[i] = (double)i;
+        reals[i] = real;
+        imags[i] = imag;
+        magnitudes[i] = hypot(real, imag);
+        phases[i] = atan2(imag, real);
     }
     free(data);
     return 0;
 }
 
-int32_t ce_build_fourier_winding(const ce_complex *signal, const double *times,
+int32_t ce_build_fourier_winding(const double *times, const double *values,
                                  uint32_t count, double frequency, double progress,
-                                 ce_complex *wound, ce_complex *center) {
-    if (!signal || !times || !wound || !center || !count) return -1;
-    uint32_t visible = progress <= 0.0 ? 1 : (uint32_t)floor(progress * (count - 1)) + 1;
+                                 double time_window, ce_complex *wound,
+                                 ce_complex *center, double *max_amplitude) {
+    if (!times || !values || !wound || !center || !max_amplitude || !count) return -1;
+    const double safe_progress = progress < 0.0 ? 0.0 : (progress > 1.0 ? 1.0 : progress);
+    const double safe_window = time_window > 0.0 ? time_window : 1.0;
+    const double cutoff = safe_progress * safe_window;
+
+    double max_amp = 0.0;
+    uint32_t visible = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const double t = times[i];
+        const double val = values[i];
+        if (!isfinite(t) || !isfinite(val)) continue;
+        const double abs_val = fabs(val);
+        if (abs_val > max_amp) max_amp = abs_val;
+        if (t <= cutoff || visible == 0) {
+            visible = i + 1u;
+        }
+    }
+    if (visible == 0) visible = 1u;
     if (visible > count) visible = count;
+
     double sum_re = 0.0, sum_im = 0.0;
     for (uint32_t i = 0; i < visible; ++i) {
-        const double angle = -CE_TWO_PI * frequency * times[i];
-        const double cosine = cos(angle), sine = sin(angle);
-        wound[i].re = signal[i].re * cosine - signal[i].im * sine;
-        wound[i].im = signal[i].re * sine + signal[i].im * cosine;
+        const double t = times[i];
+        const double val = values[i];
+        const double angle = -CE_TWO_PI * frequency * t;
+        const double cosine = cos(angle);
+        const double sine = sin(angle);
+        wound[i].re = val * cosine;
+        wound[i].im = val * sine;
         sum_re += wound[i].re;
         sum_im += wound[i].im;
     }
-    center->re = sum_re / visible;
-    center->im = sum_im / visible;
+    center->re = sum_re / (double)visible;
+    center->im = sum_im / (double)visible;
+    *max_amplitude = max_amp;
     return (int32_t)visible;
-}
-
-int32_t ce_compute_laplace_samples(const ce_complex *signal, const double *times,
-                                   uint32_t count, const ce_complex *s_values,
-                                   uint32_t s_count, ce_complex *output) {
-    if (!signal || !times || !s_values || !output || count < 2) return -1;
-    for (uint32_t j = 0; j < s_count; ++j) {
-        double sum_re = 0.0, sum_im = 0.0;
-        for (uint32_t i = 0; i + 1 < count; ++i) {
-            const double dt = times[i + 1] - times[i];
-            const double angle = -s_values[j].im * times[i];
-            const double magnitude = exp(-s_values[j].re * times[i]);
-            const double weight_re = magnitude * cos(angle);
-            const double weight_im = magnitude * sin(angle);
-            sum_re += (signal[i].re * weight_re - signal[i].im * weight_im) * dt;
-            sum_im += (signal[i].re * weight_im + signal[i].im * weight_re) * dt;
-        }
-        output[j].re = sum_re;
-        output[j].im = sum_im;
-    }
-    return 0;
 }

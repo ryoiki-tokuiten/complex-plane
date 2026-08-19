@@ -1,25 +1,13 @@
 import { state } from '../store/state.js';
-import { getChainedStageTransformFunction } from '../native/map-runtime.js';
+import { evaluateNativePoints, nativeMapOptions } from '../native/complex-engine.js';
 
 export const MAP_PRESENTATION = Object.freeze({
     function: 'function',
     derivative: 'derivative'
 });
 
-const DERIVATIVE_STEP = 1e-6;
-const NESTED_DERIVATIVE_STEP_MULTIPLIER = 100;
-const INVALID = Object.freeze({ re: NaN, im: NaN });
-
-function finiteComplex(value) {
-    return !!value && Number.isFinite(value.re) && Number.isFinite(value.im);
-}
-
 function normalizeStageIndex(stageIndex) {
     return Math.max(0, Math.floor(Number.isFinite(stageIndex) ? stageIndex : 0));
-}
-
-function derivativeStep(re, im, multiplier = 1) {
-    return DERIVATIVE_STEP * multiplier * Math.max(1, Math.abs(re), Math.abs(im));
 }
 
 function sourceSignature() {
@@ -45,36 +33,39 @@ export function getFinalMapStageIndex(runtimeState = state) {
     return normalizeStageIndex((runtimeState.chainCount || 1) - 1);
 }
 
-export function createDerivativeTransform(transform, stepMultiplier = 1) {
-    return (re, im) => {
-        if (typeof transform !== 'function' || !Number.isFinite(re) || !Number.isFinite(im)) {
-            return INVALID;
+function createNativeEvaluator(stage, derivativeOrder) {
+    const options = nativeMapOptions(state, {
+        stage,
+        derivativeOrder,
+        derivativeMode: derivativeOrder > 0
+    });
+    const evaluator = (re, im) => {
+        if (!Number.isFinite(re) || !Number.isFinite(im)) {
+            return { re: NaN, im: NaN };
         }
-
-        const h = derivativeStep(re, im, stepMultiplier);
-        const right = transform(re + h, im);
-        const left = transform(re - h, im);
-
-        if (!finiteComplex(right) || !finiteComplex(left)) return INVALID;
-
-        return {
-            re: (right.re - left.re) / (2 * h),
-            im: (right.im - left.im) / (2 * h)
-        };
+        try {
+            const result = evaluateNativePoints(options, [{ re, im }]);
+            return result.valid[0] ? result.values[0] : { re: NaN, im: NaN };
+        } catch {
+            return { re: NaN, im: NaN };
+        }
     };
+    Object.defineProperty(evaluator, 'nativeMapOptions', { value: options });
+    return evaluator;
 }
 
 export function resolveActiveMap(stageIndex = getFinalMapStageIndex()) {
     const stage = normalizeStageIndex(stageIndex);
-    const baseMap = getChainedStageTransformFunction(state.currentFunction, stage);
-    const baseDerivative = createDerivativeTransform(baseMap);
     const presentation = state.mapPresentation === MAP_PRESENTATION.derivative
         ? MAP_PRESENTATION.derivative
         : MAP_PRESENTATION.function;
+
+    const baseMap = createNativeEvaluator(stage, 0);
+    const baseDerivative = createNativeEvaluator(stage, 1);
+    const secondDerivative = createNativeEvaluator(stage, 2);
+
     const evaluate = presentation === MAP_PRESENTATION.derivative ? baseDerivative : baseMap;
-    const derivative = presentation === MAP_PRESENTATION.derivative
-        ? createDerivativeTransform(baseDerivative, NESTED_DERIVATIVE_STEP_MULTIPLIER)
-        : baseDerivative;
+    const derivative = presentation === MAP_PRESENTATION.derivative ? secondDerivative : baseDerivative;
 
     return Object.freeze({
         stage,
@@ -84,3 +75,4 @@ export function resolveActiveMap(stageIndex = getFinalMapStageIndex()) {
         signature: `${presentation}:${stage}:${sourceSignature()}`
     });
 }
+

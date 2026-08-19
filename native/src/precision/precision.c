@@ -1137,7 +1137,7 @@ static int ce_write_decimal(char *output, uint32_t capacity, const mpfr_t value,
 }
 
 int32_t ce_precise_pixel_coordinate(const char *center_re, const char *center_im,
-                                    int32_t zoom_power, uint32_t precision_bits,
+                                    double zoom_power, uint32_t precision_bits,
                                     uint32_t frame_width, uint32_t frame_height,
                                     double pixel_x, double pixel_y,
                                     char *output_re, uint32_t output_re_capacity,
@@ -1156,9 +1156,10 @@ int32_t ce_precise_pixel_coordinate(const char *center_re, const char *center_im
         goto done;
     }
 
+    mpfr_set_d(scratch, -zoom_power, MPFR_RNDN);
     mpfr_set_ui(scale, 10u, MPFR_RNDN);
-    mpfr_pow_si(scale, scale, -(long)zoom_power, MPFR_RNDN);
-    mpfr_mul_ui(x_span, scale, 7u, MPFR_RNDN);
+    mpfr_pow(scale, scale, scratch, MPFR_RNDN);
+    mpfr_mul_d(x_span, scale, 7.0, MPFR_RNDN);
     mpfr_mul_ui(y_span, x_span, frame_height, MPFR_RNDN);
     mpfr_div_ui(y_span, y_span, frame_width, MPFR_RNDN);
 
@@ -1198,14 +1199,15 @@ static void pc_viewport_clear(ce_precise_viewport *viewport) {
 
 static int pc_viewport_set(ce_precise_viewport *viewport,
                            const char *center_re, const char *center_im,
-                           int32_t zoom_power, uint32_t width, uint32_t height) {
+                           double zoom_power, uint32_t width, uint32_t height) {
     if (!width || !height || !ce_set_decimal(viewport->center_re, center_re) ||
         !ce_set_decimal(viewport->center_im, center_im)) return 0;
     viewport->width = width;
     viewport->height = height;
-    mpfr_set_ui(viewport->x_span, 10u, MPFR_RNDN);
-    mpfr_pow_si(viewport->x_span, viewport->x_span, -(long)zoom_power, MPFR_RNDN);
-    mpfr_mul_ui(viewport->x_span, viewport->x_span, 7u, MPFR_RNDN);
+    mpfr_set_d(viewport->x_span, -zoom_power, MPFR_RNDN);
+    mpfr_set_ui(viewport->y_span, 10u, MPFR_RNDN);
+    mpfr_pow(viewport->x_span, viewport->y_span, viewport->x_span, MPFR_RNDN);
+    mpfr_mul_d(viewport->x_span, viewport->x_span, 7.0, MPFR_RNDN);
     mpfr_mul_ui(viewport->y_span, viewport->x_span, height, MPFR_RNDN);
     mpfr_div_ui(viewport->y_span, viewport->y_span, width, MPFR_RNDN);
     return 1;
@@ -1243,7 +1245,7 @@ void *ce_precision_image_context_create(const ce_map_config *config,
                                         double source_center_re, double source_center_im,
                                         double source_width, double source_height,
                                         const char *view_center_re, const char *view_center_im,
-                                        int32_t zoom_power, uint32_t precision_bits,
+                                        double zoom_power, uint32_t precision_bits,
                                         uint32_t view_width, uint32_t view_height) {
     if (!config || !(source_width > 0.0) || !(source_height > 0.0)) return NULL;
     ce_precision_image_context *context = malloc(sizeof(*context));
@@ -1302,12 +1304,12 @@ void ce_precision_image_context_destroy(void *opaque) {
 
 int32_t ce_project_precise_pixels(const ce_map_config *config,
                                   const char *input_center_re, const char *input_center_im,
-                                  int32_t input_zoom_power, uint32_t precision_bits,
+                                  double input_zoom_power, uint32_t precision_bits,
                                   uint32_t input_width, uint32_t input_height,
                                   const float *input_pixels, uint32_t point_count,
                                   uint32_t map_points,
                                   const char *output_center_re, const char *output_center_im,
-                                  int32_t output_zoom_power,
+                                  double output_zoom_power,
                                   uint32_t output_width, uint32_t output_height,
                                   float *output_pixels, uint8_t *valid) {
     if (!input_pixels || !output_pixels || !valid || (map_points && !config)) return -1;
@@ -1346,7 +1348,7 @@ int32_t ce_project_precise_pixels(const ce_map_config *config,
 int32_t ce_project_precise_pixels_to_canvas(const ce_map_config *config,
                                             const char *input_center_re,
                                             const char *input_center_im,
-                                            int32_t input_zoom_power,
+                                            double input_zoom_power,
                                             uint32_t precision_bits,
                                             uint32_t input_width, uint32_t input_height,
                                             const float *input_pixels, uint32_t point_count,
@@ -1395,7 +1397,7 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
                                      const ce_complex *source_points, uint32_t point_count,
                                      uint32_t map_points,
                                      const char *output_center_re, const char *output_center_im,
-                                     int32_t output_zoom_power, uint32_t precision_bits,
+                                     double output_zoom_power, uint32_t precision_bits,
                                      uint32_t output_width, uint32_t output_height,
                                      float *output_pixels, uint8_t *valid) {
     if (!source_points || !output_pixels || !valid || (map_points && !config)) return -1;
@@ -1427,55 +1429,20 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
     return 0;
 }
 
-static int pc_is_quadratic_mandelbrot(const ce_map_config *config) {
-    if (!config || config->function_id != CE_FN_ALGEBRAIC || !config->zero_seed ||
-        config->derivative || config->function.expression_count ||
-        config->function.algebraic_term_count != 2u ||
-        config->function.polynomial_count != 3u) return 0;
-    const ce_complex *polynomial = config->function.polynomial;
-    if (!polynomial || polynomial[0].re != 0.0 || polynomial[0].im != 0.0 ||
-        polynomial[1].re != 0.0 || polynomial[1].im != 0.0 ||
-        polynomial[2].re != 1.0 || polynomial[2].im != 0.0) return 0;
-    int polynomial_term = 0, parameter_term = 0;
-    for (uint32_t term_index = 0; term_index < 2u; ++term_index) {
-        const ce_algebraic_term *term = &config->function.algebraic_terms[term_index];
-        if (term->coefficient.re != 1.0 || term->coefficient.im != 0.0 || term->factor_count != 1u ||
-            term->factor_offset >= config->function.algebraic_factor_count) return 0;
-        const ce_algebraic_factor *factor = &config->function.algebraic_factors[term->factor_offset];
-        if (factor->flags || factor->step_count || factor->chained_function_id >= 0 || factor->power != 1.0) return 0;
-        if (factor->function_id == CE_FN_POLYNOMIAL) polynomial_term += 1;
-        else if (factor->function_id == CE_FN_C) parameter_term += 1;
-        else return 0;
-    }
-    return polynomial_term == 1 && parameter_term == 1;
-}
-
-static void pc_square_add(ce_precise_complex *output, const ce_precise_complex *value,
-                          const ce_precise_complex *addend) {
-    const mpfr_prec_t precision = mpfr_get_prec(output->re);
-    mpfr_t real, imaginary, scratch;
-    mpfr_inits2(precision, real, imaginary, scratch, (mpfr_ptr)0);
-    mpfr_sqr(real, value->re, MPFR_RNDN);
-    mpfr_sqr(scratch, value->im, MPFR_RNDN);
-    mpfr_sub(real, real, scratch, MPFR_RNDN);
-    mpfr_add(real, real, addend->re, MPFR_RNDN);
-    mpfr_mul(imaginary, value->re, value->im, MPFR_RNDN);
-    mpfr_mul_ui(imaginary, imaginary, 2u, MPFR_RNDN);
-    mpfr_add(imaginary, imaginary, addend->im, MPFR_RNDN);
-    mpfr_set(output->re, real, MPFR_RNDN);
-    mpfr_set(output->im, imaginary, MPFR_RNDN);
-    mpfr_clears(real, imaginary, scratch, (mpfr_ptr)0);
-}
-
-static ce_precise_complex *pc_build_mandelbrot_reference(const ce_precise_complex *parameter,
-                                                          uint32_t count,
-                                                          mpfr_prec_t precision) {
+static ce_precise_complex *pc_build_generalized_reference(const ce_map_config *config,
+                                                           const ce_precise_complex *parameter,
+                                                           uint32_t count,
+                                                           mpfr_prec_t precision) {
     ce_precise_complex *orbit = malloc((size_t)(count + 1u) * sizeof(*orbit));
     if (!orbit) return NULL;
     for (uint32_t index = 0; index <= count; ++index) pc_init(&orbit[index], precision);
-    pc_set_d(&orbit[0], 0.0, 0.0);
+    if (config->zero_seed) pc_set_d(&orbit[0], 0.0, 0.0);
+    else pc_set(&orbit[0], parameter);
+
     for (uint32_t index = 0; index < count; ++index) {
-        pc_square_add(&orbit[index + 1u], &orbit[index], parameter);
+        if (!pc_eval_step(&orbit[index + 1u], config, &orbit[index], parameter)) {
+            pc_set(&orbit[index + 1u], &orbit[index]);
+        }
     }
     return orbit;
 }
@@ -1502,13 +1469,7 @@ static ce_precise_trace pc_direct_trace(const ce_map_config *config,
     else pc_set(&current, point);
     ce_precise_trace trace = pc_empty_trace(count);
     for (uint32_t iteration = 0; iteration < count; ++iteration) {
-        int valid;
-        if (pc_is_quadratic_mandelbrot(config)) {
-            pc_square_add(&next, &current, point);
-            valid = pc_finite(&next);
-        } else {
-            valid = pc_eval_step(&next, config, &current, point);
-        }
+        const int valid = pc_eval_step(&next, config, &current, point);
         if (!valid || pc_bailout(&next)) {
             trace.event = 1u;
             trace.iteration = iteration + 1u;
@@ -1548,12 +1509,12 @@ static ce_precise_trace pc_direct_trace(const ce_map_config *config,
     return trace;
 }
 
-static int pc_perturb_mandelbrot_trace(const ce_map_config *config,
-                                       const ce_precise_complex *point,
-                                       const ce_precise_complex *reference_point,
-                                       const ce_precise_complex *reference_orbit,
-                                       int detect_convergence,
-                                       ce_precise_trace *trace) {
+static int pc_perturb_generalized_trace(const ce_map_config *config,
+                                        const ce_precise_complex *point,
+                                        const ce_precise_complex *reference_point,
+                                        const ce_precise_complex *reference_orbit,
+                                        int detect_convergence,
+                                        ce_precise_trace *trace) {
     const uint32_t count = config->chain_count ? config->chain_count : 1u;
     const mpfr_prec_t precision = mpfr_get_prec(point->re);
     mpfr_t difference;
@@ -1566,31 +1527,51 @@ static int pc_perturb_mandelbrot_trace(const ce_map_config *config,
     if (!isfinite(dc_re) || !isfinite(dc_im)) return 0;
 
     *trace = pc_empty_trace(count);
-    double delta_re = 0.0, delta_im = 0.0;
+    double delta_re = config->zero_seed ? 0.0 : dc_re;
+    double delta_im = config->zero_seed ? 0.0 : dc_im;
     double previous_re = 0.0, previous_im = 0.0;
-    double error = 0.0;
+    const ce_complex c_pt = { mpfr_get_d(point->re, MPFR_RNDN), mpfr_get_d(point->im, MPFR_RNDN) };
+
     for (uint32_t iteration = 0; iteration < count; ++iteration) {
         const double reference_re = mpfr_get_d(reference_orbit[iteration].re, MPFR_RNDN);
         const double reference_im = mpfr_get_d(reference_orbit[iteration].im, MPFR_RNDN);
         const double next_reference_re = mpfr_get_d(reference_orbit[iteration + 1u].re, MPFR_RNDN);
         const double next_reference_im = mpfr_get_d(reference_orbit[iteration + 1u].im, MPFR_RNDN);
-        const double next_delta_re = 2.0 * (reference_re * delta_re - reference_im * delta_im) +
-            delta_re * delta_re - delta_im * delta_im + dc_re;
-        const double next_delta_im = 2.0 * (reference_re * delta_im + reference_im * delta_re) +
-            2.0 * delta_re * delta_im + dc_im;
-        const double actual_re = next_reference_re + next_delta_re;
-        const double actual_im = next_reference_im + next_delta_im;
-        const double reference_size = next_reference_re * next_reference_re + next_reference_im * next_reference_im;
-        const double delta_size = next_delta_re * next_delta_re + next_delta_im * next_delta_im;
-        const double actual_size = actual_re * actual_re + actual_im * actual_im;
-        error = (2.0 * hypot(reference_re, reference_im) + 2.0 * hypot(delta_re, delta_im)) * error +
-            8.0 * 2.220446049250313e-16 * fmax(1.0, hypot(actual_re, actual_im));
-        if (!isfinite(actual_re) || !isfinite(actual_im) ||
-            (delta_size > 1e-300 && actual_size < reference_size * 1e-12) ||
-            error > fmax(1e-290, hypot(actual_re, actual_im) * 1e-9)) return 0;
+
+        double next_delta_re, next_delta_im;
+        const double delta_mag_sq = delta_re * delta_re + delta_im * delta_im;
+        if (delta_mag_sq < 0.01) {
+            const ce_complex z_ref = { reference_re, reference_im };
+            const double h = 1e-7 * fmax(1.0, hypot(reference_re, reference_im));
+            ce_complex f_0 = ce_domain_step(config, z_ref, c_pt);
+            ce_complex f_zp = ce_domain_step(config, (ce_complex){z_ref.re + h, z_ref.im}, c_pt);
+            ce_complex f_zm = ce_domain_step(config, (ce_complex){z_ref.re - h, z_ref.im}, c_pt);
+            ce_complex f_cp = ce_domain_step(config, z_ref, (ce_complex){c_pt.re + h, c_pt.im});
+            ce_complex A = { (f_zp.re - f_zm.re) * 0.5 / h, (f_zp.im - f_zm.im) * 0.5 / h };
+            ce_complex B = { (f_cp.re - f_0.re) / h, (f_cp.im - f_0.im) / h };
+            ce_complex C = { (f_zp.re - 2.0 * f_0.re + f_zm.re) * 0.5 / (h * h),
+                             (f_zp.im - 2.0 * f_0.im + f_zm.im) * 0.5 / (h * h) };
+
+            next_delta_re = A.re * delta_re - A.im * delta_im + B.re * dc_re - B.im * dc_im +
+                            C.re * (delta_re * delta_re - delta_im * delta_im) - C.im * (2.0 * delta_re * delta_im);
+            next_delta_im = A.re * delta_im + A.im * delta_re + B.re * dc_im + B.im * dc_re +
+                            C.re * (2.0 * delta_re * delta_im) + C.im * (delta_re * delta_re - delta_im * delta_im);
+        } else {
+            const ce_complex z_actual = { reference_re + delta_re, reference_im + delta_im };
+            ce_complex next_z = ce_domain_step(config, z_actual, c_pt);
+            next_delta_re = next_z.re - next_reference_re;
+            next_delta_im = next_z.im - next_reference_im;
+        }
+
+        delta_re = next_delta_re;
+        delta_im = next_delta_im;
+
+        const double actual_re = next_reference_re + delta_re;
+        const double actual_im = next_reference_im + delta_im;
+        if (!isfinite(actual_re) || !isfinite(actual_im)) return 0;
 
         const ce_complex value = { actual_re, actual_im };
-        if (ce_domain_bailout(value)) {
+        if (ce_domain_bailout(value) || !ce_domain_valid(value)) {
             trace->event = 1u;
             trace->iteration = iteration + 1u;
             trace->smooth_iteration = ce_domain_smooth_iteration(iteration, count, value);
@@ -1602,7 +1583,7 @@ static int pc_perturb_mandelbrot_trace(const ce_map_config *config,
             const double change_re = actual_re - previous_re;
             const double change_im = actual_im - previous_im;
             if (change_re * change_re + change_im * change_im <=
-                CE_ATTRACTOR_EPSILON_SQ * fmax(1.0, actual_size)) {
+                CE_ATTRACTOR_EPSILON_SQ * fmax(1.0, actual_re * actual_re + actual_im * actual_im)) {
                 trace->event = 2u;
                 trace->iteration = iteration + 1u;
                 trace->smooth_iteration = iteration + 1.0;
@@ -1612,7 +1593,6 @@ static int pc_perturb_mandelbrot_trace(const ce_map_config *config,
             }
         }
         previous_re = actual_re; previous_im = actual_im;
-        delta_re = next_delta_re; delta_im = next_delta_im;
         trace->value = value; trace->has_value = 1u;
     }
     return 1;
@@ -1690,17 +1670,17 @@ static void pc_sample(const ce_precise_render_context *context,
     ce_precise_trace trace;
     int complete = 0;
     if (context->primary_orbit) {
-        complete = pc_perturb_mandelbrot_trace(context->config, point,
-                                               context->primary_point,
-                                               context->primary_orbit,
-                                               context->orbit_mode >= 2u, &trace);
+        complete = pc_perturb_generalized_trace(context->config, point,
+                                                context->primary_point,
+                                                context->primary_orbit,
+                                                context->orbit_mode >= 2u, &trace);
         if (!complete && context->max_repair_passes) {
             const uint32_t count = context->config->chain_count ? context->config->chain_count : 1u;
-            ce_precise_complex *repair_orbit = pc_build_mandelbrot_reference(point, count, context->precision);
+            ce_precise_complex *repair_orbit = pc_build_generalized_reference(context->config, point, count, context->precision);
             if (repair_orbit) {
                 *context->repair_count += 1u;
-                complete = pc_perturb_mandelbrot_trace(context->config, point, point, repair_orbit,
-                                                       context->orbit_mode >= 2u, &trace);
+                complete = pc_perturb_generalized_trace(context->config, point, point, repair_orbit,
+                                                        context->orbit_mode >= 2u, &trace);
                 pc_free_reference(repair_orbit, count);
             }
         }
@@ -1718,7 +1698,7 @@ static void pc_sample(const ce_precise_render_context *context,
 
 int32_t ce_render_domain_tile_precise(const ce_map_config *config,
                                       const char *center_re, const char *center_im,
-                                      int32_t zoom_power, uint32_t precision_bits,
+                                      double zoom_power, uint32_t precision_bits,
                                       uint32_t frame_width, uint32_t frame_height,
                                       uint32_t tile_x, uint32_t tile_y,
                                       uint32_t tile_width, uint32_t tile_height, uint32_t scale,
@@ -1742,23 +1722,34 @@ int32_t ce_render_domain_tile_precise(const ce_map_config *config,
         mpfr_clears(x_span, y_span, scale_value, scratch, (mpfr_ptr)0);
         return -2;
     }
+    mpfr_set_d(scratch, -zoom_power, MPFR_RNDN);
     mpfr_set_ui(scale_value, 10u, MPFR_RNDN);
-    mpfr_pow_si(scale_value, scale_value, -(long)zoom_power, MPFR_RNDN);
-    mpfr_mul_ui(x_span, scale_value, 7u, MPFR_RNDN);
+    mpfr_pow(scale_value, scale_value, scratch, MPFR_RNDN);
+    mpfr_mul_d(x_span, scale_value, 7.0, MPFR_RNDN);
     mpfr_mul_ui(y_span, x_span, frame_height, MPFR_RNDN);
     mpfr_div_ui(y_span, y_span, frame_width, MPFR_RNDN);
     *repair_count = 0u;
     *direct_count = 0u;
 
     const uint32_t count = config->chain_count ? config->chain_count : 1u;
-    ce_precise_complex *primary_orbit = pc_is_quadratic_mandelbrot(config)
-        ? pc_build_mandelbrot_reference(&center, count, precision)
-        : NULL;
-    if (pc_is_quadratic_mandelbrot(config) && !primary_orbit) {
+    ce_precise_complex *primary_orbit = pc_build_generalized_reference(config, &center, count, precision);
+
+    if (!primary_orbit) {
+        const double c_re = mpfr_get_d(center.re, MPFR_RNDN);
+        const double c_im = mpfr_get_d(center.im, MPFR_RNDN);
+        const double x_span_d = mpfr_get_d(x_span, MPFR_RNDN);
+        const double y_span_d = mpfr_get_d(y_span, MPFR_RNDN);
         pc_clear(&center); pc_clear(&point);
         mpfr_clears(x_span, y_span, scale_value, scratch, (mpfr_ptr)0);
-        return -3;
+        return ce_render_domain_tile(config, c_re - x_span_d * 0.5, c_re + x_span_d * 0.5,
+                                     c_im - y_span_d * 0.5, c_im + y_span_d * 0.5,
+                                     frame_width, frame_height, tile_x, tile_y,
+                                     tile_width, tile_height, scale, orbit_mode,
+                                     palette_rg, palette_b, palette_count,
+                                     brightness, contrast, saturation, lightness_cycles,
+                                     quality_only, rgba);
     }
+
     const ce_precise_render_context context = {
         config, &center, primary_orbit, precision, orbit_mode,
         palette_rg, palette_b, palette_count,
@@ -1766,50 +1757,92 @@ int32_t ce_render_domain_tile_precise(const ce_map_config *config,
         max_repair_passes, repair_count, direct_count
     };
 
+    // Base pass: evaluate 1 sample per pixel
     for (uint32_t y = 0; y < tile_height; ++y) {
         for (uint32_t x = 0; x < tile_width; ++x) {
-            double red = 0.0, green = 0.0, blue = 0.0;
-            uint32_t samples = 1u;
-            if (quality_only) {
-                ce_pixel_coordinate(point.re, center.re, x_span, frame_width,
-                                    (tile_x + x + 0.5) * scale - 0.5, 0, scratch);
-                ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
-                                    (tile_y + y + 0.5) * scale - 0.5, 1, scratch);
-                double center_red, center_green, center_blue;
-                pc_sample(&context, &point, &center_red, &center_green, &center_blue);
-                ce_pixel_coordinate(point.re, center.re, x_span, frame_width,
-                                    (tile_x + x + 0.875) * scale - 0.5, 0, scratch);
-                ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
-                                    (tile_y + y + 0.875) * scale - 0.5, 1, scratch);
-                double diagonal_red, diagonal_green, diagonal_blue;
-                pc_sample(&context, &point, &diagonal_red, &diagonal_green, &diagonal_blue);
-                const double difference = fabs(center_red - diagonal_red) +
-                    fabs(center_green - diagonal_green) + fabs(center_blue - diagonal_blue);
-                if (difference <= 0.06) {
-                    red = center_red; green = center_green; blue = center_blue; samples = 0u;
-                } else {
-                    samples = 2u;
-                }
-            }
-            for (uint32_t sy = 0; sy < samples; ++sy) {
-                for (uint32_t sx = 0; sx < samples; ++sx) {
-                    const double sub_x = (sx + 0.5) / samples;
-                    const double sub_y = (sy + 0.5) / samples;
-                    ce_pixel_coordinate(point.re, center.re, x_span, frame_width,
-                                        (tile_x + x + sub_x) * scale - 0.5, 0, scratch);
-                    ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
-                                        (tile_y + y + sub_y) * scale - 0.5, 1, scratch);
-                    double sample_red, sample_green, sample_blue;
-                    pc_sample(&context, &point, &sample_red, &sample_green, &sample_blue);
-                    red += sample_red; green += sample_green; blue += sample_blue;
-                }
-            }
+            ce_pixel_coordinate(point.re, center.re, x_span, frame_width,
+                                (tile_x + x + 0.5) * scale - 0.5, 0, scratch);
+            ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
+                                (tile_y + y + 0.5) * scale - 0.5, 1, scratch);
+            double sample_red, sample_green, sample_blue;
+            pc_sample(&context, &point, &sample_red, &sample_green, &sample_blue);
             const uint32_t output_index = (y * tile_width + x) * 4u;
-            const double inverse_samples = samples ? 1.0 / (samples * samples) : 1.0;
-            rgba[output_index] = ce_domain_byte(red * inverse_samples);
-            rgba[output_index + 1u] = ce_domain_byte(green * inverse_samples);
-            rgba[output_index + 2u] = ce_domain_byte(blue * inverse_samples);
+            rgba[output_index] = ce_domain_byte(sample_red);
+            rgba[output_index + 1u] = ce_domain_byte(sample_green);
+            rgba[output_index + 2u] = ce_domain_byte(sample_blue);
             rgba[output_index + 3u] = 255u;
+        }
+    }
+
+    // Quality refinement: adaptive 4-neighbor edge detection and 4x4 (16-sample) subpixel anti-aliasing
+    if (quality_only && scale == 1 && tile_width <= 512 && tile_height <= 512) {
+        uint8_t *edge_mask = (uint8_t *)calloc(tile_width * tile_height, sizeof(uint8_t));
+        if (edge_mask) {
+            const int threshold = 80;
+            int edge_count = 0;
+
+            for (uint32_t y = 0; y < tile_height; ++y) {
+                const uint32_t row = y * tile_width;
+                for (uint32_t x = 0; x < tile_width - 1; ++x) {
+                    const uint32_t idx1 = (row + x) * 4u;
+                    const uint32_t idx2 = (row + x + 1) * 4u;
+                    const int dr = abs((int)rgba[idx1] - (int)rgba[idx2]);
+                    const int dg = abs((int)rgba[idx1 + 1] - (int)rgba[idx2 + 1]);
+                    const int db = abs((int)rgba[idx1 + 2] - (int)rgba[idx2 + 2]);
+                    if (dr >= threshold || dg >= threshold || db >= threshold) {
+                        if (!edge_mask[row + x]) { edge_mask[row + x] = 1; edge_count++; }
+                        if (!edge_mask[row + x + 1]) { edge_mask[row + x + 1] = 1; edge_count++; }
+                    }
+                }
+            }
+
+            for (uint32_t y = 0; y < tile_height - 1; ++y) {
+                const uint32_t row1 = y * tile_width;
+                const uint32_t row2 = (y + 1) * tile_width;
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const uint32_t idx1 = (row1 + x) * 4u;
+                    const uint32_t idx2 = (row2 + x) * 4u;
+                    const int dr = abs((int)rgba[idx1] - (int)rgba[idx2]);
+                    const int dg = abs((int)rgba[idx1 + 1] - (int)rgba[idx2 + 1]);
+                    const int db = abs((int)rgba[idx1 + 2] - (int)rgba[idx2 + 2]);
+                    if (dr >= threshold || dg >= threshold || db >= threshold) {
+                        if (!edge_mask[row1 + x]) { edge_mask[row1 + x] = 1; edge_count++; }
+                        if (!edge_mask[row2 + x]) { edge_mask[row2 + x] = 1; edge_count++; }
+                    }
+                }
+            }
+
+            if (edge_count > 0) {
+                static const double offsets[4] = { -0.375, -0.125, 0.125, 0.375 };
+                for (uint32_t y = 0; y < tile_height; ++y) {
+                    const uint32_t row = y * tile_width;
+                    for (uint32_t x = 0; x < tile_width; ++x) {
+                        if (!edge_mask[row + x]) continue;
+                        double sum_red = 0.0, sum_green = 0.0, sum_blue = 0.0;
+                        for (int sy = 0; sy < 4; ++sy) {
+                            const double sub_y = y + 0.5 + offsets[sy];
+                            for (int sx = 0; sx < 4; ++sx) {
+                                const double sub_x = x + 0.5 + offsets[sx];
+                                ce_pixel_coordinate(point.re, center.re, x_span, frame_width,
+                                                    (tile_x + sub_x) * scale - 0.5, 0, scratch);
+                                ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
+                                                    (tile_y + sub_y) * scale - 0.5, 1, scratch);
+                                double sub_r, sub_g, sub_b;
+                                pc_sample(&context, &point, &sub_r, &sub_g, &sub_b);
+                                sum_red += sub_r;
+                                sum_green += sub_g;
+                                sum_blue += sub_b;
+                            }
+                        }
+                        const uint32_t output_index = (row + x) * 4u;
+                        rgba[output_index] = ce_domain_byte(sum_red * (1.0 / 16.0));
+                        rgba[output_index + 1u] = ce_domain_byte(sum_green * (1.0 / 16.0));
+                        rgba[output_index + 2u] = ce_domain_byte(sum_blue * (1.0 / 16.0));
+                        rgba[output_index + 3u] = 255u;
+                    }
+                }
+            }
+            free(edge_mask);
         }
     }
     pc_free_reference(primary_orbit, count);

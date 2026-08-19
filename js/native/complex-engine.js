@@ -7,7 +7,7 @@ async function loadBytes() {
         const { readFile } = await import('node:fs/promises');
         return readFile(wasmUrl);
     }
-    const response = await fetch(wasmUrl);
+    const response = await fetch(wasmUrl, { cache: 'no-cache' });
     if (!response.ok) throw new Error(`Native complex engine failed to load: HTTP ${response.status}`);
     return response.arrayBuffer();
 }
@@ -1625,61 +1625,168 @@ export function estimateNativeResidue(map, pole, radius, samples) {
     }
 }
 
-export function renderNativeDomainTile(snapshot, tile) {
+export function generateNativeContourPoints(type, params, stepCount) {
+    const count = Math.max(1, Math.floor(stepCount));
+    const typeId = type === 'circle' ? 1 : (type === 'ellipse' ? 2 : 0);
+    if (!typeId) return [];
+    const paramA = typeId === 1 ? Number(params.r) : Number(params.a);
+    const paramB = typeId === 1 ? 0 : Number(params.b);
     const allocations = [];
     try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-        writeMapConfig(configPointer, snapshot, allocations);
-        const palette = Array.isArray(snapshot.paletteStops) && snapshot.paletteStops.length >= 2
-            ? snapshot.paletteStops
-            : [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0]];
-        const paletteRgPointer = alloc(palette.length * 16); allocations.push(paletteRgPointer);
-        const paletteBPointer = alloc(palette.length * 8); allocations.push(paletteBPointer);
-        const paletteView = memoryView();
-        palette.forEach((stop, index) => {
-            paletteView.setFloat64(paletteRgPointer + index * 16, Number(stop?.[0]) || 0, true);
-            paletteView.setFloat64(paletteRgPointer + index * 16 + 8, Number(stop?.[1]) || 0, true);
-            paletteView.setFloat64(paletteBPointer + index * 8, Number(stop?.[2]) || 0, true);
-        });
-        const outputLength = tile.width * tile.height * 4;
-        const outputPointer = alloc(outputLength); allocations.push(outputPointer);
-        const viewport = snapshot.viewport;
-        const orbitMode = ({ value: 0, escape: 1, attractor: 2, hybrid: 3 })[snapshot.orbitColoringMode] ?? 0;
-        const style = snapshot.style || {};
-        const precise = typeof viewport.centerRe === 'string' && typeof viewport.centerIm === 'string' &&
-            Number.isInteger(viewport.zoomPower) && Number.isInteger(viewport.precisionBits);
-        let status;
-        if (precise) {
-            const centerRePointer = writeCString(viewport.centerRe, allocations);
-            const centerImPointer = writeCString(viewport.centerIm, allocations);
-            const repairPointer = alloc(4); allocations.push(repairPointer);
-            const directPointer = alloc(4); allocations.push(directPointer);
-            status = wasm.ce_render_domain_tile_precise(
-                configPointer, centerRePointer, centerImPointer,
-                viewport.zoomPower, viewport.precisionBits,
-                viewport.width, viewport.height,
-                tile.x, tile.y, tile.width, tile.height, tile.scale,
-                orbitMode, paletteRgPointer, paletteBPointer, palette.length,
-                Number(style.brightness) || 1, Number(style.contrast) || 1,
-                Number(style.saturation) || 1, Number(style.lightnessCycles) || 0,
-                tile.qualityOnly ? 1 : 0, 2, repairPointer, directPointer, outputPointer
-            );
-        } else {
-            status = wasm.ce_render_domain_tile(
-                configPointer,
-                viewport.xRange[0], viewport.xRange[1], viewport.yRange[0], viewport.yRange[1],
-                viewport.width, viewport.height,
-                tile.x, tile.y, tile.width, tile.height, tile.scale,
-                orbitMode, paletteRgPointer, paletteBPointer, palette.length,
-                Number(style.brightness) || 1, Number(style.contrast) || 1,
-                Number(style.saturation) || 1, Number(style.lightnessCycles) || 0,
-                tile.qualityOnly ? 1 : 0, outputPointer
-            );
-        }
-        if (status !== 0) throw new Error(`Native domain tile failed with status ${status}.`);
-        return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
+        const outputPointer = alloc((count + 1) * 16); allocations.push(outputPointer);
+        const total = wasm.ce_generate_contour_points(
+            typeId, Number(params.cx) || 0, Number(params.cy) || 0, paramA, paramB, count, outputPointer
+        );
+        if (total < 0) return [];
+        const view = memoryView();
+        return Array.from({ length: total }, (_, index) => ({
+            re: view.getFloat64(outputPointer + index * 16, true),
+            im: view.getFloat64(outputPointer + index * 16 + 8, true)
+        }));
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    }
+}
+
+export function classifyNativeContourSingularities(contourType, params, polygonContours, epsilon, singularities) {
+    if (!Array.isArray(singularities) || !singularities.length) return [];
+    const typeId = contourType === 'circle' ? 1 : (contourType === 'ellipse' ? 2 : (contourType === 'contour' || contourType === 'contours' ? 3 : 0));
+    const cx = Number(params?.cx) || 0;
+    const cy = Number(params?.cy) || 0;
+    const paramA = typeId === 1 ? Number(params?.r) || 0 : Number(params?.a) || 0;
+    const paramB = typeId === 2 ? Number(params?.b) || 0 : 0;
+    const allocations = [];
+    try {
+        let polygonPointsPointer = 0;
+        let polygonOffsetsPointer = 0;
+        let polygonCount = 0;
+        if (typeId === 3 && Array.isArray(polygonContours) && polygonContours.length) {
+            polygonCount = polygonContours.length;
+            const totalPoints = polygonContours.reduce((sum, points) => sum + (Array.isArray(points) ? points.length : 0), 0);
+            polygonPointsPointer = alloc(totalPoints * 16); allocations.push(polygonPointsPointer);
+            polygonOffsetsPointer = alloc((polygonCount + 1) * 4); allocations.push(polygonOffsetsPointer);
+            const view = memoryView();
+            let currentOffset = 0;
+            polygonContours.forEach((points, pIndex) => {
+                view.setUint32(polygonOffsetsPointer + pIndex * 4, currentOffset, true);
+                if (Array.isArray(points)) {
+                    points.forEach(point => {
+                        view.setFloat64(polygonPointsPointer + currentOffset * 16, Number(point?.re) || 0, true);
+                        view.setFloat64(polygonPointsPointer + currentOffset * 16 + 8, Number(point?.im) || 0, true);
+                        currentOffset += 1;
+                    });
+                }
+            });
+            view.setUint32(polygonOffsetsPointer + polygonCount * 4, currentOffset, true);
+        }
+
+        const singPointer = alloc(singularities.length * 16); allocations.push(singPointer);
+        const insidePointer = alloc(singularities.length); allocations.push(insidePointer);
+        const safePointer = alloc(singularities.length); allocations.push(safePointer);
+        const singView = memoryView();
+        singularities.forEach((sing, index) => {
+            singView.setFloat64(singPointer + index * 16, Number.isFinite(sing?.re) ? sing.re : NaN, true);
+            singView.setFloat64(singPointer + index * 16 + 8, Number.isFinite(sing?.im) ? sing.im : NaN, true);
+        });
+
+        const status = wasm.ce_classify_contour_singularities(
+            typeId, cx, cy, paramA, paramB,
+            polygonPointsPointer, polygonOffsetsPointer, polygonCount,
+            Number(epsilon) || 0, singPointer, singularities.length,
+            insidePointer, safePointer
+        );
+        if (status !== 0) throw new Error(`Native singularity classification failed with status ${status}.`);
+        const insideBuf = new Uint8Array(wasm.memory.buffer, insidePointer, singularities.length);
+        const safeBuf = new Uint8Array(wasm.memory.buffer, safePointer, singularities.length);
+        return Array.from({ length: singularities.length }, (_, index) => ({
+            inside: insideBuf[index] !== 0,
+            safeForResidue: safeBuf[index] !== 0
+        }));
+    } finally {
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    }
+}
+
+export function createCompiledDomainTileRenderer(snapshot) {
+    const allocations = [];
+    const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    writeMapConfig(configPointer, snapshot, allocations);
+    const palette = Array.isArray(snapshot.paletteStops) && snapshot.paletteStops.length >= 2
+        ? snapshot.paletteStops
+        : [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0]];
+    const paletteRgPointer = alloc(palette.length * 16); allocations.push(paletteRgPointer);
+    const paletteBPointer = alloc(palette.length * 8); allocations.push(paletteBPointer);
+    const paletteView = memoryView();
+    palette.forEach((stop, index) => {
+        paletteView.setFloat64(paletteRgPointer + index * 16, Number(stop?.[0]) || 0, true);
+        paletteView.setFloat64(paletteRgPointer + index * 16 + 8, Number(stop?.[1]) || 0, true);
+        paletteView.setFloat64(paletteBPointer + index * 8, Number(stop?.[2]) || 0, true);
+    });
+
+    const viewport = snapshot.viewport;
+    const orbitMode = ({ value: 0, escape: 1, attractor: 2, hybrid: 3 })[snapshot.orbitColoringMode] ?? 0;
+    const style = snapshot.style || {};
+    const precise = typeof viewport.centerRe === 'string' && typeof viewport.centerIm === 'string' &&
+        Number.isFinite(viewport.zoomPower) && Number.isInteger(viewport.precisionBits);
+
+    let xMin, xMax, yMin, yMax;
+    if (precise) {
+        const span = 7.0 * (10 ** -Number(viewport.zoomPower));
+        const aspect = (Number(viewport.width) || 1) / (Number(viewport.height) || 1);
+        const xSpan = aspect >= 1 ? span * aspect : span;
+        const ySpan = aspect >= 1 ? span : span / aspect;
+        const cRe = Number(viewport.centerRe) || 0;
+        const cIm = Number(viewport.centerIm) || 0;
+        xMin = cRe - xSpan * 0.5;
+        xMax = cRe + xSpan * 0.5;
+        yMin = cIm - ySpan * 0.5;
+        yMax = cIm + ySpan * 0.5;
+    } else {
+        xMin = viewport.xRange[0];
+        xMax = viewport.xRange[1];
+        yMin = viewport.yRange[0];
+        yMax = viewport.yRange[1];
+    }
+    let outputCapacity = 0;
+    let outputPointer = 0;
+
+    const render = tile => {
+        const outputLength = tile.width * tile.height * 4;
+        if (outputLength > outputCapacity) {
+            if (outputPointer) wasm.ce_free(outputPointer);
+            outputCapacity = Math.max(outputLength, 256 * 256 * 4);
+            outputPointer = alloc(outputCapacity);
+        }
+        const status = wasm.ce_render_domain_tile(
+            configPointer,
+            xMin, xMax, yMin, yMax,
+            viewport.width, viewport.height,
+            tile.x, tile.y, tile.width, tile.height, tile.scale,
+            orbitMode, paletteRgPointer, paletteBPointer, palette.length,
+            Number(style.brightness) || 1, Number(style.contrast) || 1,
+            Number(style.saturation) || 1, Number(style.lightnessCycles) || 0,
+            tile.qualityOnly ? 1 : 0, outputPointer
+        );
+        if (status !== 0) throw new Error(`Native domain tile failed with status ${status}.`);
+        const result = new Uint8ClampedArray(outputLength);
+        result.set(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
+        return result;
+    };
+
+    render.dispose = () => {
+        if (outputPointer) wasm.ce_free(outputPointer);
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    };
+
+    return render;
+}
+
+export function renderNativeDomainTile(snapshot, tile) {
+    const renderer = createCompiledDomainTileRenderer(snapshot);
+    try {
+        return renderer(tile);
+    } finally {
+        renderer.dispose();
     }
 }
 
@@ -1687,7 +1794,7 @@ export function precisePixelCoordinate(viewport, pixelX, pixelY) {
     const width = Math.max(1, Math.floor(Number(viewport?.width)));
     const height = Math.max(1, Math.floor(Number(viewport?.height)));
     const precisionBits = Math.max(128, Math.min(4096, Math.floor(Number(viewport?.precisionBits) || 512)));
-    const zoomPower = Math.trunc(Number(viewport?.zoomPower));
+    const zoomPower = Number(viewport?.zoomPower);
     if (!Number.isFinite(zoomPower) || !Number.isFinite(pixelX) || !Number.isFinite(pixelY)) {
         throw new Error('Precise pixel coordinates require finite pixel and zoom values.');
     }
@@ -1716,7 +1823,7 @@ export function precisePixelCoordinate(viewport, pixelX, pixelY) {
 function preciseViewportArguments(viewport) {
     const width = Math.max(1, Math.floor(Number(viewport?.width)));
     const height = Math.max(1, Math.floor(Number(viewport?.height)));
-    const zoomPower = Math.trunc(Number(viewport?.zoomPower));
+    const zoomPower = Number(viewport?.zoomPower);
     const precisionBits = Math.max(128, Math.min(4096, Math.floor(Number(viewport?.precisionBits) || 512)));
     if (typeof viewport?.centerRe !== 'string' || typeof viewport?.centerIm !== 'string' ||
         !Number.isFinite(zoomPower)) throw new Error('Native precise geometry requires a precise viewport.');
@@ -1812,78 +1919,142 @@ export function projectNativeValuesToPrecise(options, points) {
     }
 }
 
-export function computeNativeDft(values) {
-    if (!Array.isArray(values) || !values.length) return [];
+const FOURIER_SIGNAL_TYPES = Object.freeze({
+    sine: 0,
+    cosine: 1,
+    square: 2,
+    sawtooth: 3,
+    triangle: 4,
+    am: 5,
+    fm: 6,
+    chirp: 7,
+    damped_sine: 8,
+    exponential: 9,
+    gaussian: 10,
+    pulse: 11,
+    harmonics: 12,
+    beat: 13,
+    noise: 14
+});
+
+export function generateNativeFourierSignal(funcType, frequency, amplitude, timeWindow, sampleCount, randomSeed = 0) {
+    const samples = Math.max(1, Math.floor(sampleCount));
+    const signalType = FOURIER_SIGNAL_TYPES[funcType] ?? 0;
+    const window = Number(timeWindow) > 0 ? Number(timeWindow) : 1;
     const allocations = [];
     try {
-        const inputPointer = alloc(values.length * 16); allocations.push(inputPointer);
-        const outputPointer = alloc(values.length * 16); allocations.push(outputPointer);
-        writePointBuffer(inputPointer, values.map(value => typeof value === 'number' ? { re: value, im: 0 } : value));
-        const status = wasm.ce_compute_dft(inputPointer, values.length, outputPointer);
-        if (status !== 0) throw new Error(`Native FFT failed with status ${status}.`);
-        const view = memoryView();
-        return Array.from({ length: values.length }, (_, index) => ({
-            re: view.getFloat64(outputPointer + index * 16, true),
-            im: view.getFloat64(outputPointer + index * 16 + 8, true)
+        const timesPointer = alloc(samples * 8); allocations.push(timesPointer);
+        const valuesPointer = alloc(samples * 8); allocations.push(valuesPointer);
+        const status = wasm.ce_generate_fourier_signal(
+            signalType, Number(frequency) || 0, Number(amplitude) || 0,
+            window, samples, randomSeed || 0,
+            timesPointer, valuesPointer
+        );
+        if (status !== 0) throw new Error(`Native Fourier signal generation failed with status ${status}.`);
+        const timesBuf = new Float64Array(wasm.memory.buffer, timesPointer, samples);
+        const valuesBuf = new Float64Array(wasm.memory.buffer, valuesPointer, samples);
+        return Array.from({ length: samples }, (_, index) => ({
+            t: timesBuf[index],
+            value: valuesBuf[index]
         }));
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }
 }
 
-export function buildNativeFourierWinding(samples, frequency) {
-    if (!Array.isArray(samples) || !samples.length) return { values: [], center: { re: 0, im: 0 } };
+export function computeNativeFourierSpectrum(values) {
+    if (!Array.isArray(values) || !values.length) return [];
+    const count = values.length;
     const allocations = [];
     try {
-        const signalPointer = alloc(samples.length * 16); allocations.push(signalPointer);
-        const timePointer = alloc(samples.length * 8); allocations.push(timePointer);
-        const outputPointer = alloc(samples.length * 16); allocations.push(outputPointer);
+        const valuesPointer = alloc(count * 8); allocations.push(valuesPointer);
+        const freqPointer = alloc(count * 8); allocations.push(freqPointer);
+        const realPointer = alloc(count * 8); allocations.push(realPointer);
+        const imagPointer = alloc(count * 8); allocations.push(imagPointer);
+        const magPointer = alloc(count * 8); allocations.push(magPointer);
+        const phasePointer = alloc(count * 8); allocations.push(phasePointer);
+
+        const valBuf = new Float64Array(wasm.memory.buffer, valuesPointer, count);
+        for (let i = 0; i < count; i++) {
+            valBuf[i] = Number(values[i]) || 0;
+        }
+
+        const status = wasm.ce_compute_fourier_spectrum(
+            valuesPointer, count, freqPointer, realPointer, imagPointer, magPointer, phasePointer
+        );
+        if (status !== 0) throw new Error(`Native Fourier spectrum failed with status ${status}.`);
+
+        const freqBuf = new Float64Array(wasm.memory.buffer, freqPointer, count);
+        const realBuf = new Float64Array(wasm.memory.buffer, realPointer, count);
+        const imagBuf = new Float64Array(wasm.memory.buffer, imagPointer, count);
+        const magBuf = new Float64Array(wasm.memory.buffer, magPointer, count);
+        const phaseBuf = new Float64Array(wasm.memory.buffer, phasePointer, count);
+
+        return Array.from({ length: count }, (_, index) => ({
+            k: index,
+            frequency: freqBuf[index],
+            real: realBuf[index],
+            imag: imagBuf[index],
+            magnitude: magBuf[index],
+            phase: phaseBuf[index]
+        }));
+    } finally {
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    }
+}
+
+export function buildNativeFourierWinding(signal, frequency, progress = 1, timeWindow = 1) {
+    if (!Array.isArray(signal) || !signal.length) {
+        return {
+            points: [],
+            centerOfMass: { re: 0, im: 0 },
+            referenceRadius: 1,
+            vectorStep: 1
+        };
+    }
+    const count = signal.length;
+    const allocations = [];
+    try {
+        const timesPointer = alloc(count * 8); allocations.push(timesPointer);
+        const valuesPointer = alloc(count * 8); allocations.push(valuesPointer);
+        const woundPointer = alloc(count * 16); allocations.push(woundPointer);
         const centerPointer = alloc(16); allocations.push(centerPointer);
-        writePointBuffer(signalPointer, samples.map(sample => ({ re: sample.value, im: 0 })));
-        const timeView = memoryView();
-        samples.forEach((sample, index) => timeView.setFloat64(timePointer + index * 8, sample.t, true));
+        const maxAmpPointer = alloc(8); allocations.push(maxAmpPointer);
+
+        const timeBuf = new Float64Array(wasm.memory.buffer, timesPointer, count);
+        const valBuf = new Float64Array(wasm.memory.buffer, valuesPointer, count);
+        signal.forEach((sample, index) => {
+            timeBuf[index] = Number(sample?.t) || 0;
+            valBuf[index] = Number(sample?.value) || 0;
+        });
+
         const visible = wasm.ce_build_fourier_winding(
-            signalPointer, timePointer, samples.length, frequency, 1, outputPointer, centerPointer
+            timesPointer, valuesPointer, count, Number(frequency) || 0,
+            Number(progress) ?? 1, Number(timeWindow) || 1,
+            woundPointer, centerPointer, maxAmpPointer
         );
         if (visible < 0) throw new Error(`Native Fourier winding failed with status ${visible}.`);
-        const view = memoryView();
-        const values = Array.from({ length: visible }, (_, index) => ({
-            re: view.getFloat64(outputPointer + index * 16, true),
-            im: view.getFloat64(outputPointer + index * 16 + 8, true)
-        }));
-        return {
-            values,
-            center: {
-                re: view.getFloat64(centerPointer, true),
-                im: view.getFloat64(centerPointer + 8, true)
-            }
-        };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
 
-export function computeNativeLaplaceSamples(signal, sValues) {
-    if (!Array.isArray(signal) || signal.length < 2 || !Array.isArray(sValues) || !sValues.length) return [];
-    const allocations = [];
-    try {
-        const signalPointer = alloc(signal.length * 16); allocations.push(signalPointer);
-        const timePointer = alloc(signal.length * 8); allocations.push(timePointer);
-        const sPointer = alloc(sValues.length * 16); allocations.push(sPointer);
-        const outputPointer = alloc(sValues.length * 16); allocations.push(outputPointer);
-        writePointBuffer(signalPointer, signal.map(sample => ({ re: sample.value, im: 0 })));
-        writePointBuffer(sPointer, sValues);
         const view = memoryView();
-        signal.forEach((sample, index) => view.setFloat64(timePointer + index * 8, sample.t, true));
-        const status = wasm.ce_compute_laplace_samples(
-            signalPointer, timePointer, signal.length, sPointer, sValues.length, outputPointer
-        );
-        if (status !== 0) throw new Error(`Native Laplace job failed with status ${status}.`);
-        const resultView = memoryView();
-        return Array.from({ length: sValues.length }, (_, index) => ({
-            re: resultView.getFloat64(outputPointer + index * 16, true),
-            im: resultView.getFloat64(outputPointer + index * 16 + 8, true)
+        const maxAmplitude = view.getFloat64(maxAmpPointer, true);
+        const centerOfMass = {
+            re: view.getFloat64(centerPointer, true),
+            im: view.getFloat64(centerPointer + 8, true)
+        };
+
+        const points = Array.from({ length: visible }, (_, index) => ({
+            t: timeBuf[index],
+            value: valBuf[index],
+            re: view.getFloat64(woundPointer + index * 16, true),
+            im: view.getFloat64(woundPointer + index * 16 + 8, true)
         }));
+
+        return {
+            points,
+            centerOfMass,
+            referenceRadius: Math.max(Number.EPSILON, maxAmplitude * 1.1),
+            vectorStep: Math.max(1, Math.floor(points.length / 50))
+        };
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }

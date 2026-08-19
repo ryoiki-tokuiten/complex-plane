@@ -2,6 +2,7 @@ node_modules/
 dist/
 .cache/
 .DS_Store
+.cache/
 .env
 .env.local
 .env.*.local
@@ -10,3 +11,4 @@ Experiment
 fractal-garden-master
 playwright-report/
 test-results/
+bertbaron_mandelbrot/

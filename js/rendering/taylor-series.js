@@ -3,7 +3,7 @@ import { DEFAULT_POINTS_PER_LINE } from '../constants/numerical.js';
 import { LINE_WIDTH_NORMAL } from '../constants/rendering.js';
 import { createTaylorApproximationTransform } from '../native/map-runtime.js';
 import { generateCurrentInputShapePointSets } from './shape-generators.js';
-import { drawPointSetCollectionOnPlane, preparePointSetForMappedPlane } from './draw-planar.js';
+import { drawPointSetCollectionOnPlane } from './draw-planar.js';
 import { drawAxes } from './canvas-primitives.js';
 
 const TAYLOR_Y_AXIS_ROLES = new Set([
@@ -52,9 +52,6 @@ export function drawPlanarTaylorApproximation(
     drawPointSetCollectionOnPlane(ctx, wPlaneParamsOriginal, pointSets, {
         transformFunc: taylorApproxFunc,
         colorResolver: pointSet => getTaylorPointSetColor(pointSet, axisColorX, axisColorY),
-        lineWidthResolver: pointSet => pointSet.lineWidth || LINE_WIDTH_NORMAL,
-        preparePointSet: pointSet => preparePointSetForMappedPlane(pointSet, taylorApproxFunc, {
-            sampleCountResolver: () => DEFAULT_POINTS_PER_LINE
-        })
+        lineWidthResolver: pointSet => pointSet.lineWidth || LINE_WIDTH_NORMAL
     });
 }

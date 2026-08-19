@@ -96,3 +96,25 @@ test('Fourier winding includes samples through the partial-progress cutoff', () 
     assertClose(winding.centerOfMass.im, 0, 'partial center-of-mass imaginary component');
     assertClose(winding.referenceRadius, 8.8, 'partial-progress reference radius');
 });
+
+test('generateTimeDomainSignal generates signals natively', async () => {
+    const { generateTimeDomainSignal } = await import('../js/analysis/fourier-transform.js');
+    const sineSignal = generateTimeDomainSignal('sine', 1, 2, 1, 4);
+    assert.equal(sineSignal.length, 4);
+    assertClose(sineSignal[0].value, 0, 'sine sample 0');
+    assertClose(sineSignal[1].value, 2, 'sine sample 1');
+    assertClose(sineSignal[2].value, 0, 'sine sample 2');
+    assertClose(sineSignal[3].value, -2, 'sine sample 3');
+});
+
+test('computeDFT computes spectrum natively', async () => {
+    const { computeDFT } = await import('../js/analysis/fourier-transform.js');
+    const signal = [{ value: 1 }, { value: 0 }, { value: -1 }, { value: 0 }];
+    const spectrum = computeDFT(signal);
+    assert.equal(spectrum.length, 4);
+    assert.equal(spectrum[0].k, 0);
+    assertClose(spectrum[0].real, 0, 'DC real');
+    assertClose(spectrum[1].real, 0.5, 'fundamental real');
+    assertClose(spectrum[1].imag, 0, 'fundamental imag');
+});
+

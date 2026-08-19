@@ -138,8 +138,8 @@ const exported = [
     '_ce_map_planar_geometry', '_ce_generate_input_shape', '_ce_generate_radial_steps',
     '_ce_generate_viewport_grid_pixels',
     '_ce_build_planar_line', '_ce_build_planar_lines', '_ce_build_planar_polyline',
-    '_ce_compute_dft', '_ce_build_fourier_winding',
-    '_ce_compute_laplace_samples', '_ce_generate_laplace_analysis', '_ce_evaluate_laplace',
+    '_ce_generate_fourier_signal', '_ce_compute_fourier_spectrum', '_ce_build_fourier_winding',
+    '_ce_generate_laplace_analysis', '_ce_evaluate_laplace',
     '_ce_build_laplace_surface', '_ce_build_real_surface', '_ce_build_image_mesh',
     '_ce_build_image_mesh_precise', '_ce_build_grid_fold',
     '_ce_build_sphere_lines', '_ce_project_sphere_points', '_ce_build_sphere_probe',
@@ -150,7 +150,8 @@ const exported = [
     '_ce_project_precise_pixels_to_canvas', '_ce_project_values_to_precise',
     '_ce_render_domain_tile_precise',
     '_ce_trace_streamlines', '_ce_build_vector_field', '_ce_build_tissot',
-    '_ce_find_preimages', '_ce_find_polynomial_roots', '_ce_analyze_contour', '_ce_estimate_residue'
+    '_ce_find_preimages', '_ce_find_polynomial_roots', '_ce_analyze_contour', '_ce_estimate_residue',
+    '_ce_generate_contour_points', '_ce_classify_contour_singularities'
 ];
 const compileArgs = [
     ...sources.filter(path => extname(path) === '.c'),

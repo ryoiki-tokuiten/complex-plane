@@ -184,3 +184,127 @@ int32_t ce_estimate_residue(const ce_map_config *config, double pole_re, double 
     residue->im = -integral.re / 6.28318530717958647693;
     return 0;
 }
+
+int32_t ce_generate_contour_points(uint32_t type, double cx, double cy,
+                                   double param_a, double param_b,
+                                   uint32_t step_count, ce_complex *output) {
+    if (!output || step_count < 1u) return -1;
+    const double step_angle = 6.28318530717958647693 / (double)step_count;
+    if (type == 1u) { // circle
+        if (param_a <= 0.0) return -2;
+        for (uint32_t i = 0; i <= step_count; ++i) {
+            const double angle = (double)i * step_angle;
+            output[i] = (ce_complex){cx + param_a * cos(angle), cy + param_a * sin(angle)};
+        }
+        return (int32_t)(step_count + 1u);
+    }
+    if (type == 2u) { // ellipse
+        if (param_a <= 0.0 || param_b <= 0.0) return -2;
+        for (uint32_t i = 0; i <= step_count; ++i) {
+            const double angle = (double)i * step_angle;
+            output[i] = (ce_complex){cx + param_a * cos(angle), cy + param_b * sin(angle)};
+        }
+        return (int32_t)(step_count + 1u);
+    }
+    return -3;
+}
+
+static int ce_inside_polygon(ce_complex point, const ce_complex *points, uint32_t count) {
+    int inside = 0;
+    for (uint32_t index = 0, previous = count - 1u; index < count; previous = index, ++index) {
+        const ce_complex a = points[index];
+        const ce_complex b = points[previous];
+        if ((a.im > point.im) != (b.im > point.im)) {
+            const double denominator = (b.im - a.im) != 0.0 ? (b.im - a.im) : 1e-30;
+            if (point.re < (b.re - a.re) * (point.im - a.im) / denominator + a.re) {
+                inside = !inside;
+            }
+        }
+    }
+    return inside;
+}
+
+int32_t ce_classify_contour_singularities(uint32_t contour_type, double cx, double cy,
+                                          double param_a, double param_b,
+                                          const ce_complex *polygon_points,
+                                          const uint32_t *polygon_offsets,
+                                          uint32_t polygon_count,
+                                          double epsilon,
+                                          const ce_complex *singularities,
+                                          uint32_t singularity_count,
+                                          uint8_t *inside_results,
+                                          uint8_t *safe_results) {
+    if (!singularities || !inside_results || !safe_results) return -1;
+
+    for (uint32_t s = 0; s < singularity_count; ++s) {
+        const ce_complex pole = singularities[s];
+        if (!isfinite(pole.re) || !isfinite(pole.im)) {
+            inside_results[s] = 0u;
+            safe_results[s] = 0u;
+            continue;
+        }
+
+        if (contour_type == 1u) { // circle
+            if (param_a <= 0.0) { inside_results[s] = 0u; safe_results[s] = 0u; continue; }
+            const double dist_sq = (pole.re - cx) * (pole.re - cx) + (pole.im - cy) * (pole.im - cy);
+            const double dist = sqrt(dist_sq);
+            const int inside = dist < param_a * (1.0 - 1e-9);
+            const int safe = dist < (param_a - epsilon);
+            inside_results[s] = (uint8_t)inside;
+            safe_results[s] = (uint8_t)(inside && safe);
+        } else if (contour_type == 2u) { // ellipse
+            if (param_a <= 0.0 || param_b <= 0.0) { inside_results[s] = 0u; safe_results[s] = 0u; continue; }
+            const double dx = (pole.re - cx) / param_a;
+            const double dy = (pole.im - cy) / param_b;
+            const double dist_norm_sq = dx * dx + dy * dy;
+            const int inside = dist_norm_sq < (1.0 - 1e-9);
+            const double min_axis = param_a < param_b ? param_a : param_b;
+            const double effective_eps = epsilon / min_axis;
+            const double safe_threshold = (1.0 - effective_eps);
+            const int safe = dist_norm_sq < (safe_threshold > 0.0 ? safe_threshold * safe_threshold : 0.0);
+            inside_results[s] = (uint8_t)inside;
+            safe_results[s] = (uint8_t)(inside && safe);
+        } else if (contour_type == 3u) { // polygon contours
+            if (!polygon_points || !polygon_offsets || !polygon_count) {
+                inside_results[s] = 0u; safe_results[s] = 0u; continue;
+            }
+            int inside = 0;
+            int safe = 1;
+            for (uint32_t p = 0; p < polygon_count; ++p) {
+                const uint32_t start = polygon_offsets[p];
+                const uint32_t end = polygon_offsets[p + 1u];
+                if (end <= start + 2u) continue;
+                const uint32_t count = end - start;
+                if (ce_inside_polygon(pole, polygon_points + start, count)) {
+                    inside = !inside;
+                }
+                for (uint32_t i = 1; i < count; ++i) {
+                    const ce_complex a = polygon_points[start + i - 1u];
+                    const ce_complex b = polygon_points[start + i];
+                    const double seg_dx = b.re - a.re;
+                    const double seg_dy = b.im - a.im;
+                    const double len_sq = seg_dx * seg_dx + seg_dy * seg_dy;
+                    double t = 0.0;
+                    if (len_sq > 1e-15) {
+                        t = ((pole.re - a.re) * seg_dx + (pole.im - a.im) * seg_dy) / len_sq;
+                        if (t < 0.0) t = 0.0;
+                        else if (t > 1.0) t = 1.0;
+                    }
+                    const double proj_x = a.re + t * seg_dx;
+                    const double proj_y = a.im + t * seg_dy;
+                    const double d = hypot(pole.re - proj_x, pole.im - proj_y);
+                    if (d <= epsilon) {
+                        safe = 0;
+                    }
+                }
+            }
+            inside_results[s] = (uint8_t)inside;
+            safe_results[s] = (uint8_t)(inside && safe);
+        } else {
+            inside_results[s] = 0u;
+            safe_results[s] = 0u;
+        }
+    }
+    return 0;
+}
+

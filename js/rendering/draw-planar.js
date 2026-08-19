@@ -40,6 +40,7 @@ import {
     buildNativePlanarLines,
     buildNativePlanarPolyline,
     buildNativeVectorField,
+    evaluateNativePoints,
     nativeMapOptions,
     projectNativePrecisePixels,
     projectNativePrecisePixelsToCanvas,
@@ -1140,10 +1141,10 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
             if (preparedPointSet.role === 'grid-dots') {
                 ctx.fillStyle = color;
                 const radius = Math.max(1.5, lineWidth * 0.75);
-                for (const point of preparedPointSet.points) {
-                    const mapped = mappedTransform
-                        ? evaluateMappedTransform(mappedTransform, point.re, point.im, appState.currentFunction)
-                        : point;
+                const mappedPoints = mappedTransform
+                    ? evaluateNativePoints(nativeOptionsForMap(options.map), preparedPointSet.points).values
+                    : preparedPointSet.points;
+                for (const mapped of mappedPoints) {
                     if (!mapped || !Number.isFinite(mapped.re) || !Number.isFinite(mapped.im)) continue;
                     const canvasPoint = mapToCanvasCoords(mapped.re, mapped.im, planeParams);
                     ctx.beginPath();
@@ -1496,121 +1497,6 @@ export function drawPlanarTransformedLine(ctx, planeParams, mappedTransform, z_p
     if (appendTransformedPolyline(ctx, geometry)) ctx.stroke();
 }
 
-export function calculateDynamicPointsForSegment(p1_world, p2_world, tf, planeParams = null) {
-    if (!isRenderableComplexPoint(p1_world) ||
-        !isRenderableComplexPoint(p2_world) ||
-        typeof tf !== 'function') {
-        return DEFAULT_POINTS_PER_LINE;
-    }
-
-    const vectorRe = p2_world.re - p1_world.re;
-    const vectorIm = p2_world.im - p1_world.im;
-    const lengthSq = vectorRe * vectorRe + vectorIm * vectorIm;
-    const pointToTargetRe = p1_world.re - ZETA_POLE.re;
-    const pointToTargetIm = p1_world.im - ZETA_POLE.im;
-    let evalRe = p1_world.re;
-    let evalIm = p1_world.im;
-
-    if (Math.abs(lengthSq) >= DEGENERATE_SEGMENT_EPSILON) {
-        const rawT = -(pointToTargetRe * vectorRe + pointToTargetIm * vectorIm) / lengthSq;
-        const t = clamp(rawT, 0, 1);
-        evalRe += t * vectorRe;
-        evalIm += t * vectorIm;
-    }
-
-    if (appState.currentFunction === 'zeta' &&
-        !appState.zetaContinuationEnabled &&
-        (
-            (p1_world.re <= ZETA_REFLECTION_POINT_RE && p2_world.re <= ZETA_REFLECTION_POINT_RE) ||
-            evalRe <= ZETA_REFLECTION_POINT_RE
-        )) {
-        return Math.max(240, Math.floor(MIN_POINTS_ADAPTIVE * 0.5));
-    }
-
-    const viewportActive = isViewportManipulationActive();
-    const minSegments = viewportActive ? ZETA_CURVE_MIN_SEGMENTS : ZETA_CURVE_MIN_SEGMENTS * 2;
-    const maxSegments = viewportActive ? ZETA_CURVE_MAX_SEGMENTS / 2 : ZETA_CURVE_MAX_SEGMENTS;
-    const toleranceSq = viewportActive ? ZETA_CURVE_TOLERANCE_SQ * 2 : ZETA_CURVE_TOLERANCE_SQ;
-
-    const project = point => planeParams
-        ? mapToCanvasCoords(point.re, point.im, planeParams)
-        : { x: point.re, y: point.im };
-    const evaluateAt = t => {
-        const safeT = clamp(t, 0, 1);
-        const re = p1_world.re + (p2_world.re - p1_world.re) * safeT;
-        const im = p1_world.im + (p2_world.im - p1_world.im) * safeT;
-        let mapped = null;
-        try {
-            mapped = tf(re, im);
-        } catch {
-            mapped = null;
-        }
-        return isRenderableComplexPoint(mapped)
-            ? { mapped, projected: project(mapped), t: safeT }
-            : null;
-    };
-
-    const start = evaluateAt(0);
-    const end = evaluateAt(1);
-    if (!start || !end) return maxSegments;
-
-    const poleDistanceSq = (evalRe - ZETA_POLE.re) ** 2 + (evalIm - ZETA_POLE.im) ** 2;
-    const rawPoleT = lengthSq >= DEGENERATE_SEGMENT_EPSILON
-        ? -(pointToTargetRe * vectorRe + pointToTargetIm * vectorIm) / lengthSq
-        : NaN;
-    const poleIsOnSegment = Number.isFinite(rawPoleT) && rawPoleT >= 0 && rawPoleT <= 1 && poleDistanceSq < 0.05 ** 2;
-    let segmentCount = 0;
-
-    function countSegment(left, right, depth) {
-        if (segmentCount >= maxSegments) return;
-        const midpointT = (left.t + right.t) * 0.5;
-        const midpoint = evaluateAt(midpointT);
-        if (!midpoint) {
-            segmentCount = maxSegments;
-            return;
-        }
-
-        const chordMidX = (left.projected.x + right.projected.x) * 0.5;
-        const chordMidY = (left.projected.y + right.projected.y) * 0.5;
-        const errorSq = (midpoint.projected.x - chordMidX) ** 2 +
-            (midpoint.projected.y - chordMidY) ** 2;
-        const segmentX = right.projected.x - left.projected.x;
-        const segmentY = right.projected.y - left.projected.y;
-        const poleNeedsSubdivision = poleIsOnSegment && rawPoleT > left.t && rawPoleT < right.t;
-        const needsSubdivision = errorSq > toleranceSq ||
-            segmentX * segmentX + segmentY * segmentY > ZETA_CURVE_MAX_SEGMENT_LENGTH_SQ ||
-            poleNeedsSubdivision;
-
-        if (needsSubdivision && depth < ZETA_CURVE_MAX_DEPTH && segmentCount + 2 <= maxSegments) {
-            countSegment(left, midpoint, depth + 1);
-            countSegment(midpoint, right, depth + 1);
-            return;
-        }
-        segmentCount += 1;
-    }
-
-    countSegment(start, end, 0);
-    return clamp(Math.max(minSegments, segmentCount), minSegments, maxSegments);
-}
-
-export function generateLinearSegmentPoints(startPoint, endPoint, sampleCount) {
-    const steps = Math.max(1, Math.floor(finiteOr(sampleCount, 1)));
-    const points = new Array(steps + 1);
-    const startRe = startPoint.re;
-    const startIm = startPoint.im;
-    const stepRe = (endPoint.re - startRe) / steps;
-    const stepIm = (endPoint.im - startIm) / steps;
-
-    for (let i = 0; i <= steps; i++) {
-        points[i] = {
-            re: startRe + stepRe * i,
-            im: startIm + stepIm * i
-        };
-    }
-
-    return points;
-}
-
 export function getPointSetEndpoints(pointSet) {
     const points = pointSet && pointSet.points;
 
@@ -1636,31 +1522,6 @@ export function getPointSetEndpoints(pointSet) {
     return validCount >= 2
         ? { start, end }
         : null;
-}
-
-export function preparePointSetForMappedPlane(pointSet, transformFunc, options = {}) {
-    if (!pointSet || !LINEAR_SOURCE_POINT_SET_ROLES.has(pointSet.role)) {
-        return pointSet;
-    }
-
-    const endpoints = getPointSetEndpoints(pointSet);
-    if (!endpoints) {
-        return pointSet;
-    }
-
-    const sampleCount = options.sampleCountResolver
-        ? options.sampleCountResolver(pointSet, endpoints, transformFunc, options.planeParams)
-        : DEFAULT_POINTS_PER_LINE;
-    const normalizedSampleCount = Math.max(2, sampleCount);
-    const preparedPointSet = Object.assign({}, pointSet, {
-        points: generateLinearSegmentPoints(
-            endpoints.start,
-            endpoints.end,
-            normalizedSampleCount
-        )
-    });
-
-    return preparedPointSet;
 }
 
 export function drawFunctionFociOverlay(ctx, planeParams) {
@@ -1754,13 +1615,7 @@ export function drawPlanarTransformedShape(ctx, planeParams, tf, options = {}) {
                     : pointSet.color,
                 lineWidthResolver: pointSet => renderJob.highlightContour && (pointSet.role === 'shape-curve' || pointSet.role === 'shape-arbitrary')
                     ? 3.5
-                    : (pointSet.lineWidth || LINE_WIDTH_NORMAL),
-                preparePointSet: pointSet => preparePointSetForMappedPlane(pointSet, renderJob.transformFunc, {
-                    planeParams,
-                    sampleCountResolver: (currentPointSet, endpoints, transformFunc) => appState.currentFunction === 'zeta'
-                        ? calculateDynamicPointsForSegment(endpoints.start, endpoints.end, transformFunc, planeParams)
-                        : DEFAULT_POINTS_PER_LINE
-                })
+                    : (pointSet.lineWidth || LINE_WIDTH_NORMAL)
             });
         }
     }

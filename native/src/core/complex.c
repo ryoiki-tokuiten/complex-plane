@@ -99,9 +99,32 @@ static ce_complex ce_log(ce_complex z, const ce_function_config *config) {
     return ce_make(ce_log_hypot(z.re, z.im), argument);
 }
 
-static ce_complex ce_pow_integer(ce_complex base, int64_t exponent) {
+static inline ce_complex ce_pow_integer(ce_complex base, int64_t exponent) {
     if (exponent == 0) return ce_make(1.0, 0.0);
     if (exponent == 1) return base;
+    if (exponent == 2) {
+        return ce_make(base.re * base.re - base.im * base.im, 2.0 * base.re * base.im);
+    }
+    if (exponent == 3) {
+        const double r2 = base.re * base.re;
+        const double i2 = base.im * base.im;
+        return ce_make(base.re * (r2 - 3.0 * i2), base.im * (3.0 * r2 - i2));
+    }
+    if (exponent == 4) {
+        const double r2 = base.re * base.re;
+        const double i2 = base.im * base.im;
+        return ce_make(r2 * r2 - 6.0 * r2 * i2 + i2 * i2, 4.0 * base.re * base.im * (r2 - i2));
+    }
+    if (exponent == -1) {
+        const double d = base.re * base.re + base.im * base.im;
+        return ce_make(base.re / d, -base.im / d);
+    }
+    if (exponent == -2) {
+        const double z2r = base.re * base.re - base.im * base.im;
+        const double z2i = 2.0 * base.re * base.im;
+        const double d = z2r * z2r + z2i * z2i;
+        return ce_make(z2r / d, -z2i / d);
+    }
     const int negative = exponent < 0;
     uint64_t n = negative ? (uint64_t)(-exponent) : (uint64_t)exponent;
     ce_complex result = ce_make(1.0, 0.0);
@@ -118,23 +141,30 @@ ce_complex ce_pow(ce_complex base, ce_complex exponent) {
         if (exponent.re > 0.0 || (exponent.re == 0.0 && exponent.im != 0.0)) return ce_make(0.0, 0.0);
         if (exponent.re == 0.0 && exponent.im == 0.0) return ce_make(1.0, 0.0);
     }
-    if (exponent.im == 0.0 && isfinite(exponent.re) && floor(exponent.re) == exponent.re &&
-        fabs(exponent.re) <= 9007199254740991.0) {
-        return ce_pow_integer(base, (int64_t)exponent.re);
-    }
-    if (base.im == 0.0 && exponent.im == 0.0) {
-        if (base.re >= 0.0) return ce_make(ce_exp_safe(exponent.re * log(base.re)), 0.0);
-        const double magnitude = ce_exp_safe(exponent.re * log(-base.re));
-        const double doubled = exponent.re * 2.0;
-        if (floor(doubled) == doubled && fabs(doubled) <= 9007199254740991.0) {
-            int quadrant = (int)fmod(fmod(doubled, 4.0) + 4.0, 4.0);
-            if (quadrant == 0) return ce_make(magnitude, 0.0);
-            if (quadrant == 1) return ce_make(0.0, magnitude);
-            if (quadrant == 2) return ce_make(-magnitude, 0.0);
-            return ce_make(0.0, -magnitude);
+    if (exponent.im == 0.0) {
+        if (isfinite(exponent.re) && floor(exponent.re) == exponent.re &&
+            fabs(exponent.re) <= 9007199254740991.0) {
+            return ce_pow_integer(base, (int64_t)exponent.re);
         }
-        const double angle = exponent.re * CE_PI;
-        return ce_make(magnitude * cos(angle), magnitude * sin(angle));
+        if (base.im == 0.0) {
+            if (base.re >= 0.0) return ce_make(ce_exp_safe(exponent.re * log(base.re)), 0.0);
+            const double magnitude = ce_exp_safe(exponent.re * log(-base.re));
+            const double doubled = exponent.re * 2.0;
+            if (floor(doubled) == doubled && fabs(doubled) <= 9007199254740991.0) {
+                int quadrant = (int)fmod(fmod(doubled, 4.0) + 4.0, 4.0);
+                if (quadrant == 0) return ce_make(magnitude, 0.0);
+                if (quadrant == 1) return ce_make(0.0, magnitude);
+                if (quadrant == 2) return ce_make(-magnitude, 0.0);
+                return ce_make(0.0, -magnitude);
+            }
+            const double angle = exponent.re * CE_PI;
+            return ce_make(magnitude * cos(angle), magnitude * sin(angle));
+        }
+        const double r_sq = base.re * base.re + base.im * base.im;
+        const double p_re = exponent.re * 0.5 * log(r_sq);
+        const double p_im = exponent.re * atan2(base.im, base.re);
+        const double mag = ce_exp_safe(p_re);
+        return ce_make(mag * cos(p_im), mag * sin(p_im));
     }
     const double log_re = ce_log_hypot(base.re, base.im);
     const double log_im = atan2(base.im, base.re);
@@ -150,12 +180,99 @@ static ce_complex ce_sqrt(ce_complex z) {
     return ce_make(re, copysign(sqrt(fmax(0.0, (magnitude - z.re) * 0.5)), z.im));
 }
 
-static ce_complex ce_sin(ce_complex z) {
-    return ce_make(sin(z.re) * cosh(z.im), cos(z.re) * sinh(z.im));
+static inline ce_complex ce_sin(ce_complex z) {
+    if (fabs(z.im) > 700.0) {
+        const double ey = ce_exp_safe(fabs(z.im));
+        const double s = 0.5 * ey * copysign(1.0, z.im);
+        return ce_make(sin(z.re) * 0.5 * ey, cos(z.re) * s);
+    }
+    const double ey = ce_exp_safe(z.im);
+    const double ey_inv = 1.0 / ey;
+    const double sinh_y = 0.5 * (ey - ey_inv);
+    const double cosh_y = 0.5 * (ey + ey_inv);
+    return ce_make(sin(z.re) * cosh_y, cos(z.re) * sinh_y);
 }
 
-static ce_complex ce_cos(ce_complex z) {
-    return ce_make(cos(z.re) * cosh(z.im), -sin(z.re) * sinh(z.im));
+static inline ce_complex ce_cos(ce_complex z) {
+    if (fabs(z.im) > 700.0) {
+        const double ey = ce_exp_safe(fabs(z.im));
+        const double s = 0.5 * ey * copysign(1.0, z.im);
+        return ce_make(cos(z.re) * 0.5 * ey, -sin(z.re) * s);
+    }
+    const double ey = ce_exp_safe(z.im);
+    const double ey_inv = 1.0 / ey;
+    const double sinh_y = 0.5 * (ey - ey_inv);
+    const double cosh_y = 0.5 * (ey + ey_inv);
+    return ce_make(cos(z.re) * cosh_y, -sin(z.re) * sinh_y);
+}
+
+static inline ce_complex ce_tan(ce_complex z) {
+    if (fabs(z.im) > 25.0) {
+        return ce_make(0.0, copysign(1.0, z.im));
+    }
+    const double r2 = 2.0 * z.re;
+    const double i2 = 2.0 * z.im;
+    const double ey = ce_exp_safe(i2);
+    const double ey_inv = 1.0 / ey;
+    const double sinh_2y = 0.5 * (ey - ey_inv);
+    const double cosh_2y = 0.5 * (ey + ey_inv);
+    const double denom = cos(r2) + cosh_2y;
+    if (denom == 0.0) return ce_make(NAN, NAN);
+    return ce_make(sin(r2) / denom, sinh_2y / denom);
+}
+
+static inline ce_complex ce_sec(ce_complex z) {
+    if (fabs(z.im) > 30.0) return ce_make(0.0, 0.0);
+    const double ey = ce_exp_safe(z.im);
+    const double ey_inv = 1.0 / ey;
+    const double sinh_y = 0.5 * (ey - ey_inv);
+    const double cosh_y = 0.5 * (ey + ey_inv);
+    const double cr = cos(z.re) * cosh_y;
+    const double ci = -sin(z.re) * sinh_y;
+    const double denom = cr * cr + ci * ci;
+    if (denom == 0.0) return ce_make(NAN, NAN);
+    return ce_make(cr / denom, -ci / denom);
+}
+
+static inline ce_complex ce_sinh(ce_complex z) {
+    if (fabs(z.re) > 700.0) {
+        const double ex = ce_exp_safe(fabs(z.re));
+        const double s = 0.5 * ex * copysign(1.0, z.re);
+        return ce_make(s * cos(z.im), 0.5 * ex * sin(z.im));
+    }
+    const double ex = ce_exp_safe(z.re);
+    const double ex_inv = 1.0 / ex;
+    const double sinh_x = 0.5 * (ex - ex_inv);
+    const double cosh_x = 0.5 * (ex + ex_inv);
+    return ce_make(sinh_x * cos(z.im), cosh_x * sin(z.im));
+}
+
+static inline ce_complex ce_cosh(ce_complex z) {
+    if (fabs(z.re) > 700.0) {
+        const double ex = ce_exp_safe(fabs(z.re));
+        const double s = 0.5 * ex * copysign(1.0, z.re);
+        return ce_make(0.5 * ex * cos(z.im), s * sin(z.im));
+    }
+    const double ex = ce_exp_safe(z.re);
+    const double ex_inv = 1.0 / ex;
+    const double sinh_x = 0.5 * (ex - ex_inv);
+    const double cosh_x = 0.5 * (ex + ex_inv);
+    return ce_make(cosh_x * cos(z.im), sinh_x * sin(z.im));
+}
+
+static inline ce_complex ce_tanh(ce_complex z) {
+    if (fabs(z.re) > 30.0) {
+        return ce_make(copysign(1.0, z.re), 0.0);
+    }
+    const double r2 = 2.0 * z.re;
+    const double i2 = 2.0 * z.im;
+    const double ex = ce_exp_safe(r2);
+    const double ex_inv = 1.0 / ex;
+    const double sinh_2x = 0.5 * (ex - ex_inv);
+    const double cosh_2x = 0.5 * (ex + ex_inv);
+    const double denom = cosh_2x + cos(i2);
+    if (denom == 0.0) return ce_make(NAN, NAN);
+    return ce_make(sinh_2x / denom, sin(i2) / denom);
 }
 
 static ce_complex ce_asin(ce_complex z) {
@@ -241,10 +358,22 @@ static ce_complex ce_bessel(ce_complex z, ce_complex order) {
     return sum;
 }
 
+static double ce_zeta_log_table[513] = {0};
+static int ce_zeta_log_table_initialized = 0;
+
+static void ce_ensure_zeta_log_table(void) {
+    if (ce_zeta_log_table_initialized) return;
+    for (uint32_t i = 1; i <= 512; ++i) {
+        ce_zeta_log_table[i] = log((double)i);
+    }
+    ce_zeta_log_table_initialized = 1;
+}
+
 static ce_complex ce_zeta_eta(double re, double im, uint32_t levels) {
     if (re == 1.0 && im == 0.0) return ce_make(INFINITY, NAN);
-    ce_complex denominator = ce_make(1.0 - ce_exp_safe((1.0 - re) * log(2.0)) * cos(-im * log(2.0)),
-                                         -ce_exp_safe((1.0 - re) * log(2.0)) * sin(-im * log(2.0)));
+    ce_ensure_zeta_log_table();
+    ce_complex denominator = ce_make(1.0 - ce_exp_safe((1.0 - re) * 0.693147180559945309417) * cos(-im * 0.693147180559945309417),
+                                     -ce_exp_safe((1.0 - re) * 0.693147180559945309417) * sin(-im * 0.693147180559945309417));
     ce_complex sum = ce_make(0.0, 0.0);
     double weights[128] = {0};
     levels = levels > 128u ? 128u : levels;
@@ -257,7 +386,7 @@ static ce_complex ce_zeta_eta(double re, double im, uint32_t levels) {
         }
     }
     for (uint32_t k = 0; k < levels; ++k) {
-        const double ln = log((double)k + 1.0);
+        const double ln = (k + 1 <= 512) ? ce_zeta_log_table[k + 1] : log((double)k + 1.0);
         const double magnitude = ce_exp_safe(-re * ln);
         const double angle = -im * ln;
         sum.re += weights[k] * magnitude * cos(angle);
@@ -268,9 +397,10 @@ static ce_complex ce_zeta_eta(double re, double im, uint32_t levels) {
 
 static ce_complex ce_zeta_direct(double re, double im, uint32_t terms) {
     if (re <= 1.0) return ce_make(NAN, NAN);
+    ce_ensure_zeta_log_table();
     ce_complex sum = ce_make(0.0, 0.0);
     for (uint32_t n = 1; n <= terms; ++n) {
-        const double ln = log((double)n);
+        const double ln = (n <= 512) ? ce_zeta_log_table[n] : log((double)n);
         const double magnitude = ce_exp_safe(-re * ln);
         const double angle = -im * ln;
         sum.re += magnitude * cos(angle);
@@ -446,8 +576,23 @@ static ce_complex ce_eval_algebraic(ce_complex input, ce_complex c, const ce_fun
             if (factor->step_count) {
                 if (!config->algebraic_steps || factor->step_offset > config->algebraic_step_count ||
                     factor->step_count > config->algebraic_step_count - factor->step_offset) return ce_make(NAN, NAN);
-                for (uint32_t step = 0; step < factor->step_count; ++step) {
-                    argument = ce_eval_function(config->algebraic_steps[factor->step_offset + step], argument, c, config);
+                const uint32_t *steps = &config->algebraic_steps[factor->step_offset];
+                const uint32_t step_count = factor->step_count;
+                for (uint32_t step = 0; step < step_count; ++step) {
+                    switch (steps[step]) {
+                        case CE_FN_SIN: argument = ce_sin(argument); break;
+                        case CE_FN_COS: argument = ce_cos(argument); break;
+                        case CE_FN_TAN: argument = ce_tan(argument); break;
+                        case CE_FN_SEC: argument = ce_sec(argument); break;
+                        case CE_FN_EXP: argument = ce_exp(argument); break;
+                        case CE_FN_LN: argument = ce_log(argument, config); break;
+                        case CE_FN_RECIPROCAL: argument = ce_div(ce_make(1.0, 0.0), argument); break;
+                        case CE_FN_SINH: argument = ce_sinh(argument); break;
+                        case CE_FN_COSH: argument = ce_cosh(argument); break;
+                        case CE_FN_TANH: argument = ce_tanh(argument); break;
+                        default: argument = ce_eval_function(steps[step], argument, c, config); break;
+                    }
+                    if (!isfinite(argument.re) || !isfinite(argument.im)) break;
                 }
                 factor_value = argument;
             } else {
@@ -483,8 +628,8 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
         case CE_FN_C: return c;
         case CE_FN_COS: return ce_cos(z);
         case CE_FN_SIN: return ce_sin(z);
-        case CE_FN_TAN: return ce_div(ce_sin(z), ce_cos(z));
-        case CE_FN_SEC: return ce_div(ce_make(1.0, 0.0), ce_cos(z));
+        case CE_FN_TAN: return ce_tan(z);
+        case CE_FN_SEC: return ce_sec(z);
         case CE_FN_EXP: return ce_exp_at_base(z, config->exp_base);
         case CE_FN_LN: {
             ce_complex numerator = ce_log(z, config);
@@ -492,14 +637,13 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
             if (denominator.re == 0.0 && denominator.im == 0.0) return ce_make(NAN, NAN);
             return ce_div(numerator, denominator);
         }
-        case CE_FN_RECIPROCAL: return ce_div(ce_make(1.0, 0.0), z);
-        case CE_FN_SINH: return ce_make(sinh(z.re) * cos(z.im), cosh(z.re) * sin(z.im));
-        case CE_FN_COSH: return ce_make(cosh(z.re) * cos(z.im), sinh(z.re) * sin(z.im));
-        case CE_FN_TANH: {
-            ce_complex numerator = ce_make(sinh(2.0 * z.re), sin(2.0 * z.im));
-            return ce_make(numerator.re / (cosh(2.0 * z.re) + cos(2.0 * z.im)),
-                           numerator.im / (cosh(2.0 * z.re) + cos(2.0 * z.im)));
+        case CE_FN_RECIPROCAL: {
+            const double d = z.re * z.re + z.im * z.im;
+            return ce_make(z.re / d, -z.im / d);
         }
+        case CE_FN_SINH: return ce_sinh(z);
+        case CE_FN_COSH: return ce_cosh(z);
+        case CE_FN_TANH: return ce_tanh(z);
         case CE_FN_ASIN: return ce_asin(z);
         case CE_FN_ATAN: return ce_atan(z);
         case CE_FN_GAMMA: return ce_gamma(z);
@@ -538,6 +682,7 @@ static ce_complex ce_eval_taylor(const ce_map_config *config, ce_complex point) 
 }
 
 static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parameter,
+                                  int32_t sheet,
                                   int *valid, ce_complex *point_values,
                                   ce_complex *term_values, uint8_t *errors,
                                   uint8_t *reduction_status, ce_complex *partial_values,
@@ -581,7 +726,7 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
         uint8_t point_error = 0u, term_error = 0u;
         int point_ok = ce_evaluate_expression_one(
             &base, config->dynamic_point_expression, config->dynamic_point_count,
-            variables, config->dynamic_variable_count, 0, &point, &point_error
+            variables, config->dynamic_variable_count, sheet, &point, &point_error
         );
         if (point_ok) {
             for (uint32_t slot = 0; slot < config->dynamic_variable_count; ++slot) {
@@ -593,7 +738,7 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
         }
         const int term_ok = point_ok && ce_evaluate_expression_one(
             &base, config->dynamic_term_expression, config->dynamic_term_count,
-            variables, config->dynamic_variable_count, 0, &term, &term_error
+            variables, config->dynamic_variable_count, sheet, &term, &term_error
         ) && ce_valid(term);
         if (point_values) point_values[source] = point;
         if (term_values) term_values[source] = term;
@@ -686,7 +831,7 @@ static ce_complex ce_eval_map_point(const ce_map_config *config, ce_complex poin
         ce_complex last = ce_make(NAN, NAN);
         int has_last = 0;
         for (uint32_t iteration = 0; iteration < count; ++iteration) {
-            current = ce_eval_dynamic(config, current, &has_last, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+            current = ce_eval_dynamic(config, current, 0, &has_last, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
             if (!has_last) break;
             last = current;
             if (fabs(current.re) >= CE_CHAIN_BAILOUT || fabs(current.im) >= CE_CHAIN_BAILOUT) break;
@@ -732,7 +877,7 @@ int32_t ce_evaluate_dynamic(const ce_map_config *config, double parameter_re, do
         !partial_values || !final_value || !product_metadata) return -1;
     int valid = 0;
     *final_value = ce_eval_dynamic(
-        config, ce_make(parameter_re, parameter_im), &valid, point_values, term_values, errors,
+        config, ce_make(parameter_re, parameter_im), 0, &valid, point_values, term_values, errors,
         reduction_status, partial_values, partial_product_metadata, product_metadata
     );
     return valid ? 0 : 1;
@@ -892,9 +1037,7 @@ static ce_complex ce_eval_algebraic_sheet(ce_complex input, ce_complex c,
                     (uint32_t)factor->chained_function_id, argument, c, config, sheet
                 );
             }
-            ce_complex factor_value = factor->step_count
-                ? argument
-                : ce_eval_function_sheet(factor->function_id, argument, c, config, sheet);
+            ce_complex factor_value = ce_eval_function_sheet(factor->function_id, argument, c, config, sheet);
             if (factor->power != 1.0) {
                 if (floor(factor->power) == factor->power) {
                     factor_value = ce_pow(factor_value, ce_make(factor->power, 0.0));
@@ -953,6 +1096,22 @@ int32_t ce_evaluate_sheets(const ce_map_config *config, const ce_complex *input,
                            ce_complex *output, uint8_t *valid) {
     if (!config || !input || !sheets || !output || !valid) return -1;
     const uint32_t chain_count = config->chain_count ? config->chain_count : 1u;
+    if (config->dynamic_source_count) {
+        for (uint32_t point = 0; point < count; ++point) {
+            ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : input[point];
+            ce_complex last = ce_make(NAN, NAN);
+            int ok = 0;
+            for (uint32_t iteration = 0; iteration < chain_count; ++iteration) {
+                current = ce_eval_dynamic(config, current, sheets[point], &ok, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+                if (!ok) break;
+                last = current;
+                if (fabs(current.re) >= CE_CHAIN_BAILOUT || fabs(current.im) >= CE_CHAIN_BAILOUT) break;
+            }
+            output[point] = ok ? last : ce_make(NAN, NAN);
+            valid[point] = (uint8_t)ok;
+        }
+        return 0;
+    }
     for (uint32_t point = 0; point < count; ++point) {
         ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : input[point];
         int ok = 0;

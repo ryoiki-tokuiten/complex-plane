@@ -1,4 +1,5 @@
 import {
+    createCompiledDomainTileRenderer,
     evaluateNativeAlgebraic,
     evaluateNativePoints,
     renderNativeDomainTile
@@ -31,12 +32,12 @@ export function evaluateDomainDynamicsValue(snapshot, re, im) {
     return pointResult(snapshot, re, im);
 }
 
-export function renderDomainDynamicsTile(snapshot, tile) {
-    return renderNativeDomainTile(snapshot, tile);
+export function createDomainDynamicsTileRenderer(snapshot) {
+    return createCompiledDomainTileRenderer(snapshot);
 }
 
-export function createDomainDynamicsTileRenderer(snapshot) {
-    return tile => renderDomainDynamicsTile(snapshot, tile);
+export function renderDomainDynamicsTile(snapshot, tile) {
+    return renderNativeDomainTile(snapshot, tile);
 }
 
 export function colorDomainDynamicsPoint(snapshot, re, im) {
@@ -88,6 +89,6 @@ export function domainDynamicsSignature(snapshot) {
 }
 
 export function isDomainDynamicsSnapshot(snapshot) {
-    return !!snapshot && !snapshot.isWPlaneColoring &&
+    return !!snapshot &&
         (snapshot.chainMode === 'recursion' || snapshot.chainMode === 'zero_seed');
 }

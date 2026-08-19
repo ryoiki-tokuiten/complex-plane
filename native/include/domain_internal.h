@@ -3,6 +3,7 @@
 
 #include "complex_engine.h"
 
+ce_complex ce_domain_step(const ce_map_config *config, ce_complex current, ce_complex c);
 int ce_domain_valid(ce_complex value);
 int ce_domain_bailout(ce_complex value);
 double ce_domain_smooth_iteration(uint32_t iteration, uint32_t count, ce_complex value);

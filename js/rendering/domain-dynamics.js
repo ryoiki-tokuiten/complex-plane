@@ -245,8 +245,7 @@ function workerCount() {
 }
 
 function needsAdaptiveQuality(snapshot) {
-    return !(snapshot?.chainMode === 'zero_seed' &&
-        snapshot?.functionKey !== 'algebraic_chaining' && snapshot?.functionKey !== 'c');
+    return true;
 }
 
 function createTileList(passWidth, passHeight, scale) {
@@ -268,6 +267,20 @@ function createTileList(passWidth, passHeight, scale) {
 function createImageDataFromPixels(pixels, width, height) {
     if (typeof ImageData !== 'undefined') return new ImageData(pixels, width, height);
     return null;
+}
+
+let pooledPassCanvas = null;
+
+function getPassCanvas(width, height) {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    if (!pooledPassCanvas) {
+        pooledPassCanvas = document.createElement('canvas');
+    }
+    if (pooledPassCanvas.width !== width || pooledPassCanvas.height !== height) {
+        pooledPassCanvas.width = width;
+        pooledPassCanvas.height = height;
+    }
+    return pooledPassCanvas;
 }
 
 function drawPassToTarget(job, pass) {
@@ -371,7 +384,7 @@ class WorkerCpuDomainDynamicsBackend {
         const count = workerCount();
         for (let i = 0; i < count; i += 1) {
             const worker = new Worker(new URL('./domain-dynamics-worker.js', import.meta.url), { type: 'module' });
-            const entry = { worker, busy: false };
+            const entry = { worker, busy: false, ready: false };
             worker.onmessage = event => this.handleWorkerMessage(entry, event.data);
             worker.onerror = error => {
                 this.cancel();
@@ -383,11 +396,13 @@ class WorkerCpuDomainDynamicsBackend {
 
     initializeWorkerJobs(job) {
         this.workers.forEach(entry => {
-            entry.worker.postMessage({
-                type: 'start',
-                jobId: job.id,
-                snapshot: job.snapshot
-            });
+            if (entry.ready) {
+                entry.worker.postMessage({
+                    type: 'start',
+                    jobId: job.id,
+                    snapshot: job.snapshot
+                });
+            }
         });
     }
 
@@ -410,11 +425,8 @@ class WorkerCpuDomainDynamicsBackend {
         const scale = PASS_SCALES[job.passIndex];
         const passWidth = Math.max(1, Math.ceil(job.snapshot.viewport.width / scale));
         const passHeight = Math.max(1, Math.ceil(job.snapshot.viewport.height / scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = passWidth;
-        canvas.height = passHeight;
-        const ctx = canvas.getContext('2d');
-
+        const canvas = getPassCanvas(passWidth, passHeight);
+        const ctx = canvas ? canvas.getContext('2d') : null;
         this.pass = {
             id: `${job.id}:${scale}`,
             scale,
@@ -443,7 +455,7 @@ class WorkerCpuDomainDynamicsBackend {
 
     dispatchWorker(entry) {
         const job = this.activeJob;
-        if (!job || job.cancelled || entry.busy) return;
+        if (!entry.ready || !job || job.cancelled || entry.busy || !this.pass) return;
 
         const tile = this.queue[this.queueIndex];
         if (!tile) return;
@@ -464,6 +476,19 @@ class WorkerCpuDomainDynamicsBackend {
     }
 
     handleWorkerMessage(entry, message) {
+        if (message?.type === 'ready') {
+            entry.ready = true;
+            if (this.activeJob && !this.activeJob.cancelled) {
+                entry.worker.postMessage({
+                    type: 'start',
+                    jobId: this.activeJob.id,
+                    snapshot: this.activeJob.snapshot
+                });
+                this.dispatchWorker(entry);
+            }
+            return;
+        }
+
         entry.busy = false;
         this.handleTileMessage(message);
         this.dispatchWorker(entry);
@@ -484,7 +509,7 @@ class WorkerCpuDomainDynamicsBackend {
                 activeSignature = null;
                 activeJobId = 0;
             }
-            queueMicrotask(() => { throw new Error(`Native domain tile failed: ${message.message}`); });
+            queueMicrotask(() => { throw new Error(`Native domain worker failed: ${message.message}`); });
             return;
         } else if (message.type === 'tile') {
             const image = createImageDataFromPixels(message.pixels, message.tile.width, message.tile.height);
@@ -507,9 +532,8 @@ class WorkerCpuDomainDynamicsBackend {
 
         if (pass.remaining <= 0) {
             if (pass.scale === 1) {
-                // Keep the refining indicator active, but stop softening the image
-                // once a native-resolution frame is available.
                 setDomainFullResolution(job.snapshot.isWPlaneColoring, true);
+                setDomainProcessing(job.snapshot.isWPlaneColoring, false);
             }
             drawPassToTarget(job, pass);
 
@@ -543,25 +567,17 @@ export function selectDomainDynamicsBackend() {
     return workerBackend;
 }
 
-let pendingJobTimeout = null;
-
 export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
     if (!targetCtx || !planeParams || !snapshot) return false;
 
     const signature = domainDynamicsSignature(snapshot);
     if (signature === activeSignature) return true;
 
-    if (pendingJobTimeout) {
-        clearTimeout(pendingJobTimeout);
-        pendingJobTimeout = null;
-    }
-
     if (activeBackend) {
         activeBackend.cancel(activeJobId);
     }
 
     activeSignature = signature;
-    clearTarget(targetCtx, snapshot.viewport);
     setDomainFullResolution(snapshot.isWPlaneColoring, false);
 
     activeJobId = nextJobId;
@@ -571,7 +587,7 @@ export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
         id: activeJobId,
         targetCtx,
         snapshot,
-        maxAllowedPassIndex: 0 // Only run scale 16 pass instantly!
+        maxAllowedPassIndex: PASS_SCALES.length - 1
     };
 
     const selected = selectDomainDynamicsBackend(snapshot);
@@ -579,26 +595,10 @@ export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
     selected.start(job);
 
     setDomainProcessing(snapshot.isWPlaneColoring, true);
-
-    // Debounce the heavier passes (scale 4 and scale 1) during zoom/pan storms
-    pendingJobTimeout = setTimeout(() => {
-        const currentJob = activeBackend?.activeJob;
-        if (currentJob && currentJob.id === job.id && !currentJob.cancelled) {
-            currentJob.maxAllowedPassIndex = PASS_SCALES.length - 1; // Allow all passes
-            if (activeBackend.startNextPass) {
-                activeBackend.startNextPass();
-            }
-        }
-    }, 100);
-
     return true;
 }
 
 export function cancelPlanarDomainDynamics() {
-    if (pendingJobTimeout) {
-        clearTimeout(pendingJobTimeout);
-        pendingJobTimeout = null;
-    }
     if (activeBackend) activeBackend.cancel(activeJobId);
     activeSignature = null;
     activeJobId = 0;

@@ -231,25 +231,25 @@ int32_t ce_render_domain_tile(const ce_map_config *config,
                               uint8_t *rgba);
 
 int32_t ce_precise_pixel_coordinate(const char *center_re, const char *center_im,
-                                    int32_t zoom_power, uint32_t precision_bits,
+                                    double zoom_power, uint32_t precision_bits,
                                     uint32_t frame_width, uint32_t frame_height,
                                     double pixel_x, double pixel_y,
                                     char *output_re, uint32_t output_re_capacity,
                                     char *output_im, uint32_t output_im_capacity);
 int32_t ce_project_precise_pixels(const ce_map_config *config,
                                   const char *input_center_re, const char *input_center_im,
-                                  int32_t input_zoom_power, uint32_t precision_bits,
+                                  double input_zoom_power, uint32_t precision_bits,
                                   uint32_t input_width, uint32_t input_height,
                                   const float *input_pixels, uint32_t point_count,
                                   uint32_t map_points,
                                   const char *output_center_re, const char *output_center_im,
-                                  int32_t output_zoom_power,
+                                  double output_zoom_power,
                                   uint32_t output_width, uint32_t output_height,
                                   float *output_pixels, uint8_t *valid);
 int32_t ce_project_precise_pixels_to_canvas(const ce_map_config *config,
                                             const char *input_center_re,
                                             const char *input_center_im,
-                                            int32_t input_zoom_power,
+                                            double input_zoom_power,
                                             uint32_t precision_bits,
                                             uint32_t input_width, uint32_t input_height,
                                             const float *input_pixels, uint32_t point_count,
@@ -261,12 +261,12 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
                                      const ce_complex *source_points, uint32_t point_count,
                                      uint32_t map_points,
                                      const char *output_center_re, const char *output_center_im,
-                                     int32_t output_zoom_power, uint32_t precision_bits,
+                                     double output_zoom_power, uint32_t precision_bits,
                                      uint32_t output_width, uint32_t output_height,
                                      float *output_pixels, uint8_t *valid);
 int32_t ce_render_domain_tile_precise(const ce_map_config *config,
                                       const char *center_re, const char *center_im,
-                                      int32_t zoom_power, uint32_t precision_bits,
+                                      double zoom_power, uint32_t precision_bits,
                                       uint32_t frame_width, uint32_t frame_height,
                                       uint32_t tile_x, uint32_t tile_y,
                                       uint32_t tile_width, uint32_t tile_height, uint32_t scale,
@@ -277,14 +277,16 @@ int32_t ce_render_domain_tile_precise(const ce_map_config *config,
                                       uint32_t max_repair_passes,
                                       uint32_t *repair_count, uint32_t *direct_count,
                                       uint8_t *rgba);
-
-int32_t ce_compute_dft(const ce_complex *input, uint32_t count, ce_complex *output);
-int32_t ce_build_fourier_winding(const ce_complex *signal, const double *times,
+int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, double amplitude,
+                                  double time_window, uint32_t sample_count, uint32_t random_seed,
+                                  double *times, double *values);
+int32_t ce_compute_fourier_spectrum(const double *values, uint32_t count,
+                                   double *frequencies, double *reals, double *imags,
+                                   double *magnitudes, double *phases);
+int32_t ce_build_fourier_winding(const double *times, const double *values,
                                  uint32_t count, double frequency, double progress,
-                                 ce_complex *wound, ce_complex *center);
-int32_t ce_compute_laplace_samples(const ce_complex *signal, const double *times,
-                                   uint32_t count, const ce_complex *s_values,
-                                   uint32_t s_count, ce_complex *output);
+                                 double time_window, ce_complex *wound,
+                                 ce_complex *center, double *max_amplitude);
 int32_t ce_generate_laplace_analysis(uint32_t function_id, double frequency,
                                      double damping, double amplitude,
                                      double time_window, uint32_t sample_count,
@@ -335,17 +337,17 @@ int32_t ce_build_image_mesh(const ce_map_config *config,
                             double fold_height_scale, float *fold_positions,
                             float *fold_uvs, double fold_mapping[4]);
 int32_t ce_build_image_mesh_precise(const ce_map_config *config,
-                                    double source_center_re, double source_center_im,
-                                    double source_width, double source_height,
-                                    const char *view_center_re, const char *view_center_im,
-                                    int32_t zoom_power, uint32_t precision_bits,
-                                    uint32_t pixel_width, uint32_t pixel_height,
-                                    uint32_t base_resolution, uint32_t max_depth,
-                                    uint32_t max_cells, uint32_t max_vertices,
-                                    uint32_t max_samples,
-                                    float *texture_coordinates, float *mapped_positions,
-                                    uint16_t *indices, uint32_t index_capacity,
-                                    uint32_t stats[4]);
+                                     double source_center_re, double source_center_im,
+                                     double source_width, double source_height,
+                                     const char *view_center_re, const char *view_center_im,
+                                     double zoom_power, uint32_t precision_bits,
+                                     uint32_t pixel_width, uint32_t pixel_height,
+                                     uint32_t base_resolution, uint32_t max_depth,
+                                     uint32_t max_cells, uint32_t max_vertices,
+                                     uint32_t max_samples,
+                                     float *texture_coordinates, float *mapped_positions,
+                                     uint16_t *indices, uint32_t index_capacity,
+                                     uint32_t stats[4]);
 int32_t ce_build_grid_fold(const ce_map_config *config,
                            const ce_complex *source_points,
                            const uint32_t *source_offsets,
@@ -429,6 +431,19 @@ int32_t ce_analyze_contour(const ce_map_config *config, const ce_complex *points
                            double *winding, uint32_t *status);
 int32_t ce_estimate_residue(const ce_map_config *config, double pole_re, double pole_im,
                             double radius, uint32_t samples, ce_complex *residue);
+int32_t ce_generate_contour_points(uint32_t type, double cx, double cy,
+                                   double param_a, double param_b,
+                                   uint32_t step_count, ce_complex *output);
+int32_t ce_classify_contour_singularities(uint32_t contour_type, double cx, double cy,
+                                          double param_a, double param_b,
+                                          const ce_complex *polygon_points,
+                                          const uint32_t *polygon_offsets,
+                                          uint32_t polygon_count,
+                                          double epsilon,
+                                          const ce_complex *singularities,
+                                          uint32_t singularity_count,
+                                          uint8_t *inside_results,
+                                          uint8_t *safe_results);
 
 #ifdef __cplusplus
 }

@@ -1,6 +1,6 @@
 import { precisePixelCoordinate } from './complex-engine.js';
 
-export const PRECISE_ZOOM_THRESHOLD = 14;
+export const PRECISE_ZOOM_THRESHOLD = 12;
 
 function precisionFor(zoomPower) {
     return Math.max(256, Math.min(4096, Math.ceil((Math.abs(zoomPower) + 30) * Math.LOG2E * Math.LN10)));
@@ -25,13 +25,23 @@ export function isPreciseViewport(planeParams) {
     return !!planeParams?.preciseViewport;
 }
 
+export function shouldBePrecise(planeParams, zoom) {
+    const center = planeCenter(planeParams);
+    const maxCoord = Math.max(Math.abs(center.re), Math.abs(center.im), 1.0);
+    const z = Number(zoom);
+    if (!Number.isFinite(z) || z <= 0) return false;
+    const span = 7 / z;
+    const pixelSpan = span / Math.max(1, planeParams.width || 800);
+    return pixelSpan <= maxCoord * 1.0e-100;
+}
+
 export function synchronizePreciseViewport(planeParams, zoom) {
     const exactPower = Math.log10(Number(zoom));
-    if (!Number.isFinite(exactPower) || exactPower < PRECISE_ZOOM_THRESHOLD) {
+    if (!Number.isFinite(exactPower) || !shouldBePrecise(planeParams, zoom)) {
         if (planeParams.preciseViewport) leavePreciseViewport(planeParams, Number.isFinite(exactPower) ? exactPower : 0);
         return false;
     }
-    const zoomPower = Math.max(PRECISE_ZOOM_THRESHOLD, Math.round(exactPower));
+    const zoomPower = exactPower;
     if (!planeParams.preciseViewport) {
         const center = planeCenter(planeParams);
         planeParams.preciseViewport = {
@@ -78,11 +88,14 @@ export function panPreciseViewport(planeParams, deltaX, deltaY) {
     viewport.centerIm = center.im;
 }
 
-export function zoomPreciseViewportAt(planeParams, pixelX, pixelY, direction) {
+export function zoomPreciseViewportAt(planeParams, pixelX, pixelY, factor) {
     const viewport = planeParams.preciseViewport;
     if (!viewport) throw new Error('Precise zoom requires an active precise viewport.');
     const anchor = precisePixelCoordinate(viewport, pixelX - 0.5, pixelY - 0.5);
-    viewport.zoomPower = Math.max(PRECISE_ZOOM_THRESHOLD, viewport.zoomPower + Math.sign(direction));
+    const deltaPower = typeof factor === 'number' && factor > 0
+        ? Math.log10(factor)
+        : Math.sign(factor || 1) * Math.log10(1.1);
+    viewport.zoomPower = Math.max(PRECISE_ZOOM_THRESHOLD, viewport.zoomPower + deltaPower);
     viewport.precisionBits = precisionFor(viewport.zoomPower);
     const centeredOnAnchor = { ...viewport, centerRe: anchor.re, centerIm: anchor.im };
     const center = precisePixelCoordinate(

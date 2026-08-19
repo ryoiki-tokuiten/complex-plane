@@ -6,11 +6,17 @@ self.onmessage = event => {
     const message = event.data || {};
 
     if (message.type === 'start') {
+        for (const [id, r] of renderers) {
+            if (r?.dispose) r.dispose();
+        }
+        renderers.clear();
         renderers.set(message.jobId, createDomainDynamicsTileRenderer(message.snapshot));
         return;
     }
 
     if (message.type === 'cancel') {
+        const existing = renderers.get(message.jobId);
+        if (existing?.dispose) existing.dispose();
         renderers.delete(message.jobId);
         return;
     }
@@ -20,7 +26,7 @@ self.onmessage = event => {
     try {
         const renderTile = renderers.get(message.jobId);
         if (!renderTile) {
-            throw new Error('Domain dynamics job is not initialized.');
+            throw new Error(`Domain dynamics job ${message.jobId} is not initialized.`);
         }
 
         const pixels = renderTile(message.tile);
@@ -42,3 +48,5 @@ self.onmessage = event => {
         });
     }
 };
+
+self.postMessage({ type: 'ready' });

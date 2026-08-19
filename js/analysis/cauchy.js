@@ -2,7 +2,12 @@ import { state, context } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { buildMappedTransformProfileKey } from '../native/map-runtime.js';
 import { getContourPoints, isPointInsideContour } from './contours.js';
-import { analyzeNativeContour, estimateNativeResidue, nativeMapOptions } from '../native/complex-engine.js';
+import {
+    analyzeNativeContour,
+    classifyNativeContourSingularities,
+    estimateNativeResidue,
+    nativeMapOptions
+} from '../native/complex-engine.js';
 import {
     NUM_INTEGRAL_STEPS,
     RESIDUE_CALC_EPSILON_RADIUS,
@@ -165,47 +170,23 @@ export function performCauchyAnalysis() {
     }
 
 
-    if (state.showZerosPoles && state.poles) {
+    if (state.showZerosPoles && Array.isArray(state.poles) && state.poles.length > 0) {
         let polesInsideC = [];
         let polesTooCloseToContourForResidue = false;
 
-        state.poles.forEach(pole => {
-            if (isPointInsideContour(pole, contourParams.type, contourParams)) {
-                
-                let safeToCalcResidue = true;
+        const epsilon = RESIDUE_CALC_EPSILON_RADIUS * RESIDUE_BOUNDARY_CHECK_FACTOR;
+        const classifications = classifyNativeContourSingularities(
+            contourParams.type,
+            contourParams,
+            contourCPointSets || [contourC_points],
+            epsilon,
+            state.poles
+        );
 
-                if (contourParams.type === 'circle') {
-                    const distToCenterSq = (pole.re - contourParams.cx)**2 + (pole.im - contourParams.cy)**2;
-                    if (Math.sqrt(distToCenterSq) >= contourParams.r - RESIDUE_CALC_EPSILON_RADIUS * RESIDUE_BOUNDARY_CHECK_FACTOR) {
-                        safeToCalcResidue = false;
-                    }
-                } else if (contourParams.type === 'ellipse') {
-                    const dx = pole.re - contourParams.cx;
-                    const dy = pole.im - contourParams.cy;
-                    const effectiveEpsilon = RESIDUE_CALC_EPSILON_RADIUS * RESIDUE_BOUNDARY_CHECK_FACTOR / Math.min(contourParams.a, contourParams.b);
-                    if ((dx / contourParams.a)**2 + (dy / contourParams.b)**2 >= (1 - effectiveEpsilon)**2 ) {
-                         safeToCalcResidue = false;
-                    }
-                } else {
-                    const epsilon = RESIDUE_CALC_EPSILON_RADIUS * RESIDUE_BOUNDARY_CHECK_FACTOR;
-                    for (const points of contourCPointSets || [contourC_points]) {
-                        for (let i = 1; i < points.length; i++) {
-                            const a = points[i - 1];
-                            const b = points[i];
-                            const dx = b.re - a.re;
-                            const dy = b.im - a.im;
-                            const lengthSq = dx * dx + dy * dy;
-                            const t = lengthSq ? Math.max(0, Math.min(1, ((pole.re - a.re) * dx + (pole.im - a.im) * dy) / lengthSq)) : 0;
-                            if (Math.hypot(pole.re - (a.re + t * dx), pole.im - (a.im + t * dy)) <= epsilon) {
-                                safeToCalcResidue = false;
-                                break;
-                            }
-                        }
-                        if (!safeToCalcResidue) break;
-                    }
-                }
-
-                if (safeToCalcResidue) {
+        classifications.forEach((classification, index) => {
+            const pole = state.poles[index];
+            if (classification.inside) {
+                if (classification.safeForResidue) {
                     polesInsideC.push(pole);
                 } else {
                     polesTooCloseToContourForResidue = true;

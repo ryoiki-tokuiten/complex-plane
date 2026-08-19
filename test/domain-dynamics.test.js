@@ -144,8 +144,21 @@ function makeFakeCanvasEnvironment(targetCtx) {
     class FakeWorker {
         constructor() {
             this.renderers = new Map();
-            this.onmessage = null;
+            this._onmessage = null;
             this.onerror = null;
+        }
+
+        set onmessage(handler) {
+            this._onmessage = handler;
+            if (handler) {
+                setTimeout(() => {
+                    this._onmessage?.({ data: { type: 'ready' } });
+                }, 0);
+            }
+        }
+
+        get onmessage() {
+            return this._onmessage;
         }
 
         postMessage(message) {

@@ -9,7 +9,8 @@ import {
     leavePreciseViewport,
     panPreciseViewport,
     synchronizePreciseViewport,
-    zoomPreciseViewportAt
+    zoomPreciseViewportAt,
+    shouldBePrecise
 } from '../native/precise-viewport.js';
 import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
@@ -1628,12 +1629,6 @@ function panPlane(ctx, pos) {
     }
     const deltaX = pos.x - ctx.pan.panStart.x;
     const deltaY = pos.y - ctx.pan.panStart.y;
-    if (ctx.params.preciseViewport) {
-        Object.assign(ctx.params.preciseViewport, ctx.precisePanStart);
-        panPreciseViewport(ctx.params, deltaX, deltaY);
-        requestDomainRedraw(true);
-        return;
-    }
     ctx.params.origin.x = ctx.pan.panStartOrigin.x + deltaX;
     ctx.params.origin.y = ctx.pan.panStartOrigin.y + deltaY;
     updatePlaneViewportRanges(ctx.params);
@@ -1850,25 +1845,6 @@ function zoomPlaneAt(ctx, pos, factor) {
     const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
 
     state[zoomKey] = nextZoom;
-    if (ctx.params.preciseViewport) {
-        if (factor < 1 && ctx.params.preciseViewport.zoomPower === 14) {
-            leavePreciseViewport(ctx.params, 13);
-            state[zoomKey] = 1e13;
-            setupVisualParameters(ctx.isZ, !ctx.isZ);
-            requestDomainRedraw(true);
-            return;
-        }
-        const power = zoomPreciseViewportAt(ctx.params, pos.x, pos.y, factor > 1 ? 1 : -1);
-        state[zoomKey] = 10 ** power;
-        requestDomainRedraw(true);
-        return;
-    }
-    if (synchronizePreciseViewport(ctx.params, nextZoom)) {
-        anchorPreciseViewport(ctx.params, world.x, world.y, pos.x, pos.y);
-        state[zoomKey] = 10 ** ctx.params.preciseViewport.zoomPower;
-        requestDomainRedraw(true);
-        return;
-    }
     const applied = nextZoom / oldZoom;
     ctx.params.scale.x *= applied;
     ctx.params.scale.y *= applied;

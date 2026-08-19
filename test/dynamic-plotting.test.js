@@ -291,3 +291,28 @@ test('GPU aggregate compilation uses the complete visible term count', () => {
     assert.match(exactPredicate.error, /exact CPU backend/);
     assert.equal(exactPredicate.source, '');
 });
+
+test('dynamic aggregate branch continuation evaluates branch sheets natively', async () => {
+    const { evaluateNativeSheets, compileNativeDynamicAggregate, nativeMapOptions } = await import('../js/native/complex-engine.js');
+    const dynamicAggregate = compileNativeDynamicAggregate({
+        pointExpression: 'd',
+        term: { kind: 'expression', expression: 'ln(s)' },
+        reductionKind: 'sum',
+        invalidPolicy: 'stop',
+        sourceRecords: [{ ordinal: 1, domainValue: { re: 1, im: 0 } }]
+    });
+
+    const options = nativeMapOptions(state, { dynamicAggregate });
+    const points = [{ re: 1, im: 0 }, { re: 1, im: 0 }, { re: 1, im: 0 }];
+    const sheets = [0, 1, -1];
+    const { values } = evaluateNativeSheets(options, points, sheets);
+
+    assert.equal(values.length, 3);
+    assert.ok(Math.abs(values[0].re) < 1e-10);
+    assert.ok(Math.abs(values[0].im) < 1e-10);
+    assert.ok(Math.abs(values[1].re) < 1e-10);
+    assert.ok(Math.abs(values[1].im - 2 * Math.PI) < 1e-10);
+    assert.ok(Math.abs(values[2].re) < 1e-10);
+    assert.ok(Math.abs(values[2].im + 2 * Math.PI) < 1e-10);
+});
+
