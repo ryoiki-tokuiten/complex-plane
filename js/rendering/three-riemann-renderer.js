@@ -7,10 +7,11 @@ import {
     buildNativeRiemannProbe,
     buildNativeRiemannSphereGeometry,
     buildNativeRiemannSpherePositions,
-    interpolateNativeGeometry,
-    nativeMapOptions
+    interpolateNativeGeometry
 } from '../native/complex-engine.js';
+import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { disposeThreeObject } from './three-utils.js';
+import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 
 
 const COLOR_BACKGROUND = 0x0b0914;
@@ -96,7 +97,7 @@ export class ThreeRiemannRenderer {
         this.scene.add(this.ghostSphere);
 
         // Intrinsic Sphere Latitude/Longitude Grid
-        const gridDensity = state.gridDensity !== undefined ? state.gridDensity : 12;
+        const gridDensity = requireFiniteNumber(state.gridDensity, 'Riemann grid density');
         const widthSegments = Math.max(8, gridDensity * 4);
         const heightSegments = Math.max(8, gridDensity*2);
         
@@ -277,11 +278,7 @@ export class ThreeRiemannRenderer {
     setTransform(map = null) {
         const nextTransformKey = map?.signature || null;
         const changed = this.transformKey !== nextTransformKey;
-        this.mapOptions = map ? nativeMapOptions(state, {
-            stage: map.stage,
-            derivativeMode: map.presentation === 'derivative',
-            ...(map.evaluate?.nativeMapOptions || map.nativeMapOptions || {})
-        }) : null;
+        this.mapOptions = map ? nativeOptionsForActiveMap(map) : null;
         this.transformKey = nextTransformKey;
         if (changed) this.renderDirty = true;
         return changed;
@@ -329,14 +326,30 @@ export class ThreeRiemannRenderer {
         return changed;
     }
 
-    setRasterSurface(data, source, opacity = 1, heightScale = 1) {
-        if (!data || !source) return false;
+    setRasterSurface(data, source, opacity, heightScale) {
+        if (!data || typeof data !== 'object') throw new Error('Riemann raster surface data is required.');
+        if (!source) throw new Error('Riemann raster surface source is required.');
+        if (!(data.indices instanceof Uint16Array)) {
+            throw new Error('Riemann raster surface requires native Uint16 indices.');
+        }
+        if (!(data.foldPositions instanceof Float32Array) || data.foldPositions.length % 3 !== 0 ||
+            !(data.foldUvs instanceof Float32Array) || data.foldUvs.length % 2 !== 0 ||
+            data.foldPositions.length / 3 !== data.foldUvs.length / 2) {
+            throw new Error('Riemann raster surface has malformed native geometry.');
+        }
+        const foldMapping = data.foldMapping;
+        if (!foldMapping || ![
+            foldMapping.mappedCenterX, foldMapping.mappedCenterY,
+            foldMapping.sourceCenter, foldMapping.scale
+        ].every(Number.isFinite) || foldMapping.scale <= 0) {
+            throw new Error('Riemann raster surface requires a valid native fold mapping.');
+        }
 
-        const hasGeometry = Boolean(data.indices?.length);
-        const nextHeightScale = Number.isFinite(Number(heightScale))
-            ? Math.max(0, Number(heightScale))
-            : 1;
+        const hasGeometry = data.indices.length > 0;
+        const nextHeightScale = requireFiniteNumber(heightScale, 'Riemann raster height scale');
+        if (nextHeightScale <= 0) throw new Error('Riemann raster height scale must be positive.');
         this.setFoldSurfaceMode('raster');
+        this.foldMapping = foldMapping;
 
         if (!this.rasterSurfaceMesh) {
             this.rasterSurfaceMesh = new THREE.Mesh(
@@ -357,7 +370,7 @@ export class ThreeRiemannRenderer {
             this.rasterSurfaceData = data;
             this.rasterSurfaceHeightScale = nextHeightScale;
         } else if (this.rasterSurfaceData !== data || this.rasterSurfaceHeightScale !== nextHeightScale) {
-            const { foldPositions, foldUvs, foldMapping, indices } = data;
+            const { foldPositions, foldUvs, indices } = data;
 
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.BufferAttribute(foldPositions, 3));
@@ -366,7 +379,6 @@ export class ThreeRiemannRenderer {
             geometry.computeBoundingSphere();
             this.rasterSurfaceMesh.geometry.dispose();
             this.rasterSurfaceMesh.geometry = geometry;
-            this.foldMapping = foldMapping;
             this.rasterSurfaceData = data;
             this.rasterSurfaceHeightScale = nextHeightScale;
         }
@@ -389,7 +401,10 @@ export class ThreeRiemannRenderer {
             material.needsUpdate = true;
         }
 
-        const nextOpacity = Math.max(0, Math.min(1, Number(opacity) || 0));
+        const nextOpacity = Math.max(0, Math.min(
+            1,
+            requireFiniteNumber(opacity, 'Riemann raster opacity')
+        ));
         if (material.opacity !== nextOpacity) {
             material.opacity = nextOpacity;
             material.needsUpdate = true;
@@ -401,13 +416,23 @@ export class ThreeRiemannRenderer {
     setFoldPreimageMarkers(roots, target, map) {
         const mapping = this.foldMapping;
         const heightScale = this.foldSurfaceMode === 'raster' ? this.rasterSurfaceHeightScale : this.gridFoldHeightScale;
-        const nextKey = state.preimageExplorerEnabled && mapping?.scale && target && Array.isArray(roots) && roots.length
-            ? [
-                this.foldSurfaceMode, heightScale, mapping.mappedCenterX, mapping.mappedCenterY,
-                mapping.sourceCenter, mapping.scale, target.re, target.im,
-                map?.signature || '', ...roots.flatMap(root => [root?.re, root?.im])
-            ].join('|')
-            : '';
+        let nextKey = '';
+        if (state.preimageExplorerEnabled) {
+            if (!mapping || !Number.isFinite(mapping.scale) || mapping.scale <= 0) {
+                throw new Error('Preimage markers require a valid fold mapping.');
+            }
+            if (!map?.signature) throw new Error('Preimage markers require an active native map.');
+            requireFiniteComplex(target, 'Preimage target');
+            if (!Array.isArray(roots)) throw new Error('Preimage roots must be an array.');
+            roots.forEach((root, index) => requireFiniteComplex(root, `Preimage root ${index}`));
+            if (roots.length) {
+                nextKey = [
+                    this.foldSurfaceMode, heightScale, mapping.mappedCenterX, mapping.mappedCenterY,
+                    mapping.sourceCenter, mapping.scale, target.re, target.im,
+                    map.signature, ...roots.flatMap(root => [root.re, root.im])
+                ].join('|');
+            }
+        }
         if (this.foldPreimageKey === nextKey) return;
         this.foldPreimageKey = nextKey;
         while (this.foldPreimageGroup.children.length) {
@@ -417,17 +442,13 @@ export class ThreeRiemannRenderer {
             this.foldPreimageGroup.remove(child);
         }
         this.foldPreimageGroup.clear();
-        if (!state.preimageExplorerEnabled || !mapping?.scale || !target || !Array.isArray(roots) || !roots.length) {
+        if (!state.preimageExplorerEnabled || !roots.length) {
             this.foldPreimageGroup.visible = false;
             this.renderDirty = true;
             return;
         }
         const positions = buildNativeFoldPreimageMarkers({
-            mapOptions: nativeMapOptions(state, {
-                stage: map?.stage,
-                derivativeMode: map?.presentation === 'derivative',
-                ...(map?.evaluate?.nativeMapOptions || map?.nativeMapOptions || {})
-            }),
+            mapOptions: nativeOptionsForActiveMap(map),
             mapping,
             heightScale
         }, roots);
@@ -444,31 +465,40 @@ export class ThreeRiemannRenderer {
         this.renderDirty = true;
     }
 
-    setGridFoldSurface(data, heightScale = 1) {
-        if (!data) return false;
+    setGridFoldSurface(data, heightScale) {
+        if (!data || typeof data !== 'object') throw new Error('Riemann grid-fold surface data is required.');
+        if (!Array.isArray(data.lines) || !Array.isArray(data.points)) {
+            throw new Error('Riemann grid-fold surface requires native line and point groups.');
+        }
+        const mapping = data.mapping;
+        if (!mapping || ![
+            mapping.mappedCenterX, mapping.mappedCenterY, mapping.sourceCenter, mapping.scale
+        ].every(Number.isFinite) || mapping.scale <= 0) {
+            throw new Error('Riemann grid-fold surface requires a valid native mapping.');
+        }
 
         this.setFoldSurfaceMode('grid');
-        this.foldMapping = data.mapping || null;
-        const nextHeightScale = Number.isFinite(Number(heightScale))
-            ? Math.max(0, Number(heightScale))
-            : 1;
+        this.foldMapping = mapping;
+        const nextHeightScale = requireFiniteNumber(heightScale, 'Riemann grid-fold height scale');
+        if (nextHeightScale <= 0) throw new Error('Riemann grid-fold height scale must be positive.');
         if (this.gridFoldSurfaceData === data && this.gridFoldHeightScale === nextHeightScale) return true;
 
         disposeThreeObject(this.gridFoldSurfaceGroup);
         this.gridFoldSurfaceGroup.clear();
 
-        for (const lineData of data.lines || []) {
-            if (!(lineData.positions instanceof Float32Array) || lineData.positions.length < 6) continue;
+        for (const [index, lineData] of data.lines.entries()) {
+            if (!(lineData?.positions instanceof Float32Array) || lineData.positions.length < 6 ||
+                lineData.positions.length % 3 !== 0) {
+                throw new Error(`Riemann grid-fold line ${index} has malformed native positions.`);
+            }
+            if (lineData.color === undefined || lineData.color === null) {
+                throw new Error(`Riemann grid-fold line ${index} requires a color.`);
+            }
 
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.BufferAttribute(lineData.positions, 3));
 
-            let color = 0xa78bfa;
-            if (lineData.color) {
-                try {
-                    color = new THREE.Color(lineData.color);
-                } catch {}
-            }
+            const color = new THREE.Color(lineData.color);
 
             const material = new THREE.LineBasicMaterial({
                 color,
@@ -478,11 +508,17 @@ export class ThreeRiemannRenderer {
             });
             this.gridFoldSurfaceGroup.add(new THREE.Line(geometry, material));
         }
-        for (const pointData of data.points || []) {
-            if (!(pointData.positions instanceof Float32Array) || pointData.positions.length < 3) continue;
+        for (const [index, pointData] of data.points.entries()) {
+            if (!(pointData?.positions instanceof Float32Array) || pointData.positions.length < 3 ||
+                pointData.positions.length % 3 !== 0) {
+                throw new Error(`Riemann grid-fold point group ${index} has malformed native positions.`);
+            }
+            if (pointData.color === undefined || pointData.color === null) {
+                throw new Error(`Riemann grid-fold point group ${index} requires a color.`);
+            }
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.BufferAttribute(pointData.positions, 3));
-            const material = new THREE.PointsMaterial({ color: pointData.color || 0xa78bfa, size: 0.09, sizeAttenuation: true });
+            const material = new THREE.PointsMaterial({ color: pointData.color, size: 0.09, sizeAttenuation: true });
             this.gridFoldSurfaceGroup.add(new THREE.Points(geometry, material));
         }
 
@@ -493,16 +529,27 @@ export class ThreeRiemannRenderer {
     }
 
     buildGridFromPointSets(pointSets, progressOverride = undefined) {
+        if (!Array.isArray(pointSets)) throw new Error('Riemann sphere point sets must be an array.');
+        pointSets.forEach((pointSet, index) => {
+            if (!Array.isArray(pointSet?.points)) {
+                throw new Error(`Riemann sphere point set ${index} requires points.`);
+            }
+            if (pointSet.color === undefined || pointSet.color === null) {
+                throw new Error(`Riemann sphere point set ${index} requires a color.`);
+            }
+        });
         this.resize();
         this.setSphereMode();
         disposeThreeObject(this.linesGroup);
         this.linesGroup.clear();
         this.scale = 2 * SPHERE_RADIUS;
-        const drawableSets = (pointSets || []).filter(pointSet => pointSet?.points?.length >=
+        const drawableSets = pointSets.filter(pointSet => pointSet.points.length >=
             (pointSet.role === 'grid-dots' ? 1 : 2));
-        const progress = progressOverride !== undefined
+        const progress = requireFiniteNumber(progressOverride !== undefined
             ? progressOverride
-            : (this.planeType === 'z' ? state.riemannTransformationProgressZ : state.riemannTransformationProgressW);
+            : (this.planeType === 'z' ? state.riemannTransformationProgressZ : state.riemannTransformationProgressW),
+        'Riemann sphere progress');
+        if (progress < 0 || progress > 1) throw new Error('Riemann sphere progress must be between zero and one.');
         const nativeGeometry = buildNativeRiemannSphereGeometry({
             mapPoints: this.planeType === 'w',
             mapOptions: this.mapOptions,
@@ -513,12 +560,7 @@ export class ThreeRiemannRenderer {
         this.sphereGeometryData = nativeGeometry;
 
         drawableSets.forEach((pointSet, setIndex) => {
-            let colorHex = 0xa78bfa;
-            if (pointSet.color) {
-                try {
-                    colorHex = new THREE.Color(pointSet.color);
-                } catch {}
-            }
+            const colorHex = new THREE.Color(pointSet.color);
 
             const material = pointSet.role === 'grid-dots'
                 ? new THREE.PointsMaterial({
@@ -571,11 +613,15 @@ export class ThreeRiemannRenderer {
             return true;
         }
 
-        const spherePositions = values => buildNativeRiemannSpherePositions(
-            (values || []).filter(value => Number.isFinite(value?.re) && Number.isFinite(value?.im)),
-            this.scale,
-            SPHERE_RADIUS
-        );
+        if (!Array.isArray(data.points) || !Array.isArray(data.path)) {
+            throw new Error('Dynamic Riemann overlays require point and path arrays.');
+        }
+        data.points.forEach((value, index) => requireFiniteComplex(value, `Dynamic Riemann point ${index}`));
+        data.path.forEach((value, index) => requireFiniteComplex(value, `Dynamic Riemann path point ${index}`));
+        if (data.finalPoint !== null) requireFiniteComplex(data.finalPoint, 'Dynamic Riemann final point');
+        const pointSize = requireFiniteNumber(data.pointSize, 'Dynamic Riemann point size');
+        if (pointSize <= 0) throw new Error('Dynamic Riemann point size must be positive.');
+        const spherePositions = values => buildNativeRiemannSpherePositions(values, this.scale, SPHERE_RADIUS);
 
         const pointPositions = spherePositions(data.points);
         if (pointPositions.length > 0) {
@@ -586,7 +632,7 @@ export class ThreeRiemannRenderer {
             );
             const material = new THREE.PointsMaterial({
                 color: 0xd8dee9,
-                size: Math.max(0.1, Math.min(0.28, Number(data.pointSize) * 0.038)),
+                size: Math.max(0.1, Math.min(0.28, pointSize * 0.038)),
                 sizeAttenuation: true,
                 transparent: true,
                 opacity: 0.86,
@@ -612,7 +658,7 @@ export class ThreeRiemannRenderer {
             this.dynamicOverlayGroup.add(new THREE.Line(geometry, material));
         }
 
-        const finalPositions = spherePositions(data.finalPoint ? [data.finalPoint] : []);
+        const finalPositions = spherePositions(data.finalPoint === null ? [] : [data.finalPoint]);
         if (finalPositions.length === 3) {
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute(
@@ -672,6 +718,8 @@ export class ThreeRiemannRenderer {
     }
 
     updateGeometry(progress) {
+        progress = requireFiniteNumber(progress, 'Riemann geometry progress');
+        if (progress < 0 || progress > 1) throw new Error('Riemann geometry progress must be between zero and one.');
         const easedProgress = -(Math.cos(Math.PI * progress) - 1) / 2;
         const progressChanged = this.lastGeometryProgress !== progress;
         let changed = progressChanged;
@@ -689,11 +737,11 @@ export class ThreeRiemannRenderer {
             });
         }
 
-        const maxOpacity = state.threeSphereOpacity !== undefined ? state.threeSphereOpacity : 0.15;
-        const density = state.gridDensity !== undefined ? state.gridDensity : 12;
+        const maxOpacity = requireFiniteNumber(state.threeSphereOpacity, 'Riemann sphere opacity');
+        const density = requireFiniteNumber(state.gridDensity, 'Riemann grid density');
         const widthSegments = Math.max(8, density * 2);
         const heightSegments = Math.max(8, density);
-        const gridOpacity = state.sphereGridOpacity !== undefined ? state.sphereGridOpacity : 0.0;
+        const gridOpacity = requireFiniteNumber(state.sphereGridOpacity, 'Riemann sphere-grid opacity');
         const geometryStateKey = `${easedProgress}|${maxOpacity}|${gridOpacity}|${widthSegments}|${heightSegments}`;
         const geometryStateChanged = this.lastGeometryStateKey !== geometryStateKey;
 

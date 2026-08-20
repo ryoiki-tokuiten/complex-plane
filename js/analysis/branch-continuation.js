@@ -4,10 +4,6 @@ import {
     nativeMapOptions
 } from '../native/complex-engine.js';
 
-export function branchCutCrossingForSegment(a, b, branchCutType, branchCutAngle, branchCutPoints) {
-    return continuationNativeSheet([a, b], branchCutType, branchCutAngle, branchCutPoints);
-}
-
 export function continuationSheetForPath(path, branchCutType, branchCutAngle, branchCutPoints) {
     return continuationNativeSheet(path, branchCutType, branchCutAngle, branchCutPoints);
 }

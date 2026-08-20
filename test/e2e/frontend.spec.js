@@ -42,30 +42,6 @@ test('branch-aware algebraic Riemann shaders compile', async ({ page }) => {
     expect(shaderErrors).toEqual([]);
 });
 
-test('branch-aware dynamic aggregate Riemann shaders compile', async ({ page }) => {
-    const shaderErrors = [];
-    page.on('console', message => {
-        if (message.text().includes('WebGL shader compile error')) shaderErrors.push(message.text());
-    });
-    const rendered = await page.evaluate(async () => {
-        const { state } = await import('./js/store/state.js');
-        Object.assign(state.dynamicPlotting, {
-            enabled: true,
-            mode: 'aggregate',
-            source: { kind: 'integers', count: 4, start: 1, step: 1, ordering: 'ascending' },
-            pointExpression: 'd',
-            term: { kind: 'expression', expression: 'ln(s) + d^(-s)', bindings: [] },
-            reduction: { kind: 'sum', invalidPolicy: 'stop' },
-            parameters: [],
-            playback: { visibleCount: 4, playing: false, speed: 10, loop: false }
-        });
-        const { renderRiemannSurface } = await import('./js/rendering/webgl-riemann-surface.js');
-        return renderRiemannSurface(document.getElementById('w_plane_canvas'), { stage: 1 });
-    });
-    expect(rendered).toBe(true);
-    expect(shaderErrors).toEqual([]);
-});
-
 test('arbitrary shapes support freehand drawing without Cauchy mode', async ({ page }) => {
     await page.locator('#input_shape_selector').selectOption('arbitrary');
     await expect(page.locator('#arbitrary_shape_controls')).not.toHaveClass(/hidden/);
@@ -121,11 +97,21 @@ test('Preact controls preserve the public DOM and interaction contract', async (
         element.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await expect(page.locator('body')).toHaveClass(/vertical-layout/);
+
+    await expect.poll(async () => {
+        return page.locator('#collapse_z_btn svg').evaluate(element => window.getComputedStyle(element).transform);
+    }).toContain('matrix');
+
     await page.locator('#enable_vertical_layout_cb').evaluate(element => {
         element.checked = false;
         element.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await expect(page.locator('body')).not.toHaveClass(/vertical-layout/);
+
+    await expect.poll(async () => {
+        return page.locator('#collapse_z_btn svg').evaluate(element => window.getComputedStyle(element).transform);
+    }).not.toContain('matrix');
+
     await page.click('#close_theme_modal_btn');
     await expect(page.locator('#theme_modal')).toHaveClass(/hidden/);
 
@@ -198,11 +184,12 @@ test('full-grid and connected Fourier graph modes stay isolated from standalone 
         if (message.type() === 'error') errors.push(message.text());
     });
 
-    await expect(page.locator('#view_full_grid_perspective_btn')).toBeHidden();
+    const fullGridToggle = page.locator('label[for="view_full_grid_perspective_btn"]');
+    await expect(fullGridToggle).toBeHidden();
     await expect(page.locator('#graph_focus_box_toggle')).toBeHidden();
     await page.locator('#enable_graph_view_cb').evaluate(element => element.click());
-    await expect(page.locator('#view_full_grid_perspective_btn')).toBeVisible();
-    await page.locator('#view_full_grid_perspective_btn').evaluate(element => element.click());
+    await expect(fullGridToggle).toBeVisible();
+    await fullGridToggle.click();
     await expect(page.locator('#enable_graph_view_cb')).toBeChecked();
     await expect(page.locator('#graph_focus_box_toggle')).toBeVisible();
     await expect(page.locator('#graph_layer_lock_toggle')).toBeVisible();
@@ -258,7 +245,7 @@ test('full-grid and connected Fourier graph modes stay isolated from standalone 
     await expect(page.locator('#graph_grid_family_selector option').nth(1)).toHaveText('Lines');
     await page.locator('#graph_grid_family_selector').selectOption('secondary');
 
-    await page.locator('#view_full_grid_perspective_btn').evaluate(element => element.click());
+    await fullGridToggle.click();
     await expect(page.locator('#graph_column')).toBeVisible();
     await expect(page.locator('#graph_title_label')).toHaveText('Graph + Fourier');
     await expect(page.locator('#fourier_specific_controls')).toBeVisible();
@@ -293,8 +280,8 @@ test('raster fold view stays connected and chain depth settles safely', async ({
         return import('./js/store/state.js').then(({ state }) => state.imageContentVersion > 0);
     });
 
-    await page.locator('label[for="image_surface_3d_cb"]').click();
-    await expect(page.locator('#image_surface_3d_cb')).toBeChecked();
+    await page.locator('label[for="grid_surface_3d_cb"]').click();
+    await expect(page.locator('#grid_surface_3d_cb')).toBeChecked();
     await expect(page.locator('#w_plane_canvas')).toHaveClass(/hidden/);
     await expect(page.locator('#w_plane_three_container')).not.toHaveClass(/hidden/);
 
@@ -322,4 +309,28 @@ test('raster fold view stays connected and chain depth settles safely', async ({
     await page.waitForTimeout(400);
     await expect(page.locator('#w-plane-title')).toContainText('Chain 511');
     expect(errors).toEqual([]);
+});
+
+test('branch-aware dynamic aggregate Riemann shaders compile', async ({ page }) => {
+    const shaderErrors = [];
+    page.on('console', message => {
+        if (message.text().includes('WebGL shader compile error')) shaderErrors.push(message.text());
+    });
+    const rendered = await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        Object.assign(state.dynamicPlotting, {
+            enabled: true,
+            mode: 'aggregate',
+            source: { kind: 'integers', count: 4, start: 1, step: 1, ordering: 'ascending' },
+            pointExpression: 'd',
+            term: { kind: 'expression', expression: 'ln(s) + d^(-s)', bindings: [] },
+            reduction: { kind: 'sum', invalidPolicy: 'stop' },
+            parameters: [],
+            playback: { visibleCount: 4, playing: false, speed: 10, loop: false }
+        });
+        const { renderRiemannSurface } = await import('./js/rendering/webgl-riemann-surface.js');
+        return renderRiemannSurface(document.getElementById('w_plane_canvas'), { stage: 1 });
+    });
+    expect(rendered).toBe(true);
+    expect(shaderErrors).toEqual([]);
 });

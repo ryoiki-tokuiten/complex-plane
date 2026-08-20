@@ -4,15 +4,16 @@ import {
     computeNativeFourierSpectrum,
     generateNativeFourierSignal
 } from '../native/complex-engine.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 /**
  * Generate time domain signal using native C signal generator
  */
 export function generateTimeDomainSignal(funcType, frequency, amplitude, timeWindow, samples) {
-    const count = Math.max(1, Math.floor(Number(samples) || 128));
-    const freq = Number(frequency) || 0;
-    const amp = Number(amplitude) || 0;
-    const win = Number(timeWindow) > 0 ? Number(timeWindow) : 1;
+    const count = requireInteger(samples, 'Fourier sample count');
+    const freq = requireFiniteNumber(frequency, 'Fourier frequency');
+    const amp = requireFiniteNumber(amplitude, 'Fourier amplitude');
+    const win = requireFiniteNumber(timeWindow, 'Fourier time window');
     return generateNativeFourierSignal(funcType, freq, amp, win, count, Math.floor(Math.random() * 0x7fffffff));
 }
 
@@ -21,7 +22,8 @@ export function generateTimeDomainSignal(funcType, frequency, amplitude, timeWin
  */
 export function computeDFT(signal) {
     if (!Array.isArray(signal) || signal.length === 0) return [];
-    const values = signal.map(sample => Number(sample?.value) || 0);
+    const values = signal.map((sample, index) =>
+        requireFiniteNumber(sample?.value, `Fourier sample ${index}`));
     return computeNativeFourierSpectrum(values);
 }
 
@@ -38,15 +40,18 @@ export function buildFourierWinding(signal, options = {}) {
         };
     }
 
-    const windingFrequency = Number.isFinite(options.windingFrequency)
-        ? Math.max(0, options.windingFrequency)
-        : Math.max(0, state.fourierWindingFrequency || 1);
-    const progress = Number.isFinite(options.progress)
-        ? Math.max(0, Math.min(1, options.progress))
-        : Math.max(0, Math.min(1, state.fourierWindingTime || 0));
-    const timeWindow = Number.isFinite(options.timeWindow)
-        ? Math.max(Number.EPSILON, options.timeWindow)
-        : Math.max(Number.EPSILON, state.fourierTimeWindow || signal.at(-1)?.t || 1);
+    const windingFrequency = requireFiniteNumber(
+        options.windingFrequency === undefined ? state.fourierWindingFrequency : options.windingFrequency,
+        'Fourier winding frequency'
+    );
+    const progress = requireFiniteNumber(
+        options.progress === undefined ? state.fourierWindingTime : options.progress,
+        'Fourier winding progress'
+    );
+    const timeWindow = requireFiniteNumber(
+        options.timeWindow === undefined ? state.fourierTimeWindow : options.timeWindow,
+        'Fourier winding time window'
+    );
 
     return buildNativeFourierWinding(signal, windingFrequency, progress, timeWindow);
 }
@@ -57,11 +62,11 @@ export function buildFourierWinding(signal, options = {}) {
 export function updateFourierTransform() {
     if (!state.fourierModeEnabled) return;
     
-    const funcType = state.fourierFunction || 'sine';
-    const frequency = state.fourierFrequency || 1.0;
-    const amplitude = state.fourierAmplitude || 1.0;
-    const timeWindow = state.fourierTimeWindow || 4.0;
-    const samples = state.fourierSamples || 128;
+    const funcType = state.fourierFunction;
+    const frequency = state.fourierFrequency;
+    const amplitude = state.fourierAmplitude;
+    const timeWindow = state.fourierTimeWindow;
+    const samples = state.fourierSamples;
     
     state.fourierTimeDomainSignal = generateTimeDomainSignal(
         funcType,
@@ -77,4 +82,3 @@ export function updateFourierTransform() {
         state.fourierDFTResult = [];
     }
 }
-

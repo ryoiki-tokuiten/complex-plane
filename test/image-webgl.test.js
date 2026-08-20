@@ -1,21 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-    getImageRenderChainIndex,
-    shouldUseInverseImagePath
-} from '../js/rendering/draw-image-webgl.js';
+import { getImageRenderStage } from '../js/rendering/draw-image-webgl.js';
 import { buildNativeImageMesh } from '../js/native/complex-engine.js';
-
-function rasterSnapshot(overrides = {}) {
-    return {
-        currentFunction: 'cos',
-        chainingMode: 'recursion',
-        polynomialN: 2,
-        navigationModeEnabled: false,
-        ...overrides
-    };
-}
+import { completeNativeMapOptions } from './helpers/native-map.js';
 
 function nativeMesh({ mapOptions, bounds, sourceCenter, sourceSize, ...options } = {}) {
     const x0 = bounds?.x0 ?? -1;
@@ -23,7 +11,7 @@ function nativeMesh({ mapOptions, bounds, sourceCenter, sourceSize, ...options }
     const y0 = bounds?.y0 ?? -1;
     const y1 = bounds?.y1 ?? 1;
     return buildNativeImageMesh({
-        mapOptions: { functionKey: 'identity', chainingEnabled: false, ...mapOptions },
+        mapOptions: completeNativeMapOptions({ functionKey: 'identity', chainingEnabled: false, ...mapOptions }),
         bounds: { x0, x1, y0, y1 },
         sourceCenter: sourceCenter || { re: 0, im: 0 },
         sourceSize: sourceSize || { width: 2, height: 2 },
@@ -34,6 +22,8 @@ function nativeMesh({ mapOptions, bounds, sourceCenter, sourceSize, ...options }
         maxSamples: 65536,
         pixelWidth: 1024,
         pixelHeight: 1024,
+        buildFold: false,
+        foldHeightScale: 1,
         ...options
     });
 }
@@ -66,21 +56,13 @@ function assertConformingSourceEdges(mesh) {
 }
 
 test('collapsed raster output uses the resolved map stage instead of display panel index', () => {
-    assert.equal(getImageRenderChainIndex(0, { stage: 29 }), 29);
-    assert.equal(getImageRenderChainIndex(4, { stage: 7 }), 7);
-    assert.equal(getImageRenderChainIndex(4, null), 4);
-});
-
-test('only supported invertible ordinary maps use the inverse GPU path', () => {
-    const snapshot = rasterSnapshot();
-    assert.equal(shouldUseInverseImagePath(true, snapshot, 0), false);
-    assert.equal(shouldUseInverseImagePath(true, { ...snapshot, currentFunction: 'exp' }, 0), true);
-    assert.equal(shouldUseInverseImagePath(true, snapshot, 16), false);
-    assert.equal(shouldUseInverseImagePath(false, snapshot, 100), true);
+    assert.equal(getImageRenderStage({ stage: 29 }), 29);
+    assert.equal(getImageRenderStage({ stage: 7 }), 7);
+    assert.throws(() => getImageRenderStage(null), /resolved non-negative map stage/);
 });
 
 test('native adaptive image mesh omits cells surrounding invalid poles', () => {
-    const mesh = nativeMesh({ mapOptions: { functionKey: 'power', fractionalPower: -1 } });
+    const mesh = nativeMesh({ mapOptions: { functionKey: 'power', fractionalPowerN: -1 } });
     assert.ok(mesh.indices.length > 0);
     assert.ok(mesh.indices.every(index => index < mesh.vertices.length / 2));
     assert.ok(mesh.mappedPositions.every(Number.isFinite));
@@ -156,10 +138,14 @@ test('native adaptive image mesh stitches refinement boundaries', () => {
 });
 
 test('native adaptive image mesh honors explicit cell, sample, and vertex budgets', () => {
-    const mesh = nativeMesh({ baseResolution: 8, maxCells: 4, maxSamples: 9, maxVertices: 4 });
+    const mesh = nativeMesh({ baseResolution: 2, maxCells: 4, maxSamples: 9, maxVertices: 4 });
     assert.ok(mesh.cellCount <= 4);
     assert.ok(mesh.sampleCount <= 9);
     assert.ok(mesh.vertices.length / 2 <= 4);
+    assert.throws(
+        () => nativeMesh({ baseResolution: 8, maxCells: 4 }),
+        /dimensions and work budgets are invalid/
+    );
 });
 
 test('native adaptive image mesh scales deterministically with render resolution', () => {

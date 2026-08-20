@@ -23,6 +23,7 @@ import {
     decomposeProductExpression
 } from '../math/expression/index.js';
 import { createElement } from './dom-components.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 const SOURCE_GROUPS = Object.freeze({
     integers: [],
@@ -84,24 +85,46 @@ function element(id) {
 }
 
 function config() {
-    return state.dynamicPlotting;
+    const dynamic = state.dynamicPlotting;
+    if (!dynamic || typeof dynamic !== 'object') {
+        throw new Error('Dynamic plotting requires a configuration object.');
+    }
+    return dynamic;
+}
+
+function sourceConfig() {
+    const source = config().source;
+    if (!source || typeof source !== 'object') throw new Error('Dynamic plotting requires a source.');
+    if (!Object.prototype.hasOwnProperty.call(SOURCE_GROUPS, source.kind)) {
+        throw new Error(`Unsupported dynamic source kind: ${source.kind}`);
+    }
+    return source;
+}
+
+function reductionKind() {
+    const kind = config().reduction?.kind;
+    if (!Object.prototype.hasOwnProperty.call(OPERATION_COPY, kind)) {
+        throw new Error(`Unsupported dynamic reduction: ${kind}`);
+    }
+    return kind;
+}
+
+function termConfig() {
+    const term = config().term;
+    if (!term || (term.kind !== 'expression' && term.kind !== 'selected-function')) {
+        throw new Error(`Unsupported dynamic term kind: ${term?.kind}`);
+    }
+    return term;
 }
 
 function synchronizeTermBindingState() {
     const term = config().term;
     if (!term || term.kind !== 'expression') return;
-    try {
-        const next = synchronizeSequenceBindings(
-            String(term.expression || ''),
-            term.bindings || []
-        );
-        if (JSON.stringify(next) !== JSON.stringify(term.bindings || [])) {
-            mutateState('dynamicPlotting', dynamic => {
-                dynamic.term.bindings = next;
-            }, 'dynamicPlotting.term.bindings');
-        }
-    } catch {
-        // The formula error is presented by the main validation status.
+    const next = synchronizeSequenceBindings(term.expression, term.bindings);
+    if (JSON.stringify(next) !== JSON.stringify(term.bindings)) {
+        mutateState('dynamicPlotting', dynamic => {
+            dynamic.term.bindings = next;
+        }, 'dynamicPlotting.term.bindings');
     }
 }
 
@@ -121,15 +144,6 @@ function setChecked(id, value) {
 
 function textNode(tag, className, text) {
     return createElement(tag, { className, text });
-}
-
-function finiteNumber(value, fallback) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function integer(value, fallback) {
-    return Math.floor(finiteNumber(value, fallback));
 }
 
 export function updateDynamicPlotting(mutator, options = {}) {
@@ -159,7 +173,7 @@ function bindCheckbox(id, setter, options) {
 
 function bindNumber(id, setter, options = {}) {
     bind(id, options.event || 'change', event => update(
-        dynamic => setter(dynamic, finiteNumber(event.target.value, options.fallback ?? 0)),
+        dynamic => setter(dynamic, requireFiniteNumber(event.target.value, `Dynamic control ${id}`)),
         options
     ));
 }
@@ -191,26 +205,25 @@ function bindFormula(id, setter) {
 }
 
 function sourceCount() {
-    return Math.max(0, integer(config().source?.count, 0));
+    return Math.max(0, requireInteger(sourceConfig().count, 'Dynamic source count'));
 }
 
 function availableCount() {
     if (!config().enabled) return sourceCount();
-    try {
-        return getDynamicPlotResult()?.samples.length ?? sourceCount();
-    } catch {
-        return sourceCount();
-    }
+    return getDynamicPlotResult().samples.length;
 }
 
 function syncSourceVisibility() {
-    const sourceKind = config().source?.kind || 'integers';
-    const visibleIds = new Set(SOURCE_GROUPS[sourceKind] || []);
+    const sourceKind = sourceConfig().kind;
+    const visibleIds = new Set(SOURCE_GROUPS[sourceKind]);
     Object.values(SOURCE_GROUPS).flat().forEach(id => setHidden(id, !visibleIds.has(id)));
 }
 
 function pipelineFreeParameterSymbols() {
-    const pointExpression = String(config().pointExpression || '');
+    if (typeof config().pointExpression !== 'string') {
+        throw new Error('Dynamic plotting requires a point expression.');
+    }
+    const pointExpression = config().pointExpression;
     const symbols = getDynamicFreeParameterSymbols();
     if (
         /(^|[^A-Za-z0-9_])s([^A-Za-z0-9_]|$)/.test(pointExpression) &&
@@ -222,8 +235,8 @@ function pipelineFreeParameterSymbols() {
 }
 
 function syncTermVisibility() {
-    const customExpression = config().term?.kind === 'expression';
-    const reduction = config().reduction?.kind || 'none';
+    const customExpression = termConfig().kind === 'expression';
+    const reduction = reductionKind();
     const aggregate = reduction !== 'none';
     const parameterSymbols = pipelineFreeParameterSymbols();
     const parameterized = parameterSymbols.length > 0;
@@ -238,7 +251,7 @@ function syncTermVisibility() {
     setHidden('dynamic_aggregate_parameter_row', !parameterized);
     setHidden('dynamic_product_view_row', reduction !== 'product');
 
-    const operation = OPERATION_COPY[reduction] || OPERATION_COPY.none;
+    const operation = OPERATION_COPY[reduction];
     const subtitle = element('dynamic_operation_subtitle');
     if (subtitle) subtitle.textContent = operation.subtitle;
     const explanation = element('dynamic_operation_explanation');
@@ -269,7 +282,7 @@ function syncTermVisibility() {
 }
 
 function sourceKindLabel() {
-    return {
+    const label = {
         integers: 'Integers',
         naturals: 'Natural numbers',
         arithmetic: 'Arithmetic sequence',
@@ -280,15 +293,17 @@ function sourceKindLabel() {
         gaussian_primes: 'Gaussian primes',
         custom_points: 'Custom points',
         expression: 'Generated sequence'
-    }[config().source?.kind] || 'Discrete source';
+    }[config().source?.kind];
+    if (!label) throw new Error(`Unsupported dynamic source kind: ${config().source?.kind}`);
+    return label;
 }
 
 function syncStudioChrome() {
     const studio = element('dynamic_plotting_controls_container');
     const minimize = element('dynamic_minimize_studio_btn');
     const summary = element('dynamic_studio_summary');
-    const reduction = config().reduction?.kind || 'none';
-    const operation = reduction === 'none' ? 'Map' : reduction === 'sum' ? 'Sum' : 'Product';
+    const reduction = reductionKind();
+    const operation = OPERATION_COPY[reduction].badge;
 
     studio?.classList.toggle('is-minimized', studioMinimized);
     studio?.setAttribute('aria-hidden', String(!config().enabled));
@@ -301,17 +316,17 @@ function syncStudioChrome() {
 }
 
 function sourceDescription() {
-    const source = config().source || {};
-    const count = Math.max(0, integer(source.count, 0));
-    const start = finiteNumber(source.start, 1);
-    const step = finiteNumber(source.step, 1);
+    const source = sourceConfig();
+    const count = Math.max(0, requireInteger(source.count, 'Dynamic source count'));
+    const start = requireFiniteNumber(source.start, 'Dynamic source start');
+    const step = requireFiniteNumber(source.step, 'Dynamic source step');
     switch (source.kind) {
         case 'naturals':
             return `${count} natural numbers from ${start}`;
         case 'arithmetic':
             return `${count} terms with d_j = ${start} + j(${step})`;
         case 'geometric':
-            return `${count} terms with d_j = ${start}(${finiteNumber(source.ratio, 2)})^j`;
+            return `${count} terms with d_j = ${start}(${requireFiniteNumber(source.ratio, 'Dynamic source ratio')})^j`;
         case 'harmonic':
             return `${count} terms with d_j = 1 / (${start} + j(${step}))`;
         case 'integers':
@@ -327,30 +342,42 @@ function sourceDescription() {
         case 'custom_points':
             return `${count} custom complex points`;
         case 'expression':
-            return `${count} generated values d_j = ${source.generatorExpression || 'j'}`;
+            if (typeof source.generatorExpression !== 'string' || !source.generatorExpression.trim()) {
+                throw new Error('Generated dynamic sources require an expression.');
+            }
+            return `${count} generated values d_j = ${source.generatorExpression}`;
         default:
-            return `${count} source values`;
+            throw new Error(`Unsupported dynamic source kind: ${source.kind}`);
     }
 }
 
 function sourceForPreview() {
-    const source = config().source || {};
+    const source = sourceConfig();
+    if (!Array.isArray(source.points)) throw new Error('Dynamic source points must be an array.');
     const sourceConfig = {
         ...source,
-        points: Array.isArray(source.points) ? [...source.points] : []
+        points: [...source.points]
     };
 
-    const parameters = Object.fromEntries((config().parameters || [])
-        .filter(parameter => /^[A-Za-z_][A-Za-z0-9_]*$/.test(parameter?.name || ''))
-        .map(parameter => [parameter.name, { re: Number(parameter.value) || 0, im: 0 }]));
+    if (!Array.isArray(config().parameters)) throw new Error('Dynamic parameters must be an array.');
+    const parameters = Object.fromEntries(config().parameters
+        .map((parameter, index) => {
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(parameter?.name)) {
+                throw new Error(`Dynamic parameter ${index} requires a valid identifier.`);
+            }
+            return [parameter.name, {
+            re: requireFiniteNumber(parameter.value, `Dynamic parameter ${parameter.name}`),
+            im: 0
+            }];
+        }));
     return generateDiscreteSource(sourceConfig, { parameters });
 }
 
 function sourceRule() {
-    const source = config().source || {};
-    const start = finiteNumber(source.start, source.kind === 'naturals' ? 0 : 1);
-    const step = finiteNumber(source.step, 1);
-    const ratio = finiteNumber(source.ratio, 2);
+    const source = sourceConfig();
+    const start = requireFiniteNumber(source.start, 'Dynamic source start');
+    const step = requireFiniteNumber(source.step, 'Dynamic source step');
+    const ratio = requireFiniteNumber(source.ratio, 'Dynamic source ratio');
 
     switch (source.kind) {
         case 'naturals':
@@ -374,9 +401,12 @@ function sourceRule() {
         case 'custom_points':
             return { text: 'dⱼ = the j-th value in your point list' };
         case 'expression':
-            return { expression: String(source.generatorExpression ?? '') };
+            if (typeof source.generatorExpression !== 'string' || !source.generatorExpression.trim()) {
+                throw new Error('Generated dynamic sources require an expression.');
+            }
+            return { expression: source.generatorExpression };
         default:
-            return { text: 'dⱼ is not defined yet' };
+            throw new Error(`Unsupported dynamic source kind: ${source.kind}`);
     }
 }
 
@@ -442,11 +472,16 @@ function renderSourcePreview() {
 }
 
 function termFormula() {
-    if (config().term?.kind === 'selected-function') {
-        const functionName = FUNCTION_LABELS[state.currentFunction] || state.currentFunction || 'selected';
+    const term = termConfig();
+    if (term.kind === 'selected-function') {
+        const functionName = FUNCTION_LABELS[state.currentFunction];
+        if (!functionName) throw new Error(`Unsupported selected function: ${state.currentFunction}`);
         return `${functionName}(z_j)`;
     }
-    return String(config().term?.expression || 'a_j');
+    if (typeof term.expression !== 'string' || !term.expression.trim()) {
+        throw new Error('Dynamic plotting requires a term expression.');
+    }
+    return term.expression;
 }
 
 function sequenceVariableNames() {
@@ -485,11 +520,14 @@ export function getDynamicBindingRuleLabel(binding) {
         case 'harmonic':
             return `1 / (${binding.start} + j(${binding.step}))`;
         case 'expression':
-            return String(binding.generatorExpression || 'j');
+            if (typeof binding.generatorExpression !== 'string' || !binding.generatorExpression.trim()) {
+                throw new Error(`Sequence binding ${binding.symbol} requires a generator expression.`);
+            }
+            return binding.generatorExpression;
         case 'custom_points':
             return 'explicit value list';
         default:
-            return binding.kind;
+            throw new Error(`Unsupported sequence-binding kind: ${binding.kind}`);
     }
 }
 
@@ -497,9 +535,10 @@ function renderGeneralTermMath() {
     const target = element('dynamic_general_term_math');
     if (!target) return;
     target.replaceChildren();
-    const source = config().term?.kind === 'selected-function'
+    const term = termConfig();
+    const source = term.kind === 'selected-function'
         ? 'selected(z)'
-        : String(config().term?.expression ?? '');
+        : term.expression;
     try {
         target.appendChild(createGeneralTermMathML(source, {
             parameterSymbols: pipelineFreeParameterSymbols(),
@@ -518,11 +557,15 @@ function renderFormulaBanner(result = null, error = null) {
     if (!content || !explanation) return;
 
     content.replaceChildren();
-    const termSource = config().term?.kind === 'selected-function'
+    const term = termConfig();
+    const termSource = term.kind === 'selected-function'
         ? 'selected(z)'
-        : String(config().term?.expression ?? '');
-    const reduction = config().reduction?.kind || 'none';
-    const count = result?.visibleCount ?? Math.max(0, integer(config().playback?.visibleCount, 0));
+        : term.expression;
+    const reduction = reductionKind();
+    const count = result?.visibleCount ?? Math.max(
+        0,
+        requireInteger(config().playback?.visibleCount, 'Dynamic visible count')
+    );
     try {
         content.appendChild(createGeneralTermMathML(termSource, {
             parameterSymbols: pipelineFreeParameterSymbols(),
@@ -560,7 +603,7 @@ function renderFormulaBanner(result = null, error = null) {
     }
 
     explanation.classList.remove('dynamic-formula-explanation-error');
-    const operation = OPERATION_COPY[reduction] || OPERATION_COPY.none;
+    const operation = OPERATION_COPY[reduction];
     explanation.textContent = operation.explanation;
 }
 
@@ -575,11 +618,11 @@ function commitTermFactors(nextFactors) {
 }
 
 function currentTermFactors() {
-    try {
-        return decomposeProductExpression(String(config().term?.expression || '1'));
-    } catch {
-        return [createProductFactor(false)];
+    const term = termConfig();
+    if (term.kind !== 'expression' || typeof term.expression !== 'string' || !term.expression.trim()) {
+        throw new Error('Product factors require a dynamic term expression.');
     }
+    return decomposeProductExpression(term.expression);
 }
 
 function renderStatus() {
@@ -620,7 +663,10 @@ function syncPlayback() {
     const count = availableCount();
     const slider = element('dynamic_visible_count_slider');
     const number = element('dynamic_visible_count_number');
-    const visible = Math.max(0, Math.min(count, integer(config().playback.visibleCount, count)));
+    const visible = Math.max(0, Math.min(
+        count,
+        requireInteger(config().playback.visibleCount, 'Dynamic visible count')
+    ));
     if (config().playback.visibleCount !== visible) {
         mutateState('dynamicPlotting', dynamic => {
             dynamic.playback.visibleCount = visible;
@@ -702,7 +748,10 @@ function animationFrame(timestamp) {
 
     if (!lastAnimationTime) lastAnimationTime = timestamp;
     const elapsed = Math.max(0, (timestamp - lastAnimationTime) / 1000);
-    const increment = elapsed * Math.max(0.1, Number(config().playback.speed) || 1);
+    const increment = elapsed * Math.max(
+        0.1,
+        requireFiniteNumber(config().playback.speed, 'Dynamic playback speed')
+    );
 
     if (increment >= 1) {
         const count = availableCount();
@@ -736,7 +785,10 @@ function startAnimation() {
 
 function setVisibleCount(value) {
     update(dynamic => {
-        dynamic.playback.visibleCount = Math.max(0, Math.min(availableCount(), integer(value, 0)));
+        dynamic.playback.visibleCount = Math.max(
+            0,
+            Math.min(availableCount(), requireInteger(value, 'Dynamic visible count'))
+        );
     });
 }
 
@@ -779,7 +831,10 @@ function bindControls() {
 
     document.querySelectorAll('[data-dynamic-expression]').forEach(button => {
         button.addEventListener('click', () => {
-            const expression = button.dataset.dynamicExpression || '';
+            const expression = button.dataset.dynamicExpression;
+            if (typeof expression !== 'string' || !expression.trim()) {
+                throw new Error('Dynamic expression buttons require a non-empty expression.');
+            }
             const input = element('dynamic_term_expression');
             if (input) input.value = expression;
             update(dynamic => {
@@ -837,7 +892,7 @@ function bindControls() {
             Math.min(MAX_DYNAMIC_SOURCE_COUNT, Math.floor(value))
         );
         dynamic.playback.visibleCount = dynamic.source.count;
-    }, { fallback: 50 });
+    });
     bindNumber('dynamic_arithmetic_first', (dynamic, value) => { dynamic.source.start = value; });
     bindNumber('dynamic_arithmetic_difference', (dynamic, value) => { dynamic.source.step = value; });
     bindNumber('dynamic_geometric_first', (dynamic, value) => { dynamic.source.start = value; });
@@ -891,9 +946,12 @@ function bindControls() {
 
 }
 
-export function initializeDynamicPlottingUI(options = {}) {
+export function initializeDynamicPlottingUI(options) {
     if (initialized) return;
-    redraw = typeof options.requestRedraw === 'function' ? options.requestRedraw : redraw;
+    if (typeof options?.requestRedraw !== 'function') {
+        throw new Error('Dynamic plotting UI requires a redraw callback.');
+    }
+    redraw = options.requestRedraw;
     const studio = element('dynamic_plotting_controls_container');
     if (studio && studio.parentElement !== document.body) document.body.appendChild(studio);
     initialized = true;

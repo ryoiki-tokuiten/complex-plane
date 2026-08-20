@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 
 import { state, context, zPlaneParams } from '../js/store/state.js';
 
+class TestPath2D {
+    moveTo() {}
+    lineTo() {}
+}
+
+if (typeof globalThis.Path2D !== 'function') globalThis.Path2D = TestPath2D;
+
 const STATE_KEYS = [
     'currentFunction', 'currentInputShape', 'gridDensity', 'domainColoringEnabled',
     'navigationModeEnabled', 'vectorFieldEnabled', 'streamlineFlowEnabled',
@@ -22,7 +29,7 @@ function makeCanvasContext(kind, counters) {
         setTransform() {},
         clearRect() { if (kind === 'offscreen') counters.clear += 1; },
         drawImage() { if (kind === 'target') counters.targetDraw += 1; },
-        save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+        save() {}, restore() {}, translate() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
         fill() {}, fillRect() {}, fillText() {}, arc() {}, closePath() {}, rect() {},
         measureText(text) { return { width: String(text).length * 7 }; },
         setLineDash() {}, getLineDash() { return []; }
@@ -77,8 +84,8 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             height: 240,
             origin: { x: 160, y: 120 },
             scale: { x: 20, y: 20 },
-            xRange: [-8, 8],
-            yRange: [-6, 6]
+            currentVisXRange: [-8, 8],
+            currentVisYRange: [-6, 6]
         };
         Object.assign(zPlaneParams, {
             width: 320,

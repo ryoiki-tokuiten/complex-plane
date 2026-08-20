@@ -30,6 +30,12 @@ import {
   DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
   normalizeDomainDynamicsChainCount
 } from '../constants/domain-dynamics.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import {
+  requireFiniteComplex,
+  requireFiniteNumber,
+  requireInteger
+} from '../utils/numeric-contracts.js';
 
 const DEFAULT_CAMERA = Object.freeze({ rotX: -0.82, rotY: 0.62, distance: 3.8 });
 
@@ -64,7 +70,6 @@ const SURFACE_COMPONENT_IDS = Object.freeze({
 });
 
 const ALGEBRAIC_C_FUNCTION_ID = -1;
-const ALGEBRAIC_INVALID_FUNCTION_ID = -2;
 const MAX_DRAWN_BRANCH_CUT_POINTS = 32;
 
 const SURFACE_PALETTE_GLSL = createDomainPaletteGlslSource('surfacePaletteColor');
@@ -215,20 +220,17 @@ bool evaluateDynamicAggregateOnSheet(
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-function finiteNumber(value, fallback = 0) {
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function finiteInteger(value, fallback = 0) {
-  return Number.isFinite(value) ? Math.floor(value) : fallback;
-}
-
 function normalizeStage(stage) {
-  return clamp(finiteInteger(stage, LIMITS.minStage), LIMITS.minStage, LIMITS.maxStage);
+  const value = requireInteger(stage, 'Riemann surface stage');
+  if (value < LIMITS.minStage || value > LIMITS.maxStage) {
+    throw new Error(`Riemann surface stage must be between ${LIMITS.minStage} and ${LIMITS.maxStage}.`);
+  }
+  return value;
 }
 
 function normalizeResolution(gridDensity) {
-  const requested = LIMITS.resolutionBase + finiteInteger(gridDensity, 15) * LIMITS.resolutionScale;
+  const density = requireInteger(gridDensity, 'Riemann surface resolution');
+  const requested = LIMITS.resolutionBase + density * LIMITS.resolutionScale;
   return clamp(requested, LIMITS.minResolution, LIMITS.maxResolution);
 }
 
@@ -246,17 +248,18 @@ function rememberBounded(cache, key, value, limit) {
 }
 
 function complexRe(value) {
-  return value && typeof value === 'object' ? (+value.re || 0) : 0;
+  return requireFiniteComplex(value, 'Riemann complex value').re;
 }
 
 function complexIm(value) {
-  return value && typeof value === 'object' ? (+value.im || 0) : 0;
+  return requireFiniteComplex(value, 'Riemann complex value').im;
 }
 
 function algebraicTermsArray(appState) {
-  return Array.isArray(appState && appState.algebraicChainingTerms)
-    ? appState.algebraicChainingTerms
-    : EMPTY_ARRAY;
+  if (!Array.isArray(appState?.algebraicChainingTerms)) {
+    throw new Error('Riemann algebraic rendering requires an algebraic term array.');
+  }
+  return appState.algebraicChainingTerms;
 }
 
 const algebraicTermCoeffUniformName = termIndex => `u_algTermCoeff_${termIndex}`;
@@ -265,8 +268,7 @@ const algebraicFactorInfoUniformName = (termIndex, factorIndex) => `u_algFactorI
 function algebraicFunctionUniformId(functionName) {
   if (!functionName || functionName === 'none') return 0;
   if (functionName === 'c') return ALGEBRAIC_C_FUNCTION_ID;
-  const functionId = getWebGLFunctionIdShared(functionName, true);
-  return functionId || ALGEBRAIC_INVALID_FUNCTION_ID;
+  return getWebGLFunctionIdShared(functionName, true);
 }
 
 function algebraicFactorFlags(factor) {
@@ -330,7 +332,10 @@ function emitAlgebraicFactor(factor, termIndex, factorIndex) {
 }
 
 function emitAlgebraicTerm(term, termIndex) {
-  const factors = Array.isArray(term && term.factors) ? term.factors : [];
+  if (!Array.isArray(term?.factors)) {
+    throw new Error(`Riemann algebraic term ${termIndex} requires a factor array.`);
+  }
+  const factors = term.factors;
   const factorBody = factors
     .map((factor, factorIndex) => emitAlgebraicFactor(factor, termIndex, factorIndex))
     .filter(Boolean)
@@ -348,7 +353,10 @@ function buildAlgebraicUniformDeclarations(appState) {
   const declarations = [];
   algebraicTermsArray(appState).forEach((term, termIndex) => {
     declarations.push(`uniform vec2 ${algebraicTermCoeffUniformName(termIndex)};`);
-    const factors = Array.isArray(term && term.factors) ? term.factors : EMPTY_ARRAY;
+    if (!Array.isArray(term?.factors)) {
+      throw new Error(`Riemann algebraic term ${termIndex} requires a factor array.`);
+    }
+    const factors = term.factors;
     factors.forEach((factor, factorIndex) => {
       if (factor && factor.func && factor.func !== 'none') {
         declarations.push(`uniform vec4 ${algebraicFactorInfoUniformName(termIndex, factorIndex)};`);
@@ -360,7 +368,10 @@ function buildAlgebraicUniformDeclarations(appState) {
 
 function buildAlgebraicBranchBody(appState) {
   const terms = algebraicTermsArray(appState);
-  const zExpr = appState?.algebraicChainingZExpr || 'z';
+  const zExpr = appState?.algebraicChainingZExpr;
+  if (typeof zExpr !== 'string' || !zExpr.trim()) {
+    throw new Error('Riemann algebraic rendering requires a z expression.');
+  }
   const steps = [];
 
   if (zExpr !== 'z') {
@@ -369,9 +380,8 @@ function buildAlgebraicBranchBody(appState) {
       functionName => getWebGLFunctionIdShared(functionName, true),
       { sheet: true }
     );
-    if (!zCustomExprGLSL) {
-      steps.push('    mapped = vec2(0.0);', '    return false;');
-    } else if (zCustomExprGLSL !== 'z') {
+    if (!zCustomExprGLSL) throw new Error('Riemann algebraic z expression produced no shader source.');
+    if (zCustomExprGLSL !== 'z') {
       steps.push(`    z = ${zCustomExprGLSL};`);
     }
   }
@@ -577,7 +587,7 @@ ${buildAlgebraicBranchBody(appState)}
 ) {
   if (chainMode == 2) {
     mapped = vec2(0.0);
-    for (int i = 0; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
+    for (int i = 0; i < RIEMANN_SURFACE_ITERATION_LIMIT; i++) {
       if (i >= stage) break;
       bool seedOk = evaluateSurfaceBase(
         mapped, c, functionId, branchIndex, branchCutWidth, mA, mB, mC, mD,
@@ -595,7 +605,7 @@ ${buildAlgebraicBranchBody(appState)}
     useTaylor, taylorCenter, taylorOrder, taylorCoefficients, mapped
   );
   if (!ok) return false;
-  for (int i = 1; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
+  for (int i = 1; i < RIEMANN_SURFACE_ITERATION_LIMIT; i++) {
     if (i >= stage) break;
     ok = evaluateSurfaceBase(
       mapped, c, functionId, branchIndex, branchCutWidth, mA, mB, mC, mD,
@@ -723,73 +733,29 @@ const FRAGMENT_GLSL = Object.freeze({
 
   shadeSurface: {
     source: `vec3 shadeSurface(vec3 color, vec3 normal, vec3 viewPosition) {
-  // Decode sRGB to Linear for physically accurate math
-  vec3 albedo = pow(max(color, vec3(0.0)), vec3(2.2));
-  
+  vec3 albedo = max(color, vec3(0.0));
   vec3 viewDir = normalize(-viewPosition);
-  float ndotv = max(dot(normal, viewDir), 1e-4);
-  
-  // Glossy glass/ceramic material properties
-  float roughness = 0.15;
-  float metallic = 0.02;
-  vec3 f0 = mix(vec3(0.04), albedo, metallic);
-  
-  // Schlick's Fresnel
-  vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - ndotv, 5.0);
-  
-  // Energy conservation for diffuse
-  vec3 kD = (1.0 - fresnel) * (1.0 - metallic);
-  
-  vec3 totalLight = vec3(0.0);
-  
-  // Light 1: Main Key Light (Warm, sharp specular)
-  vec3 l1Dir = normalize(vec3(0.8, 1.0, 0.6));
-  vec3 l1Col = vec3(1.3, 1.15, 1.0) * 1.8;
-  vec3 h1 = normalize(l1Dir + viewDir);
-  float diff1 = max(dot(normal, l1Dir), 0.0);
-  float spec1 = pow(max(dot(normal, h1), 0.0), 128.0) * ((128.0 + 8.0) / (8.0 * 3.14159));
-  totalLight += (kD * albedo / 3.14159 + fresnel * spec1) * l1Col * diff1;
-  
-  // Fake Subsurface glow from Key Light
-  float sss = pow(max(dot(viewDir, -l1Dir), 0.0), 8.0) * 0.4;
-  totalLight += albedo * sss * l1Col;
-  
-  // Light 2: Soft Fill Light (Cool, broad specular)
-  vec3 l2Dir = normalize(vec3(-0.6, 0.2, -0.8));
-  vec3 l2Col = vec3(0.2, 0.35, 0.6) * 1.2;
-  vec3 h2 = normalize(l2Dir + viewDir);
-  float diff2 = max(dot(normal, l2Dir), 0.0);
-  float spec2 = pow(max(dot(normal, h2), 0.0), 32.0) * ((32.0 + 8.0) / (8.0 * 3.14159));
-  totalLight += (kD * albedo / 3.14159 + fresnel * spec2) * l2Col * diff2;
-  
-  // Light 3: Rim / Backlight
-  vec3 l3Dir = normalize(vec3(0.0, 0.9, -0.6));
-  vec3 l3Col = vec3(0.7, 0.5, 0.9) * 2.0;
-  float rim = smoothstep(0.4, 1.0, 1.0 - ndotv) * max(dot(normal, l3Dir), 0.0);
-  totalLight += albedo * rim * l3Col;
-  
-  // Fake Studio Environment Map Reflection
-  vec3 reflectDir = reflect(-viewDir, normal);
-  float envMask = smoothstep(-0.3, 1.0, reflectDir.y);
-  vec3 envColor = mix(vec3(0.02, 0.03, 0.05), vec3(0.5, 0.7, 1.0), envMask);
-  // Add some fake rectangular area lights to the reflection
-  envColor += vec3(1.0) * smoothstep(0.95, 0.98, max(dot(reflectDir, normalize(vec3(1.0, 0.8, 0.5))), 0.0));
-  envColor += vec3(1.0) * smoothstep(0.96, 0.99, max(dot(reflectDir, normalize(vec3(-1.0, 0.4, -0.2))), 0.0));
-  
-  // Base ambient
-  vec3 ambient = albedo * vec3(0.03, 0.04, 0.05);
-  totalLight += ambient + fresnel * envColor * 1.5;
-  
-  // Horizon-weighted contact shadowing gives the mathematical sheet real mass without textures.
-  float horizonOcclusion = mix(0.72, 1.0, smoothstep(-0.2, 0.85, normal.y));
-  totalLight *= horizonOcclusion;
+  vec3 keyDirection = vec3(0.565685, 0.707107, 0.424264);
+  vec3 fillDirection = vec3(-0.588348, 0.196116, -0.784465);
+  float key = max(dot(normal, keyDirection), 0.0);
+  float fill = max(dot(normal, fillDirection), 0.0);
+  float facing = max(dot(normal, viewDir), 0.0);
+  float rim = 1.0 - facing;
+  rim *= rim;
 
-  // ACES Film Tonemapping
-  vec3 x = totalLight;
-  vec3 mapped = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-  
-  // Gamma Correction back to sRGB
-  return pow(max(mapped, vec3(0.0)), vec3(1.0 / 2.2));
+  vec3 halfDirection = normalize(keyDirection + viewDir);
+  float highlight = max(dot(normal, halfDirection), 0.0);
+  highlight *= highlight;
+  highlight *= highlight;
+  highlight *= highlight;
+  highlight *= highlight;
+
+  float horizon = mix(0.72, 1.0, smoothstep(-0.2, 0.85, normal.y));
+  vec3 lit = albedo * (0.16 + key * 1.18 + fill * 0.34);
+  lit += vec3(1.0, 0.92, 0.82) * highlight * 0.82;
+  lit += mix(albedo, vec3(0.42, 0.58, 0.92), 0.55) * rim * 0.28;
+  lit *= horizon;
+  return lit / (lit + vec3(0.72));
 }`
   },
 
@@ -849,7 +815,7 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   bool escaped = false;
   bool converged = false;
 
-  for (int i = 0; i < DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH; i++) {
+  for (int i = 0; i < RIEMANN_SURFACE_ITERATION_LIMIT; i++) {
     if (i >= u_chainCount) break;
 
     vec2 nextValue = vec2(0.0);
@@ -907,7 +873,7 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   },
 
   main: {
-    source: `void main() {
+    source: dynamicsEnabled => `void main() {
   if (v_valid < 0.995) discard;
   if (u_wirePass > 0.5) {
     gl_FragColor = vec4(mix(v_color, vec3(0.92, 0.88, 1.0), 0.7), 0.42);
@@ -916,9 +882,9 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   
   vec3 baseColor = v_color;
 
-  if (u_orbitColoringMode != 0 && u_chainCount > 1 && (u_chainMode == 1 || u_chainMode == 2)) {
+  ${dynamicsEnabled ? `if (u_orbitColoringMode != 0 && (u_chainMode == 1 || u_chainMode == 2)) {
     baseColor = iteratedDynamicsColor(v_z, u_chainMode, 1.0).rgb;
-  }
+  }` : ''}
 
   vec3 shadingNormal = highQualityNormal(normalize(v_normal), v_viewPosition);
   vec3 finalColor = shadeSurface(baseColor, shadingNormal, v_viewPosition);
@@ -944,7 +910,8 @@ function buildRiemannSurfaceMathLibraryUncached(appState) {
     functionName => getWebGLFunctionIdShared(functionName, true)
   );
   const dynamicSource = dynamic.source || EMPTY_DYNAMIC_AGGREGATE_GLSL;
-  return `${GLSL_COMPLEX_MATH_LIBRARY_BASE}
+  return `const int RIEMANN_SURFACE_ITERATION_LIMIT = ${riemannSurfaceIterationLimit(appState)};
+${GLSL_COMPLEX_MATH_LIBRARY_BASE}
 ${DOMAIN_DYNAMICS_GLSL}
 ${buildAlgebraicUniformDeclarations(appState)}
 ${[
@@ -972,11 +939,11 @@ function buildCachedRiemannSurfaceMathLibrary(appState, signature) {
   );
 }
 
-export function buildRiemannSurfaceMathLibrary(appState) {
-  return buildCachedRiemannSurfaceMathLibrary(appState, getProgramSignature(appState));
+export function buildRiemannSurfaceMathLibrary(appState, signature = getRiemannSurfaceProgramSignature(appState)) {
+  return buildCachedRiemannSurfaceMathLibrary(appState, signature);
 }
 
-function buildVertexShader(appState, signature = getProgramSignature(appState)) {
+function buildVertexShader(appState, signature = getRiemannSurfaceProgramSignature(appState)) {
   return `
 precision highp float;
 precision highp int;
@@ -993,7 +960,7 @@ varying vec3 v_viewPosition;
 varying float v_valid;
 varying vec2 v_z;
 varying float v_heightVal;
-${buildCachedRiemannSurfaceMathLibrary(appState, signature)}
+${buildRiemannSurfaceMathLibrary(appState, signature)}
 ${[
   VERTEX_SURFACE_GLSL.surfaceHeight.source,
   VERTEX_SURFACE_GLSL.mapSurfacePoint.source,
@@ -1004,7 +971,13 @@ ${[
 `;
 }
 
-function buildFragmentShader(appState, signature = getProgramSignature(appState)) {
+function buildFragmentShader(appState, signature = getRiemannSurfaceProgramSignature(appState)) {
+  const dynamicsEnabled = riemannSurfaceIterationLimit(appState) > 1;
+  const dynamicsSource = dynamicsEnabled
+    ? `${buildRiemannSurfaceMathLibrary(appState, signature)}
+${VERTEX_SURFACE_GLSL.surfacePaletteColor.source()}
+${FRAGMENT_GLSL.iteratedDynamicsColor.source}`
+    : '';
   return `
 #extension GL_OES_standard_derivatives : enable
 precision highp float;
@@ -1018,16 +991,11 @@ varying float v_valid;
 varying vec2 v_z;
 varying float v_heightVal;
 
-${buildCachedRiemannSurfaceMathLibrary(appState, signature)}
-${[
-  VERTEX_SURFACE_GLSL.surfacePaletteColor.source(),
-  VERTEX_SURFACE_GLSL.surfaceColor.source
-].join('\n\n')}
+${dynamicsSource}
 ${[
   FRAGMENT_GLSL.highQualityNormal.source,
   FRAGMENT_GLSL.shadeSurface.source,
-  FRAGMENT_GLSL.iteratedDynamicsColor.source,
-  FRAGMENT_GLSL.main.source
+  FRAGMENT_GLSL.main.source(dynamicsEnabled)
 ].join('\n\n')}
 `;
 }
@@ -1197,9 +1165,10 @@ function getGridData(resolution) {
 }
 
 export function getRiemannSurfaceGridData(resolution = LIMITS.resolutionBase) {
+  const requested = requireInteger(resolution, 'Riemann grid resolution');
   const normalized = Math.max(
     LIMITS.minResolution,
-    Math.min(LIMITS.maxResolution, Math.floor(Number(resolution) || LIMITS.resolutionBase))
+    Math.min(LIMITS.maxResolution, requested)
   );
   return getGridData(normalized);
 }
@@ -1215,7 +1184,7 @@ function uploadBuffer(gl, target, data) {
 }
 
 function createGridMesh(gl, resolution) {
-  const { vertices, triangles, lines } = getGridData(resolution);
+  const { vertices, triangles, lines } = getRiemannSurfaceGridData(resolution);
 
   const vertexBuffer = uploadBuffer(gl, gl.ARRAY_BUFFER, vertices);
   const triangleBuffer = uploadBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, triangles);
@@ -1257,9 +1226,15 @@ function disposeMeshCache(gl, meshCache) {
 }
 
 function algebraicStructureSignature(algebraicTerms) {
-    const terms = Array.isArray(algebraicTerms) ? algebraicTerms : EMPTY_ARRAY;
+    if (!Array.isArray(algebraicTerms)) {
+      throw new Error('Riemann algebraic signature requires a term array.');
+    }
+    const terms = algebraicTerms;
     return `[${Array.from(terms, term => {
-        const factors = Array.isArray(term && term.factors) ? term.factors : EMPTY_ARRAY;
+        if (!Array.isArray(term?.factors)) {
+          throw new Error('Riemann algebraic signature requires factor arrays.');
+        }
+        const factors = term.factors;
         const factorSignature = Array.from(factors, factor => (
             factor && factor.func && factor.func !== 'none'
                 ? '{"active":true}'
@@ -1269,24 +1244,28 @@ function algebraicStructureSignature(algebraicTerms) {
     }).join(',')}]`;
 }
 
-function getProgramSignature(appState) {
+function riemannSurfaceIterationLimit(appState) {
+  return appState.chainingEnabled
+    ? normalizeDomainDynamicsChainCount(appState.chainCount)
+    : 1;
+}
+
+export function getRiemannSurfaceProgramSignature(appState) {
   if (!appState || typeof appState !== 'object') {
-    return 'az:z|a:[]|d:';
+    throw new TypeError('Riemann surface program generation requires application state.');
   }
 
   const algebraic = algebraicTermsArray(appState);
-  const algebraicZ = appState.algebraicChainingZExpr || 'z';
+  const algebraicZ = appState.algebraicChainingZExpr;
+  if (typeof algebraicZ !== 'string' || !algebraicZ.trim()) {
+    throw new Error('Riemann surface program generation requires an algebraic z expression.');
+  }
   const dynamicActive = isDynamicAggregateGLSLActive(appState);
   const algebraicSignature = algebraicStructureSignature(algebraic);
   const dynamicSignature = dynamicActive
     ? dynamicAggregateGLSLSignature(appState)
     : '';
-  return `az:${algebraicZ}|a:${algebraicSignature}|d:${dynamicSignature}`;
-}
-
-
-export function getRiemannSurfaceProgramSignature(appState) {
-  return getProgramSignature(appState);
+  return `az:${algebraicZ}|a:${algebraicSignature}|d:${dynamicSignature}|i:${riemannSurfaceIterationLimit(appState)}`;
 }
 
 function validateDynamicAggregate(appState, signature) {
@@ -1326,7 +1305,10 @@ function uploadComplexUniformArray(gl, locations, data) {
 
 function collectAlgebraicUniformLocations(gl, program, appState) {
   return algebraicTermsArray(appState).map((term, termIndex) => {
-    const factors = Array.isArray(term && term.factors) ? term.factors : EMPTY_ARRAY;
+    if (!Array.isArray(term?.factors)) {
+      throw new Error(`Riemann algebraic term ${termIndex} requires a factor array.`);
+    }
+    const factors = term.factors;
     return {
       coeff: gl.getUniformLocation(program, algebraicTermCoeffUniformName(termIndex)),
       factors: factors.map((factor, factorIndex) => {
@@ -1341,16 +1323,20 @@ function collectAlgebraicUniformLocations(gl, program, appState) {
 
 function uploadAlgebraicUniforms(gl, locations, appState) {
   const terms = algebraicTermsArray(appState);
-  const termLocations = locations.algebraicTerms || EMPTY_ARRAY;
+  const termLocations = locations.algebraicTerms;
+  if (!Array.isArray(termLocations)) throw new Error('Riemann algebraic uniforms were not initialized.');
   for (let termIndex = 0; termIndex < termLocations.length; termIndex++) {
     const term = terms[termIndex];
     const termLocation = termLocations[termIndex];
-    const coeff = term && term.coeff;
+    const coeff = requireFiniteComplex(term?.coeff, `Riemann algebraic coefficient ${termIndex}`);
     if (termLocation.coeff) {
-      gl.uniform2f(termLocation.coeff, finiteNumber(coeff?.re), finiteNumber(coeff?.im));
+      gl.uniform2f(termLocation.coeff, coeff.re, coeff.im);
     }
 
-    const factors = Array.isArray(term && term.factors) ? term.factors : EMPTY_ARRAY;
+    if (!Array.isArray(term?.factors)) {
+      throw new Error(`Riemann algebraic term ${termIndex} requires a factor array.`);
+    }
+    const factors = term.factors;
     for (let factorIndex = 0; factorIndex < termLocation.factors.length; factorIndex++) {
       const factorLocation = termLocation.factors[factorIndex];
       if (!factorLocation) continue;
@@ -1361,7 +1347,7 @@ function uploadAlgebraicUniforms(gl, locations, appState) {
           factorLocation.info,
           algebraicFunctionUniformId(factor?.func),
           algebraicFunctionUniformId(factor?.chainedFunc),
-          finiteNumber(factor?.power, 1),
+          requireFiniteNumber(factor?.power, `Riemann algebraic factor ${termIndex}:${factorIndex} power`),
           algebraicFactorFlags(factor)
         );
       }
@@ -1392,9 +1378,9 @@ function collectUniformLocations(gl, program, appState) {
   return locations;
 }
 
-function rebuildProgram(renderer, signature = getProgramSignature(state)) {
+function rebuildProgram(renderer, signature = getRiemannSurfaceProgramSignature(state)) {
   const { gl } = renderer;
-  if (renderer.contextLost || gl.isContextLost?.()) {
+  if (renderer.contextLost || gl.isContextLost()) {
     renderer.contextLost = true;
     return false;
   }
@@ -1404,10 +1390,6 @@ function rebuildProgram(renderer, signature = getProgramSignature(state)) {
     buildVertexShader(state, signature),
     buildFragmentShader(state, signature)
   );
-
-  if (!program) {
-    return false;
-  }
 
   if (renderer.program) gl.deleteProgram(renderer.program);
 
@@ -1427,7 +1409,6 @@ function ensureContinuationProgram(renderer) {
   if (renderer.continuationProgram) return true;
   const { gl } = renderer;
   const program = createWebGLProgramShared(gl, CONTINUATION_VERTEX_SHADER, CONTINUATION_FRAGMENT_SHADER);
-  if (!program) return false;
   renderer.continuationProgram = program;
   renderer.continuationLocations = {
     aPosition: gl.getAttribLocation(program, 'a_position'),
@@ -1435,19 +1416,25 @@ function ensureContinuationProgram(renderer) {
     uProjection: gl.getUniformLocation(program, 'u_projection')
   };
   renderer.continuationBuffer = gl.createBuffer();
-  return Boolean(renderer.continuationBuffer);
+  if (!renderer.continuationBuffer) throw new Error('WebGL failed to allocate the continuation buffer.');
+  return true;
 }
 
-function drawContinuationTrace(renderer, options) {
+function drawContinuationTrace(renderer) {
   const path = state.continuationPath;
   if (!Array.isArray(path) || path.length < 2 || !ensureContinuationProgram(renderer)) return;
-  const values = state.continuationValues || [];
-  const xRange = zPlaneParams.currentVisXRange || [-2, 2];
-  const yRange = zPlaneParams.currentVisYRange || [-2, 2];
-  const xSpan = xRange[1] - xRange[0] || 1;
-  const ySpan = yRange[1] - yRange[0] || 1;
-  const heightClip = Math.max(LIMITS.minHeightClip, +state.riemannSurfaceHeightClip || 1);
-  const heightScale = +state.riemannSurfaceHeightScale || 1;
+  const values = state.continuationValues;
+  if (!Array.isArray(values)) throw new Error('Riemann continuation values must be an array.');
+  requireVisibleViewport(zPlaneParams, 'Riemann continuation viewport');
+  const xRange = zPlaneParams.currentVisXRange;
+  const yRange = zPlaneParams.currentVisYRange;
+  const xSpan = xRange[1] - xRange[0];
+  const ySpan = yRange[1] - yRange[0];
+  const heightClip = Number(state.riemannSurfaceHeightClip);
+  const heightScale = Number(state.riemannSurfaceHeightScale);
+  if (!Number.isFinite(heightClip) || !Number.isFinite(heightScale)) {
+    throw new Error('Riemann continuation rendering requires finite height parameters.');
+  }
   const data = renderer.continuationData;
   let count = 0;
   for (let index = 0; index < path.length && count < data.length / 3; index += 1) {
@@ -1653,15 +1640,22 @@ function getTaylorCoefficients(order) {
     order
   );
 
-  return Array.isArray(coefficients) && coefficients.length > 0 ? coefficients : null;
+  if (!Array.isArray(coefficients) || coefficients.length < order + 1) {
+    throw new Error('Native Taylor coefficient generation returned incomplete data.');
+  }
+  for (let index = 0; index <= order; index += 1) {
+    requireFiniteComplex(coefficients[index], `Riemann Taylor coefficient ${index}`);
+  }
+  return coefficients;
 }
 
 function setTaylorUniforms(renderer) {
   const { gl, locations } = renderer;
-  const order = clamp(finiteInteger(state.taylorSeriesOrder, 0), 0, 8);
+  const order = requireInteger(state.taylorSeriesOrder, 'Riemann Taylor order');
+  if (order < 0 || order > 8) throw new Error('Riemann Taylor order must be between zero and eight.');
   const coefficients = getTaylorCoefficients(order);
   const useTaylor = Boolean(coefficients);
-  const center = state.taylorSeriesCenter;
+  const center = requireFiniteComplex(state.taylorSeriesCenter, 'Riemann Taylor center');
 
   renderer.currentTaylorUse = useTaylor ? 1 : 0;
   renderer.currentTaylorOrder = useTaylor ? order : 0;
@@ -1670,15 +1664,13 @@ function setTaylorUniforms(renderer) {
     return false;
   }
 
-  const centerRe = center && typeof center === 'object' ? finiteNumber(center.re) : 0;
-  const centerIm = center && typeof center === 'object' ? finiteNumber(center.im) : 0;
-  gl.uniform2f(locations.uTaylorCenter, centerRe, centerIm);
+  gl.uniform2f(locations.uTaylorCenter, center.re, center.im);
 
   const packed = renderer.taylorCoeffUniformData;
   for (let i = 0, offset = 0; i <= 8; i++, offset += 2) {
     const coefficient = i <= order ? coefficients[i] : ZERO_COMPLEX;
-    packed[offset] = coefficient && typeof coefficient === 'object' ? finiteNumber(coefficient.re) : 0;
-    packed[offset + 1] = coefficient && typeof coefficient === 'object' ? finiteNumber(coefficient.im) : 0;
+    packed[offset] = coefficient.re;
+    packed[offset + 1] = coefficient.im;
   }
   uploadComplexUniformArray(gl, locations.uTaylorCoefficients, packed);
 
@@ -1692,18 +1684,18 @@ function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
     locations.uFunctionParams,
     functionId,
     appState.zetaContinuationEnabled ? 1 : 0,
-    typeof ZETA_REFLECTION_POINT_RE !== 'undefined' ? ZETA_REFLECTION_POINT_RE : 0.5,
-    +appState.fractionalPowerN || 0.5
+    ZETA_REFLECTION_POINT_RE,
+    requireFiniteNumber(appState.fractionalPowerN, 'Riemann fractional power')
   );
-  const expBase = appState.expBase || { re: Math.E, im: 0 };
-  const logBase = appState.logBase || { re: Math.E, im: 0 };
-  const besselOrder = appState.besselOrder || ZERO_COMPLEX;
+  const expBase = requireFiniteComplex(appState.expBase, 'Riemann exponential base');
+  const logBase = requireFiniteComplex(appState.logBase, 'Riemann logarithm base');
+  const besselOrder = requireFiniteComplex(appState.besselOrder, 'Riemann Bessel order');
   gl.uniform2f(locations.uExpBase, complexRe(expBase), complexIm(expBase));
   gl.uniform2f(locations.uLogBase, complexRe(logBase), complexIm(logBase));
   gl.uniform2f(locations.uBesselOrder, complexRe(besselOrder), complexIm(besselOrder));
   gl.uniform1f(locations.uBranchCutAngle,
-    appState.branchCutType === 'ray' && Number.isFinite(appState.branchCutAngle)
-      ? appState.branchCutAngle
+    appState.branchCutType === 'ray'
+      ? requireFiniteNumber(appState.branchCutAngle, 'Riemann branch-cut angle')
       : Math.PI
   );
   const drawnCut = appState.branchCutType === 'draw' && Array.isArray(appState.branchCutPoints)
@@ -1716,17 +1708,20 @@ function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
   if (cutCount > 0) {
     const sourceStep = cutCount > 1 ? (drawnCut.length - 1) / (cutCount - 1) : 0;
     for (let index = 0; index < cutCount; index += 1) {
-      const point = drawnCut[Math.round(index * sourceStep)] || ZERO_COMPLEX;
+      const point = requireFiniteComplex(
+        drawnCut[Math.round(index * sourceStep)],
+        `Riemann branch-cut point ${index}`
+      );
       cutData[index * 2] = complexRe(point);
       cutData[index * 2 + 1] = complexIm(point);
     }
     uploadComplexUniformArray(gl, locations.uBranchCutPoints, cutData);
   }
 
-  const mobiusA = appState.mobiusA || ZERO_COMPLEX;
-  const mobiusB = appState.mobiusB || ZERO_COMPLEX;
-  const mobiusC = appState.mobiusC || ZERO_COMPLEX;
-  const mobiusD = appState.mobiusD || ZERO_COMPLEX;
+  const mobiusA = requireFiniteComplex(appState.mobiusA, 'Riemann Möbius coefficient a');
+  const mobiusB = requireFiniteComplex(appState.mobiusB, 'Riemann Möbius coefficient b');
+  const mobiusC = requireFiniteComplex(appState.mobiusC, 'Riemann Möbius coefficient c');
+  const mobiusD = requireFiniteComplex(appState.mobiusD, 'Riemann Möbius coefficient d');
   gl.uniform4f(
     locations.uMobiusAB,
     complexRe(mobiusA), complexIm(mobiusA),
@@ -1738,11 +1733,17 @@ function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
     complexRe(mobiusD), complexIm(mobiusD)
   );
 
-  const poly = appState.polynomialCoeffs || EMPTY_ARRAY;
-  const degree = Math.min(10, Math.max(0, (poly.length | 0) - 1));
+  if (!Array.isArray(appState.polynomialCoeffs)) throw new Error('Riemann polynomial coefficients must be an array.');
+  const poly = appState.polynomialCoeffs;
+  const degree = requireInteger(appState.polynomialN, 'Riemann polynomial degree');
+  if (degree < 0 || degree > 10 || poly.length !== degree + 1) {
+    throw new Error('Riemann polynomial coefficients must exactly match the degree.');
+  }
   const packed = renderer.polyCoeffUniformData;
   for (let i = 0, offset = 0; i <= 10; i++, offset += 2) {
-    const coeff = i <= degree ? (poly[i] || ZERO_COMPLEX) : ZERO_COMPLEX;
+    const coeff = i <= degree
+      ? requireFiniteComplex(poly[i], `Riemann polynomial coefficient ${i}`)
+      : ZERO_COMPLEX;
     packed[offset] = complexRe(coeff);
     packed[offset + 1] = complexIm(coeff);
   }
@@ -1776,16 +1777,9 @@ function uploadMatrices(renderer) {
 
 function setCommonUniforms(renderer, options) {
   const { gl, locations, mesh } = renderer;
-  const xRange = zPlaneParams.currentVisXRange;
-  const yRange = zPlaneParams.currentVisYRange;
-  let xMin = xRange ? +xRange[0] : -2;
-  let xMax = xRange ? +xRange[1] : 2;
-  let yMin = yRange ? +yRange[0] : -2;
-  let yMax = yRange ? +yRange[1] : 2;
-  if (!Number.isFinite(xMin)) xMin = -2;
-  if (!Number.isFinite(xMax)) xMax = 2;
-  if (!Number.isFinite(yMin)) yMin = -2;
-  if (!Number.isFinite(yMax)) yMax = 2;
+  requireVisibleViewport(zPlaneParams, 'Riemann surface viewport');
+  const [xMin, xMax] = zPlaneParams.currentVisXRange;
+  const [yMin, yMax] = zPlaneParams.currentVisYRange;
 
   const xSpan = xMax - xMin;
   const ySpan = yMax - yMin;
@@ -1800,31 +1794,34 @@ function setCommonUniforms(renderer, options) {
   uploadAlgebraicUniforms(gl, locations, state);
   setTaylorUniforms(renderer);
 
-  let heightScale = +state.riemannSurfaceHeightScale;
-  let heightClip = +state.riemannSurfaceHeightClip;
-  let brightness = +state.domainBrightness;
-  let contrast = +state.domainContrast;
-  let saturation = +state.domainSaturation;
-  let lightnessCycles = +state.domainLightnessCycles;
+  const heightScale = Number(state.riemannSurfaceHeightScale);
+  const heightClip = Number(state.riemannSurfaceHeightClip);
+  const brightness = Number(state.domainBrightness);
+  const contrast = Number(state.domainContrast);
+  const saturation = Number(state.domainSaturation);
+  const lightnessCycles = Number(state.domainLightnessCycles);
+  const contourInterval = Number(state.contourInterval);
+  const contourThickness = Number(state.contourThickness);
+  if (![heightScale, heightClip, brightness, contrast, saturation, lightnessCycles,
+    contourInterval, contourThickness].every(Number.isFinite)) {
+    throw new Error('Riemann surface rendering requires finite visual parameters.');
+  }
   const chainingEnabled = !!state.chainingEnabled;
   const chainCount = chainingEnabled ? normalizeDomainDynamicsChainCount(state.chainCount) : 1;
-  const chainMode = chainingEnabled ? (CHAIN_MODE_IDS[state.chainingMode] || 1) : 0;
+  const chainMode = chainingEnabled ? CHAIN_MODE_IDS[state.chainingMode] : 0;
+  if (chainingEnabled && !chainMode) throw new Error(`Unsupported Riemann chain mode: ${state.chainingMode}.`);
   const orbitMode = chainingEnabled
     ? orbitColoringModeId(state.orbitColoringMode)
     : 0;
-  if (!Number.isFinite(heightScale)) heightScale = 1;
-  if (!Number.isFinite(heightClip)) heightClip = 1;
-  if (!Number.isFinite(brightness)) brightness = 1;
-  if (!Number.isFinite(contrast)) contrast = 1;
-  if (!Number.isFinite(saturation)) saturation = 1;
-  if (!Number.isFinite(lightnessCycles)) lightnessCycles = 0;
+  const surfaceComponent = SURFACE_COMPONENT_IDS[state.riemannSurfaceComponent];
+  if (!surfaceComponent) throw new Error(`Unsupported Riemann surface component: ${state.riemannSurfaceComponent}.`);
 
   gl.uniform4f(
     locations.uIntParams,
     polyDegree,
     options.stage,
     chainMode,
-    SURFACE_COMPONENT_IDS[state.riemannSurfaceComponent] || 2
+    surfaceComponent
   );
   gl.uniform4f(
     locations.uRenderParams,
@@ -1846,8 +1843,8 @@ function setCommonUniforms(renderer, options) {
   gl.uniform4f(
     locations.uContourParams,
     state.contoursEnabled ? 1.0 : 0.0,
-    state.contourInterval !== undefined ? +state.contourInterval : 0.5,
-    state.contourThickness !== undefined ? +state.contourThickness : 1.5,
+    contourInterval,
+    contourThickness,
     0.0
   );
 }
@@ -1873,7 +1870,7 @@ function updateHud(renderer, branchIndices, hasBranches, stage) {
   if (renderer.hud.textContent !== text) renderer.hud.textContent = text;
 }
 
-function ensureCurrentProgram(renderer, signature = getProgramSignature(state)) {
+function ensureCurrentProgram(renderer, signature = getRiemannSurfaceProgramSignature(state)) {
   return renderer.programSignature === signature || rebuildProgram(renderer, signature);
 }
 
@@ -1936,8 +1933,8 @@ function getBranchCutWidth(renderer, hasBranches) {
 }
 
 function getCachedBranchIndices(sheets, center, hasBranches) {
-  const sheetCount = finiteInteger(sheets, 1);
-  const branchCenter = finiteInteger(center, 0);
+  const sheetCount = requireInteger(sheets, 'Riemann sheet count');
+  const branchCenter = requireInteger(center, 'Riemann branch center');
   const key = (hasBranches ? 0x10000 : 0) | ((sheetCount & 0xff) << 8) | ((branchCenter + 128) & 0xff);
   const cached = BRANCH_INDICES_CACHE.get(key);
   if (cached) return cached;
@@ -1964,9 +1961,9 @@ function drawSurfaceSheet(renderer, branchIndex, sheetIndex, tintStep, cutWidth,
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.triangleBuffer);
 }
 
-function prepareRendererFrame(renderer, options, signature = getProgramSignature(state)) {
+function prepareRendererFrame(renderer, options, signature = getRiemannSurfaceProgramSignature(state)) {
   if (!renderer || !options || !renderer.visible) return false;
-  if (renderer.contextLost || renderer.gl.isContextLost?.()) {
+  if (renderer.contextLost || renderer.gl.isContextLost()) {
     renderer.contextLost = true;
     return false;
   }
@@ -1975,7 +1972,7 @@ function prepareRendererFrame(renderer, options, signature = getProgramSignature
   return resizeRenderer(renderer) && ensureCurrentProgram(renderer, signature) && ensureMesh(renderer);
 }
 
-function drawRenderer(renderer, options = renderer.lastOptions, signature = getProgramSignature(state)) {
+function drawRenderer(renderer, options = renderer.lastOptions, signature = getRiemannSurfaceProgramSignature(state)) {
   if (!prepareRendererFrame(renderer, options, signature)) return false;
 
   const { gl, mesh } = renderer;
@@ -2000,7 +1997,7 @@ function drawRenderer(renderer, options = renderer.lastOptions, signature = getP
   for (let sheetIndex = 0; sheetIndex < branchCount; sheetIndex++) {
     drawSurfaceSheet(renderer, branchIndices[sheetIndex], sheetIndex, tintStep, cutWidth, wireframe);
   }
-  drawContinuationTrace(renderer, options);
+  drawContinuationTrace(renderer);
 
   renderer.forceUniformRefresh = false;
   updateHud(renderer, branchIndices, hasBranches, options.stage);
@@ -2036,7 +2033,7 @@ class RiemannSurfaceRendererFactory {
   #rendererByBaseCanvas = new WeakMap();
   #activeRenderers = new Set();
 
-  render(baseCanvas, options = {}, signature = getProgramSignature(state)) {
+  render(baseCanvas, options = {}, signature = getRiemannSurfaceProgramSignature(state)) {
     if (!baseCanvas) return false;
 
     const renderer = this.#ensure(baseCanvas);
@@ -2059,9 +2056,7 @@ class RiemannSurfaceRendererFactory {
 
   hide(baseCanvas) {
     const renderer = baseCanvas ? this.#rendererByBaseCanvas.get(baseCanvas) : null;
-    if (!renderer) return;
-
-    hideRenderer(renderer);
+    if (renderer) hideRenderer(renderer);
   }
 
   dispose(baseCanvas) {
@@ -2086,6 +2081,11 @@ class RiemannSurfaceRendererFactory {
     renderer.hud.remove();
     this.#activeRenderers.delete(renderer);
     this.#rendererByBaseCanvas.delete(baseCanvas);
+  }
+
+  disposeAll() {
+    Array.from(this.#activeRenderers, renderer => renderer.baseCanvas)
+      .forEach(baseCanvas => this.dispose(baseCanvas));
   }
 
   canvasFor(baseCanvas) {
@@ -2186,10 +2186,20 @@ class RiemannSurfaceRendererFactory {
 
 const rendererFactory = new RiemannSurfaceRendererFactory();
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => rendererFactory.disposeAll(), { once: true });
+}
+
 export function renderRiemannSurface(baseCanvas, options = {}) {
-  const signature = getProgramSignature(state);
-  if (!validateDynamicAggregate(state, signature)) return false;
-  return rendererFactory.render(baseCanvas, options, signature);
+  if (!baseCanvas) throw new Error('Riemann surface rendering requires a target canvas.');
+  const signature = getRiemannSurfaceProgramSignature(state);
+  if (!validateDynamicAggregate(state, signature)) {
+    throw new Error('The active dynamic aggregate cannot be compiled for the Riemann surface GPU pipeline.');
+  }
+  if (!rendererFactory.render(baseCanvas, options, signature)) {
+    throw new Error('Riemann surface WebGL initialization or rendering failed.');
+  }
+  return true;
 }
 
 export function hideRiemannSurface(baseCanvas) {

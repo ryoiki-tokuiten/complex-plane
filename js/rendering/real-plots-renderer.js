@@ -6,7 +6,8 @@ import { parseExpression } from '../math/expression/parser.js';
 import {
     buildNativeRealSurface,
     compileNativeExpressionProgram,
-    nativeMapOptions
+    nativeMapOptions,
+    renderNativeRealContour
 } from '../native/complex-engine.js';
 import {
     MAX_STATE_ZOOM_LEVEL,
@@ -17,6 +18,8 @@ import {
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestRedrawAll } from './redraw-scheduler.js';
 import { disposeThreeObject } from './three-utils.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 const BACKGROUND = 0x070812;
 const CAMERA_HOME = Object.freeze({ x: 6.0, y: 5.0, z: 8.0 });
@@ -72,15 +75,10 @@ function writeInterpolatedHex(target, offset, a, b, t) {
 }
 
 function createPaletteLut(hexStops) {
-    const lut = new Float32Array(PALETTE_LUT_SIZE * 3);
-    if (!hexStops || hexStops.length === 0) return lut;
-    if (hexStops.length === 1) {
-        for (let i = 0, offset = 0; i < PALETTE_LUT_SIZE; i += 1, offset += 3) {
-            writeInterpolatedHex(lut, offset, hexStops[0], hexStops[0], 0);
-        }
-        return lut;
+    if (!Array.isArray(hexStops) || hexStops.length < 2) {
+        throw new Error('Real-plot palettes require at least two color stops.');
     }
-
+    const lut = new Float32Array(PALETTE_LUT_SIZE * 3);
     const lastSegment = hexStops.length - 1;
     for (let i = 0, offset = 0; i < PALETTE_LUT_SIZE; i += 1, offset += 3) {
         const scaled = i / (PALETTE_LUT_SIZE - 1) * lastSegment;
@@ -94,8 +92,10 @@ const PALETTE_LUTS = Object.freeze(Object.fromEntries(
     Object.entries(PALETTE_HEX).map(([name, stops]) => [name, createPaletteLut(stops)])
 ));
 
-export function paletteLutFor(name) {
-    return PALETTE_LUTS[name] || PALETTE_LUTS.sunset;
+function paletteLutFor(name) {
+    const palette = PALETTE_LUTS[name];
+    if (!palette) throw new Error(`Unsupported real-plot palette: ${name}.`);
+    return palette;
 }
 
 function makeAxisLabel(text, color) {
@@ -305,20 +305,23 @@ function formatCoord(value) {
 }
 
 function outputComponentMode(component) {
+    if (component === 'real') return OUTPUT_COMPONENT.REAL;
     if (component === 'imag') return OUTPUT_COMPONENT.IMAG;
     if (component === 'magnitude') return OUTPUT_COMPONENT.MAGNITUDE;
-    return OUTPUT_COMPONENT.REAL;
+    throw new Error(`Unsupported real-plot component: ${component}.`);
 }
 
 function outputAxisLabel(component) {
+    if (component === 'real') return 'z = Re(f)';
     if (component === 'imag') return 'z = Im(f)';
     if (component === 'magnitude') return 'z = |f|';
-    return 'z = Re(f)';
+    throw new Error(`Unsupported real-plot component: ${component}.`);
 }
 
 function realPlotSurfaceKey() {
-    const xRange = zPlaneParams.currentVisXRange || [];
-    const yRange = zPlaneParams.currentVisYRange || [];
+    requireVisibleViewport(zPlaneParams, 'Real-plot viewport');
+    const xRange = zPlaneParams.currentVisXRange;
+    const yRange = zPlaneParams.currentVisYRange;
     return [
         buildMappedTransformProfileKey(state.currentFunction),
         buildMappedTransformProfileKey('mobius'),
@@ -348,32 +351,60 @@ function expressionProgram(source, preset) {
     return compileNativeExpressionProgram(parseExpression(String(source)), ['x', 'y']);
 }
 
-export function buildRealPlotSurface(options = {}) {
-    const inputExpr = options.inputExpr ?? state.realPlotsInputExpr ?? 'x';
-    const imagExpr = options.imagExpr ?? state.realPlotsImagExpr ?? '0';
+function resolveRealPlotDefinition(options) {
+    const inputExpr = options.inputExpr ?? state.realPlotsInputExpr;
+    const imagExpr = options.imagExpr ?? state.realPlotsImagExpr;
     const inputUPreset = presetType(inputExpr);
     const inputVPreset = presetType(imagExpr);
-    const xRange = options.xRange || zPlaneParams.currentVisXRange;
-    const yRange = options.yRange || zPlaneParams.currentVisYRange;
     const activeMap = getMappedTransformProfile(state.currentFunction);
-    const mapOptions = nativeMapOptions(state, {
-        ...(activeMap.nativeMapOptions || {}),
-        ...(options.mapOptions || {})
-    });
-    return buildNativeRealSurface({
-        mapOptions,
-        segments: Math.max(1, Math.floor(Number(options.segments) || DEFAULT_SAMPLE_SEGMENTS)),
-        xRange,
-        yRange,
+    return {
+        mapOptions: nativeMapOptions(state, {
+            ...activeMap.nativeMapOptions,
+            ...options.mapOptions
+        }),
+        xRange: options.xRange ?? zPlaneParams.currentVisXRange,
+        yRange: options.yRange ?? zPlaneParams.currentVisYRange,
         inputUPreset,
         inputVPreset,
         inputUProgram: expressionProgram(inputExpr, inputUPreset),
         inputVProgram: expressionProgram(imagExpr, inputVPreset),
         component: outputComponentMode(options.outputComponent ?? state.realPlotsOutputComponent),
-        heightScale: options.heightScale ?? state.realPlotsHeightScale ?? 1,
+        palette: paletteLutFor(options.palette ?? state.realPlotsPalette)
+    };
+}
+
+export function buildRealPlotSurface(options = {}) {
+    const segments = requireInteger(options.segments ?? DEFAULT_SAMPLE_SEGMENTS, 'Real-plot segment count');
+    if (segments < 1) throw new Error('Real-plot segment count must be positive.');
+    const definition = resolveRealPlotDefinition(options);
+    return buildNativeRealSurface({
+        ...definition,
+        segments,
+        heightScale: options.heightScale ?? state.realPlotsHeightScale,
         phaseColor: (options.colorMode ?? state.realPlotsColorMode) === 'phase',
-        palette: paletteLutFor(options.palette || state.realPlotsPalette || 'sunset'),
         valuesOnly: options.valuesOnly === true
+    });
+}
+
+export function renderRealPlotContour(options = {}) {
+    const contourInterval = requireFiniteNumber(
+        options.contourInterval ?? state.contourInterval,
+        'Real-plot contour interval'
+    );
+    const contourThickness = requireFiniteNumber(
+        options.contourThickness ?? state.contourThickness,
+        'Real-plot contour thickness'
+    );
+    if (contourInterval <= 0 || contourThickness <= 0) {
+        throw new Error('Real-plot contour interval and thickness must be positive.');
+    }
+    return renderNativeRealContour({
+        ...resolveRealPlotDefinition(options),
+        width: requireInteger(options.width, 'Real-plot contour width'),
+        height: requireInteger(options.height, 'Real-plot contour height'),
+        contoursEnabled: options.contoursEnabled ?? state.contoursEnabled,
+        contourInterval,
+        contourThickness
     });
 }
 
@@ -577,7 +608,10 @@ class RealPlots3DRenderer {
         if (!Number.isFinite(deltaY) || deltaY === 0) return;
 
         const oldZoom = Number(state.zPlaneZoom);
-        const currentZoom = Number.isFinite(oldZoom) && oldZoom > 0 ? oldZoom : 1;
+        if (!Number.isFinite(oldZoom) || oldZoom <= 0) {
+            throw new Error('Real-plot coordinate zoom must be positive and finite.');
+        }
+        const currentZoom = oldZoom;
         const factor = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
         const nextZoom = Math.max(
             MIN_STATE_ZOOM_LEVEL,
@@ -595,8 +629,13 @@ class RealPlots3DRenderer {
     updateSurface(surfaceKey) {
         const store = this.surfaceStore;
         store.contourUniforms.uContoursEnabled.value = state.contoursEnabled ? 1.0 : 0.0;
-        store.contourUniforms.uContourInterval.value = state.contourInterval !== undefined ? +state.contourInterval : 0.5;
-        store.contourUniforms.uContourThickness.value = state.contourThickness !== undefined ? +state.contourThickness : 1.5;
+        const contourInterval = requireFiniteNumber(state.contourInterval, 'Real-plot contour interval');
+        const contourThickness = requireFiniteNumber(state.contourThickness, 'Real-plot contour thickness');
+        if (contourInterval <= 0 || contourThickness <= 0) {
+            throw new Error('Real-plot contour interval and thickness must be positive.');
+        }
+        store.contourUniforms.uContourInterval.value = contourInterval;
+        store.contourUniforms.uContourThickness.value = contourThickness;
 
         if (surfaceKey && surfaceKey === this.surfaceKey) {
             this.render();

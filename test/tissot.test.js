@@ -7,6 +7,7 @@ import {
     getTissotViewportBounds
 } from '../js/analysis/tissot.js';
 import { drawConformalIndicatrices } from '../js/rendering/draw-planar.js';
+import { completeNativeMapOptions } from './helpers/native-map.js';
 
 class CanvasStrokeCounter {
     constructor() { this.strokeCount = 0; }
@@ -20,10 +21,10 @@ class CanvasStrokeCounter {
 }
 
 test('native Tissot geometry uses the active map and derivative', () => {
-    const map = {
-        functionKey: 'polynomial', chainCount: 1, polynomialN: 1,
+    const map = completeNativeMapOptions({
+        functionKey: 'polynomial', chainingEnabled: false, polynomialN: 1,
         polynomialCoeffs: [{ re: 0, im: 0 }, { re: 2, im: 0 }]
-    };
+    });
     const indicatrices = generateTissotIndicatrices(map, [-1, 1], [-1, 1], 8, 8);
 
     assert.ok(indicatrices.length > 0);
@@ -41,10 +42,10 @@ test('native Tissot geometry uses the active map and derivative', () => {
 });
 
 test('Tissot indicatrices preserve the source direction and flag critical collapse', () => {
-    const map = {
-        functionKey: 'polynomial', chainCount: 1, polynomialN: 0,
+    const map = completeNativeMapOptions({
+        functionKey: 'polynomial', chainingEnabled: false, polynomialN: 0,
         polynomialCoeffs: [{ re: 2, im: -1 }]
-    };
+    });
     const [indicatrix] = generateTissotIndicatrices(map, [-1, 1], [-1, 1], 8, 8);
 
     assert.ok(indicatrix);
@@ -54,9 +55,9 @@ test('Tissot indicatrices preserve the source direction and flag critical collap
 });
 
 test('conformal indicatrix uses the unified Canvas stroke path', () => {
-    const [indicatrix] = generateTissotIndicatrices({
-        functionKey: 'identity', chainCount: 1
-    }, [-1, 1], [-1, 1], 8, 8);
+    const [indicatrix] = generateTissotIndicatrices(completeNativeMapOptions({
+        functionKey: 'identity', chainingEnabled: false
+    }), [-1, 1], [-1, 1], 8, 8);
     const ctx = new CanvasStrokeCounter();
 
     drawConformalIndicatrices(ctx, {

@@ -1,17 +1,11 @@
 #include "complex_engine.h"
+#include "ce_limits.h"
 #include "expression_internal.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define CE_ZERO_EPSILON 1e-15
-#define CE_ZERO_MAG_SQ 1e-30
-#define CE_POLE_MAGNITUDE 5000.0
-#define CE_MAX_FINITE 1e30
-#define CE_CHAIN_BAILOUT 1e8
-#define CE_EXPONENT_MAX 69.07755278982137
-#define CE_EXPONENT_MIN -745.0
 #define CE_PI 3.141592653589793238462643383279502884
 #define CE_TWO_PI (2.0 * CE_PI)
 
@@ -22,7 +16,7 @@ static ce_complex ce_make(double re, double im) {
 
 void *ce_alloc(size_t size) { return malloc(size); }
 void ce_free(void *pointer) { free(pointer); }
-uint32_t ce_abi_version(void) { return 1; }
+uint32_t ce_abi_version(void) { return 2; }
 
 ce_complex ce_add(ce_complex a, ce_complex b) {
     return ce_make(a.re + b.re, a.im + b.im);
@@ -41,15 +35,7 @@ ce_complex ce_div(ce_complex numerator, ce_complex denominator) {
     const double abs_im = fabs(denominator.im);
     const double scale = fmax(abs_re, abs_im);
 
-    if (scale < CE_ZERO_EPSILON) {
-        const double mag_sq = numerator.re * numerator.re + numerator.im * numerator.im;
-        if (mag_sq < CE_ZERO_MAG_SQ) return ce_make(NAN, NAN);
-        if (fabs(numerator.re) < CE_ZERO_EPSILON && fabs(numerator.im) < CE_ZERO_EPSILON) {
-            return ce_make(0.0, 0.0);
-        }
-        const double safe_scale = (CE_POLE_MAGNITUDE * 2.0) / sqrt(mag_sq);
-        return ce_make(numerator.re * safe_scale, numerator.im * safe_scale);
-    }
+    if (scale == 0.0) return ce_make(NAN, NAN);
 
     if (abs_re >= abs_im) {
         const double ratio = denominator.im / denominator.re;
@@ -80,7 +66,7 @@ static double ce_log_hypot(double re, double im) {
     const double scale = fmax(abs_re, abs_im);
     if (scale == 0.0) return -INFINITY;
     if (scale < 1e154 && scale > 1e-154) return 0.5 * log(re * re + im * im);
-    return log(hypot(re, im));
+    return log(scale) + 0.5 * log((re / scale) * (re / scale) + (im / scale) * (im / scale));
 }
 
 static ce_complex ce_exp(ce_complex z) {
@@ -178,19 +164,6 @@ static ce_complex ce_sqrt(ce_complex z) {
     const double magnitude = hypot(z.re, z.im);
     const double re = sqrt(fmax(0.0, (magnitude + z.re) * 0.5));
     return ce_make(re, copysign(sqrt(fmax(0.0, (magnitude - z.re) * 0.5)), z.im));
-}
-
-static inline ce_complex ce_sin(ce_complex z) {
-    if (fabs(z.im) > 700.0) {
-        const double ey = ce_exp_safe(fabs(z.im));
-        const double s = 0.5 * ey * copysign(1.0, z.im);
-        return ce_make(sin(z.re) * 0.5 * ey, cos(z.re) * s);
-    }
-    const double ey = ce_exp_safe(z.im);
-    const double ey_inv = 1.0 / ey;
-    const double sinh_y = 0.5 * (ey - ey_inv);
-    const double cosh_y = 0.5 * (ey + ey_inv);
-    return ce_make(sin(z.re) * cosh_y, cos(z.re) * sinh_y);
 }
 
 static inline ce_complex ce_cos(ce_complex z) {
@@ -347,6 +320,8 @@ static ce_complex ce_bessel(ce_complex z, ce_complex order) {
 
 static double ce_zeta_log_table[513] = {0};
 static int ce_zeta_log_table_initialized = 0;
+static double ce_zeta_hasse_weights[128] = {0};
+static uint32_t ce_zeta_hasse_weight_levels = 0;
 
 static void ce_ensure_zeta_log_table(void) {
     if (ce_zeta_log_table_initialized) return;
@@ -356,22 +331,30 @@ static void ce_ensure_zeta_log_table(void) {
     ce_zeta_log_table_initialized = 1;
 }
 
+static const double *ce_zeta_collapsed_weights(uint32_t levels) {
+    levels = levels > 128u ? 128u : levels;
+    if (ce_zeta_hasse_weight_levels == levels) return ce_zeta_hasse_weights;
+    memset(ce_zeta_hasse_weights, 0, sizeof(ce_zeta_hasse_weights));
+    for (uint32_t n = 0; n < levels; ++n) {
+        double binomial = 1.0;
+        const double row_scale = ldexp(1.0, -(int)n - 1);
+        for (uint32_t k = 0; k <= n; ++k) {
+            ce_zeta_hasse_weights[k] += row_scale * (k & 1u ? -binomial : binomial);
+            binomial = binomial * (n - k) / (k + 1.0);
+        }
+    }
+    ce_zeta_hasse_weight_levels = levels;
+    return ce_zeta_hasse_weights;
+}
+
 static ce_complex ce_zeta_eta(double re, double im, uint32_t levels) {
     if (re == 1.0 && im == 0.0) return ce_make(INFINITY, NAN);
     ce_ensure_zeta_log_table();
     ce_complex denominator = ce_make(1.0 - ce_exp_safe((1.0 - re) * 0.693147180559945309417) * cos(-im * 0.693147180559945309417),
                                      -ce_exp_safe((1.0 - re) * 0.693147180559945309417) * sin(-im * 0.693147180559945309417));
     ce_complex sum = ce_make(0.0, 0.0);
-    double weights[128] = {0};
     levels = levels > 128u ? 128u : levels;
-    for (uint32_t n = 0; n < levels; ++n) {
-        double binomial = 1.0;
-        const double row_scale = ldexp(1.0, -(int)n - 1);
-        for (uint32_t k = 0; k <= n; ++k) {
-            weights[k] += row_scale * (k & 1u ? -binomial : binomial);
-            binomial = binomial * (n - k) / (k + 1.0);
-        }
-    }
+    const double *weights = ce_zeta_collapsed_weights(levels);
     for (uint32_t k = 0; k < levels; ++k) {
         const double ln = (k + 1 <= 512) ? ce_zeta_log_table[k + 1] : log((double)k + 1.0);
         const double magnitude = ce_exp_safe(-re * ln);
@@ -407,6 +390,9 @@ static ce_complex ce_polynomial(ce_complex z, const ce_function_config *config) 
 
 static ce_complex ce_exp_at_base(ce_complex z, ce_complex base) {
     if (base.re == 0.0 && base.im == 0.0) return ce_make(NAN, NAN);
+    if (base.im == 0.0 && fabs(base.re - 2.71828182845904523536) < 1e-12) {
+        return ce_exp(z);
+    }
     return ce_exp(ce_mul(z, ce_make(ce_log_hypot(base.re, base.im), atan2(base.im, base.re))));
 }
 
@@ -505,49 +491,135 @@ static int ce_eval_expression(const ce_function_config *config, ce_complex z, ce
     return isfinite(result->re) && isfinite(result->im);
 }
 
-static ce_complex ce_eval_algebraic(ce_complex input, ce_complex c, const ce_function_config *config) {
-    if (!config->algebraic_terms || !config->algebraic_term_count ||
-        (config->algebraic_factor_count && !config->algebraic_factors)) return ce_make(NAN, NAN);
-    if (!config->expression_count && config->algebraic_term_count == 2u &&
-        config->polynomial && config->algebraic_factor_count >= 2u) {
-        const ce_algebraic_term *first_term = &config->algebraic_terms[0];
-        const ce_algebraic_term *second_term = &config->algebraic_terms[1];
-        if (first_term->factor_count == 1u && second_term->factor_count == 1u &&
-            first_term->factor_offset < config->algebraic_factor_count &&
-            second_term->factor_offset < config->algebraic_factor_count) {
-            const ce_algebraic_factor *first = &config->algebraic_factors[first_term->factor_offset];
-            const ce_algebraic_factor *second = &config->algebraic_factors[second_term->factor_offset];
-            const int plain_first = first->chained_function_id < 0 && !first->flags && !first->step_count;
-            const int plain_second = second->chained_function_id < 0 && !second->step_count;
-            if (plain_first && plain_second && first_term->coefficient.re == 1.0 &&
-                first_term->coefficient.im == 0.0 && second_term->coefficient.re == 1.0 &&
-                second_term->coefficient.im == 0.0 && config->polynomial_count == 3u &&
-                config->polynomial[0].re == 0.0 && config->polynomial[0].im == 0.0 &&
-                config->polynomial[1].re == 0.0 && config->polynomial[1].im == 0.0 &&
-                config->polynomial[2].re == 1.0 && config->polynomial[2].im == 0.0) {
-                if (first->function_id == CE_FN_POLYNOMIAL && first->power == 1.0 &&
-                    second->function_id == CE_FN_C && second->power == 1.0 && !second->flags) {
-                    return ce_add(ce_mul(input, input), c);
-                }
-                if (second->function_id == CE_FN_POLYNOMIAL && second->power == 1.0 &&
-                    first->function_id == CE_FN_C && first->power == 1.0 && !first->flags) {
-                    return ce_add(ce_mul(input, input), c);
-                }
-            }
-            if (plain_first && plain_second && config->polynomial_count == 2u &&
-                config->polynomial[0].re == 0.0 && config->polynomial[0].im == 0.0 &&
-                config->polynomial[1].re == 1.0 && config->polynomial[1].im == 0.0 &&
-                first->function_id == CE_FN_POLYNOMIAL && first->power == 1.0 &&
-                second->function_id == CE_FN_POLYNOMIAL && second->power == 2.0 &&
-                !(first->flags) && second->flags == 1u &&
-                first_term->coefficient.re == 2.0 / 3.0 && first_term->coefficient.im == 0.0 &&
-                second_term->coefficient.re == 1.0 / 3.0 && second_term->coefficient.im == 0.0) {
-                ce_complex square = ce_mul(input, input);
-                ce_complex inverse = ce_div(ce_make(1.0 / 3.0, 0.0), square);
-                return ce_add(ce_make((2.0 / 3.0) * input.re, (2.0 / 3.0) * input.im), inverse);
+static int ce_complex_is(ce_complex value, double re, double im) {
+    return value.re == re && value.im == im;
+}
+
+static int ce_plain_algebraic_factor(const ce_algebraic_factor *factor) {
+    return factor->chained_function_id < 0 && !factor->flags && factor->power == 1.0;
+}
+
+static int ce_identity_polynomial(const ce_function_config *function) {
+    return function->polynomial && function->polynomial_count == 2u &&
+        ce_complex_is(function->polynomial[0], 0.0, 0.0) &&
+        ce_complex_is(function->polynomial[1], 1.0, 0.0);
+}
+
+static int ce_classify_newton_cubic(const ce_function_config *function) {
+    if (!ce_identity_polynomial(function) || function->algebraic_term_count != 2u) return 0;
+    int found_linear = 0, found_inverse_square = 0;
+    for (uint32_t index = 0; index < 2u; ++index) {
+        const ce_algebraic_term *term = &function->algebraic_terms[index];
+        if (term->factor_count != 1u || term->factor_offset >= function->algebraic_factor_count) return 0;
+        const ce_algebraic_factor *factor = &function->algebraic_factors[term->factor_offset];
+        if (factor->function_id != CE_FN_POLYNOMIAL || factor->chained_function_id >= 0) return 0;
+        if (!factor->flags && factor->power == 1.0 && ce_complex_is(term->coefficient, 2.0 / 3.0, 0.0)) {
+            found_linear = 1;
+        } else if (factor->flags == 1u && factor->power == 2.0 &&
+                   ce_complex_is(term->coefficient, 1.0 / 3.0, 0.0)) {
+            found_inverse_square = 1;
+        } else return 0;
+    }
+    return found_linear && found_inverse_square;
+}
+
+static uint32_t ce_classify_map_kernel(ce_map_config *config) {
+    if (!config) return CE_MAP_KERNEL_GENERIC;
+    config->kernel_polynomial_scale = ce_make(0.0, 0.0);
+    config->kernel_parameter_scale = ce_make(0.0, 0.0);
+    config->kernel_constant = ce_make(0.0, 0.0);
+    if (config->function_id != CE_FN_ALGEBRAIC || config->dynamic_source_count ||
+        config->use_taylor || config->derivative || config->function.expression_count ||
+        !config->function.algebraic_term_count || !config->function.algebraic_terms ||
+        (config->function.algebraic_factor_count && !config->function.algebraic_factors)) {
+        return CE_MAP_KERNEL_GENERIC;
+    }
+    const ce_function_config *function = &config->function;
+    if (ce_classify_newton_cubic(function)) return CE_MAP_KERNEL_NEWTON_CUBIC;
+
+    if (function->algebraic_term_count == 1u) {
+        const ce_algebraic_term *term = &function->algebraic_terms[0];
+        if (term->factor_count == 1u && term->factor_offset < function->algebraic_factor_count) {
+            const ce_algebraic_factor *factor = &function->algebraic_factors[term->factor_offset];
+            if (ce_plain_algebraic_factor(factor) && factor->function_id != CE_FN_C &&
+                factor->function_id != CE_FN_ALGEBRAIC && factor->function_id != CE_FN_IDENTITY) {
+                return CE_MAP_KERNEL_DIRECT_FUNCTION;
             }
         }
     }
+
+    int has_polynomial = 0;
+    for (uint32_t index = 0; index < function->algebraic_term_count; ++index) {
+        const ce_algebraic_term *term = &function->algebraic_terms[index];
+        if (!term->factor_count) {
+            config->kernel_constant = ce_add(config->kernel_constant, term->coefficient);
+            continue;
+        }
+        if (term->factor_count != 1u || term->factor_offset >= function->algebraic_factor_count) {
+            has_polynomial = -1;
+            break;
+        }
+        const ce_algebraic_factor *factor = &function->algebraic_factors[term->factor_offset];
+        if (!ce_plain_algebraic_factor(factor)) {
+            has_polynomial = -1;
+            break;
+        }
+        if (factor->function_id == CE_FN_POLYNOMIAL) {
+            config->kernel_polynomial_scale = ce_add(config->kernel_polynomial_scale, term->coefficient);
+            has_polynomial = 1;
+        } else if (factor->function_id == CE_FN_C) {
+            config->kernel_parameter_scale = ce_add(config->kernel_parameter_scale, term->coefficient);
+        } else {
+            has_polynomial = -1;
+            break;
+        }
+    }
+    if (has_polynomial > 0) {
+        if (function->polynomial_count == 3u &&
+            ce_complex_is(function->polynomial[0], 0.0, 0.0) &&
+            ce_complex_is(function->polynomial[1], 0.0, 0.0) &&
+            ce_complex_is(function->polynomial[2], 1.0, 0.0) &&
+            ce_complex_is(config->kernel_polynomial_scale, 1.0, 0.0) &&
+            ce_complex_is(config->kernel_parameter_scale, 1.0, 0.0) &&
+            ce_complex_is(config->kernel_constant, 0.0, 0.0)) {
+            return CE_MAP_KERNEL_QUADRATIC_PARAMETER;
+        }
+        return CE_MAP_KERNEL_POLYNOMIAL_PARAMETER;
+    }
+
+    config->kernel_parameter_scale = ce_make(0.0, 0.0);
+    config->kernel_constant = ce_make(0.0, 0.0);
+    if (ce_identity_polynomial(function)) {
+        int has_laurent_term = 0;
+        for (uint32_t index = 0; index < function->algebraic_term_count; ++index) {
+            const ce_algebraic_term *term = &function->algebraic_terms[index];
+            if (!term->factor_count) {
+                config->kernel_constant = ce_add(config->kernel_constant, term->coefficient);
+                continue;
+            }
+            if (term->factor_count != 1u || term->factor_offset >= function->algebraic_factor_count) return CE_MAP_KERNEL_GENERIC;
+            const ce_algebraic_factor *factor = &function->algebraic_factors[term->factor_offset];
+            if (ce_plain_algebraic_factor(factor) && factor->function_id == CE_FN_C) {
+                config->kernel_parameter_scale = ce_add(config->kernel_parameter_scale, term->coefficient);
+                continue;
+            }
+            if (factor->function_id != CE_FN_POLYNOMIAL || factor->chained_function_id >= 0 ||
+                (factor->flags & ~1u) || factor->power < 0.0 || factor->power > 2147483647.0 ||
+                floor(factor->power) != factor->power) return CE_MAP_KERNEL_GENERIC;
+            has_laurent_term = 1;
+        }
+        if (has_laurent_term) return CE_MAP_KERNEL_LAURENT_PARAMETER;
+    }
+    return CE_MAP_KERNEL_GENERIC;
+}
+
+void ce_prepare_map_config(ce_map_config *config) {
+    if (config) config->kernel_kind = ce_classify_map_kernel(config);
+}
+
+static ce_complex ce_eval_algebraic(ce_complex input, ce_complex c, const ce_function_config *config) {
+    if (!config->algebraic_terms || !config->algebraic_term_count ||
+        (config->algebraic_factor_count && !config->algebraic_factors)) return ce_make(NAN, NAN);
     ce_complex z;
     if (!ce_eval_expression(config, input, c, &z)) return ce_make(NAN, NAN);
     ce_complex sum = ce_make(0.0, 0.0);
@@ -556,42 +628,25 @@ static ce_complex ce_eval_algebraic(ce_complex input, ce_complex c, const ce_fun
         if (term->factor_offset > config->algebraic_factor_count ||
             term->factor_count > config->algebraic_factor_count - term->factor_offset) return ce_make(NAN, NAN);
         ce_complex value = term->coefficient;
+        const int is_coeff_one = (term->coefficient.re == 1.0 && term->coefficient.im == 0.0);
         for (uint32_t factor_index = 0; factor_index < term->factor_count; ++factor_index) {
             const ce_algebraic_factor *factor = &config->algebraic_factors[term->factor_offset + factor_index];
             ce_complex argument = z;
-            ce_complex factor_value;
-            if (factor->step_count) {
-                if (!config->algebraic_steps || factor->step_offset > config->algebraic_step_count ||
-                    factor->step_count > config->algebraic_step_count - factor->step_offset) return ce_make(NAN, NAN);
-                const uint32_t *steps = &config->algebraic_steps[factor->step_offset];
-                const uint32_t step_count = factor->step_count;
-                for (uint32_t step = 0; step < step_count; ++step) {
-                    switch (steps[step]) {
-                        case CE_FN_COS: argument = ce_cos(argument); break;
-                        case CE_FN_TAN: argument = ce_tan(argument); break;
-                        case CE_FN_SEC: argument = ce_sec(argument); break;
-                        case CE_FN_EXP: argument = ce_exp(argument); break;
-                        case CE_FN_LN: argument = ce_log(argument, config); break;
-                        case CE_FN_SINH: argument = ce_sinh(argument); break;
-                        case CE_FN_TANH: argument = ce_tanh(argument); break;
-                        default: argument = ce_eval_function(steps[step], argument, c, config); break;
-                    }
-                    if (!isfinite(argument.re) || !isfinite(argument.im)) break;
-                }
-                factor_value = argument;
-            } else {
-                if (factor->chained_function_id >= 0) {
-                    argument = ce_eval_function((uint32_t)factor->chained_function_id, argument, c, config);
-                }
-                factor_value = ce_eval_function(factor->function_id, argument, c, config);
+            if (factor->chained_function_id >= 0) {
+                argument = ce_eval_function((uint32_t)factor->chained_function_id, argument, c, config);
             }
+            ce_complex factor_value = ce_eval_function(factor->function_id, argument, c, config);
             if (factor->power != 1.0) factor_value = ce_pow(factor_value, ce_make(factor->power, 0.0));
             if (factor->flags & 1u) factor_value = ce_div(ce_make(1.0, 0.0), factor_value);
             if (factor->flags & 2u) {
                 factor_value = ce_div(ce_log(factor_value, config), ce_log(config->log_base, NULL));
             }
             if (factor->flags & 4u) factor_value = ce_exp_at_base(factor_value, config->exp_base);
-            value = ce_mul(value, factor_value);
+            if (factor_index == 0 && is_coeff_one) {
+                value = factor_value;
+            } else {
+                value = ce_mul(value, factor_value);
+            }
         }
         if (!isfinite(value.re) || !isfinite(value.im)) return ce_make(NAN, NAN);
         sum = ce_add(sum, value);
@@ -601,13 +656,7 @@ static ce_complex ce_eval_algebraic(ce_complex input, ce_complex c, const ce_fun
 
 ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
                             const ce_function_config *config) {
-    const ce_function_config defaults = {
-        {2.718281828459045, 0.0}, {2.718281828459045, 0.0}, {0.0, 0.0},
-        {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0},
-        NULL, 0, 0.5, CE_PI, 0, 0,
-        NULL, 0, NULL, 0, NULL, 0, NULL, 0
-    };
-    if (!config) config = &defaults;
+    if (!config) return ce_make(NAN, NAN);
     switch (function_id) {
         case CE_FN_C: return c;
         case CE_FN_COS: return ce_cos(z);
@@ -642,8 +691,54 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
     }
 }
 
+ce_complex ce_eval_map_step(const ce_map_config *config, ce_complex current, ce_complex parameter) {
+    if (config->kernel_kind == CE_MAP_KERNEL_DIRECT_FUNCTION) {
+        const ce_algebraic_term *term = &config->function.algebraic_terms[0];
+        const ce_algebraic_factor *factor = &config->function.algebraic_factors[term->factor_offset];
+        return ce_mul(term->coefficient,
+                      ce_eval_function(factor->function_id, current, parameter, &config->function));
+    }
+    if (config->kernel_kind == CE_MAP_KERNEL_QUADRATIC_PARAMETER) {
+        return ce_make(
+            current.re * current.re - current.im * current.im + parameter.re,
+            2.0 * current.re * current.im + parameter.im
+        );
+    }
+    if (config->kernel_kind == CE_MAP_KERNEL_NEWTON_CUBIC) {
+        const double square_re = current.re * current.re - current.im * current.im;
+        const double square_im = 2.0 * current.re * current.im;
+        const ce_complex inverse = ce_div(ce_make(1.0 / 3.0, 0.0), ce_make(square_re, square_im));
+        return ce_make(
+            (2.0 / 3.0) * current.re + inverse.re,
+            (2.0 / 3.0) * current.im + inverse.im
+        );
+    }
+    if (config->kernel_kind == CE_MAP_KERNEL_POLYNOMIAL_PARAMETER) {
+        return ce_add(config->kernel_constant, ce_add(
+            ce_mul(config->kernel_polynomial_scale, ce_polynomial(current, &config->function)),
+            ce_mul(config->kernel_parameter_scale, parameter)
+        ));
+    }
+    if (config->kernel_kind == CE_MAP_KERNEL_LAURENT_PARAMETER) {
+        ce_complex sum = ce_add(config->kernel_constant, ce_mul(config->kernel_parameter_scale, parameter));
+        const ce_function_config *function = &config->function;
+        for (uint32_t index = 0; index < function->algebraic_term_count; ++index) {
+            const ce_algebraic_term *term = &function->algebraic_terms[index];
+            if (!term->factor_count) continue;
+            const ce_algebraic_factor *factor = &function->algebraic_factors[term->factor_offset];
+            if (factor->function_id == CE_FN_C) continue;
+            int64_t exponent = (int64_t)factor->power;
+            if (factor->flags & 1u) exponent = -exponent;
+            sum = ce_add(sum, ce_mul(term->coefficient, ce_pow_integer(current, exponent)));
+        }
+        return sum;
+    }
+    return ce_eval_function(config->function_id, current, parameter, &config->function);
+}
+
 static int ce_valid(ce_complex value) {
-    return isfinite(value.re) && isfinite(value.im) && fabs(value.re) < CE_MAX_FINITE && fabs(value.im) < CE_MAX_FINITE;
+    return isfinite(value.re) && isfinite(value.im) &&
+        fabs(value.re) < CE_DOMAIN_MAGNITUDE_MAX && fabs(value.im) < CE_DOMAIN_MAGNITUDE_MAX;
 }
 
 static ce_complex ce_eval_taylor(const ce_map_config *config, ce_complex point) {
@@ -665,12 +760,12 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
     *valid = 0;
     if (!config->dynamic_point_expression || !config->dynamic_point_count ||
         !config->dynamic_term_expression || !config->dynamic_term_count ||
-        !config->dynamic_variables || !config->dynamic_source_count ||
+        !config->dynamic_variables || !config->dynamic_variable_flags ||
+        !config->dynamic_variable_count || !config->dynamic_source_count ||
         config->dynamic_variable_count > 256u || config->dynamic_reduction > 2u) {
         return ce_make(NAN, NAN);
     }
-    ce_complex *variables = malloc(config->dynamic_variable_count * sizeof(ce_complex));
-    if (!variables) return ce_make(NAN, NAN);
+    ce_complex variables[256];
     ce_map_config base = *config;
     base.chain_count = 1u;
     base.zero_seed = 0u;
@@ -692,8 +787,7 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
                config->dynamic_variables + (size_t)source * config->dynamic_variable_count,
                config->dynamic_variable_count * sizeof(ce_complex));
         for (uint32_t slot = 0; slot < config->dynamic_variable_count; ++slot) {
-            const uint8_t flag = config->dynamic_variable_flags
-                ? config->dynamic_variable_flags[slot] : 0u;
+            const uint8_t flag = config->dynamic_variable_flags[slot];
             if (flag == 1u) variables[slot] = parameter;
             else if (flag == 2u) variables[slot] = ce_make(parameter.re, 0.0);
         }
@@ -705,7 +799,7 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
         );
         if (point_ok) {
             for (uint32_t slot = 0; slot < config->dynamic_variable_count; ++slot) {
-                if (config->dynamic_variable_flags && config->dynamic_variable_flags[slot] == 3u) {
+                if (config->dynamic_variable_flags[slot] == 3u) {
                     variables[slot] = point;
                 }
             }
@@ -794,14 +888,13 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
         product_metadata[4] = product_zero ? 1.0 : 0.0;
         product_metadata[5] = product_finite ? 1.0 : 0.0;
     }
-    free(variables);
     *valid = (has_value || config->dynamic_reduction != 0u) && ce_valid(final);
     return final;
 }
 
 static ce_complex ce_eval_map_point(const ce_map_config *config, ce_complex point, int *valid) {
     if (config->dynamic_source_count) {
-        const uint32_t count = config->chain_count ? config->chain_count : 1u;
+        const uint32_t count = config->chain_count;
         ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : point;
         ce_complex last = ce_make(NAN, NAN);
         int has_last = 0;
@@ -826,16 +919,18 @@ static ce_complex ce_eval_map_point(const ce_map_config *config, ce_complex poin
         *valid = ce_valid(value);
         return value;
     }
-    const uint32_t count = config->chain_count ? config->chain_count : 1;
+    const uint32_t count = config->chain_count;
     ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : point;
     ce_complex last = ce_make(NAN, NAN);
     int has_last = 0;
     for (uint32_t i = 0; i < count; ++i) {
-        current = ce_eval_function(config->function_id, current, point, &config->function);
+        const ce_complex previous = current;
+        current = ce_eval_map_step(config, current, point);
         if (!ce_valid(current)) break;
         last = current;
         has_last = 1;
         if (fabs(current.re) >= CE_CHAIN_BAILOUT || fabs(current.im) >= CE_CHAIN_BAILOUT) break;
+        if (count >= 64u && current.re == previous.re && current.im == previous.im) break;
         if (!config->zero_seed && count == 1) break;
     }
     *valid = has_last;
@@ -848,7 +943,8 @@ int32_t ce_evaluate_dynamic(const ce_map_config *config, double parameter_re, do
                             ce_complex *partial_values, double *partial_product_metadata,
                             ce_complex *final_value,
                             double product_metadata[6]) {
-    if (!config || !point_values || !term_values || !errors || !reduction_status ||
+    if (!config || !config->chain_count || config->chain_count > 1024u ||
+        !point_values || !term_values || !errors || !reduction_status ||
         !partial_values || !final_value || !product_metadata) return -1;
     int valid = 0;
     *final_value = ce_eval_dynamic(
@@ -878,7 +974,8 @@ static ce_complex ce_eval_map_derivative(const ce_map_config *config, ce_complex
 
 int32_t ce_evaluate_points(const ce_map_config *config, const ce_complex *input,
                            uint32_t count, ce_complex *output, uint8_t *valid) {
-    if (!config || !input || !output || config->derivative > 2u) return -1;
+    if (!config || !input || !output || !config->chain_count || config->chain_count > 1024u ||
+        config->derivative > 2u) return -1;
     for (uint32_t i = 0; i < count; ++i) {
         int ok = 0;
         output[i] = ce_eval_map_derivative(config, input[i], config->derivative, &ok);
@@ -890,18 +987,21 @@ int32_t ce_evaluate_points(const ce_map_config *config, const ce_complex *input,
 int32_t ce_evaluate_algebraic_points(const ce_map_config *config, const ce_complex *input,
                                      const ce_complex *parameters, uint32_t count,
                                      ce_complex *output, uint8_t *valid) {
-    if (!config || !input || !parameters || !output || config->function_id != CE_FN_ALGEBRAIC) return -1;
-    const uint32_t chain_count = config->chain_count ? config->chain_count : 1;
+    if (!config || !input || !parameters || !output || !config->chain_count || config->chain_count > 1024u ||
+        config->function_id != CE_FN_ALGEBRAIC) return -1;
+    const uint32_t chain_count = config->chain_count;
     for (uint32_t point = 0; point < count; ++point) {
         ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : input[point];
         ce_complex last = ce_make(NAN, NAN);
         int has_last = 0;
         for (uint32_t iteration = 0; iteration < chain_count; ++iteration) {
-            current = ce_eval_function(CE_FN_ALGEBRAIC, current, parameters[point], &config->function);
+            const ce_complex previous = current;
+            current = ce_eval_map_step(config, current, parameters[point]);
             if (!ce_valid(current)) break;
             last = current;
             has_last = 1;
             if (fabs(current.re) >= CE_CHAIN_BAILOUT || fabs(current.im) >= CE_CHAIN_BAILOUT) break;
+            if (chain_count >= 64u && current.re == previous.re && current.im == previous.im) break;
         }
         output[point] = last;
         if (valid) valid[point] = (uint8_t)has_last;
@@ -999,15 +1099,7 @@ static ce_complex ce_eval_algebraic_sheet(ce_complex input, ce_complex c,
         for (uint32_t factor_index = 0; factor_index < term->factor_count; ++factor_index) {
             const ce_algebraic_factor *factor = &config->algebraic_factors[term->factor_offset + factor_index];
             ce_complex argument = z;
-            if (factor->step_count) {
-                if (!config->algebraic_steps || factor->step_offset > config->algebraic_step_count ||
-                    factor->step_count > config->algebraic_step_count - factor->step_offset) return ce_make(NAN, NAN);
-                for (uint32_t step = 0; step < factor->step_count; ++step) {
-                    argument = ce_eval_function_sheet(
-                        config->algebraic_steps[factor->step_offset + step], argument, c, config, sheet
-                    );
-                }
-            } else if (factor->chained_function_id >= 0) {
+            if (factor->chained_function_id >= 0) {
                 argument = ce_eval_function_sheet(
                     (uint32_t)factor->chained_function_id, argument, c, config, sheet
                 );
@@ -1069,8 +1161,9 @@ static ce_complex ce_eval_function_sheet(uint32_t function_id, ce_complex z, ce_
 int32_t ce_evaluate_sheets(const ce_map_config *config, const ce_complex *input,
                            const int32_t *sheets, uint32_t count,
                            ce_complex *output, uint8_t *valid) {
-    if (!config || !input || !sheets || !output || !valid) return -1;
-    const uint32_t chain_count = config->chain_count ? config->chain_count : 1u;
+    if (!config || !input || !sheets || !output || !valid ||
+        !config->chain_count || config->chain_count > 1024u) return -1;
+    const uint32_t chain_count = config->chain_count;
     if (config->dynamic_source_count) {
         for (uint32_t point = 0; point < count; ++point) {
             ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : input[point];
@@ -1153,48 +1246,4 @@ int32_t ce_continuation_sheets(const ce_complex *path, uint32_t point_count,
         }
     }
     return sheet;
-}
-
-int32_t ce_pow_points(const ce_complex *bases, const ce_complex *exponents,
-                      uint32_t count, ce_complex *output) {
-    if (!bases || !exponents || !output) return -1;
-    for (uint32_t index = 0; index < count; ++index) output[index] = ce_pow(bases[index], exponents[index]);
-    return 0;
-}
-
-int32_t ce_zeta_points(const ce_complex *input, uint32_t count, uint32_t algorithm,
-                       uint32_t work_count, ce_complex *output) {
-    if (!input || !output || !work_count) return -1;
-    for (uint32_t index = 0; index < count; ++index) {
-        const ce_complex z = input[index];
-        if (algorithm == 0) {
-            output[index] = ce_zeta_direct(z.re, z.im, work_count);
-        } else if (algorithm == 1) {
-            if (z.re == 1.0 && z.im == 0.0) output[index] = ce_make(INFINITY, NAN);
-            else {
-                ce_complex sum = ce_make(0.0, 0.0);
-                for (uint32_t n = 1; n <= work_count; ++n) {
-                    const double logarithm = log((double)n);
-                    const double magnitude = ce_exp_safe(-z.re * logarithm);
-                    const double angle = -z.im * logarithm;
-                    const double sign = n & 1u ? 1.0 : -1.0;
-                    sum.re += sign * magnitude * cos(angle);
-                    sum.im += sign * magnitude * sin(angle);
-                }
-                ce_complex denominator = ce_make(
-                    1.0 - ce_exp_safe((1.0 - z.re) * log(2.0)) * cos(-z.im * log(2.0)),
-                    -ce_exp_safe((1.0 - z.re) * log(2.0)) * sin(-z.im * log(2.0))
-                );
-                output[index] = ce_div(sum, denominator);
-            }
-        } else if (algorithm == 2) {
-            output[index] = ce_zeta_eta(z.re, z.im, work_count);
-        } else return -2;
-    }
-    return 0;
-}
-
-int32_t ce_map_planar_geometry(const ce_map_config *config, const ce_complex *input,
-                              uint32_t count, ce_complex *output, uint8_t *valid) {
-    return ce_evaluate_points(config, input, count, output, valid);
 }

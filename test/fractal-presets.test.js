@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 import { applyFractalPreset } from '../js/analysis/fractal-presets.js';
 import { state } from '../js/store/state.js';
 import {
-    evaluateAlgebraicChaining,
-    evaluateDomainColoringMappedTransform,
     getEffectiveBaseTransformFunction,
     getMappedTransformProfile
 } from '../js/native/map-runtime.js';
+import {
+    evaluateAlgebraicChaining,
+    evaluateDomainColoringMappedTransform
+} from './helpers/native-map.js';
 
 function snapshotState(keys) {
     return Object.fromEntries(keys.map(key => [key, state[key]]));

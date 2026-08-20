@@ -16,7 +16,8 @@ import {
 } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { resolveActiveMap } from '../math/active-map.js';
-import { buildRasterSurfaceMesh, getImageRenderChainIndex } from './draw-image-webgl.js';
+import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
+import { buildRasterSurfaceMesh, getImageRenderStage } from './draw-image-webgl.js';
 import {
     getRasterSourceForShape,
     getRasterSizeForShape,
@@ -26,8 +27,9 @@ import {
 } from '../utils/raster-media.js';
 import { drawWindingVisualization, drawTimeDomainSignal } from './draw-fourier-winding.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
+import { getLaplaceFrameData } from '../analysis/laplace-transform.js';
 import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
-import { buildNativeGridFold, nativeMapOptions } from '../native/complex-engine.js';
+import { buildNativeGridFold } from '../native/complex-engine.js';
 import {
     generateCurrentInputShapePointSets,
     buildInputShapeGeometryConfig,
@@ -35,6 +37,8 @@ import {
 } from './shape-generators.js';
 import { drawGraphSelectionOverlay, filterGraphFullGridPointSets } from './transformation-graph.js';
 import { hideRiemannSurface, renderRiemannSurface } from './webgl-riemann-surface.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import {
     drawZerosAndPolesMarkers,
@@ -354,8 +358,11 @@ function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, re
 }
 
 function normalizedPolynomialDegree() {
-    const degree = Number.isFinite(state.polynomialN) ? state.polynomialN : 0;
-    return Math.max(0, Math.min(MAX_POLY_DEGREE, degree));
+    const degree = requireInteger(state.polynomialN, 'Renderer polynomial degree');
+    if (degree < 0 || degree > MAX_POLY_DEGREE) {
+        throw new Error(`Renderer polynomial degree must be from zero through ${MAX_POLY_DEGREE}.`);
+    }
+    return degree;
 }
 
 function captureNamedTransformDependencies(tracker, name) {
@@ -371,12 +378,15 @@ function captureNamedTransformDependencies(tracker, name) {
             const coeffs = state.polynomialCoeffs;
             captureDependency(tracker, degree);
             for (let index = 0; index <= degree; index += 1) {
-                captureComplexDependency(tracker, Array.isArray(coeffs) ? coeffs[index] || null : null);
+                if (!Array.isArray(coeffs) || !coeffs[index]) {
+                    throw new Error(`Renderer polynomial coefficient ${index} is missing.`);
+                }
+                captureComplexDependency(tracker, coeffs[index]);
             }
             return;
         }
         case 'power':
-            captureDependency(tracker, state.fractionalPowerN ?? 0.5);
+            captureDependency(tracker, state.fractionalPowerN);
             return;
         case 'exp':
             captureComplexDependency(tracker, state.expBase);
@@ -443,11 +453,11 @@ function scanPlanarLayerDependencies(isWPlane, tracker) {
     captureStateDependencies(tracker, PLANAR_STATE_DEPENDENCIES);
     captureDependency(tracker, Boolean(state.conformalGridEnabled));
     captureDependency(tracker, Boolean(state.zetaContinuationEnabled));
-    captureDependency(tracker, state.gridColor1 || '');
-    captureDependency(tracker, state.gridColor2 || '');
-    captureDependency(tracker, state.imageContentVersion || 0);
-    captureDependency(tracker, state.videoProcessingFps || 0);
-    captureDependency(tracker, state.videoFrameVersion || 0);
+    captureDependency(tracker, state.gridColor1);
+    captureDependency(tracker, state.gridColor2);
+    captureDependency(tracker, state.imageContentVersion);
+    captureDependency(tracker, state.videoProcessingFps);
+    captureDependency(tracker, state.videoFrameVersion);
     captureDependency(tracker, getDynamicPlottingCacheKey());
 
     const domainEnabled = Boolean(state.domainColoringEnabled);
@@ -457,12 +467,13 @@ function scanPlanarLayerDependencies(isWPlane, tracker) {
         captureDependency(tracker, normalizeOrbitColoringMode(state.orbitColoringMode));
     }
 
-    const sourceX = zPlaneParams?.currentVisXRange;
-    const sourceY = zPlaneParams?.currentVisYRange;
-    captureDependency(tracker, sourceX?.[0]);
-    captureDependency(tracker, sourceX?.[1]);
-    captureDependency(tracker, sourceY?.[0]);
-    captureDependency(tracker, sourceY?.[1]);
+    requireVisibleViewport(zPlaneParams, 'Planar cache viewport');
+    const sourceX = zPlaneParams.currentVisXRange;
+    const sourceY = zPlaneParams.currentVisYRange;
+    captureDependency(tracker, sourceX[0]);
+    captureDependency(tracker, sourceX[1]);
+    captureDependency(tracker, sourceY[0]);
+    captureDependency(tracker, sourceY[1]);
     captureDependency(tracker, params?.origin?.x);
     captureDependency(tracker, params?.origin?.y);
     captureDependency(tracker, params?.scale?.x);
@@ -563,17 +574,19 @@ function fillCanvasBackground(ctx, planeParams) {
 function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
     if (state.domainColoringEnabled && domainCanvas) {
         withCanvasState(ctx, () => {
-            const isProcessing = !planeParams.currentVisXRange
-                ? runtime.rendering.processingWDomainDynamics
-                : runtime.rendering.processingZDomainDynamics;
-            const hasFullResolution = !planeParams.currentVisXRange
-                ? runtime.rendering.wDomainDynamicsHasFullResolution
-                : runtime.rendering.zDomainDynamicsHasFullResolution;
-            if (isProcessing && !hasFullResolution) {
-                ctx.filter = 'blur(3px)';
-            }
             fillCanvasBackground(ctx, planeParams);
-            ctx.drawImage(domainCanvas, 0, 0);
+            const source = runtime.rendering.domainViewport;
+            const currentX = planeParams.currentVisXRange;
+            const currentY = planeParams.currentVisYRange;
+            const matchesViewport = source?.xRange && source?.yRange &&
+                Array.isArray(currentX) && Array.isArray(currentY) &&
+                Math.abs(source.xRange[0] - currentX[0]) < 1e-12 &&
+                Math.abs(source.xRange[1] - currentX[1]) < 1e-12 &&
+                Math.abs(source.yRange[0] - currentY[0]) < 1e-12 &&
+                Math.abs(source.yRange[1] - currentY[1]) < 1e-12;
+            if (matchesViewport) {
+                ctx.drawImage(domainCanvas, 0, 0);
+            }
         });
         return;
     }
@@ -582,8 +595,9 @@ function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
 }
 
 function getPlaneRanges(planeParams) {
-    const [xMin, xMax] = planeParams?.currentVisXRange || planeParams?.xRange || [];
-    const [yMin, yMax] = planeParams?.currentVisYRange || planeParams?.yRange || [];
+    requireVisibleViewport(planeParams);
+    const [xMin, xMax] = planeParams.currentVisXRange;
+    const [yMin, yMax] = planeParams.currentVisYRange;
 
     return { xMin, xMax, yMin, yMax };
 }
@@ -699,7 +713,7 @@ function drawPolynomialOriginMarkerOverlay(ctx, planeParams) {
 }
 
 function drawWOriginGlowOverlay(ctx, planeParams) {
-    const startedAt = Number(runtime.rendering.wOriginGlowTime) || 0;
+    const startedAt = requireFiniteNumber(runtime.rendering.wOriginGlowTime, 'W-origin glow timestamp');
 
     if (startedAt <= 0) {
         return;
@@ -723,14 +737,10 @@ function drawWOriginGlowOverlay(ctx, planeParams) {
     });
 }
 
-function visiblePlaneRange(planeParams, currentKey, fallbackKey) {
-    const range = planeParams?.[currentKey] || planeParams?.[fallbackKey];
-    return Array.isArray(range) && range.length >= 2 ? range : [-1, 1];
-}
-
 function getConformalIndicatrixData(map) {
-    const xRange = visiblePlaneRange(zPlaneParams, 'currentVisXRange', 'xRange');
-    const yRange = visiblePlaneRange(zPlaneParams, 'currentVisYRange', 'yRange');
+    requireVisibleViewport(zPlaneParams, 'Conformal-grid viewport');
+    const xRange = zPlaneParams.currentVisXRange;
+    const yRange = zPlaneParams.currentVisYRange;
     const key = [
         map.signature,
         state.gridDensity,
@@ -741,7 +751,7 @@ function getConformalIndicatrixData(map) {
     if (conformalIndicatrixCache.key !== key) {
         conformalIndicatrixCache.key = key;
         conformalIndicatrixCache.value = selectStableTissotIndicatrices(
-            generateTissotIndicatrices(map, xRange, yRange, state.gridDensity, 72)
+            generateTissotIndicatrices(nativeOptionsForActiveMap(map), xRange, yRange, state.gridDensity, 72)
         );
     }
     return conformalIndicatrixCache.value;
@@ -780,7 +790,10 @@ export function drawZPlaneContent(timestamp) {
         return;
     }
     if (state.laplaceModeEnabled) {
-        if (zCtx && zPlaneParams) drawLaplaceTimeDomain(zCtx, state.laplaceTimeDomainSignal, zPlaneParams);
+        if (zCtx && zPlaneParams) {
+            const signal = state.laplaceTimeDomainSignal;
+            drawLaplaceTimeDomain(zCtx, signal, zPlaneParams, getLaplaceFrameData(signal));
+        }
         return;
     }
 
@@ -807,7 +820,7 @@ export function drawZPlaneContent(timestamp) {
     }
 
     if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCtx) {
-        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams, false, map);
+        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams);
     }
     if (!zCtx || !zPlaneParams) {
         if (state.navigationModeEnabled) {
@@ -967,7 +980,8 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             if (state.fourierModeEnabled) {
                 drawWindingVisualization(wCtx, state.fourierTimeDomainSignal, wPlaneParams);
             } else if (state.laplaceModeEnabled) {
-                drawLaplaceWindingVisualization(wCtx, state.laplaceTimeDomainSignal, wPlaneParams);
+                const signal = state.laplaceTimeDomainSignal;
+                drawLaplaceWindingVisualization(wCtx, signal, wPlaneParams, getLaplaceFrameData(signal));
             }
             return;
         }
@@ -978,7 +992,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
         }
         if (state.foldSurface3dEnabled) {
             if (isRasterInputShape(state.currentInputShape)) {
-                renderThreeWRasterSurface(map, index);
+                renderThreeWRasterSurface(map);
                 return;
             }
             if (isFoldableInputShape(state.currentInputShape)) {
@@ -1125,20 +1139,16 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
         ? state.chainCount
         : index + 1;
     context.riemannSurfaceContourPipeline = { index, stage, map };
-    if (wCanvas && renderRiemannSurface(wCanvas, { stage, map })) {
-        wCanvas?.classList?.toggle('hidden', true);
-        return true;
-    }
-
-    wCanvas?.classList?.toggle('hidden', false);
-    return false;
+    if (!wCanvas) throw new Error('Riemann surface rendering requires a W-plane canvas.');
+    renderRiemannSurface(wCanvas, { stage, map });
+    wCanvas.classList?.toggle('hidden', true);
+    return true;
 }
 
 function prepareThreeWRenderer() {
     const container = controls.wPlaneThreeContainer;
     if (!container) {
-        wCanvas?.classList?.toggle('hidden', false);
-        return null;
+        throw new Error('Three-dimensional W-plane rendering requires its container.');
     }
 
     setWPresentation('three');
@@ -1149,10 +1159,10 @@ function prepareThreeWRenderer() {
     }
     renderer.onFoldTargetSelected = target => {
         const map = resolveActiveMap();
-        const xRange = zPlaneParams.currentVisXRange || zPlaneParams.xRange;
-        const yRange = zPlaneParams.currentVisYRange || zPlaneParams.yRange;
+        const xRange = zPlaneParams.currentVisXRange;
+        const yRange = zPlaneParams.currentVisYRange;
         state.preimageTarget = target;
-        state.preimageRoots = findPreimages(target, map, { xRange, yRange });
+        state.preimageRoots = findPreimages(target, nativeOptionsForActiveMap(map), { xRange, yRange });
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
         requestRedrawAll();
     };
@@ -1161,7 +1171,6 @@ function prepareThreeWRenderer() {
 
 function renderThreeWPlane(map, stageIndex) {
     const threeRenderer = prepareThreeWRenderer();
-    if (!threeRenderer) return;
 
     threeRenderer.setSphereMode();
 
@@ -1209,27 +1218,25 @@ function renderThreeWPlane(map, stageIndex) {
     }
 }
 
-function renderThreeWRasterSurface(map, stageIndex) {
+function renderThreeWRasterSurface(map) {
     const rasterShape = state.currentInputShape;
     const source = getRasterSourceForShape(rasterShape);
 
     if (!source) {
-        setWPresentation('canvas');
-        return;
+        throw new Error('Raster fold rendering requires a decoded raster source.');
     }
 
     const threeRenderer = prepareThreeWRenderer();
-    if (!threeRenderer) return;
 
-    const xRange = wPlaneParams.currentVisXRange || wPlaneParams.xRange;
-    const yRange = wPlaneParams.currentVisYRange || wPlaneParams.yRange;
-    const rasterStage = getImageRenderChainIndex(stageIndex, map);
+    const xRange = wPlaneParams.currentVisXRange;
+    const yRange = wPlaneParams.currentVisYRange;
+    const rasterStage = getImageRenderStage(map);
     const rasterSize = getRasterSizeForShape(rasterShape);
     const rasterAspectRatio = getRasterAspectRatioForShape(rasterShape);
     const rasterContentVersion = rasterShape === 'image' ? state.imageContentVersion : 0;
     const surfaceKey = [
         rasterStage,
-        map?.signature || '',
+        map.signature,
         rasterShape,
         rasterContentVersion,
         state.a0,
@@ -1245,19 +1252,15 @@ function renderThreeWRasterSurface(map, stageIndex) {
         : null;
     if (!surface) {
         surface = buildRasterSurfaceMesh(wPlaneParams, map);
-        if (surface) threeRenderer.rasterSurfaceKey = surfaceKey;
+        threeRenderer.rasterSurfaceKey = surfaceKey;
     }
 
-    if (!threeRenderer.setRasterSurface(
+    threeRenderer.setRasterSurface(
         surface,
         source,
         getRasterOpacityForShape(rasterShape),
         state.foldSurfaceHeightScale
-    )) {
-        threeRenderer.rasterSurfaceKey = null;
-        setWPresentation('canvas');
-        return;
-    }
+    );
 
     threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map);
 
@@ -1266,7 +1269,6 @@ function renderThreeWRasterSurface(map, stageIndex) {
 
 function renderThreeWGridFold(map) {
     const threeRenderer = prepareThreeWRenderer();
-    if (!threeRenderer) return;
 
     const geometryConfig = buildInputShapeGeometryConfig(zPlaneParams, {
         currentFunction: state.currentFunction,
@@ -1274,8 +1276,8 @@ function renderThreeWGridFold(map) {
         gridDensity: state.gridDensity,
         curvePoints: 250
     });
-    const outputXRange = wPlaneParams.currentVisXRange || wPlaneParams.xRange;
-    const outputYRange = wPlaneParams.currentVisYRange || wPlaneParams.yRange;
+    const outputXRange = wPlaneParams.currentVisXRange;
+    const outputYRange = wPlaneParams.currentVisYRange;
     const surfaceKey = [
         map.signature,
         JSON.stringify(geometryConfig),
@@ -1301,24 +1303,16 @@ function renderThreeWGridFold(map) {
             ? filterGraphFullGridPointSets(generatedPointSets)
             : generatedPointSets;
         surface = buildNativeGridFold({
-            mapOptions: nativeMapOptions(state, {
-                stage: map.stage,
-                derivativeMode: map.presentation === 'derivative',
-                ...(map.evaluate?.nativeMapOptions || map.nativeMapOptions || {})
-            }),
+            mapOptions: nativeOptionsForActiveMap(map),
             sourceXRange: geometryConfig.xRange,
             outputXRange,
             outputYRange,
             heightScale: state.foldSurfaceHeightScale
         }, pointSets);
-        if (surface) threeRenderer.gridFoldSurfaceKey = surfaceKey;
+        threeRenderer.gridFoldSurfaceKey = surfaceKey;
     }
 
-    if (!threeRenderer.setGridFoldSurface(surface, state.foldSurfaceHeightScale)) {
-        threeRenderer.gridFoldSurfaceKey = null;
-        setWPresentation('canvas');
-        return;
-    }
+    threeRenderer.setGridFoldSurface(surface, state.foldSurfaceHeightScale);
 
     threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map);
 
@@ -1338,17 +1332,19 @@ function drawTaylorApproximationLayer(ctx) {
     );
 }
 
-function drawWTransformedShape(index, map, targetCtx, options = null) {
-    const stageIndex = Number.isFinite(map?.stage) ? map.stage : index;
-    const drawOptions = { ...options, index: stageIndex, map };
-    return drawPlanarTransformedShape(targetCtx, wPlaneParams, map.evaluate, drawOptions);
+function drawWTransformedShape(_index, map, targetCtx, options = null) {
+    if (!map || !Number.isInteger(map.stage)) {
+        throw new Error('W-plane transformed rendering requires a resolved native map stage.');
+    }
+    const drawOptions = { ...options, index: map.stage };
+    return drawPlanarTransformedShape(targetCtx, wPlaneParams, map, drawOptions);
 }
 
 function drawWTransformedShapeChunk(index, map, targetCtx, fresh) {
     const cache = wPlanarTransformedLayerCache;
 
     if (fresh || !cache.renderJob) {
-        cache.renderJob = createPlanarTransformedShapeRenderJob(map.evaluate, map);
+        cache.renderJob = createPlanarTransformedShapeRenderJob(map);
         cache.nextPointSet = 0;
     }
 
@@ -1420,19 +1416,27 @@ export function drawWPlaneContent(options = {}) {
         if (!Array.isArray(wCanvasList)
             || !Array.isArray(wCtxList)
             || !Array.isArray(wPlaneParamsList)
-            || wCanvasList.length === 0) return;
+            || wCanvasList.length === 0) {
+            throw new Error('W-plane rendering requires initialized canvas, context, and viewport lists.');
+        }
         if (state.fourierModeEnabled || state.laplaceModeEnabled) {
             renderSingleWPlane(0, null, true, options);
             return;
         }
+        const requested = requireInteger(state.chainCount, 'W-plane chain count');
+        if (requested < 1 || requested > 1024) {
+            throw new Error('W-plane chain count must be from one through 1024.');
+        }
         if (state.chainingEnabled && state.chainCount > 25) {
-            renderSingleWPlane(0, resolveActiveMap(Math.max(0, state.chainCount - 1)), false, options);
+            renderSingleWPlane(0, resolveActiveMap(requested - 1), false, options);
             return;
         }
 
         const available = wCanvasList.length;
-        const requested = Number.isFinite(state.chainCount) ? state.chainCount : 0;
-        const count = state.chainingEnabled ? Math.max(0, Math.min(requested, available)) : 1;
+        const count = state.chainingEnabled ? requested : 1;
+        if (available < count || wCtxList.length < count || wPlaneParamsList.length < count) {
+            throw new Error(`W-plane rendering requires ${count} initialized output planes; found ${available}.`);
+        }
         for (let index = 0; index < count; index += 1) {
             renderSingleWPlane(index, resolveActiveMap(index), false, options);
         }

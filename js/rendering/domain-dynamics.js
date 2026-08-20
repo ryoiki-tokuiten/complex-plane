@@ -7,18 +7,23 @@ import { computeTaylorSeriesCoefficients } from '../native/map-runtime.js';
 import { compileNativeDynamicAggregate } from '../native/complex-engine.js';
 import {
     domainDynamicsSignature,
-    freezeDomainDynamicsSnapshot,
-    isDomainDynamicsSnapshot
+    freezeDomainDynamicsSnapshot
 } from '../native/domain-engine.js';
 import {
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
 import { normalizeDomainDynamicsChainCount } from '../constants/domain-dynamics.js';
 import { preciseViewportSnapshot } from '../native/precise-viewport.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import {
+    requireFiniteComplex,
+    requireFiniteNumber,
+    requireInteger
+} from '../utils/numeric-contracts.js';
 
-const PASS_SCALES = Object.freeze([16, 4, 1]);
-const TILE_SIZE = 64;
-const MAX_WORKERS = 16;
+const TILE_SIZE = 256;
+const MAX_WORKERS = 6;
+const RENDER_SETTLE_MS = 8;
 const SUPPORTED_FUNCTIONS = new Set([
     'cos',
     'tan',
@@ -43,18 +48,16 @@ let nextJobId = 1;
 let activeSignature = null;
 let activeBackend = null;
 let activeJobId = 0;
+let pendingStartTimer = 0;
 
-function cloneComplex(value, fallback = { re: 0, im: 0 }) {
-    const re = Number(value?.re);
-    const im = Number(value?.im);
-    return {
-        re: Number.isFinite(re) ? re : fallback.re,
-        im: Number.isFinite(im) ? im : fallback.im
-    };
+function cloneComplex(value) {
+    const complex = requireFiniteComplex(value, 'Domain dynamics parameter');
+    return { re: complex.re, im: complex.im };
 }
 
 function cloneComplexList(values) {
-    return Array.isArray(values) ? values.map(value => cloneComplex(value)) : [];
+    if (!Array.isArray(values)) throw new Error('Domain dynamics requires a complex-value array.');
+    return values.map(value => cloneComplex(value));
 }
 
 function clonePlainData(value) {
@@ -69,31 +72,49 @@ function clonePlainData(value) {
 }
 
 function cloneAlgebraicTerms(terms) {
-    return Array.isArray(terms)
-        ? terms.map(term => ({
-            coeff: cloneComplex(term?.coeff, { re: 1, im: 0 }),
-            factors: Array.isArray(term?.factors)
-                ? term.factors.map(clonePlainData)
-                : []
-        }))
-        : [];
+    if (!Array.isArray(terms)) throw new Error('Domain dynamics requires an algebraic term array.');
+    return terms.map((term, index) => {
+        if (!Array.isArray(term?.factors)) {
+            throw new Error(`Domain dynamics algebraic term ${index} requires a factor array.`);
+        }
+        return {
+            coeff: cloneComplex(term?.coeff),
+            factors: term.factors.map(clonePlainData)
+        };
+    });
 }
 
 function paletteStops(paletteId) {
     const stops = getDomainPaletteStops(paletteId);
-    return stops.length >= 2 ? stops : [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0]];
+    if (stops.length < 2) throw new Error(`Domain palette ${paletteId} has fewer than two stops.`);
+    return stops;
 }
 
 function planeRanges(planeParams) {
-    const xRange = planeParams?.currentVisXRange || planeParams?.xRange;
-    const yRange = planeParams?.currentVisYRange || planeParams?.yRange;
-    return Array.isArray(xRange) && Array.isArray(yRange)
-        ? { xRange: [Number(xRange[0]), Number(xRange[1])], yRange: [Number(yRange[0]), Number(yRange[1])] }
-        : null;
+    requireVisibleViewport(planeParams, 'Domain-dynamics viewport');
+    return {
+        xRange: planeParams.currentVisXRange.slice(0, 2),
+        yRange: planeParams.currentVisYRange.slice(0, 2)
+    };
 }
 
 function normalizeChainMode(mode) {
-    return mode === 'zero_seed' ? 'zero_seed' : 'recursion';
+    if (mode !== 'zero_seed' && mode !== 'recursion') {
+        throw new Error(`Unsupported domain-dynamics chain mode: ${mode}`);
+    }
+    return mode;
+}
+
+function dynamicParameters(config) {
+    if (!Array.isArray(config.parameters)) throw new Error('Domain dynamics requires a dynamic parameter array.');
+    return Object.fromEntries(config.parameters.map(parameter => {
+        const name = String(parameter?.name ?? '').trim();
+        const value = Number(parameter?.value);
+        if (!name || !Number.isFinite(value)) {
+            throw new Error('Domain-dynamics parameters require a name and finite value.');
+        }
+        return [name, { re: value, im: 0 }];
+    }));
 }
 
 function dynamicAggregateSnapshot(runtimeState) {
@@ -102,131 +123,149 @@ function dynamicAggregateSnapshot(runtimeState) {
     if (!config?.enabled || config.mode !== 'aggregate' ||
         (reductionKind !== 'sum' && reductionKind !== 'product')) return null;
 
-    let source;
-    try {
-        const parameters = Object.fromEntries((config.parameters || [])
-            .map(parameter => [String(parameter?.name || ''), {
-                re: Number(parameter?.value) || 0,
-                im: 0
-            }])
-            .filter(([name]) => name));
-        source = generateDiscreteSource(clonePlainData(config.source || {}), { parameters });
-    } catch {
-        return null;
+    if (!config.source || !config.term || !config.playback || typeof config.pointExpression !== 'string') {
+        throw new Error('Domain dynamics requires complete dynamic aggregate configuration.');
     }
+    if (config.reduction.invalidPolicy !== 'stop' && config.reduction.invalidPolicy !== 'skip') {
+        throw new Error(`Unsupported dynamic invalid policy: ${config.reduction.invalidPolicy}.`);
+    }
+    const parameters = dynamicParameters(config);
+    const source = generateDiscreteSource(clonePlainData(config.source), { parameters });
 
     const requestedVisibleCount = Number(config.playback?.visibleCount);
-    const visibleCount = Number.isFinite(requestedVisibleCount)
-        ? Math.max(0, Math.min(source.records.length, Math.floor(requestedVisibleCount)))
-        : source.records.length;
+    if (!Number.isFinite(requestedVisibleCount)) {
+        throw new Error('Domain dynamics requires a finite dynamic visible count.');
+    }
+    const visibleCount = Math.max(0, Math.min(source.records.length, Math.floor(requestedVisibleCount)));
 
-    const termExpression = String(config.term?.expression ?? 'z');
-    const bindings = synchronizeSequenceBindings(termExpression, config.term?.bindings || []);
+    if (config.term.kind !== 'expression' && config.term.kind !== 'selected-function') {
+        throw new Error(`Unsupported dynamic term kind: ${config.term.kind}.`);
+    }
+    const termExpression = config.term.kind === 'expression' ? config.term.expression : 'selected(z)';
+    if (typeof termExpression !== 'string' || !Array.isArray(config.term.bindings)) {
+        throw new Error('Domain dynamics requires explicit dynamic term bindings.');
+    }
+    const bindings = synchronizeSequenceBindings(termExpression, config.term.bindings);
 
     const bindingResult = generateSequenceBindingSeries(bindings, visibleCount, {
         aggregateParameter: { re: 0, im: 0 },
-        parameters: Object.fromEntries((config.parameters || [])
-            .map(parameter => [String(parameter?.name || ''), {
-                re: Number(parameter?.value) || 0,
-                im: 0
-            }])
-            .filter(([name]) => name))
+        parameters
     });
-    const aggregate = {
-        pointExpression: String(config.pointExpression ?? 'd'),
-        term: clonePlainData(config.term || { kind: 'expression', expression: 'z', bindings: [] }),
+    return compileNativeDynamicAggregate({
+        pointExpression: config.pointExpression,
+        term: clonePlainData(config.term),
         bindings: clonePlainData(bindings),
         reductionKind,
-        invalidPolicy: config.reduction?.invalidPolicy === 'skip' ? 'skip' : 'stop',
-        parameters: Object.fromEntries((config.parameters || [])
-            .map(parameter => [String(parameter?.name || ''), {
-                re: Number(parameter?.value) || 0,
-                im: 0
-            }])
-            .filter(([name]) => name)),
+        invalidPolicy: config.reduction.invalidPolicy,
+        parameters,
         sourceRecords: source.records.slice(0, visibleCount).map(record => ({
             ordinal: record.ordinal,
             domainValue: cloneComplex(record.domainValue)
         })),
         bindingSeries: clonePlainData(bindingResult.series)
-    };
-    aggregate.native = compileNativeDynamicAggregate(aggregate);
-    return aggregate;
+    });
 }
 
 function taylorSnapshot(runtimeState, functionKey) {
     if (!runtimeState?.taylorSeriesEnabled) return null;
 
-    const center = cloneComplex(runtimeState.taylorSeriesCenter, { re: 0, im: 0 });
-    const order = Math.max(0, Math.floor(Number(runtimeState.taylorSeriesOrder) || 0));
-    let coefficients = null;
-    try {
-        coefficients = computeTaylorSeriesCoefficients(functionKey, center, order);
-    } catch {
-        coefficients = null;
+    const center = cloneComplex(runtimeState.taylorSeriesCenter);
+    const order = requireInteger(runtimeState.taylorSeriesOrder, 'Taylor order');
+    if (order < 0) throw new Error('Taylor order must be non-negative.');
+    const coefficients = computeTaylorSeriesCoefficients(functionKey, center, order);
+    if (!Array.isArray(coefficients) || coefficients.length < order + 1) {
+        throw new Error('Native Taylor coefficient generation returned incomplete data.');
+    }
+    const radius = Number(runtimeState.taylorSeriesConvergenceRadius);
+    if ((!Number.isFinite(radius) && radius !== Infinity) || radius < 0) {
+        throw new Error('Taylor convergence radius must be non-negative or infinite.');
     }
 
     return {
         center,
         order,
-        radius: Number.isFinite(Number(runtimeState.taylorSeriesConvergenceRadius))
-            ? Number(runtimeState.taylorSeriesConvergenceRadius)
-            : Infinity,
+        radius,
         coefficients: clonePlainData(coefficients)
     };
 }
 
 export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, options = null) {
-    const ranges = planeRanges(planeParams);
+    if (!runtimeState || !planeParams) throw new Error('Domain dynamics requires state and plane parameters.');
     const preciseViewport = preciseViewportSnapshot(planeParams);
-    if (!runtimeState || !planeParams || (!ranges && !preciseViewport)) return null;
+    const ranges = preciseViewport ? null : planeRanges(planeParams);
+    const width = requireInteger(planeParams.width, 'Domain-dynamics viewport width');
+    const height = requireInteger(planeParams.height, 'Domain-dynamics viewport height');
+    if (width < 1 || height < 1) {
+        throw new Error('Domain dynamics requires positive integer viewport dimensions.');
+    }
 
     const functionKey = runtimeState.currentFunction;
-    if (!SUPPORTED_FUNCTIONS.has(functionKey)) return null;
+    if (!SUPPORTED_FUNCTIONS.has(functionKey)) {
+        throw new Error(`Unsupported native domain-dynamics function: ${functionKey}`);
+    }
     const orbitColoringMode = normalizeOrbitColoringMode(runtimeState.orbitColoringMode);
 
+    const polynomialN = requireInteger(runtimeState.polynomialN, 'Domain dynamics polynomial degree');
+    if (polynomialN < 0) throw new Error('Domain dynamics polynomial degree must be non-negative.');
+    const fractionalPowerN = requireFiniteNumber(runtimeState.fractionalPowerN, 'Domain dynamics fractional power');
+    const branchCutAngle = requireFiniteNumber(runtimeState.branchCutAngle, 'Domain dynamics branch-cut angle');
+    const mapPresentation = options?.mapPresentation ?? runtimeState.mapPresentation;
+    if (mapPresentation !== 'function' && mapPresentation !== 'derivative') {
+        throw new Error(`Unsupported domain-dynamics map presentation: ${mapPresentation}.`);
+    }
+    for (const [name, value] of [
+        ['chainingEnabled', runtimeState.chainingEnabled],
+        ['algebraicChainingEnabled', runtimeState.algebraicChainingEnabled],
+        ['zetaContinuationEnabled', runtimeState.zetaContinuationEnabled]
+    ]) {
+        if (typeof value !== 'boolean') throw new Error(`Domain dynamics ${name} must be boolean.`);
+    }
     const snapshot = {
-        isWPlaneColoring: !!options?.isWPlaneColoring,
-        derivativeMode: options?.mapPresentation === 'derivative',
+        derivativeOrder: mapPresentation === 'derivative' ? 1 : 0,
         functionKey,
-        expBase: cloneComplex(runtimeState.expBase, { re: Math.E, im: 0 }),
-        logBase: cloneComplex(runtimeState.logBase, { re: Math.E, im: 0 }),
+        expBase: cloneComplex(runtimeState.expBase),
+        logBase: cloneComplex(runtimeState.logBase),
         besselOrder: cloneComplex(runtimeState.besselOrder),
-        chainingEnabled: !!runtimeState.chainingEnabled,
+        chainingEnabled: runtimeState.chainingEnabled,
         chainMode: normalizeChainMode(runtimeState.chainingMode),
         chainCount: normalizeDomainDynamicsChainCount(runtimeState.chainCount),
         orbitColoringMode,
-        algebraicChainingEnabled: !!runtimeState.algebraicChainingEnabled,
+        algebraicChainingEnabled: runtimeState.algebraicChainingEnabled,
         algebraicChainingTerms: cloneAlgebraicTerms(runtimeState.algebraicChainingTerms),
-        algebraicChainingZExpr: clonePlainData(runtimeState.algebraicChainingZExpr || 'z'),
-        mobiusA: cloneComplex(runtimeState.mobiusA, { re: 1, im: 0 }),
+        algebraicChainingZExpr: clonePlainData(runtimeState.algebraicChainingZExpr),
+        mobiusA: cloneComplex(runtimeState.mobiusA),
         mobiusB: cloneComplex(runtimeState.mobiusB),
         mobiusC: cloneComplex(runtimeState.mobiusC),
-        mobiusD: cloneComplex(runtimeState.mobiusD, { re: 1, im: 0 }),
-        polynomialN: Math.max(0, Math.floor(Number(runtimeState.polynomialN) || 0)),
+        mobiusD: cloneComplex(runtimeState.mobiusD),
+        polynomialN,
         polynomialCoeffs: cloneComplexList(runtimeState.polynomialCoeffs),
-        fractionalPowerN: Number.isFinite(Number(runtimeState.fractionalPowerN)) ? Number(runtimeState.fractionalPowerN) : 0.5,
-        branchCutType: runtimeState.branchCutType === 'ray' ? 'ray' : 'draw',
-        branchCutAngle: Number.isFinite(Number(runtimeState.branchCutAngle)) ? Number(runtimeState.branchCutAngle) : Math.PI,
-        zetaContinuationEnabled: !!runtimeState.zetaContinuationEnabled,
+        fractionalPowerN,
+        branchCutType: runtimeState.branchCutType,
+        branchCutAngle,
+        zetaContinuationEnabled: runtimeState.zetaContinuationEnabled,
         taylor: taylorSnapshot(runtimeState, functionKey),
         dynamicAggregate: dynamicAggregateSnapshot(runtimeState),
         style: {
-            brightness: Number(runtimeState.domainBrightness) || 1,
-            contrast: Number(runtimeState.domainContrast) || 1,
-            saturation: Number(runtimeState.domainSaturation) || 1,
-            lightnessCycles: Number(runtimeState.domainLightnessCycles) || 0
+            brightness: requireFiniteNumber(runtimeState.domainBrightness, 'Domain brightness'),
+            contrast: requireFiniteNumber(runtimeState.domainContrast, 'Domain contrast'),
+            saturation: requireFiniteNumber(runtimeState.domainSaturation, 'Domain saturation'),
+            lightnessCycles: requireFiniteNumber(runtimeState.domainLightnessCycles, 'Domain lightness cycles')
         },
         paletteStops: paletteStops(runtimeState.domainPalette),
         viewport: preciseViewport || {
-            width: Math.max(1, Math.floor(Number(planeParams.width) || 1)),
-            height: Math.max(1, Math.floor(Number(planeParams.height) || 1)),
+            width,
+            height,
             xRange: ranges.xRange,
             yRange: ranges.yRange
         }
     };
 
-    return isDomainDynamicsSnapshot(snapshot) ? freezeDomainDynamicsSnapshot(snapshot) : null;
+    if (snapshot.polynomialCoeffs.length !== snapshot.polynomialN + 1 ||
+        (snapshot.branchCutType !== 'draw' && snapshot.branchCutType !== 'ray')) {
+        throw new Error('Domain dynamics received invalid native map or style parameters.');
+    }
+
+    return freezeDomainDynamicsSnapshot(snapshot);
 }
 
 function canUseWorker() {
@@ -234,26 +273,24 @@ function canUseWorker() {
 }
 
 function workerCount() {
-    const cores = typeof navigator !== 'undefined' && Number.isFinite(navigator.hardwareConcurrency)
-        ? navigator.hardwareConcurrency
-        : 4;
+    if (typeof navigator === 'undefined' || !Number.isFinite(navigator.hardwareConcurrency)) {
+        throw new Error('Domain dynamics requires a finite browser hardware-concurrency value.');
+    }
+    const cores = navigator.hardwareConcurrency;
     return Math.max(1, Math.min(MAX_WORKERS, cores));
 }
 
-function needsAdaptiveQuality(snapshot) {
-    return true;
-}
-
-function createTileList(passWidth, passHeight, scale) {
+function createTileList(width, height) {
     const tiles = [];
-    for (let y = 0; y < passHeight; y += TILE_SIZE) {
-        for (let x = 0; x < passWidth; x += TILE_SIZE) {
+    for (let y = 0; y < height; y += TILE_SIZE) {
+        for (let x = 0; x < width; x += TILE_SIZE) {
             tiles.push({
                 x,
                 y,
-                width: Math.min(TILE_SIZE, passWidth - x),
-                height: Math.min(TILE_SIZE, passHeight - y),
-                scale
+                width: Math.min(TILE_SIZE, width - x),
+                height: Math.min(TILE_SIZE, height - y),
+                scale: 1,
+                adaptiveQuality: true
             });
         }
     }
@@ -261,64 +298,48 @@ function createTileList(passWidth, passHeight, scale) {
 }
 
 function createImageDataFromPixels(pixels, width, height) {
-    if (typeof ImageData !== 'undefined') return new ImageData(pixels, width, height);
-    return null;
+    if (typeof ImageData === 'undefined') {
+        throw new Error('Domain dynamics requires ImageData support.');
+    }
+    return new ImageData(pixels, width, height);
 }
 
-let pooledPassCanvas = null;
-
-function getPassCanvas(width, height) {
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
-    if (!pooledPassCanvas) {
-        pooledPassCanvas = document.createElement('canvas');
+function createStagingTarget(targetCtx, viewport) {
+    const ownerDocument = targetCtx.canvas?.ownerDocument;
+    if (!ownerDocument || typeof ownerDocument.createElement !== 'function') {
+        throw new Error('Domain dynamics requires a canvas-backed rendering target.');
     }
-    if (pooledPassCanvas.width !== width || pooledPassCanvas.height !== height) {
-        pooledPassCanvas.width = width;
-        pooledPassCanvas.height = height;
-    }
-    return pooledPassCanvas;
+    const canvas = ownerDocument.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Domain dynamics could not allocate its final-frame canvas.');
+    return { canvas, context };
 }
 
-function drawPassToTarget(job, pass) {
-    const ctx = job.targetCtx;
-    ctx.save();
+function commitFinalFrame(job) {
+    job.targetCtx.save();
     try {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, job.snapshot.viewport.width, job.snapshot.viewport.height);
-        ctx.imageSmoothingEnabled = pass.scale !== 1;
-        if (ctx.imageSmoothingQuality !== undefined) ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(
-            pass.canvas,
-            0, 0, pass.width, pass.height,
-            0, 0, job.snapshot.viewport.width, job.snapshot.viewport.height
-        );
+        job.targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+        job.targetCtx.clearRect(0, 0, job.snapshot.viewport.width, job.snapshot.viewport.height);
+        job.targetCtx.drawImage(job.staging.canvas, 0, 0);
     } finally {
-        ctx.restore();
-    }
-
-    eventBus.emit('redraw:all');
-}
-
-function clearTarget(targetCtx, viewport) {
-    targetCtx.save();
-    try {
-        targetCtx.setTransform(1, 0, 0, 1, 0, 0);
-        targetCtx.clearRect(0, 0, viewport.width, viewport.height);
-    } finally {
-        targetCtx.restore();
+        job.targetCtx.restore();
     }
 }
 
-function setDomainProcessing(isWPlane, isProcessing) {
-    if (isWPlane) {
-        runtime.rendering.processingWDomainDynamics = isProcessing;
-    } else {
-        runtime.rendering.processingZDomainDynamics = isProcessing;
-    }
+function snapshotViewport(viewport) {
+    return Object.freeze(viewport.xRange
+        ? { width: viewport.width, height: viewport.height,
+            xRange: [...viewport.xRange], yRange: [...viewport.yRange] }
+        : { ...viewport });
+}
+
+function setDomainProcessing(isProcessing) {
+    runtime.rendering.processingDomainDynamics = isProcessing;
 
     if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
-        const indicatorId = isWPlane ? 'w_plane_refining_indicator' : 'z_plane_refining_indicator';
-        const indicator = document.getElementById(indicatorId);
+        const indicator = document.getElementById('z_plane_rendering_indicator');
         if (indicator) {
             if (isProcessing) {
                 indicator.classList.remove('hidden');
@@ -329,49 +350,66 @@ function setDomainProcessing(isWPlane, isProcessing) {
     }
 }
 
-function setDomainFullResolution(isWPlane, isReady) {
-    if (isWPlane) {
-        runtime.rendering.wDomainDynamicsHasFullResolution = isReady;
-    } else {
-        runtime.rendering.zDomainDynamicsHasFullResolution = isReady;
-    }
-}
-
-class WorkerCpuDomainDynamicsBackend {
+class WorkerNativeDomainDynamicsBackend {
     constructor() {
-        this.id = 'worker-cpu';
+        this.id = 'worker-native';
         this.workers = [];
         this.queue = [];
         this.queueIndex = 0;
+        this.remainingTiles = 0;
         this.activeJob = null;
-        this.pass = null;
     }
 
     start(job) {
-        this.cancel();
+        if (this.activeJob && !this.activeJob.cancelled && !this.activeJob.complete) {
+            throw new Error('Domain dynamics cannot start a second native job before cancellation.');
+        }
         this.activeJob = {
             ...job,
             cancelled: false,
-            passIndex: -1
+            complete: false,
+            staging: createStagingTarget(job.targetCtx, job.snapshot.viewport),
+            startedAt: performance.now(),
+            workerMilliseconds: 0,
+            maximumTileMilliseconds: 0
         };
+        const previous = runtime.rendering.domainDynamicsStats;
+        runtime.rendering.domainDynamicsStats = Object.freeze({
+            state: 'rendering',
+            jobId: job.id,
+            width: job.snapshot.viewport.width,
+            height: job.snapshot.viewport.height,
+            totalTiles: Math.ceil(job.snapshot.viewport.width / TILE_SIZE) *
+                Math.ceil(job.snapshot.viewport.height / TILE_SIZE),
+            completedTiles: 0,
+            completedJobs: previous.completedJobs,
+            cancelledJobs: previous.cancelledJobs
+        });
         this.ensureWorkers();
         this.initializeWorkerJobs(this.activeJob);
-        this.startNextPass();
+        this.startTiles();
         return true;
     }
 
     cancel(jobId = null) {
-        const cancelledJobId = jobId || this.activeJob?.id || null;
-        if (this.activeJob && (jobId === null || this.activeJob.id === jobId)) {
-            this.activeJob.cancelled = true;
-            setDomainProcessing(this.activeJob.snapshot.isWPlaneColoring, false);
-        }
+        const job = this.activeJob;
+        if (!job || job.complete || job.cancelled || (jobId !== null && job.id !== jobId)) return false;
+        job.cancelled = true;
+        setDomainProcessing(false);
         this.queue = [];
         this.queueIndex = 0;
-        this.pass = null;
-        if (cancelledJobId) {
-            this.workers.forEach(entry => entry.worker.postMessage({ type: 'cancel', jobId: cancelledJobId }));
-        }
+        this.remainingTiles = 0;
+        this.workers.forEach(entry => {
+            entry.busy = false;
+            entry.worker.postMessage({ type: 'cancel', jobId: job.id });
+        });
+        const previous = runtime.rendering.domainDynamicsStats;
+        runtime.rendering.domainDynamicsStats = Object.freeze({
+            ...previous,
+            state: 'cancelled',
+            cancelledJobs: previous.cancelledJobs + 1
+        });
+        return true;
     }
 
     ensureWorkers() {
@@ -392,6 +430,7 @@ class WorkerCpuDomainDynamicsBackend {
 
     initializeWorkerJobs(job) {
         this.workers.forEach(entry => {
+            entry.busy = false;
             if (entry.ready) {
                 entry.worker.postMessage({
                     type: 'start',
@@ -402,56 +441,25 @@ class WorkerCpuDomainDynamicsBackend {
         });
     }
 
-    startNextPass() {
+    startTiles() {
         const job = this.activeJob;
         if (!job || job.cancelled) return;
 
-        job.passIndex += 1;
-
-        if (job.passIndex > (job.maxAllowedPassIndex ?? PASS_SCALES.length - 1)) {
-            job.passIndex -= 1;
-            return;
-        }
-
-        if (job.passIndex >= PASS_SCALES.length) {
-            this.pass = null;
-            return;
-        }
-
-        const scale = PASS_SCALES[job.passIndex];
-        const passWidth = Math.max(1, Math.ceil(job.snapshot.viewport.width / scale));
-        const passHeight = Math.max(1, Math.ceil(job.snapshot.viewport.height / scale));
-        const canvas = getPassCanvas(passWidth, passHeight);
-        const ctx = canvas ? canvas.getContext('2d') : null;
-        this.pass = {
-            id: `${job.id}:${scale}`,
-            scale,
-            width: passWidth,
-            height: passHeight,
-            canvas,
-            ctx,
-            remaining: 0,
-            qualityPhase: false,
-            refinementTiles: []
-        };
-        this.queue = createTileList(passWidth, passHeight, scale);
-        if (scale === 1 && needsAdaptiveQuality(job.snapshot)) {
-            this.queue = this.queue.map(tile => ({ ...tile, deferQuality: true }));
-        }
+        const width = job.snapshot.viewport.width;
+        const height = job.snapshot.viewport.height;
+        this.queue = createTileList(width, height);
         this.queueIndex = 0;
-        this.pass.remaining = this.queue.length;
+        this.remainingTiles = this.queue.length;
 
-        if (!this.queue.length) {
-            this.startNextPass();
-            return;
-        }
-
-        this.workers.forEach(worker => this.dispatchWorker(worker));
+        this.workers.forEach(worker => {
+            worker.busy = false;
+            this.dispatchWorker(worker);
+        });
     }
 
     dispatchWorker(entry) {
         const job = this.activeJob;
-        if (!entry.ready || !job || job.cancelled || entry.busy || !this.pass) return;
+        if (!entry.ready || !job || job.cancelled || entry.busy || this.remainingTiles === 0) return;
 
         const tile = this.queue[this.queueIndex];
         if (!tile) return;
@@ -461,14 +469,9 @@ class WorkerCpuDomainDynamicsBackend {
         const message = {
             type: 'tile',
             jobId: job.id,
-            passId: this.pass.id,
             tile
         };
-        if (tile.basePixels instanceof Uint8ClampedArray) {
-            entry.worker.postMessage(message, [tile.basePixels.buffer]);
-        } else {
-            entry.worker.postMessage(message);
-        }
+        entry.worker.postMessage(message);
     }
 
     handleWorkerMessage(entry, message) {
@@ -492,15 +495,10 @@ class WorkerCpuDomainDynamicsBackend {
 
     handleTileMessage(message) {
         const job = this.activeJob;
-        const pass = this.pass;
-        if (!job || job.cancelled || !pass || message.jobId !== job.id || message.passId !== pass.id) return;
+        if (!job || job.cancelled || message.jobId !== job.id) return;
 
         if (message.type === 'error') {
             this.cancel(job.id);
-            if (pendingJobTimeout) {
-                clearTimeout(pendingJobTimeout);
-                pendingJobTimeout = null;
-            }
             if (activeJobId === job.id) {
                 activeSignature = null;
                 activeJobId = 0;
@@ -509,93 +507,119 @@ class WorkerCpuDomainDynamicsBackend {
             return;
         } else if (message.type === 'tile') {
             const image = createImageDataFromPixels(message.pixels, message.tile.width, message.tile.height);
-            if (image) {
-                pass.ctx.putImageData(image, message.tile.x, message.tile.y);
+            job.staging.context.putImageData(image, message.tile.x, message.tile.y);
+            const tileMilliseconds = Number(message.renderMilliseconds);
+            if (!Number.isFinite(tileMilliseconds) || tileMilliseconds < 0) {
+                throw new Error('Native domain worker returned invalid timing data.');
             }
-            if (pass.scale === 1 && !pass.qualityPhase && message.tile.deferQuality) {
-                pass.refinementTiles.push({
-                    x: message.tile.x,
-                    y: message.tile.y,
-                    width: message.tile.width,
-                    height: message.tile.height,
-                    scale: 1,
-                    qualityOnly: true,
-                    basePixels: message.pixels
-                });
-            }
-            pass.remaining -= 1;
+            job.workerMilliseconds += tileMilliseconds;
+            job.maximumTileMilliseconds = Math.max(job.maximumTileMilliseconds, tileMilliseconds);
+            this.remainingTiles -= 1;
+            runtime.rendering.domainDynamicsStats = Object.freeze({
+                ...runtime.rendering.domainDynamicsStats,
+                completedTiles: runtime.rendering.domainDynamicsStats.completedTiles + 1
+            });
+        } else {
+            throw new Error(`Unsupported native domain worker message: ${message.type}.`);
         }
 
-        if (pass.remaining <= 0) {
-            if (pass.scale === 1) {
-                setDomainFullResolution(job.snapshot.isWPlaneColoring, true);
-                setDomainProcessing(job.snapshot.isWPlaneColoring, false);
-            }
-            drawPassToTarget(job, pass);
-
-            // The first scale-1 completion is immediately usable full-resolution
-            // output. Refine those exact pixels as a second worker phase so adaptive
-            // supersampling never blocks first-paint latency.
-            if (pass.scale === 1 && !pass.qualityPhase && pass.refinementTiles.length) {
-                pass.qualityPhase = true;
-                this.queue = pass.refinementTiles;
-                pass.refinementTiles = [];
-                this.queueIndex = 0;
-                pass.remaining = this.queue.length;
-                this.workers.forEach(worker => this.dispatchWorker(worker));
-                return;
-            }
-
-            if (job.passIndex === PASS_SCALES.length - 1) {
-                setDomainProcessing(job.snapshot.isWPlaneColoring, false);
-            }
+        if (this.remainingTiles === 0) {
+            commitFinalFrame(job);
+            job.complete = true;
+            runtime.rendering.domainViewport = snapshotViewport(job.snapshot.viewport);
+            setDomainProcessing(false);
             this.queue = [];
             this.queueIndex = 0;
-            this.startNextPass();
+            this.workers.forEach(entry => {
+                entry.busy = false;
+                entry.worker.postMessage({ type: 'cancel', jobId: job.id });
+            });
+            const previous = runtime.rendering.domainDynamicsStats;
+            runtime.rendering.domainDynamicsStats = Object.freeze({
+                ...previous,
+                state: 'complete',
+                wallMilliseconds: performance.now() - job.startedAt,
+                workerMilliseconds: job.workerMilliseconds,
+                maximumTileMilliseconds: job.maximumTileMilliseconds,
+                completedJobs: previous.completedJobs + 1
+            });
+            eventBus.emit('redraw:all');
         }
     }
 
 }
 
-const workerBackend = new WorkerCpuDomainDynamicsBackend();
+const workerBackend = new WorkerNativeDomainDynamicsBackend();
 
 export function selectDomainDynamicsBackend() {
     return workerBackend;
 }
 
+function startDomainJob(job) {
+    if (activeSignature !== job.signature || activeJobId !== job.id) return;
+    pendingStartTimer = 0;
+    const selected = selectDomainDynamicsBackend();
+    activeBackend = selected;
+    selected.start(job);
+    setDomainProcessing(true);
+}
+
 export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
-    if (!targetCtx || !planeParams || !snapshot) return false;
+    if (!targetCtx || !planeParams || !snapshot) {
+        throw new Error('Domain dynamics rendering requires a target, plane parameters, and snapshot.');
+    }
 
     const signature = domainDynamicsSignature(snapshot);
     if (signature === activeSignature) return true;
 
-    if (activeBackend) {
-        activeBackend.cancel(activeJobId);
+    if (pendingStartTimer) {
+        clearTimeout(pendingStartTimer);
+        pendingStartTimer = 0;
     }
+    if (activeBackend) activeBackend.cancel();
 
     activeSignature = signature;
-    setDomainFullResolution(snapshot.isWPlaneColoring, false);
 
     activeJobId = nextJobId;
     nextJobId += 1;
 
     const job = {
         id: activeJobId,
+        signature,
         targetCtx,
-        snapshot,
-        maxAllowedPassIndex: PASS_SCALES.length - 1
+        snapshot
     };
 
-    const selected = selectDomainDynamicsBackend(snapshot);
-    activeBackend = selected;
-    selected.start(job);
-
-    setDomainProcessing(snapshot.isWPlaneColoring, true);
+    if (runtime.rendering.domainViewport) {
+        const previous = runtime.rendering.domainDynamicsStats;
+        runtime.rendering.domainDynamicsStats = Object.freeze({
+            state: 'scheduled',
+            jobId: job.id,
+            width: snapshot.viewport.width,
+            height: snapshot.viewport.height,
+            completedJobs: previous.completedJobs,
+            cancelledJobs: previous.cancelledJobs
+        });
+        pendingStartTimer = setTimeout(() => startDomainJob(job), RENDER_SETTLE_MS);
+    } else {
+        startDomainJob(job);
+    }
     return true;
 }
 
 export function cancelPlanarDomainDynamics() {
-    if (activeBackend) activeBackend.cancel(activeJobId);
+    if (pendingStartTimer) {
+        clearTimeout(pendingStartTimer);
+        pendingStartTimer = 0;
+    }
+    if (activeBackend) activeBackend.cancel();
     activeSignature = null;
     activeJobId = 0;
+    runtime.rendering.domainViewport = null;
+    const previous = runtime.rendering.domainDynamicsStats;
+    runtime.rendering.domainDynamicsStats = Object.freeze({
+        state: 'idle',
+        completedJobs: previous.completedJobs,
+        cancelledJobs: previous.cancelledJobs
+    });
 }

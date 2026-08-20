@@ -5,14 +5,12 @@ import { getContourPoints, isPointInsideContour } from './contours.js';
 import {
     analyzeNativeContour,
     classifyNativeContourSingularities,
-    estimateNativeResidue,
     nativeMapOptions
 } from '../native/complex-engine.js';
 import {
     NUM_INTEGRAL_STEPS,
     RESIDUE_CALC_EPSILON_RADIUS,
-    RESIDUE_BOUNDARY_CHECK_FACTOR,
-    NUM_RESIDUE_INTEGRAL_STEPS
+    RESIDUE_BOUNDARY_CHECK_FACTOR
 } from '../constants/numerical.js';
 import { createSafeMarkupFragment } from '../ui/dom-components.js';
 import { buildInputShapeGeometryConfig, generateInputShapePointSets } from '../rendering/shape-generators.js';
@@ -155,7 +153,7 @@ export function performCauchyAnalysis() {
     }
 
     const integralValue = (contourCPointSets || [contourC_points]).reduce((sum, points) => {
-        const value = analyzeNativeContour(map, points)?.integral || { re: NaN, im: NaN };
+        const value = analyzeNativeContour(map, points).integral;
         return { re: sum.re + value.re, im: sum.im + value.im };
     }, { re: 0, im: 0 });
     let resultsHTML = `∮<sub>C</sub> f(z)dz ≈ `;
@@ -197,7 +195,6 @@ export function performCauchyAnalysis() {
 
             polesInsideC.forEach(pole => {
                 let displayResidue = { re: NaN, im: NaN };
-                let residueSource = ""; 
 
                 if (pole.type === 'essential') {
                     hasEssentialSingularityInside = true;
@@ -207,26 +204,15 @@ export function performCauchyAnalysis() {
                     let poleOrderDisplay = pole.order !== 'unknown' && pole.order !== null ? `(order: ${pole.order})` : '';
                     resultsHTML += `<br/>&nbsp;&nbsp;Pole at z = ${pole.re.toFixed(2)} + ${pole.im.toFixed(2)}i ${poleOrderDisplay}`;
 
-                    if (pole.residue && typeof pole.residue.re === 'number' && typeof pole.residue.im === 'number' &&
-                        isFinite(pole.residue.re) && isFinite(pole.residue.im)) {
-                        displayResidue = pole.residue;
-                        residueSource = "pre-calc";
-                    } else {
-                        
-                        const estimatedRes = estimateNativeResidue(
-                            map, pole, RESIDUE_CALC_EPSILON_RADIUS, NUM_RESIDUE_INTEGRAL_STEPS
-                        );
-                        if (typeof estimatedRes.re === 'number' && typeof estimatedRes.im === 'number' &&
-                            isFinite(estimatedRes.re) && isFinite(estimatedRes.im)) {
-                            displayResidue = estimatedRes;
-                            residueSource = "estimated";
-                        }
+                    if (!pole.residue || !Number.isFinite(pole.residue.re) ||
+                        !Number.isFinite(pole.residue.im)) {
+                        throw new Error('Cauchy analysis requires precomputed native residues for every pole.');
                     }
+                    displayResidue = pole.residue;
 
                     if (!isNaN(displayResidue.re) && !isNaN(displayResidue.im)) {
                         sumResidues = { re: sumResidues.re + displayResidue.re, im: sumResidues.im + displayResidue.im };
                         resultsHTML += ` &nbsp;&nbsp;Res ≈ ${displayResidue.re.toFixed(2)} + ${displayResidue.im.toFixed(2)}i`;
-                        if (residueSource === "estimated") resultsHTML += ` (est.)`;
                     } else {
                         resultsHTML += ` &nbsp;&nbsp;Res ≈ N/A (calc failed)`;
                     }

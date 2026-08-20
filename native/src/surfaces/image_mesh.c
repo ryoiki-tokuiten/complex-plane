@@ -215,19 +215,11 @@ static int32_t ce_build_image_mesh_internal(const ce_map_config *config,
     if (!config || !texture_coordinates || !mapped_positions || !indices || !stats ||
         !(source_width > 0.0) || !(source_height > 0.0) ||
         !(view_x_max > view_x_min) || !(view_y_max > view_y_min) ||
+        !pixel_width || !pixel_height || !base_resolution || max_depth > 12u ||
+        !max_cells || max_cells > CE_UINT16_VERTEX_LIMIT / 4u ||
+        base_resolution > 127u || base_resolution * base_resolution > max_cells ||
+        !max_vertices || max_vertices > CE_UINT16_VERTEX_LIMIT || !max_samples ||
         (build_fold && (!fold_positions || !fold_uvs || !fold_mapping))) return -1;
-    if (max_depth > 12u) max_depth = 12u;
-    if (!max_cells) max_cells = 1u;
-    if (max_cells > CE_UINT16_VERTEX_LIMIT / 4u) max_cells = CE_UINT16_VERTEX_LIMIT / 4u;
-    uint32_t base_limit = (uint32_t)floor(sqrt((double)(CE_UINT16_VERTEX_LIMIT / 4u)));
-    uint32_t cell_base_limit = (uint32_t)floor(sqrt((double)max_cells));
-    if (!base_resolution) base_resolution = 1u;
-    if (base_resolution > base_limit) base_resolution = base_limit;
-    if (base_resolution > cell_base_limit) base_resolution = cell_base_limit;
-    if (!base_resolution) base_resolution = 1u;
-    if (!max_vertices) max_vertices = 1u;
-    if (max_vertices > CE_UINT16_VERTEX_LIMIT) max_vertices = CE_UINT16_VERTEX_LIMIT;
-    if (!max_samples) max_samples = 1u;
     const uint32_t grid_size = base_resolution << max_depth;
     const uint32_t point_capacity = ce_next_power_of_two(max_samples * 2u + 1u);
     const uint32_t vertex_capacity = ce_next_power_of_two(max_vertices * 2u + 1u);

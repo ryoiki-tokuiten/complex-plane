@@ -10,6 +10,7 @@ import {
 } from './shape-generators.js';
 import { disposeThreeObject } from './three-utils.js';
 import { buildFourierWinding } from '../analysis/fourier-transform.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -67,6 +68,11 @@ function isFiniteComplex(value) {
 
 function finitePoint(point) {
     return point && Number.isFinite(point.re) && Number.isFinite(point.im);
+}
+
+function pointSetPoints(pointSet, label = 'Transformation-graph point set') {
+    if (!Array.isArray(pointSet?.points)) throw new Error(`${label} requires a points array.`);
+    return pointSet.points;
 }
 
 function clamp(value, min, max) {
@@ -129,8 +135,10 @@ function getGraphPointSets(planeParams = zPlaneParams, curvePoints = null) {
         curvePoints: curvePoints ?? Math.max(SAMPLE_COUNT * 2, Math.min(NUM_POINTS_CURVE, 1000))
     });
 
-    return generateInputShapePointSets(config)
-        .filter(set => Array.isArray(set?.points) && set.points.length > 1);
+    const pointSets = generateInputShapePointSets(config);
+    if (!Array.isArray(pointSets)) throw new Error('Input-shape generation must return point sets.');
+    pointSets.forEach((set, index) => pointSetPoints(set, `Transformation-graph point set ${index}`));
+    return pointSets.filter(set => set.points.length > 1);
 }
 
 function pointSegmentDistanceSq(point, start, end) {
@@ -153,7 +161,7 @@ function pointSegmentDistanceSq(point, start, end) {
 }
 
 function pointSetDistanceSq(point, pointSet) {
-    const points = pointSet?.points || [];
+    const points = pointSetPoints(pointSet);
     let best = Infinity;
 
     for (let index = 1; index < points.length; index += 1) {
@@ -245,8 +253,10 @@ export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = 
         });
     if (!candidates.length) return false;
 
-    const xRange = planeParams.currentVisXRange || planeParams.xRange || [-1, 1];
-    const worldPerPixel = Math.abs((xRange[1] - xRange[0]) / Math.max(1, planeParams.width || 1));
+    const xRange = planeParams.currentVisXRange;
+    const viewportWidth = requireFiniteNumber(planeParams.width, 'Transformation-graph viewport width');
+    if (viewportWidth <= 0) throw new Error('Transformation-graph viewport width must be positive.');
+    const worldPerPixel = Math.abs((xRange[1] - xRange[0]) / viewportWidth);
     const toleranceSq = (worldPerPixel * 14) ** 2;
 
     let bestIndex = -1;
@@ -280,9 +290,8 @@ export function drawGraphSelectionOverlay(ctx, planeParams = zPlaneParams) {
     const pointSets = getGraphPointSets(planeParams);
     const index = selectedLineIndex(pointSets, false);
     const selected = pointSets[index];
-    const points = selected?.points || [];
-
-    if (points.length < 2) return;
+    if (!selected) return;
+    const points = pointSetPoints(selected, 'Selected transformation-graph point set');
 
     const drawPath = () => {
         let started = false;
@@ -394,7 +403,7 @@ function normalizedComponentScale(samples, component) {
 }
 
 function pointSetLabel(pointSet) {
-    const points = pointSet?.points || [];
+    const points = pointSetPoints(pointSet);
     const first = points.find(finitePoint);
     const last = [...points].reverse().find(finitePoint);
     const role = String(pointSet?.role || '');
@@ -410,19 +419,15 @@ function pointSetLabel(pointSet) {
 }
 
 function evaluateSamples(inputSamples, map) {
+    const outputs = map.evaluateBatch(inputSamples);
     return inputSamples.map((input, index) => {
         const t = inputSamples.length <= 1 ? 0 : index / (inputSamples.length - 1);
-        return evaluateSample(input, t, map);
+        return { input: { re: input.re, im: input.im }, output: outputs[index], t };
     });
 }
 
 function evaluateSample(input, t, map) {
-    let output = { re: NaN, im: NaN };
-    try {
-        output = map.evaluate(input.re, input.im);
-    } catch {
-        output = { re: NaN, im: NaN };
-    }
+    const output = map.evaluate(input.re, input.im);
     return { input: { re: input.re, im: input.im }, output, t };
 }
 
@@ -541,7 +546,7 @@ export function filterGraphFullGridPointSets(pointSets) {
 }
 
 function gridFamilySortValue(pointSet) {
-    const first = pointSet?.points?.find(finitePoint);
+    const first = pointSetPoints(pointSet).find(finitePoint);
     if (!first) return 0;
     const role = String(pointSet.role || '');
     if (role.includes('horizontal')) return first.im;
@@ -557,8 +562,8 @@ function gridFamilySortValue(pointSet) {
 
 function visibleInputBounds(planeParams = zPlaneParams) {
     return {
-        xRange: planeParams.currentVisXRange || planeParams.xRange || [-1, 1],
-        yRange: planeParams.currentVisYRange || planeParams.yRange || [-1, 1]
+        xRange: planeParams.currentVisXRange,
+        yRange: planeParams.currentVisYRange
     };
 }
 
@@ -726,8 +731,8 @@ export function buildFullGridTransformationGraphData(planeParams = zPlaneParams)
 }
 
 function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
-    const xRange = planeParams.currentVisXRange || planeParams.xRange || [];
-    const yRange = planeParams.currentVisYRange || planeParams.yRange || [];
+    const xRange = planeParams.currentVisXRange;
+    const yRange = planeParams.currentVisYRange;
     return [
         map.signature,
         state.currentInputShape,
@@ -1174,7 +1179,7 @@ function curveIsClosed(curve) {
 
 function connectedLayerRatio(sample, curve) {
     if (curve.locked) return 0;
-    const anchor = clamp(Number(curve.anchorT) || 0, 0, 1);
+    const anchor = clamp(requireFiniteNumber(curve.anchorT, 'Connected graph anchor'), 0, 1);
     if (curveIsClosed(curve)) {
         let phase = sample.t - anchor;
         phase -= Math.round(phase);
@@ -1256,7 +1261,7 @@ function windingPointToVector(point, center, plane) {
 }
 
 function graphFourierSignal(samples, component, scale) {
-    const requested = clamp(Math.floor(Number(state.fourierSamples) || 128), 32, 512);
+    const requested = clamp(requireInteger(state.fourierSamples, 'Graph Fourier sample count'), 32, 512);
     let source = samples;
     const firstInput = source[0]?.input;
     const lastInput = source.at(-1)?.input;
@@ -1265,9 +1270,12 @@ function graphFourierSignal(samples, component, scale) {
         source = source.slice(0, -1);
     }
     source = selectEvenly(source, requested);
-    const timeWindow = Math.max(EPSILON, Number(state.fourierTimeWindow) || 1);
-    const amplitudeScale = clamp(Number(state.fourierAmplitude) || 1, 0.1, 5);
-    const traversalFrequency = clamp(Number(state.fourierFrequency) || 1, 0.1, 10);
+    const timeWindow = Math.max(EPSILON,
+        requireFiniteNumber(state.fourierTimeWindow, 'Graph Fourier time window'));
+    const amplitudeScale = clamp(
+        requireFiniteNumber(state.fourierAmplitude, 'Graph Fourier amplitude'), 0.1, 5);
+    const traversalFrequency = clamp(
+        requireFiniteNumber(state.fourierFrequency, 'Graph Fourier frequency'), 0.1, 10);
     const signal = [];
     for (let index = 0; index < requested; index += 1) {
         const normalizedTime = requested <= 1 ? 0 : index / (requested - 1);
@@ -1292,17 +1300,19 @@ function graphFourierSignal(samples, component, scale) {
 function graphFourierWinding(samples, component, scale) {
     const signal = graphFourierSignal(samples, component, scale);
     return buildFourierWinding(signal, {
-        windingFrequency: Number(state.fourierWindingFrequency) || 0,
-        progress: Number(state.fourierWindingTime) || 0,
-        timeWindow: Math.max(EPSILON, Number(state.fourierTimeWindow) || 1)
+        windingFrequency: requireFiniteNumber(state.fourierWindingFrequency, 'Graph winding frequency'),
+        progress: requireFiniteNumber(state.fourierWindingTime, 'Graph winding progress'),
+        timeWindow: Math.max(EPSILON,
+            requireFiniteNumber(state.fourierTimeWindow, 'Graph Fourier time window'))
     });
 }
 
 function graphFourierProgress(data) {
-    const rawProgress = Number(state.fourierWindingTime);
-    const progress = Number.isFinite(rawProgress) ? clamp(rawProgress, 0, 1) : 1;
-    const traversalFrequency = clamp(Number(state.fourierFrequency) || 1, 0.1, 10);
-    const timeWindow = Math.max(EPSILON, Number(state.fourierTimeWindow) || 1);
+    const progress = clamp(requireFiniteNumber(state.fourierWindingTime, 'Graph winding progress'), 0, 1);
+    const traversalFrequency = clamp(
+        requireFiniteNumber(state.fourierFrequency, 'Graph Fourier frequency'), 0.1, 10);
+    const timeWindow = Math.max(EPSILON,
+        requireFiniteNumber(state.fourierTimeWindow, 'Graph Fourier time window'));
     const traversed = progress * timeWindow * traversalFrequency;
     const phase = traversed - Math.floor(traversed);
     const cursorProgress = progress === 1 && Math.abs(phase) <= EPSILON ? 1 : phase;

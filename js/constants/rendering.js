@@ -27,29 +27,21 @@ export const ORBIT_COLORING_MODE_IDS = Object.freeze({
     hybrid: 3
 });
 
-export const DEFAULT_ORBIT_COLORING_MODE = ORBIT_COLORING_MODES.value;
-
 export function normalizeOrbitColoringMode(mode) {
-    if (Object.prototype.hasOwnProperty.call(ORBIT_COLORING_MODES, mode)) {
-        return mode;
+    if (!Object.prototype.hasOwnProperty.call(ORBIT_COLORING_MODES, mode)) {
+        throw new Error(`Unsupported orbit-coloring mode: ${mode}`);
     }
-    return DEFAULT_ORBIT_COLORING_MODE;
+    return mode;
 }
 
 export function orbitColoringModeId(mode) {
-    const normalized = normalizeOrbitColoringMode(mode);
-    return ORBIT_COLORING_MODE_IDS[normalized] ?? ORBIT_COLORING_MODE_IDS.value;
+    return ORBIT_COLORING_MODE_IDS[normalizeOrbitColoringMode(mode)];
 }
 
 export const SPHERE_VIEW_RADIUS_FACTOR = 0.85;
 export const SPHERE_INITIAL_ROT_X = 0.4;
 export const SPHERE_INITIAL_ROT_Y = -0.6;
 export const SPHERE_SENSITIVITY = 0.01;
-export const SPHERE_TEXTURE_AMBIENT_INTENSITY = 0.3;
-export const SPHERE_TEXTURE_DIFFUSE_INTENSITY = 0.7;
-export const SPHERE_TEXTURE_SPECULAR_INTENSITY = 0.6;
-export const SPHERE_TEXTURE_SHININESS_FACTOR = 32;
-export const SPHERE_LIGHT_DIRECTION_CAMERA = { x: 0.5, y: 0.5, z: 0.707 };
 export const SPHERE_GRID_LINE_MAX_WIDTH_W = 1.5;
 export const SPHERE_GRID_LINE_MAX_WIDTH_Z = 1.0;
 export const SPHERE_GRID_LINE_DEPTH_EFFECT = true;

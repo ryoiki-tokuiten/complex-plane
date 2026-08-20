@@ -4,14 +4,16 @@ import assert from 'node:assert/strict';
 import { state } from '../js/store/state.js';
 import { DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE } from '../js/constants/domain-dynamics.js';
 import {
-    evaluateDomainColoringMappedTransform,
-    evaluateAlgebraicChaining,
-    evaluateAlgebraicTerm,
     getEffectiveBaseTransformFunction,
     getMappedTransformProfile,
     getChainedTransformFunction,
     getChainedStageTransformFunction
 } from '../js/native/map-runtime.js';
+import {
+    evaluateAlgebraicChaining,
+    evaluateAlgebraicTerm,
+    evaluateDomainColoringMappedTransform
+} from './helpers/native-map.js';
 
 function snapshotState(keys) {
     return Object.fromEntries(keys.map(key => [key, state[key]]));
@@ -74,13 +76,13 @@ test('algebraic term cache observes in-place term edits', () => {
         term.coeff.re = 2;
         approxComplex(evaluateAlgebraicTerm(term, { re: 0, im: 0 }), { re: 2, im: 0 });
         term.factors[0].func = 'missing_transform';
-        assert.ok(Number.isNaN(evaluateAlgebraicTerm(term, z).re));
+        assert.throws(() => evaluateAlgebraicTerm(term, z), /Unsupported native algebraic function/);
     } finally {
         restoreState(before);
     }
 });
 
-test('invalid algebraic z expressions do not fall back to identity', () => {
+test('invalid algebraic z expressions fail at the native boundary', () => {
     const before = snapshotState(['algebraicChainingEnabled', 'algebraicChainingZExpr', 'algebraicChainingTerms']);
     try {
         Object.assign(state, {
@@ -88,7 +90,7 @@ test('invalid algebraic z expressions do not fall back to identity', () => {
             algebraicChainingZExpr: 'bad +',
             algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [factor('c')] }]
         });
-        assert.ok(Number.isNaN(evaluateAlgebraicChaining(2, 0).re));
+        assert.throws(() => evaluateAlgebraicChaining(2, 0), /Expected a value/);
     } finally {
         restoreState(before);
     }
@@ -477,8 +479,13 @@ test('algebraic modifier chains agree between domain coloring and staged output 
 
             const domainColoring = evaluateDomainColoringMappedTransform(baseProfile, point.re, point.im, 'algebraic_chaining');
             const staged = getChainedStageTransformFunction('algebraic_chaining', state.chainCount - 1);
-
-            approxComplex(domainColoring, staged(point.re, point.im));
+            const stagedValue = staged(point.re, point.im);
+            if (mode === 'zero_seed') {
+                assert.equal(Number.isFinite(domainColoring.re) || Number.isFinite(domainColoring.im), false);
+                assert.equal(Number.isFinite(stagedValue.re) || Number.isFinite(stagedValue.im), false);
+            } else {
+                approxComplex(domainColoring, stagedValue);
+            }
         }
     } finally {
         restoreState(before);
@@ -518,7 +525,7 @@ test('escaped quadratic recursion returns the deterministic domain-coloring bail
     }
 });
 
-test('compiled and fallback algebraic chains agree for composite expressions across output modes', () => {
+test('equivalent native algebraic expressions agree across output modes', () => {
     const keys = [
         'currentFunction',
         'algebraicChainingEnabled',
@@ -561,16 +568,21 @@ test('compiled and fallback algebraic chains agree for composite expressions acr
                 'algebraic_chaining',
                 getEffectiveBaseTransformFunction('algebraic_chaining')
             );
-            const compiled = evaluateDomainColoringMappedTransform(profile, point.re, point.im, 'algebraic_chaining');
+            const directExpression = evaluateDomainColoringMappedTransform(profile, point.re, point.im, 'algebraic_chaining');
 
             state.algebraicChainingZExpr = 'z + 0';
             profile = getMappedTransformProfile(
                 'algebraic_chaining',
                 getEffectiveBaseTransformFunction('algebraic_chaining')
             );
-            const fallback = evaluateDomainColoringMappedTransform(profile, point.re, point.im, 'algebraic_chaining');
+            const equivalentExpression = evaluateDomainColoringMappedTransform(profile, point.re, point.im, 'algebraic_chaining');
 
-            approxComplex(compiled, fallback, 1e-12);
+            if (mode === 'zero_seed') {
+                assert.equal(Number.isFinite(directExpression.re) || Number.isFinite(directExpression.im), false);
+                assert.equal(Number.isFinite(equivalentExpression.re) || Number.isFinite(equivalentExpression.im), false);
+            } else {
+                approxComplex(directExpression, equivalentExpression, 1e-12);
+            }
         }
     } finally {
         restoreState(before);

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 
 import { runBenchmark } from './utils.js';
 import { state } from '../../js/store/state.js';
-import { buildRealPlotSurface } from '../../js/rendering/real-plots-renderer.js';
+import { buildRealPlotSurface, renderRealPlotContour } from '../../js/rendering/real-plots-renderer.js';
+import { buildNativeLaplaceWinding } from '../../js/native/complex-engine.js';
 import {
     buildRiemannSurfaceMathLibrary,
     getRiemannSurfaceGridData
@@ -14,10 +15,22 @@ const REAL_PLOT_SEGMENTS = Object.freeze({
     deep: 80
 });
 
+const REAL_CONTOUR_SIZES = Object.freeze({
+    smoke: 64,
+    standard: 256,
+    deep: 512
+});
+
 const RIEMANN_RESOLUTIONS = Object.freeze({
     smoke: [42],
     standard: [64, 128],
     deep: [96, 160, 224]
+});
+
+const LAPLACE_SAMPLE_COUNTS = Object.freeze({
+    smoke: 256,
+    standard: 1024,
+    deep: 4096
 });
 
 function factor(func, overrides = {}) {
@@ -63,6 +76,32 @@ export async function runSurfaceRenderingBenchmarks() {
     console.log('\n[Benchmark] 3D real-plot and Riemann-surface CPU preparation\n');
 
     await runBenchmark(
+        'native per-frame Laplace damping and winding geometry',
+        ({ profile }) => {
+            const count = LAPLACE_SAMPLE_COUNTS[profile];
+            const signal = Array.from({ length: count }, (_, index) => {
+                const t = index * 6 / (count - 1);
+                return { t, value: Math.sin(3 * t) * Math.exp(-0.15 * t) };
+            });
+            return { signal };
+        },
+        ({ signal }) => buildNativeLaplaceWinding(signal, 0.35, 4.2, 0.73),
+        {
+            profiles: {
+                smoke: { iterations: 3, warmup: 1 },
+                standard: { iterations: 80, warmup: 10 },
+                deep: { iterations: 180, warmup: 18 }
+            },
+            verify: frame => {
+                assert.ok(frame.points.length > 0);
+                assert.ok(frame.weighted.length >= frame.points.length);
+                assert.ok(Number.isFinite(frame.integral.real));
+                assert.ok(Number.isFinite(frame.integral.imag));
+            }
+        }
+    );
+
+    await runBenchmark(
         'real 3D plot heightfield sampling from algebraic output chain',
         ({ profile }) => {
             configureSurfaceState();
@@ -89,6 +128,38 @@ export async function runSurfaceRenderingBenchmarks() {
                 assert.ok(sampled.finiteResultCount > sampled.vertexCount * 0.9);
                 assert.ok(sampled.positions.every(Number.isFinite));
                 assert.ok(sampled.normals.every(Number.isFinite));
+            }
+        }
+    );
+
+    await runBenchmark(
+        'full-resolution real contour evaluation, shading, and RGBA packing in native C',
+        ({ profile }) => {
+            configureSurfaceState();
+            return { size: REAL_CONTOUR_SIZES[profile] };
+        },
+        ({ size }) => renderRealPlotContour({
+            width: size,
+            height: size,
+            xRange: [-1.25, 1.25],
+            yRange: [-1.25, 1.25],
+            inputExpr: 'x',
+            imagExpr: 'y',
+            outputComponent: 'magnitude',
+            palette: 'viridis',
+            contoursEnabled: true,
+            contourInterval: 0.25,
+            contourThickness: 1.5
+        }),
+        {
+            profiles: {
+                smoke: { iterations: 2, warmup: 1 },
+                standard: { iterations: 20, warmup: 4 },
+                deep: { iterations: 60, warmup: 8 }
+            },
+            verify: (pixels, { size }) => {
+                assert.equal(pixels.length, size * size * 4);
+                assert.equal(pixels[3], 255);
             }
         }
     );

@@ -4,6 +4,7 @@ import {
     synchronizeSequenceBindings
 } from '../../analysis/sequence-bindings.js';
 import { parseExpression } from './parser.js';
+import { requireFiniteComplex, requireFiniteNumber, requireInteger } from '../../utils/numeric-contracts.js';
 
 const MAX_SHADER_CACHE_ENTRIES = 12;
 const MAX_EXPRESSION_CACHE_ENTRIES = 64;
@@ -60,15 +61,15 @@ function cacheShaderResult(key, result) {
 }
 
 function glslFloat(value) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return '0.0';
+    const numeric = requireFiniteNumber(value, 'GLSL numeric literal');
     if (Object.is(numeric, -0)) return '0.0';
     const rendered = Number(numeric.toPrecision(12)).toString();
     return rendered.includes('.') || /e/i.test(rendered) ? rendered : `${rendered}.0`;
 }
 
 function vec2(value) {
-    return `vec2(${glslFloat(value?.re)}, ${glslFloat(value?.im)})`;
+    const point = requireFiniteComplex(value, 'GLSL complex literal');
+    return `vec2(${glslFloat(point.re)}, ${glslFloat(point.im)})`;
 }
 
 function assertExpressionNode(node) {
@@ -92,20 +93,27 @@ function assertGPUArity(node) {
 
 function dynamicEnabled(appState) {
     const config = appState?.dynamicPlotting;
-    return Boolean(
-        config?.enabled &&
-        config.mode === 'aggregate' &&
-        (config.reduction?.kind === 'sum' || config.reduction?.kind === 'product')
-    );
+    if (!config?.enabled) return false;
+    if (config.mode === 'map') return false;
+    if (config.mode !== 'aggregate' ||
+        (config.reduction?.kind !== 'sum' && config.reduction?.kind !== 'product')) {
+        throw new Error('GPU dynamic plotting requires a valid aggregate reduction.');
+    }
+    return true;
 }
 
 function parameterMap(appState) {
-    const parameters = appState?.dynamicPlotting?.parameters || [];
+    const parameters = appState?.dynamicPlotting?.parameters;
+    if (!Array.isArray(parameters)) throw new Error('GPU dynamic plotting requires a parameter array.');
     const output = {};
     for (let index = 0; index < parameters.length; index++) {
         const parameter = parameters[index];
-        const name = parameter?.name || '';
-        if (isSafeIdentifierName(name)) output[name] = { re: Number(parameter.value) || 0, im: 0 };
+        const name = String(parameter?.name ?? '').trim();
+        if (!isSafeIdentifierName(name)) throw new Error(`Invalid dynamic parameter name: ${name}.`);
+        output[name] = {
+            re: requireFiniteNumber(parameter.value, `Dynamic parameter ${name}`),
+            im: 0
+        };
     }
     return output;
 }
@@ -671,16 +679,20 @@ vec2 dynamicEvaluateBasicOnSheet(
 `;
 }
 
-export const GLSL_EXPRESSION_HELPERS = createGlslExpressionHelpers();
-
 function sourceRecords(appState) {
-    const raw = appState.dynamicPlotting.source || {};
+    const raw = appState?.dynamicPlotting?.source;
+    if (!raw || typeof raw !== 'object') throw new Error('GPU dynamic plotting requires a source.');
     const sourceConfig = { ...raw };
     if (Array.isArray(raw.points)) sourceConfig.points = raw.points.slice();
-    if (sourceConfig.kind === 'custom_points') sourceConfig.points = sourceConfig.points || [];
+    if (sourceConfig.kind === 'custom_points' && !Array.isArray(sourceConfig.points)) {
+        throw new Error('GPU custom-point sources require a points array.');
+    }
     const parameters = parameterMap(appState);
     const source = generateDiscreteSource(sourceConfig, { parameters });
-    const limit = Math.floor(Number(appState.dynamicPlotting.playback?.visibleCount) || 0);
+    const limit = requireInteger(
+        appState.dynamicPlotting.playback?.visibleCount,
+        'GPU dynamic visible count'
+    );
     const visibleCount = Math.max(0, Math.min(source.records.length, limit));
     return visibleCount === source.records.length ? source.records : source.records.slice(0, visibleCount);
 }
@@ -745,12 +757,15 @@ export function buildDynamicAggregateGLSL(appState, getFunctionId) {
 
     try {
         const config = appState.dynamicPlotting;
+        if (!config.term || typeof config.term !== 'object') {
+            throw new Error('GPU dynamic plotting requires a term.');
+        }
         const records = sourceRecords(appState);
         const parameters = parameterMap(appState);
         const bindings = config.term?.kind === 'expression'
             ? synchronizeSequenceBindings(
-                String(config.term?.expression ?? ''),
-                config.term?.bindings || []
+                config.term.expression,
+                config.term.bindings
             )
             : [];
         const bindingResult = generateSequenceBindingSeries(bindings, records.length, {
@@ -847,13 +862,7 @@ export function buildDynamicAggregateGLSL(appState, getFunctionId) {
             error: null
         });
     } catch (error) {
-        return cacheShaderResult(cacheKey, {
-            enabled: true,
-            source: '',
-            termCount: 0,
-            truncated: false,
-            error: error?.message || String(error)
-        });
+        throw new Error(`Dynamic aggregate shader compilation failed: ${error?.message || String(error)}`);
     }
 }
 
@@ -880,21 +889,17 @@ export function compileCustomExpressionToGLSL(source, getFunctionId, options = n
     }
     const cached = expressionCache.get(source);
     if (cached) return cached;
-    try {
-        const ast = parseExpression(source);
-        const context = {
-            parameters: {},
-            variables: { z: 'z', i: I_VEC },
-            sheet: Boolean(options?.sheet),
-            getFunctionId: name => getFunctionId(name, true)
-        };
-        return cacheMapResult(
-            expressionCache,
-            MAX_EXPRESSION_CACHE_ENTRIES,
-            source,
-            compileNode(ast, context)
-        );
-    } catch {
-        return null;
-    }
+    const ast = parseExpression(source);
+    const context = {
+        parameters: {},
+        variables: { z: 'z', i: I_VEC },
+        sheet: Boolean(options?.sheet),
+        getFunctionId: name => getFunctionId(name, true)
+    };
+    return cacheMapResult(
+        expressionCache,
+        MAX_EXPRESSION_CACHE_ENTRIES,
+        source,
+        compileNode(ast, context)
+    );
 }

@@ -285,11 +285,7 @@ export function cleanupUploadedVideo() {
     if (previousVideo) {
         previousVideo.pause();
         previousVideo.removeAttribute('src');
-        try {
-            previousVideo.load();
-        } catch (error) {
-            console.warn('Unable to fully reset previous video element:', error);
-        }
+        previousVideo.load();
     }
 
     if (previousUrl) {

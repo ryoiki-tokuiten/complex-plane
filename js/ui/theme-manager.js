@@ -25,33 +25,31 @@ const isHexColor = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(
 
 export function loadThemePreferences() {
     if (typeof localStorage === 'undefined') return;
-
-    try {
-        const saved = JSON.parse(localStorage.getItem(THEME_PREFERENCES_KEY) || 'null');
-        if (saved?.themeId && themes.some(theme => theme.id === saved.themeId)) state.themeId = saved.themeId;
-        if (isHexColor(saved?.gridColor1)) state.gridColor1 = saved.gridColor1;
-        if (isHexColor(saved?.gridColor2)) state.gridColor2 = saved.gridColor2;
-    } catch {
-        // Ignore unavailable or malformed local preferences.
+    const serialized = localStorage.getItem(THEME_PREFERENCES_KEY);
+    if (serialized === null) return;
+    const saved = JSON.parse(serialized);
+    if (!saved || typeof saved !== 'object') throw new Error('Theme preferences must be an object.');
+    if (!themes.some(theme => theme.id === saved.themeId) ||
+        !isHexColor(saved.gridColor1) || !isHexColor(saved.gridColor2)) {
+        throw new Error('Theme preferences are malformed.');
     }
+    state.themeId = saved.themeId;
+    state.gridColor1 = saved.gridColor1;
+    state.gridColor2 = saved.gridColor2;
 }
 
 export function persistThemePreferences() {
     if (typeof localStorage === 'undefined') return;
-
-    try {
-        localStorage.setItem(THEME_PREFERENCES_KEY, JSON.stringify({
-            themeId: state.themeId,
-            gridColor1: state.gridColor1,
-            gridColor2: state.gridColor2
-        }));
-    } catch {
-        // Ignore storage failures (for example, private browsing restrictions).
-    }
+    localStorage.setItem(THEME_PREFERENCES_KEY, JSON.stringify({
+        themeId: state.themeId,
+        gridColor1: state.gridColor1,
+        gridColor2: state.gridColor2
+    }));
 }
 
 export function applyTheme(themeId, { preserveGridColors = false } = {}) {
-    const theme = themes.find(t => t.id === themeId) || themes[0];
+    const theme = themes.find(t => t.id === themeId);
+    if (!theme) throw new Error(`Unknown theme: ${themeId}.`);
     const root = document.documentElement;
     root.style.setProperty('--bg-color', theme.colors.bg);
     root.style.setProperty('--bg-color-rgb', hexToRgbStr(theme.colors.bg));

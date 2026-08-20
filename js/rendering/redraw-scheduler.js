@@ -19,20 +19,13 @@ export function requestRedrawAll() {
     context.redrawRequest = requestAnimationFrame(timestamp => {
         context.redrawQueued = false;
         context.domainColoringDirtyQueued = false;
+        context.redrawRequest = null;
+        if (!renderFrame) throw new Error('Redraw scheduler has not been configured');
+        renderFrame(timestamp);
 
-        try {
-            if (!renderFrame) throw new Error('Redraw scheduler has not been configured');
-            renderFrame(timestamp);
-
-            context.domainColoringDirty = context.domainColoringDirtyQueued;
-            context.redrawRequest = null;
-
-            if (context.redrawQueued || context.domainColoringDirty || state.particleAnimationEnabled) {
-                requestRedrawAll();
-            }
-        } catch (error) {
-            console.error('Error during redraw (requestAnimationFrame):', error);
-            context.redrawRequest = null;
+        context.domainColoringDirty = context.domainColoringDirtyQueued;
+        if (context.redrawQueued || context.domainColoringDirty || state.particleAnimationEnabled) {
+            requestRedrawAll();
         }
     });
 }

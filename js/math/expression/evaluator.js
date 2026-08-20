@@ -31,16 +31,6 @@ export class ExpressionEvaluationError extends Error {
     }
 }
 
-export function isPrimeInteger(value) {
-    if (!Number.isSafeInteger(value) || value < 2) return false;
-    if (value === 2 || value === 3) return true;
-    if ((value & 1) === 0 || value % 3 === 0) return false;
-    for (let divisor = 5, step = 2; divisor * divisor <= value; divisor += step, step = 6 - step) {
-        if (value % divisor === 0) return false;
-    }
-    return true;
-}
-
 function optionKey(options) {
     const variables = options?.allowedVariables;
     return variables ? Array.from(variables).join('\u0000') : '';
@@ -87,7 +77,7 @@ function selectedMapOptions(environment, ast) {
     const selected = environment.selectedFunction;
     if (selected === undefined) return nativeMapOptions(state, { chainingEnabled: false, chainCount: 1 });
     const metadata = selected?.nativeMapOptions;
-    const functionKey = metadata?.functionKey || selected?.nativeFunctionKey;
+    const functionKey = metadata?.functionKey;
     if (!functionKey) {
         throw new ExpressionEvaluationError('Selected function is not owned by the native engine', ast);
     }
@@ -175,11 +165,4 @@ export function asComplex(value) {
     if (typeof value === 'number') return { re: value, im: 0 };
     if (typeof value === 'boolean') return { re: value ? 1 : 0, im: 0 };
     return { re: NaN, im: NaN };
-}
-
-export function asBoolean(value) {
-    if (typeof value === 'boolean') return value;
-    const complex = asComplex(value);
-    return Number.isFinite(complex.re) && Number.isFinite(complex.im) &&
-        (Math.abs(complex.re) > 1e-12 || Math.abs(complex.im) > 1e-12);
 }

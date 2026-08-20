@@ -7,6 +7,7 @@ import { updatePlaneViewportRanges } from './utils/canvas-utils.js';
 import { drawImageWithWebGL } from './rendering/draw-image-webgl.js';
 import { drawPlanarTransformedLine, drawComplexLineSetOnPlane } from './rendering/draw-planar.js';
 import { setupVisualParameters } from './utils/dom-utils.js';
+import { requireFiniteNumber } from './utils/numeric-contracts.js';
 
 const { controls } = context;
 
@@ -63,19 +64,23 @@ function isNavigationFormTarget(target) {
     return !!(target && target.closest && target.closest('input, select, textarea, button, [contenteditable="true"]'));
 }
 
-function readNavigationControlValue(controlKey, fallback, parser = parseFloat) {
+function readNavigationControlValue(controlKey, parser = parseFloat) {
     const control = controls[controlKey];
-    if (!control) return fallback;
+    if (!control) throw new Error(`Missing navigation control: ${controlKey}.`);
     const value = parser(control.value);
-    return Number.isNaN(value) ? fallback : value;
+    return requireFiniteNumber(value, `Navigation control ${controlKey}`);
 }
 
 export function initializeNavigationStateFromControls() {
-    state.navigationSize = readNavigationControlValue('navigationSizeSlider', state.navigationSize);
-    state.navigationOpacity = readNavigationControlValue('navigationOpacitySlider', state.navigationOpacity);
-    state.navigationSpeed = readNavigationControlValue('navigationSpeedSlider', state.navigationSpeed);
-    state.navigationTrailLength = readNavigationControlValue('navigationTrailLengthSlider', state.navigationTrailLength, value => parseInt(value, 10));
-    state.navigationModeEnabled = controls.enableNavigationModeCb ? controls.enableNavigationModeCb.checked : state.navigationModeEnabled;
+    state.navigationSize = readNavigationControlValue('navigationSizeSlider');
+    state.navigationOpacity = readNavigationControlValue('navigationOpacitySlider');
+    state.navigationSpeed = readNavigationControlValue('navigationSpeedSlider');
+    state.navigationTrailLength = readNavigationControlValue(
+        'navigationTrailLengthSlider',
+        value => parseInt(value, 10)
+    );
+    if (!controls.enableNavigationModeCb) throw new Error('Missing navigation mode control.');
+    state.navigationModeEnabled = controls.enableNavigationModeCb.checked;
     syncNavigationControls();
 }
 
@@ -135,7 +140,10 @@ export function resetNavigationVehicle() {
 }
 
 function getNavigationInputVector() {
-    const keys = runtime.navigation.keys || {};
+    const keys = runtime.navigation.keys;
+    if (!keys || typeof keys !== 'object' || Array.isArray(keys)) {
+        throw new Error('Navigation runtime requires a key-state object.');
+    }
     let x = 0;
     let y = 0;
     if (keys.ArrowLeft) x -= 1;
@@ -356,7 +364,7 @@ export function drawNavigationLayer(ctx, planeParams, planeKey, transformFunc = 
     if (!applyNavigationImageState(pos)) return;
 
     try {
-        drawImageWithWebGL(ctx, planeParams, false, 0);
+        drawImageWithWebGL(ctx, planeParams, false);
     } finally {
         restoreNavigationImageState();
     }

@@ -3,7 +3,10 @@ import { createDomainDynamicsTileRenderer } from '../native/domain-engine.js';
 const renderers = new Map();
 
 self.onmessage = event => {
-    const message = event.data || {};
+    const message = event.data;
+    if (!message || typeof message !== 'object') {
+        throw new Error('Native domain worker received an invalid message.');
+    }
 
     if (message.type === 'start') {
         for (const [id, r] of renderers) {
@@ -21,28 +24,30 @@ self.onmessage = event => {
         return;
     }
 
-    if (message.type !== 'tile') return;
+    if (message.type !== 'tile') {
+        throw new Error(`Unsupported native domain worker message: ${message.type}.`);
+    }
 
     try {
+        const startedAt = performance.now();
         const renderTile = renderers.get(message.jobId);
         if (!renderTile) {
             throw new Error(`Domain dynamics job ${message.jobId} is not initialized.`);
         }
 
         const pixels = renderTile(message.tile);
-        const { basePixels: _basePixels, ...replyTile } = message.tile;
+        const renderMilliseconds = performance.now() - startedAt;
         self.postMessage({
             type: 'tile',
             jobId: message.jobId,
-            passId: message.passId,
-            tile: replyTile,
-            pixels
+            tile: message.tile,
+            pixels,
+            renderMilliseconds
         }, [pixels.buffer]);
     } catch (error) {
         self.postMessage({
             type: 'error',
             jobId: message.jobId,
-            passId: message.passId,
             tile: message.tile,
             message: error?.message || String(error)
         });

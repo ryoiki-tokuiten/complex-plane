@@ -215,26 +215,33 @@ static void pc_sqrt(ce_precise_complex *output, const ce_precise_complex *value)
     mpfr_clears(magnitude, real, imaginary, (mpfr_ptr)0);
 }
 
+static int pc_finite(const ce_precise_complex *value);
+
+static int pc_pow_integer(ce_precise_complex *output, const ce_precise_complex *base, long power) {
+    ce_precise_complex factor, result;
+    const mpfr_prec_t precision = mpfr_get_prec(output->re);
+    pc_init(&factor, precision); pc_init(&result, precision);
+    pc_set(&factor, base); pc_set_d(&result, 1.0, 0.0);
+    unsigned long remaining = power < 0 ? (unsigned long)(-power) : (unsigned long)power;
+    while (remaining) {
+        if (remaining & 1u) pc_mul(&result, &result, &factor);
+        remaining >>= 1u;
+        if (remaining) pc_mul(&factor, &factor, &factor);
+    }
+    int valid = 1;
+    if (power < 0) {
+        pc_set_d(&factor, 1.0, 0.0);
+        valid = pc_div(&result, &factor, &result);
+    }
+    pc_set(output, &result);
+    pc_clear(&factor); pc_clear(&result);
+    return valid && pc_finite(output);
+}
+
 static void pc_pow(ce_precise_complex *output, const ce_precise_complex *base,
                    const ce_precise_complex *exponent, const ce_function_config *config) {
     if (mpfr_zero_p(exponent->im) && mpfr_integer_p(exponent->re) && mpfr_fits_slong_p(exponent->re, MPFR_RNDN)) {
-        long power = mpfr_get_si(exponent->re, MPFR_RNDN);
-        ce_precise_complex factor, result;
-        const mpfr_prec_t precision = mpfr_get_prec(output->re);
-        pc_init(&factor, precision); pc_init(&result, precision);
-        pc_set(&factor, base); pc_set_d(&result, 1.0, 0.0);
-        unsigned long remaining = power < 0 ? (unsigned long)(-power) : (unsigned long)power;
-        while (remaining) {
-            if (remaining & 1u) pc_mul(&result, &result, &factor);
-            remaining >>= 1u;
-            if (remaining) pc_mul(&factor, &factor, &factor);
-        }
-        if (power < 0) {
-            pc_set_d(&factor, 1.0, 0.0);
-            pc_div(&result, &factor, &result);
-        }
-        pc_set(output, &result);
-        pc_clear(&factor); pc_clear(&result);
+        pc_pow_integer(output, base, mpfr_get_si(exponent->re, MPFR_RNDN));
         return;
     }
     const mpfr_prec_t precision = mpfr_get_prec(output->re);
@@ -543,9 +550,77 @@ static int pc_eval_dynamic(ce_precise_complex *output, const ce_map_config *conf
 static int pc_eval_step(ce_precise_complex *output, const ce_map_config *config,
                         const ce_precise_complex *current, const ce_precise_complex *parameter) {
     if (config->dynamic_source_count) return pc_eval_dynamic(output, config, current);
-    return config->use_taylor
-        ? pc_eval_taylor(output, config, current)
-        : pc_eval_function(output, config->function_id, current, parameter, &config->function);
+    if (config->use_taylor) return pc_eval_taylor(output, config, current);
+    if (config->kernel_kind == CE_MAP_KERNEL_QUADRATIC_PARAMETER) {
+        pc_mul(output, current, current);
+        pc_add(output, output, parameter);
+        return pc_finite(output);
+    }
+    if (config->kernel_kind == CE_MAP_KERNEL_NEWTON_CUBIC) {
+        const mpfr_prec_t precision = mpfr_get_prec(output->re);
+        ce_precise_complex inverse;
+        pc_init(&inverse, precision);
+        pc_mul(output, current, current);
+        pc_set_d(&inverse, 1.0 / 3.0, 0.0);
+        const int valid = pc_div(&inverse, &inverse, output);
+        mpfr_mul_d(output->re, current->re, 2.0 / 3.0, MPFR_RNDN);
+        mpfr_mul_d(output->im, current->im, 2.0 / 3.0, MPFR_RNDN);
+        pc_add(output, output, &inverse);
+        pc_clear(&inverse);
+        return valid && pc_finite(output);
+    }
+    if (config->kernel_kind == CE_MAP_KERNEL_POLYNOMIAL_PARAMETER) {
+        const mpfr_prec_t precision = mpfr_get_prec(output->re);
+        ce_precise_complex polynomial, coefficient, parameter_term, constant;
+        pc_init(&polynomial, precision);
+        pc_init(&coefficient, precision);
+        pc_init(&parameter_term, precision);
+        pc_init(&constant, precision);
+        int valid = pc_eval_function(
+            &polynomial, CE_FN_POLYNOMIAL, current, parameter, &config->function
+        );
+        if (valid) {
+            pc_set_complex(&coefficient, config->kernel_polynomial_scale);
+            pc_mul(&polynomial, &polynomial, &coefficient);
+            pc_set_complex(&coefficient, config->kernel_parameter_scale);
+            pc_mul(&parameter_term, parameter, &coefficient);
+            pc_add(output, &polynomial, &parameter_term);
+            pc_set_complex(&constant, config->kernel_constant);
+            pc_add(output, output, &constant);
+            valid = pc_finite(output);
+        }
+        pc_clear(&polynomial);
+        pc_clear(&coefficient);
+        pc_clear(&parameter_term);
+        pc_clear(&constant);
+        return valid;
+    }
+    if (config->kernel_kind == CE_MAP_KERNEL_LAURENT_PARAMETER) {
+        const mpfr_prec_t precision = mpfr_get_prec(output->re);
+        ce_precise_complex coefficient, term_value, parameter_term;
+        pc_init(&coefficient, precision); pc_init(&term_value, precision); pc_init(&parameter_term, precision);
+        pc_set_complex(output, config->kernel_constant);
+        pc_set_complex(&coefficient, config->kernel_parameter_scale);
+        pc_mul(&parameter_term, parameter, &coefficient);
+        pc_add(output, output, &parameter_term);
+        int valid = 1;
+        const ce_function_config *function = &config->function;
+        for (uint32_t index = 0; valid && index < function->algebraic_term_count; ++index) {
+            const ce_algebraic_term *term = &function->algebraic_terms[index];
+            if (!term->factor_count) continue;
+            const ce_algebraic_factor *factor = &function->algebraic_factors[term->factor_offset];
+            if (factor->function_id == CE_FN_C) continue;
+            long exponent = (long)factor->power;
+            if (factor->flags & 1u) exponent = -exponent;
+            valid = pc_pow_integer(&term_value, current, exponent);
+            pc_set_complex(&coefficient, term->coefficient);
+            pc_mul(&term_value, &term_value, &coefficient);
+            pc_add(output, output, &term_value);
+        }
+        pc_clear(&coefficient); pc_clear(&term_value); pc_clear(&parameter_term);
+        return valid && pc_finite(output);
+    }
+    return pc_eval_function(output, config->function_id, current, parameter, &config->function);
 }
 
 static int pc_eval_map_point(ce_precise_complex *output, const ce_map_config *config,
@@ -556,7 +631,7 @@ static int pc_eval_map_point(ce_precise_complex *output, const ce_map_config *co
     if (config->zero_seed) pc_set_d(&current, 0.0, 0.0);
     else pc_set(&current, point);
     int valid = 0;
-    const uint32_t count = config->chain_count ? config->chain_count : 1u;
+    const uint32_t count = config->chain_count;
     for (uint32_t iteration = 0; iteration < count; ++iteration) {
         valid = pc_eval_step(&next, config, &current, point);
         if (!valid) break;
@@ -625,25 +700,12 @@ static int pc_eval_algebraic(ce_precise_complex *output, const ce_precise_comple
         for (uint32_t factor_index = 0; factor_index < term->factor_count && valid; ++factor_index) {
             const ce_algebraic_factor *factor = &config->algebraic_factors[term->factor_offset + factor_index];
             pc_set(&argument, &z);
-            if (factor->step_count) {
-                if (!config->algebraic_steps || factor->step_offset > config->algebraic_step_count ||
-                    factor->step_count > config->algebraic_step_count - factor->step_offset) {
-                    valid = 0;
-                    break;
-                }
-                for (uint32_t step = 0; step < factor->step_count && valid; ++step) {
-                    valid = pc_eval_function(&argument,
-                        config->algebraic_steps[factor->step_offset + step], &argument, c, config);
-                }
-                pc_set(&factor_value, &argument);
-            } else {
-                if (factor->chained_function_id >= 0) {
-                    valid = pc_eval_function(&argument, (uint32_t)factor->chained_function_id,
-                                             &argument, c, config);
-                }
-                if (valid) valid = pc_eval_function(&factor_value, factor->function_id,
-                                                    &argument, c, config);
+            if (factor->chained_function_id >= 0) {
+                valid = pc_eval_function(&argument, (uint32_t)factor->chained_function_id,
+                                         &argument, c, config);
             }
+            if (valid) valid = pc_eval_function(&factor_value, factor->function_id,
+                                                &argument, c, config);
             if (!valid) break;
             if (factor->power != 1.0) {
                 pc_set_d(&exponent, factor->power, 0.0);
@@ -999,7 +1061,8 @@ static int pc_eval_dynamic(ce_precise_complex *output, const ce_map_config *conf
                            const ce_precise_complex *parameter) {
     if (!config->dynamic_point_expression || !config->dynamic_point_count ||
         !config->dynamic_term_expression || !config->dynamic_term_count ||
-        !config->dynamic_variables || !config->dynamic_source_count ||
+        !config->dynamic_variables || !config->dynamic_variable_flags ||
+        !config->dynamic_variable_count || !config->dynamic_source_count ||
         config->dynamic_variable_count > CE_PRECISE_STACK_LIMIT ||
         config->dynamic_reduction > 2u) return 0;
     const mpfr_prec_t precision = mpfr_get_prec(output->re);
@@ -1015,8 +1078,7 @@ static int pc_eval_dynamic(ce_precise_complex *output, const ce_map_config *conf
     int valid = 1, has_value = 0;
     for (uint32_t source = 0; source < config->dynamic_source_count && valid; ++source) {
         for (uint32_t slot = 0; slot < config->dynamic_variable_count; ++slot) {
-            const uint8_t flag = config->dynamic_variable_flags
-                ? config->dynamic_variable_flags[slot] : 0u;
+            const uint8_t flag = config->dynamic_variable_flags[slot];
             if (flag == 1u) pc_set(&variables[slot], parameter);
             else if (flag == 2u) {
                 mpfr_set(variables[slot].re, parameter->re, MPFR_RNDN);
@@ -1058,9 +1120,11 @@ static int pc_eval_dynamic(ce_precise_complex *output, const ce_map_config *conf
 }
 
 static mpfr_prec_t ce_precision(uint32_t requested) {
-    if (requested < CE_MIN_PRECISION_BITS) return CE_MIN_PRECISION_BITS;
-    if (requested > CE_MAX_PRECISION_BITS) return CE_MAX_PRECISION_BITS;
     return (mpfr_prec_t)requested;
+}
+
+static int ce_precision_valid(uint32_t requested) {
+    return requested >= CE_MIN_PRECISION_BITS && requested <= CE_MAX_PRECISION_BITS;
 }
 
 static int ce_set_decimal(mpfr_t value, const char *text) {
@@ -1126,7 +1190,8 @@ int32_t ce_precise_pixel_coordinate(const char *center_re, const char *center_im
                                     double pixel_x, double pixel_y,
                                     char *output_re, uint32_t output_re_capacity,
                                     char *output_im, uint32_t output_im_capacity) {
-    if (!frame_width || !frame_height || !isfinite(pixel_x) || !isfinite(pixel_y) ||
+    if (!frame_width || !frame_height || !ce_precision_valid(precision_bits) ||
+        !isfinite(zoom_power) || !isfinite(pixel_x) || !isfinite(pixel_y) ||
         !output_re || !output_re_capacity || !output_im || !output_im_capacity) return -1;
 
     const mpfr_prec_t precision = ce_precision(precision_bits);
@@ -1184,7 +1249,7 @@ static void pc_viewport_clear(ce_precise_viewport *viewport) {
 static int pc_viewport_set(ce_precise_viewport *viewport,
                            const char *center_re, const char *center_im,
                            double zoom_power, uint32_t width, uint32_t height) {
-    if (!width || !height || !ce_set_decimal(viewport->center_re, center_re) ||
+    if (!width || !height || !isfinite(zoom_power) || !ce_set_decimal(viewport->center_re, center_re) ||
         !ce_set_decimal(viewport->center_im, center_im)) return 0;
     viewport->width = width;
     viewport->height = height;
@@ -1231,7 +1296,8 @@ void *ce_precision_image_context_create(const ce_map_config *config,
                                         const char *view_center_re, const char *view_center_im,
                                         double zoom_power, uint32_t precision_bits,
                                         uint32_t view_width, uint32_t view_height) {
-    if (!config || !(source_width > 0.0) || !(source_height > 0.0)) return NULL;
+    if (!config || !ce_precision_valid(precision_bits) || !isfinite(zoom_power) ||
+        !(source_width > 0.0) || !(source_height > 0.0)) return NULL;
     ce_precision_image_context *context = malloc(sizeof(*context));
     if (!context) return NULL;
     context->config = config;
@@ -1296,7 +1362,8 @@ int32_t ce_project_precise_pixels(const ce_map_config *config,
                                   double output_zoom_power,
                                   uint32_t output_width, uint32_t output_height,
                                   float *output_pixels, uint8_t *valid) {
-    if (!input_pixels || !output_pixels || !valid || (map_points && !config)) return -1;
+    if (!input_pixels || !output_pixels || !valid || !ce_precision_valid(precision_bits) ||
+        (map_points && !config)) return -1;
     const mpfr_prec_t precision = ce_precision(precision_bits);
     ce_precise_viewport input_viewport, output_viewport;
     pc_viewport_init(&input_viewport, precision); pc_viewport_init(&output_viewport, precision);
@@ -1340,7 +1407,8 @@ int32_t ce_project_precise_pixels_to_canvas(const ce_map_config *config,
                                             double output_origin_x, double output_origin_y,
                                             double output_scale_x, double output_scale_y,
                                             float *output_pixels, uint8_t *valid) {
-    if (!input_pixels || !output_pixels || !valid || (map_points && !config) ||
+    if (!input_pixels || !output_pixels || !valid || !ce_precision_valid(precision_bits) ||
+        (map_points && !config) ||
         !isfinite(output_origin_x) || !isfinite(output_origin_y) ||
         !isfinite(output_scale_x) || !isfinite(output_scale_y)) return -1;
     const mpfr_prec_t precision = ce_precision(precision_bits);
@@ -1384,7 +1452,8 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
                                      double output_zoom_power, uint32_t precision_bits,
                                      uint32_t output_width, uint32_t output_height,
                                      float *output_pixels, uint8_t *valid) {
-    if (!source_points || !output_pixels || !valid || (map_points && !config)) return -1;
+    if (!source_points || !output_pixels || !valid || !ce_precision_valid(precision_bits) ||
+        (map_points && !config)) return -1;
     const mpfr_prec_t precision = ce_precision(precision_bits);
     ce_precise_viewport output_viewport;
     pc_viewport_init(&output_viewport, precision);
@@ -1413,6 +1482,8 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
     return 0;
 }
 
+static void pc_free_reference(ce_precise_complex *orbit, uint32_t count);
+
 static ce_precise_complex *pc_build_generalized_reference(const ce_map_config *config,
                                                            const ce_precise_complex *parameter,
                                                            uint32_t count,
@@ -1425,7 +1496,8 @@ static ce_precise_complex *pc_build_generalized_reference(const ce_map_config *c
 
     for (uint32_t index = 0; index < count; ++index) {
         if (!pc_eval_step(&orbit[index + 1u], config, &orbit[index], parameter)) {
-            pc_set(&orbit[index + 1u], &orbit[index]);
+            pc_free_reference(orbit, count);
+            return NULL;
         }
     }
     return orbit;
@@ -1442,64 +1514,13 @@ static ce_precise_trace pc_empty_trace(uint32_t count) {
     return trace;
 }
 
-static ce_precise_trace pc_direct_trace(const ce_map_config *config,
-                                        const ce_precise_complex *point,
-                                        int detect_convergence) {
-    const uint32_t count = config->chain_count ? config->chain_count : 1u;
-    const mpfr_prec_t precision = mpfr_get_prec(point->re);
-    ce_precise_complex current, next, delta;
-    pc_init(&current, precision); pc_init(&next, precision); pc_init(&delta, precision);
-    if (config->zero_seed) pc_set_d(&current, 0.0, 0.0);
-    else pc_set(&current, point);
-    ce_precise_trace trace = pc_empty_trace(count);
-    for (uint32_t iteration = 0; iteration < count; ++iteration) {
-        const int valid = pc_eval_step(&next, config, &current, point);
-        if (!valid || pc_bailout(&next)) {
-            trace.event = 1u;
-            trace.iteration = iteration + 1u;
-            ce_complex converted = pc_to_complex(&next);
-            trace.smooth_iteration = ce_domain_smooth_iteration(iteration, count, converted);
-            if (valid) { trace.value = converted; trace.has_value = 1u; }
-            break;
-        }
-        if (detect_convergence) {
-            pc_sub(&delta, &next, &current);
-            mpfr_t delta_sq, magnitude_sq, scratch;
-            mpfr_inits2(precision, delta_sq, magnitude_sq, scratch, (mpfr_ptr)0);
-            mpfr_sqr(delta_sq, delta.re, MPFR_RNDN);
-            mpfr_sqr(scratch, delta.im, MPFR_RNDN);
-            mpfr_add(delta_sq, delta_sq, scratch, MPFR_RNDN);
-            mpfr_sqr(magnitude_sq, next.re, MPFR_RNDN);
-            mpfr_sqr(scratch, next.im, MPFR_RNDN);
-            mpfr_add(magnitude_sq, magnitude_sq, scratch, MPFR_RNDN);
-            if (mpfr_cmp_ui(magnitude_sq, 1u) < 0) mpfr_set_ui(magnitude_sq, 1u, MPFR_RNDN);
-            mpfr_mul_d(magnitude_sq, magnitude_sq, CE_ATTRACTOR_EPSILON_SQ, MPFR_RNDN);
-            const int converged = mpfr_cmp(delta_sq, magnitude_sq) <= 0;
-            mpfr_clears(delta_sq, magnitude_sq, scratch, (mpfr_ptr)0);
-            if (converged) {
-                trace.event = 2u;
-                trace.iteration = iteration + 1u;
-                trace.smooth_iteration = iteration + 1.0;
-                trace.value = pc_to_complex(&next);
-                trace.has_value = 1u;
-                break;
-            }
-        }
-        pc_set(&current, &next);
-        trace.value = pc_to_complex(&next);
-        trace.has_value = 1u;
-    }
-    pc_clear(&current); pc_clear(&next); pc_clear(&delta);
-    return trace;
-}
-
 static int pc_perturb_generalized_trace(const ce_map_config *config,
                                         const ce_precise_complex *point,
                                         const ce_precise_complex *reference_point,
                                         const ce_precise_complex *reference_orbit,
                                         int detect_convergence,
                                         ce_precise_trace *trace) {
-    const uint32_t count = config->chain_count ? config->chain_count : 1u;
+    const uint32_t count = config->chain_count;
     const mpfr_prec_t precision = mpfr_get_prec(point->re);
     mpfr_t difference;
     mpfr_init2(difference, precision);
@@ -1632,12 +1653,24 @@ typedef struct {
     double cycles;
     uint32_t max_repair_passes;
     uint32_t *repair_count;
-    uint32_t *direct_count;
 } ce_precise_render_context;
 
-static void pc_sample(const ce_precise_render_context *context,
-                      const ce_precise_complex *point,
-                      double *red, double *green, double *blue) {
+struct ce_precise_domain_render_context {
+    ce_precise_render_context sample;
+    ce_precise_complex center;
+    ce_precise_complex *primary_orbit;
+    mpfr_t x_span;
+    mpfr_t y_span;
+    mpfr_prec_t precision;
+    uint32_t frame_width;
+    uint32_t frame_height;
+    uint32_t orbit_count;
+    uint32_t repair_count;
+};
+
+static int pc_sample(const ce_precise_render_context *context,
+                     const ce_precise_complex *point,
+                     double *red, double *green, double *blue) {
     if (context->config->derivative) {
         ce_precise_complex value;
         pc_init(&value, context->precision);
@@ -1649,7 +1682,7 @@ static void pc_sample(const ce_precise_render_context *context,
         ce_domain_color(converted, context->palette_rg, context->palette_b,
                         context->palette_count, context->brightness, context->contrast,
                         context->saturation, context->cycles, red, green, blue);
-        return;
+        return valid;
     }
     ce_precise_trace trace;
     int complete = 0;
@@ -1659,7 +1692,7 @@ static void pc_sample(const ce_precise_render_context *context,
                                                 context->primary_orbit,
                                                 context->orbit_mode >= 2u, &trace);
         if (!complete && context->max_repair_passes) {
-            const uint32_t count = context->config->chain_count ? context->config->chain_count : 1u;
+            const uint32_t count = context->config->chain_count;
             ce_precise_complex *repair_orbit = pc_build_generalized_reference(context->config, point, count, context->precision);
             if (repair_orbit) {
                 *context->repair_count += 1u;
@@ -1669,77 +1702,99 @@ static void pc_sample(const ce_precise_render_context *context,
             }
         }
     }
-    if (!complete) {
-        *context->direct_count += 1u;
-        trace = pc_direct_trace(context->config, point, context->orbit_mode >= 2u);
-    }
+    if (!complete) return 0;
     pc_trace_color(&trace, context->orbit_mode,
-                   context->config->chain_count ? context->config->chain_count : 1u,
+                   context->config->chain_count,
                    context->palette_rg, context->palette_b, context->palette_count,
                    context->brightness, context->contrast, context->saturation,
                    context->cycles, red, green, blue);
+    return 1;
 }
 
-int32_t ce_render_domain_tile_precise(const ce_map_config *config,
-                                      const char *center_re, const char *center_im,
-                                      double zoom_power, uint32_t precision_bits,
-                                      uint32_t frame_width, uint32_t frame_height,
-                                      uint32_t tile_x, uint32_t tile_y,
-                                      uint32_t tile_width, uint32_t tile_height, uint32_t scale,
-                                      uint32_t orbit_mode, const ce_complex *palette_rg,
-                                      const double *palette_b, uint32_t palette_count,
-                                      double brightness, double contrast, double saturation,
-                                      double lightness_cycles, uint32_t quality_only,
-                                      uint32_t max_repair_passes,
-                                      uint32_t *repair_count, uint32_t *direct_count,
-                                      uint8_t *rgba) {
-    if (!config || !center_re || !center_im || !frame_width || !frame_height || !scale ||
-        !tile_width || !tile_height || !palette_rg || !palette_b || palette_count < 2u ||
-        !repair_count || !direct_count || !rgba) return -1;
-    const mpfr_prec_t precision = ce_precision(precision_bits);
-    mpfr_t x_span, y_span, scale_value, scratch;
-    mpfr_inits2(precision, x_span, y_span, scale_value, scratch, (mpfr_ptr)0);
-    ce_precise_complex center, point;
-    pc_init(&center, precision); pc_init(&point, precision);
-    if (!ce_set_decimal(center.re, center_re) || !ce_set_decimal(center.im, center_im)) {
-        pc_clear(&center); pc_clear(&point);
-        mpfr_clears(x_span, y_span, scale_value, scratch, (mpfr_ptr)0);
-        return -2;
+ce_precise_domain_render_context *ce_create_precise_domain_render_context(
+        const ce_map_config *config,
+        const char *center_re, const char *center_im,
+        double zoom_power, uint32_t precision_bits,
+        uint32_t frame_width, uint32_t frame_height,
+        uint32_t orbit_mode, const ce_complex *palette_rg,
+        const double *palette_b, uint32_t palette_count,
+        double brightness, double contrast, double saturation,
+        double lightness_cycles, uint32_t max_repair_passes) {
+    if (!config || !config->chain_count || config->chain_count > 1024u ||
+        !ce_precision_valid(precision_bits) || !isfinite(zoom_power) || orbit_mode > 3u ||
+        !center_re || !center_im || !frame_width || !frame_height ||
+        !palette_rg || !palette_b || palette_count < 2u ||
+        !isfinite(brightness) || !isfinite(contrast) || !isfinite(saturation) ||
+        !isfinite(lightness_cycles)) return NULL;
+
+    ce_precise_domain_render_context *context = calloc(1, sizeof(*context));
+    if (!context) return NULL;
+    context->precision = ce_precision(precision_bits);
+    context->frame_width = frame_width;
+    context->frame_height = frame_height;
+    context->orbit_count = config->chain_count;
+    pc_init(&context->center, context->precision);
+    mpfr_inits2(context->precision, context->x_span, context->y_span, (mpfr_ptr)0);
+
+    mpfr_t scale_value, scratch;
+    mpfr_inits2(context->precision, scale_value, scratch, (mpfr_ptr)0);
+    const int center_valid = ce_set_decimal(context->center.re, center_re) &&
+        ce_set_decimal(context->center.im, center_im);
+    if (center_valid) {
+        mpfr_set_d(scratch, -zoom_power, MPFR_RNDN);
+        mpfr_set_ui(scale_value, 10u, MPFR_RNDN);
+        mpfr_pow(scale_value, scale_value, scratch, MPFR_RNDN);
+        mpfr_mul_d(context->x_span, scale_value, 7.0, MPFR_RNDN);
+        mpfr_mul_ui(context->y_span, context->x_span, frame_height, MPFR_RNDN);
+        mpfr_div_ui(context->y_span, context->y_span, frame_width, MPFR_RNDN);
+        context->primary_orbit = pc_build_generalized_reference(
+            config, &context->center, context->orbit_count, context->precision
+        );
     }
-    mpfr_set_d(scratch, -zoom_power, MPFR_RNDN);
-    mpfr_set_ui(scale_value, 10u, MPFR_RNDN);
-    mpfr_pow(scale_value, scale_value, scratch, MPFR_RNDN);
-    mpfr_mul_d(x_span, scale_value, 7.0, MPFR_RNDN);
-    mpfr_mul_ui(y_span, x_span, frame_height, MPFR_RNDN);
-    mpfr_div_ui(y_span, y_span, frame_width, MPFR_RNDN);
-    *repair_count = 0u;
-    *direct_count = 0u;
+    mpfr_clears(scale_value, scratch, (mpfr_ptr)0);
 
-    const uint32_t count = config->chain_count ? config->chain_count : 1u;
-    ce_precise_complex *primary_orbit = pc_build_generalized_reference(config, &center, count, precision);
-
-    if (!primary_orbit) {
-        const double c_re = mpfr_get_d(center.re, MPFR_RNDN);
-        const double c_im = mpfr_get_d(center.im, MPFR_RNDN);
-        const double x_span_d = mpfr_get_d(x_span, MPFR_RNDN);
-        const double y_span_d = mpfr_get_d(y_span, MPFR_RNDN);
-        pc_clear(&center); pc_clear(&point);
-        mpfr_clears(x_span, y_span, scale_value, scratch, (mpfr_ptr)0);
-        return ce_render_domain_tile(config, c_re - x_span_d * 0.5, c_re + x_span_d * 0.5,
-                                     c_im - y_span_d * 0.5, c_im + y_span_d * 0.5,
-                                     frame_width, frame_height, tile_x, tile_y,
-                                     tile_width, tile_height, scale, orbit_mode,
-                                     palette_rg, palette_b, palette_count,
-                                     brightness, contrast, saturation, lightness_cycles,
-                                     quality_only, rgba);
+    if (!center_valid || !context->primary_orbit) {
+        mpfr_clears(context->x_span, context->y_span, (mpfr_ptr)0);
+        pc_clear(&context->center);
+        free(context);
+        return NULL;
     }
 
-    const ce_precise_render_context context = {
-        config, &center, primary_orbit, precision, orbit_mode,
+    context->sample = (ce_precise_render_context){
+        config, &context->center, context->primary_orbit, context->precision, orbit_mode,
         palette_rg, palette_b, palette_count,
         brightness, contrast, saturation, lightness_cycles,
-        max_repair_passes, repair_count, direct_count
+        max_repair_passes, &context->repair_count
     };
+    return context;
+}
+
+void ce_destroy_precise_domain_render_context(ce_precise_domain_render_context *context) {
+    if (!context) return;
+    pc_free_reference(context->primary_orbit, context->orbit_count);
+    mpfr_clears(context->x_span, context->y_span, (mpfr_ptr)0);
+    pc_clear(&context->center);
+    free(context);
+}
+
+int32_t ce_render_precise_domain_tile(ce_precise_domain_render_context *renderer,
+                                      uint32_t tile_x, uint32_t tile_y,
+                                      uint32_t tile_width, uint32_t tile_height, uint32_t scale,
+                                      uint32_t adaptive_quality,
+                                      uint32_t *repair_count, uint8_t *rgba) {
+    if (!renderer || !scale || !tile_width || !tile_height || !repair_count || !rgba) return -1;
+    if (adaptive_quality && (scale != 1u || tile_width > 512u || tile_height > 512u)) return -2;
+    renderer->repair_count = 0u;
+    mpfr_t scratch;
+    mpfr_init2(scratch, renderer->precision);
+    ce_precise_complex point;
+    pc_init(&point, renderer->precision);
+    const ce_precise_complex center = renderer->center;
+    mpfr_srcptr x_span = renderer->x_span;
+    mpfr_srcptr y_span = renderer->y_span;
+    const uint32_t frame_width = renderer->frame_width;
+    const uint32_t frame_height = renderer->frame_height;
+    const ce_precise_render_context context = renderer->sample;
 
     // Base pass: evaluate 1 sample per pixel
     for (uint32_t y = 0; y < tile_height; ++y) {
@@ -1749,7 +1804,11 @@ int32_t ce_render_domain_tile_precise(const ce_map_config *config,
             ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
                                 (tile_y + y + 0.5) * scale - 0.5, 1, scratch);
             double sample_red, sample_green, sample_blue;
-            pc_sample(&context, &point, &sample_red, &sample_green, &sample_blue);
+            if (!pc_sample(&context, &point, &sample_red, &sample_green, &sample_blue)) {
+                pc_clear(&point);
+                mpfr_clear(scratch);
+                return -4;
+            }
             const uint32_t output_index = (y * tile_width + x) * 4u;
             rgba[output_index] = ce_domain_byte(sample_red);
             rgba[output_index + 1u] = ce_domain_byte(sample_green);
@@ -1759,9 +1818,11 @@ int32_t ce_render_domain_tile_precise(const ce_map_config *config,
     }
 
     // Quality refinement: adaptive 4-neighbor edge detection and 4x4 (16-sample) subpixel anti-aliasing
-    if (quality_only && scale == 1 && tile_width <= 512 && tile_height <= 512) {
-        uint8_t *edge_mask = (uint8_t *)calloc(tile_width * tile_height, sizeof(uint8_t));
-        if (edge_mask) {
+    if (adaptive_quality && scale == 1 && tile_width <= 512 && tile_height <= 512) {
+        static uint8_t edge_mask[512 * 512];
+        const uint32_t total_tile_pixels = tile_width * tile_height;
+        memset(edge_mask, 0, total_tile_pixels);
+        {
             const int threshold = 80;
             int edge_count = 0;
 
@@ -1797,40 +1858,42 @@ int32_t ce_render_domain_tile_precise(const ce_map_config *config,
             }
 
             if (edge_count > 0) {
-                static const double offsets[4] = { -0.375, -0.125, 0.125, 0.375 };
+                static const double sub_dx[4] = { -0.375, 0.125, 0.375, -0.125 };
+                static const double sub_dy[4] = { -0.125, -0.375, 0.125, 0.375 };
                 for (uint32_t y = 0; y < tile_height; ++y) {
                     const uint32_t row = y * tile_width;
                     for (uint32_t x = 0; x < tile_width; ++x) {
                         if (!edge_mask[row + x]) continue;
                         double sum_red = 0.0, sum_green = 0.0, sum_blue = 0.0;
-                        for (int sy = 0; sy < 4; ++sy) {
-                            const double sub_y = y + 0.5 + offsets[sy];
-                            for (int sx = 0; sx < 4; ++sx) {
-                                const double sub_x = x + 0.5 + offsets[sx];
-                                ce_pixel_coordinate(point.re, center.re, x_span, frame_width,
-                                                    (tile_x + sub_x) * scale - 0.5, 0, scratch);
-                                ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
-                                                    (tile_y + sub_y) * scale - 0.5, 1, scratch);
-                                double sub_r, sub_g, sub_b;
-                                pc_sample(&context, &point, &sub_r, &sub_g, &sub_b);
-                                sum_red += sub_r;
-                                sum_green += sub_g;
-                                sum_blue += sub_b;
+                        for (int s = 0; s < 4; ++s) {
+                            const double sub_y = y + 0.5 + sub_dy[s];
+                            const double sub_x = x + 0.5 + sub_dx[s];
+                            ce_pixel_coordinate(point.re, center.re, x_span, frame_width,
+                                                (tile_x + sub_x) * scale - 0.5, 0, scratch);
+                            ce_pixel_coordinate(point.im, center.im, y_span, frame_height,
+                                                (tile_y + sub_y) * scale - 0.5, 1, scratch);
+                            double sub_r, sub_g, sub_b;
+                            if (!pc_sample(&context, &point, &sub_r, &sub_g, &sub_b)) {
+                                pc_clear(&point);
+                                mpfr_clear(scratch);
+                                return -4;
                             }
+                            sum_red += sub_r;
+                            sum_green += sub_g;
+                            sum_blue += sub_b;
                         }
                         const uint32_t output_index = (row + x) * 4u;
-                        rgba[output_index] = ce_domain_byte(sum_red * (1.0 / 16.0));
-                        rgba[output_index + 1u] = ce_domain_byte(sum_green * (1.0 / 16.0));
-                        rgba[output_index + 2u] = ce_domain_byte(sum_blue * (1.0 / 16.0));
+                        rgba[output_index] = ce_domain_byte(sum_red * 0.25);
+                        rgba[output_index + 1u] = ce_domain_byte(sum_green * 0.25);
+                        rgba[output_index + 2u] = ce_domain_byte(sum_blue * 0.25);
                         rgba[output_index + 3u] = 255u;
                     }
                 }
             }
-            free(edge_mask);
         }
     }
-    pc_free_reference(primary_orbit, count);
-    pc_clear(&center); pc_clear(&point);
-    mpfr_clears(x_span, y_span, scale_value, scratch, (mpfr_ptr)0);
+    *repair_count = renderer->repair_count;
+    pc_clear(&point);
+    mpfr_clear(scratch);
     return 0;
 }

@@ -7,6 +7,7 @@ import {
     buildTransformationGraphData
 } from '../js/rendering/transformation-graph.js';
 import { createPlanarTransformedShapeRenderJob } from '../js/rendering/draw-planar.js';
+import { resolveActiveMap } from '../js/math/active-map.js';
 
 const STATE_KEYS = [
     'currentFunction', 'currentInputShape', 'gridDensity', 'graphViewEnabled',
@@ -44,7 +45,7 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
                 && curve.fourierReScale > 0 && curve.fourierImScale > 0
         ));
         assert.ok(horizontal.curves.every(curve => curve.label.startsWith('Im(z) = ')));
-        assert.ok(createPlanarTransformedShapeRenderJob(value => value).pointSets
+        assert.ok(createPlanarTransformedShapeRenderJob(resolveActiveMap()).pointSets
             .every(pointSet => pointSet.role === 'grid-horizontal'));
         const horizontalOffsets = horizontal.curves.map(curve => curve.samples[0].input.im);
         assert.deepEqual(horizontalOffsets, [...horizontalOffsets].sort((left, right) => left - right));
@@ -60,7 +61,7 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
         state.graphGridFamily = 'secondary';
         const vertical = buildFullGridTransformationGraphData(zPlaneParams);
         assert.ok(vertical.curves.every(curve => curve.role === 'grid-vertical'));
-        assert.ok(createPlanarTransformedShapeRenderJob(value => value).pointSets
+        assert.ok(createPlanarTransformedShapeRenderJob(resolveActiveMap()).pointSets
             .every(pointSet => pointSet.role === 'grid-vertical'));
 
         state.currentInputShape = 'grid_polar';
@@ -128,7 +129,7 @@ test('locked layers connect the selected grid shape to the opposite family at ex
         assertExactConnections(horizontal);
         assert.equal(horizontal.lockedCurve.role, 'grid-horizontal');
         assert.ok(horizontal.curves.slice(1).every(curve => curve.role === 'grid-vertical'));
-        const horizontalInput = createPlanarTransformedShapeRenderJob(value => value).pointSets;
+        const horizontalInput = createPlanarTransformedShapeRenderJob(resolveActiveMap()).pointSets;
         assert.equal(horizontalInput.filter(set => set.role === 'grid-horizontal').length, 1);
         assert.equal(horizontalInput.filter(set => set.role === 'grid-vertical').length, state.gridDensity + 1);
 

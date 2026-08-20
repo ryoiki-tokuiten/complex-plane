@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { traceStreamlines } from '../js/analysis/streamline.js';
 import { buildNativeVectorField, nativeMapOptions } from '../js/native/complex-engine.js';
 import { state } from '../js/store/state.js';
+import { completeNativeMapOptions } from './helpers/native-map.js';
 
 const planeParams = Object.freeze({
     currentVisXRange: Object.freeze([-2, 2]),
@@ -29,15 +30,15 @@ function factor(func, overrides = {}) {
 }
 
 test('native streamline tracing stops immediately on invalid vectors', () => {
-    const paths = traceStreamlines([{ x: 0, y: 0 }], {
-        functionKey: 'ln', chainCount: 1
-    }, planeParams, streamlineState);
+    const paths = traceStreamlines([{ x: 0, y: 0 }], completeNativeMapOptions({
+        functionKey: 'ln', chainingEnabled: false
+    }), planeParams, streamlineState);
     assert.deepEqual(paths, [[]]);
 });
 
 test('native vector-field job omits invalid map samples', () => {
     const vectors = buildNativeVectorField({
-        map: { functionKey: 'ln', chainCount: 1 },
+        map: completeNativeMapOptions({ functionKey: 'ln', chainingEnabled: false }),
         xRange: [-1, 1], yRange: [-1, 1], density: 8, inverse: false
     });
     assert.ok(vectors.length > 0);
@@ -46,13 +47,13 @@ test('native vector-field job omits invalid map samples', () => {
 
 test('native normalized RK2 streamline preserves circular flow geometry', () => {
     const stepSize = 0.001;
-    const map = {
-        functionKey: 'algebraic_chaining', chainCount: 1,
+    const map = completeNativeMapOptions({
+        functionKey: 'algebraic_chaining', chainingEnabled: false,
         algebraicChainingZExpr: 'z',
         polynomialN: 1,
         polynomialCoeffs: [{ re: 0, im: 0 }, { re: 1, im: 0 }],
         algebraicChainingTerms: [{ coeff: { re: 0, im: 1 }, factors: [factor('polynomial')] }]
-    };
+    });
     const [path] = traceStreamlines(
         [{ x: 1, y: 0 }], map,
         planeParams,

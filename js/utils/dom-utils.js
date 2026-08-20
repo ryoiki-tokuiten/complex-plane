@@ -6,10 +6,11 @@ import { synchronizePreciseViewport } from '../native/precise-viewport.js';
 import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
 import { eventBus } from '../store/events.js';
 import { registerControls } from '../ui/control-registry.js';
+import { requireInteger } from './numeric-contracts.js';
 
 const { controls } = context;
 
-let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas, wDomainColorCanvas, zDomainColorCtx, wDomainColorCtx;
+let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas, zDomainColorCtx;
 let wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList, sphereViewWParamsList;
 
 export function formatTaylorNumericValue(value) {
@@ -42,13 +43,8 @@ export function setupDOMReferences() {
     controls.zPlaneCanvas = zCanvas;
     controls.wPlaneCanvas = wCanvas;
 
-    zDomainColorCanvas = document.createElement('canvas'); wDomainColorCanvas = document.createElement('canvas');
-    zDomainColorCtx = zDomainColorCanvas.getContext('2d', { willReadFrequently: true });
-    zDomainColorCtx.imageSmoothingEnabled = true;
-    zDomainColorCtx.imageSmoothingQuality = 'high';
-    wDomainColorCtx = wDomainColorCanvas.getContext('2d', { willReadFrequently: true });
-    wDomainColorCtx.imageSmoothingEnabled = true;
-    wDomainColorCtx.imageSmoothingQuality = 'high';
+    zDomainColorCanvas = document.createElement('canvas');
+    zDomainColorCtx = zDomainColorCanvas.getContext('2d');
 
     wCanvasList = [wCanvas];
     wCtxList = [wCtx];
@@ -81,9 +77,7 @@ export function setupDOMReferences() {
     context.zCtx = zCtx;
     context.wCtx = wCtx;
     context.zDomainColorCanvas = zDomainColorCanvas;
-    context.wDomainColorCanvas = wDomainColorCanvas;
     context.zDomainColorCtx = zDomainColorCtx;
-    context.wDomainColorCtx = wDomainColorCtx;
     context.wCanvasList = wCanvasList;
     context.wCtxList = wCtxList;
     context.wPlaneParamsList = wPlaneParamsList;
@@ -108,8 +102,10 @@ export function setupCanvasBaseParams(planeParams, canvasElement, sphereViewObj,
             newHeight = DEFAULT_CANVAS_HEIGHT;
         }
     }
-    canvasElement.width = newWidth;
-    canvasElement.height = newHeight;
+    newWidth = Math.max(1, Math.round(newWidth));
+    newHeight = Math.max(1, Math.round(newHeight));
+    if (canvasElement.width !== newWidth) canvasElement.width = newWidth;
+    if (canvasElement.height !== newHeight) canvasElement.height = newHeight;
     planeParams.width = canvasElement.width;
     planeParams.height = canvasElement.height;
 
@@ -117,9 +113,10 @@ export function setupCanvasBaseParams(planeParams, canvasElement, sphereViewObj,
     sphereViewObj.centerX = planeParams.width / 2;
     sphereViewObj.centerY = planeParams.height / 2;
 
-    const domainColorCanvas = (canvasElement === zCanvas) ? zDomainColorCanvas : wDomainColorCanvas;
-    domainColorCanvas.width = planeParams.width;
-    domainColorCanvas.height = planeParams.height;
+    if (canvasElement === zCanvas) {
+        if (zDomainColorCanvas.width !== planeParams.width) zDomainColorCanvas.width = planeParams.width;
+        if (zDomainColorCanvas.height !== planeParams.height) zDomainColorCanvas.height = planeParams.height;
+    }
 }
 
 export function setupVisualParameters(updateZFromSlider = true, updateWFromSlider = true) {
@@ -129,8 +126,8 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
     let zWorldCenterX = (zPlaneParams.currentVisXRange[0] + zPlaneParams.currentVisXRange[1]) / 2;
     let zWorldCenterY = (zPlaneParams.currentVisYRange[0] + zPlaneParams.currentVisYRange[1]) / 2;
 
-    let wWorldCenterX = (wPlaneParams.xRange[0] + wPlaneParams.xRange[1]) / 2;
-    let wWorldCenterY = (wPlaneParams.yRange[0] + wPlaneParams.yRange[1]) / 2;
+    let wWorldCenterX = (wPlaneParams.currentVisXRange[0] + wPlaneParams.currentVisXRange[1]) / 2;
+    let wWorldCenterY = (wPlaneParams.currentVisYRange[0] + wPlaneParams.currentVisYRange[1]) / 2;
 
     setupCanvasBaseParams(zPlaneParams, zCanvas, sphereViewParams.z, zIsFullscreen);
 
@@ -179,14 +176,14 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
             const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
             const currentXSpanW = initialXSpanW / zoomW;
             const currentYSpanW = initialYSpanW / zoomW;
-            wPlaneParams.xRange[0] = wWorldCenterX - currentXSpanW / 2;
-            wPlaneParams.xRange[1] = wWorldCenterX + currentXSpanW / 2;
-            wPlaneParams.yRange[0] = wWorldCenterY - currentYSpanW / 2;
-            wPlaneParams.yRange[1] = wWorldCenterY + currentYSpanW / 2;
+            wPlaneParams.currentVisXRange[0] = wWorldCenterX - currentXSpanW / 2;
+            wPlaneParams.currentVisXRange[1] = wWorldCenterX + currentXSpanW / 2;
+            wPlaneParams.currentVisYRange[0] = wWorldCenterY - currentYSpanW / 2;
+            wPlaneParams.currentVisYRange[1] = wWorldCenterY + currentYSpanW / 2;
         }
     }
-    const xSpanW = wPlaneParams.xRange[1] - wPlaneParams.xRange[0];
-    const ySpanW = wPlaneParams.yRange[1] - wPlaneParams.yRange[0];
+    const xSpanW = wPlaneParams.currentVisXRange[1] - wPlaneParams.currentVisXRange[0];
+    const ySpanW = wPlaneParams.currentVisYRange[1] - wPlaneParams.currentVisYRange[0];
     if (!wIsPrecise) {
         if (xSpanW === 0 || ySpanW === 0) { return; }
         const scaleXW = wPlaneParams.width / xSpanW;
@@ -201,8 +198,8 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
     if (!wIsPrecise && wPlaneParamsList && wPlaneParamsList.length > 1) {
         for (let i = 1; i < wPlaneParamsList.length; i++) {
             const p = wPlaneParamsList[i];
-            p.xRange = [...wPlaneParams.xRange];
-            p.yRange = [...wPlaneParams.yRange];
+            p.currentVisXRange = [...wPlaneParams.currentVisXRange];
+            p.currentVisYRange = [...wPlaneParams.currentVisYRange];
             // Recompute scale and origin per-canvas using its own dimensions
             const pScaleX = p.width / xSpanW;
             const pScaleY = p.height / ySpanW;
@@ -275,7 +272,11 @@ export function updateChainingColumns(count) {
         sphereViewWParamsList = [sphereViewParams.w];
     }
     
-    const displayCount = count > 25 ? 1 : Math.max(1, Math.min(25, Math.floor(count)));
+    const chainCount = requireInteger(count, 'Chaining column count');
+    if (chainCount < 1 || chainCount > 1024) {
+        throw new Error('Chaining column count must be from one through 1024.');
+    }
+    const displayCount = chainCount > 25 ? 1 : chainCount;
     const canvasesRow = document.querySelector('.canvas-row.two-column-layout');
     if (!canvasesRow) return;
 
@@ -347,7 +348,8 @@ export function updateChainingColumns(count) {
         const params = {
             width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT,
             origin: {x:0, y:0}, scale: {x:1, y:1},
-            xRange: [...wPlaneInitialRanges.x], yRange: [...wPlaneInitialRanges.y]
+            currentVisXRange: [...wPlaneInitialRanges.x],
+            currentVisYRange: [...wPlaneInitialRanges.y]
         };
         
         const sphereParams = { 

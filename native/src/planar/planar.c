@@ -153,7 +153,16 @@ int32_t ce_build_planar_line(const ce_map_config *config,
                              double branch_cut_angle, const ce_complex *branch_cut_points,
                              uint32_t branch_cut_point_count, ce_complex *output,
                              uint32_t output_capacity) {
-    if (!config || !output || !sample_count || !ensure_scratch(sample_count + 1u)) return -1;
+    if (!config || !output || !sample_count || sample_count > 1000000u ||
+        !isfinite(start_re) || !isfinite(start_im) || !isfinite(end_re) || !isfinite(end_im) ||
+        !isfinite(scale_x) || scale_x == 0.0 || !isfinite(scale_y) || scale_y == 0.0 ||
+        !isfinite(render_limit) || !(render_limit > 0.0) ||
+        !isfinite(jump_threshold_sq) || jump_threshold_sq < 0.0 ||
+        !isfinite(tolerance_sq) || tolerance_sq < 0.0 ||
+        has_branch_cuts > 1u || branch_cut_is_drawn > 1u || !isfinite(branch_cut_angle) ||
+        (has_branch_cuts && branch_cut_is_drawn &&
+         (!branch_cut_points || branch_cut_point_count < 2u)) ||
+        !ensure_scratch(sample_count + 1u)) return -1;
     const ce_complex start = {start_re, start_im};
     const ce_complex end = {end_re, end_im};
     const uint32_t point_count = sample_count + 1u;
@@ -218,7 +227,14 @@ int32_t ce_build_planar_lines(const ce_map_config *config,
                               double branch_cut_angle, const ce_complex *branch_cut_points,
                               uint32_t branch_cut_point_count, ce_complex *output,
                               uint32_t output_capacity, uint32_t *line_offsets) {
-    if (!config || !starts || !ends || !sample_counts || !output || !line_offsets) return -1;
+    if (!config || !starts || !ends || !sample_counts || !line_count || !output || !line_offsets ||
+        !isfinite(scale_x) || scale_x == 0.0 || !isfinite(scale_y) || scale_y == 0.0 ||
+        !isfinite(render_limit) || !(render_limit > 0.0) ||
+        !isfinite(jump_threshold_sq) || jump_threshold_sq < 0.0 ||
+        !isfinite(tolerance_sq) || tolerance_sq < 0.0 || has_branch_cuts > 1u ||
+        branch_cut_is_drawn > 1u || !isfinite(branch_cut_angle) ||
+        (has_branch_cuts && branch_cut_is_drawn &&
+         (!branch_cut_points || branch_cut_point_count < 2u))) return -1;
     uint32_t output_count = 0;
     line_offsets[0] = 0;
     for (uint32_t line = 0; line < line_count; ++line) {
@@ -304,7 +320,16 @@ int32_t ce_build_planar_polyline(const ce_map_config *config,
                                  double branch_cut_angle, const ce_complex *branch_cut_points,
                                  uint32_t branch_cut_point_count, ce_complex *output,
                                  uint32_t output_capacity) {
-    if (!config || !input || !output) return -1;
+    if (!config || !input || !input_count || !output || !output_capacity ||
+        !isfinite(origin_x) || !isfinite(origin_y) ||
+        !isfinite(scale_x) || scale_x == 0.0 || !isfinite(scale_y) || scale_y == 0.0 ||
+        !isfinite(render_limit) || !(render_limit > 0.0) ||
+        !isfinite(jump_threshold_sq) || jump_threshold_sq < 0.0 ||
+        !isfinite(tolerance_sq) || tolerance_sq < 0.0 ||
+        !isfinite(max_segment_sq) || !(max_segment_sq > 0.0) || max_depth > 20u ||
+        has_branch_cuts > 1u || branch_cut_is_drawn > 1u || !isfinite(branch_cut_angle) ||
+        (has_branch_cuts && branch_cut_is_drawn &&
+         (!branch_cut_points || branch_cut_point_count < 2u))) return -1;
     adaptive_job job = {config, origin_x, origin_y, scale_x, scale_y, render_limit,
                         tolerance_sq, max_segment_sq, max_depth, output, output_capacity, 0, 0};
     int has_previous = 0;

@@ -1,6 +1,6 @@
 import { state, zPlaneParams } from '../store/state.js';
 import {
-    COLOR_SPHERE_OUTLINE, COLOR_PROBE_MARKER, COLOR_PROBE_NEIGHBORHOOD, COLOR_SPHERE_GRID,
+    COLOR_PROBE_MARKER, COLOR_PROBE_NEIGHBORHOOD, COLOR_SPHERE_GRID,
     COLOR_PROBE_CONFORMAL_LINE_Z_H, COLOR_PROBE_CONFORMAL_LINE_Z_V,
     COLOR_PROBE_CONFORMAL_LINE_W_H, COLOR_PROBE_CONFORMAL_LINE_W_V
 } from '../constants/colors.js';
@@ -13,25 +13,24 @@ import {
 import {
     buildNativeSphereLines,
     buildNativeSphereProbe,
-    nativeMapOptions,
     projectNativeSpherePoints
 } from '../native/complex-engine.js';
+import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { isRasterInputShape } from '../utils/raster-media.js';
 import { generateCurrentInputShapePointSets } from './shape-generators.js';
 
 function sphereMap(map, isMapped) {
     if (!isMapped) return null;
     if (!map) throw new Error('Mapped sphere geometry requires a native map.');
-    return nativeMapOptions(state, {
-        stage: map.stage,
-        derivativeMode: map.presentation === 'derivative',
-        ...(map.evaluate?.nativeMapOptions || map.nativeMapOptions || {})
-    });
+    return nativeOptionsForActiveMap(map);
 }
 
 export function drawRiemannSphereBase(ctx, sphere) {
     ctx.save();
-    ctx.strokeStyle = state.gridColor1 || COLOR_SPHERE_OUTLINE;
+    if (typeof state.gridColor1 !== 'string' || !state.gridColor1) {
+        throw new Error('Riemann sphere rendering requires a primary grid color.');
+    }
+    ctx.strokeStyle = state.gridColor1;
     ctx.lineWidth = 1.5;
     ctx.globalAlpha = 1;
     ctx.beginPath();

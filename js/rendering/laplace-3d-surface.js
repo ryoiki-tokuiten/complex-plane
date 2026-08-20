@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
 import { buildNativeLaplaceSurface } from '../native/complex-engine.js';
 import { disposeThreeObject } from './three-utils.js';
+import { requireFiniteNumber } from '../utils/numeric-contracts.js';
 
 const BACKGROUND = 0x0b0914;
 const CAMERA_HOME = Object.freeze({ x: 7.8, y: 6.3, z: 8.6 });
@@ -10,8 +11,6 @@ const SURFACE_WIDTH = 6.8;
 const SURFACE_DEPTH = 6.2;
 const SURFACE_HEIGHT = 4.4;
 const rendererByContainer = new WeakMap();
-
-const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
 
 function clearGroup(group) {
     while (group.children.length) {
@@ -22,8 +21,21 @@ function clearGroup(group) {
 }
 
 function coordinate(value, min, max, span) {
-    const range = max - min || 1;
+    const range = max - min;
+    if (![value, min, max, span].every(Number.isFinite) || range <= 0) {
+        throw new Error('Laplace surface coordinates require finite increasing bounds.');
+    }
     return ((value - (min + max) * 0.5) / range) * span;
+}
+
+function laplaceFeatures(value, label) {
+    if (!Array.isArray(value)) throw new Error(`${label} must be an array.`);
+    value.forEach((point, index) => {
+        if (!Number.isFinite(point?.sigma) || !Number.isFinite(point?.omega)) {
+            throw new Error(`${label} ${index} requires finite sigma and omega coordinates.`);
+        }
+    });
+    return value;
 }
 
 function makeAxisLabel(text, color) {
@@ -58,7 +70,10 @@ class LaplaceSurfaceRenderer {
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         this.renderer.setClearColor(BACKGROUND);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setPixelRatio(Math.min(
+            requireFiniteNumber(window.devicePixelRatio, 'Browser device pixel ratio'),
+            2
+        ));
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.container.replaceChildren(this.renderer.domElement);
 
@@ -110,7 +125,12 @@ class LaplaceSurfaceRenderer {
     }
 
     setHeightAxisLabel(mode) {
-        const text = mode === 'phase' ? '∠F(s)' : mode === 'combined' ? '|F(s)| + ∠F(s)' : '|F(s)|';
+        const text = ({
+            magnitude: '|F(s)|',
+            phase: '∠F(s)',
+            combined: '|F(s)| + ∠F(s)'
+        })[mode];
+        if (!text) throw new Error(`Unsupported Laplace surface mode: ${mode}.`);
         if (this.heightAxisLabelText === text) return;
         this.heightAxisLabelText = text;
 
@@ -133,9 +153,11 @@ class LaplaceSurfaceRenderer {
     }
 
     update(surface, options) {
+        const poles = laplaceFeatures(state.laplacePoles, 'Laplace poles');
+        const zeros = laplaceFeatures(state.laplaceZeros, 'Laplace zeros');
         const markers = [
-            ...(state.laplacePoles || []).map(point => `p:${point.sigma}:${point.omega}`),
-            ...(state.laplaceZeros || []).map(point => `z:${point.sigma}:${point.omega}`)
+            ...poles.map(point => `p:${point.sigma}:${point.omega}`),
+            ...zeros.map(point => `z:${point.sigma}:${point.omega}`)
         ].join('|');
         const signature = `${options.mode}|${options.clipHeight}|${options.showPolesZeros}|${options.showFourierLine}|${markers}`;
         if (surface === this.surface && signature === this.signature) {
@@ -234,7 +256,7 @@ class LaplaceSurfaceRenderer {
 
         if (!options.showPolesZeros) return;
         const markerHeight = SURFACE_HEIGHT + 0.16;
-        for (const pole of state.laplacePoles || []) {
+        for (const pole of laplaceFeatures(state.laplacePoles, 'Laplace poles')) {
             const marker = new THREE.Mesh(
                 new THREE.OctahedronGeometry(0.14, 1),
                 new THREE.MeshBasicMaterial({ color: 0xfb923c })
@@ -242,7 +264,7 @@ class LaplaceSurfaceRenderer {
             marker.position.copy(toScene(pole.sigma, pole.omega, markerHeight));
             this.overlayGroup.add(marker);
         }
-        for (const zero of state.laplaceZeros || []) {
+        for (const zero of laplaceFeatures(state.laplaceZeros, 'Laplace zeros')) {
             const marker = new THREE.Mesh(
                 new THREE.TorusGeometry(0.12, 0.032, 8, 20),
                 new THREE.MeshBasicMaterial({ color: 0x67e8f9 })
@@ -309,11 +331,11 @@ export function drawLaplace3DSurface(containerId) {
 
     const renderer = getRenderer(container);
     renderer.update(surface, {
-        mode: state.laplaceVizMode || 'magnitude',
-        clipHeight: Math.max(0.001, finite(state.laplaceClipHeight, 10)),
-        showPolesZeros: state.laplaceShowPolesZeros !== false,
-        showFourierLine: state.laplaceShowFourierLine !== false,
-        showROC: state.laplaceShowROC !== false
+        mode: state.laplaceVizMode,
+        clipHeight: requireFiniteNumber(state.laplaceClipHeight, 'Laplace clip height'),
+        showPolesZeros: state.laplaceShowPolesZeros === true,
+        showFourierLine: state.laplaceShowFourierLine === true,
+        showROC: state.laplaceShowROC === true
     });
 }
 

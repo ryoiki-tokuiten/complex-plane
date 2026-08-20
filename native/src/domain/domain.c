@@ -1,16 +1,14 @@
 #include "complex_engine.h"
+#include "ce_limits.h"
 #include "domain_internal.h"
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define CE_PI 3.141592653589793238462643383279502884
 #define CE_TWO_PI (2.0 * CE_PI)
 #define CE_INV_TWO_PI (1.0 / (2.0 * CE_PI))
-#define CE_ESCAPE_RADIUS 1e4
-#define CE_ESCAPE_RADIUS_SQ 1e8
-#define CE_CHAIN_BAILOUT 1e8
-#define CE_MAX_FINITE 1e30
 #define CE_ATTRACTOR_EPSILON_SQ 1e-14
 #define CE_HUE_LUT_SIZE 4096
 #define CE_INV_HUE_LUT_SIZE (1.0 / (double)CE_HUE_LUT_SIZE)
@@ -31,6 +29,9 @@ typedef struct {
     double contrast;
     double saturation;
     double cycles;
+    double average_red;
+    double average_green;
+    double average_blue;
 } ce_color_lut;
 
 // Fast Chebyshev minimax polynomial approximation for atan2(y, x).
@@ -52,6 +53,23 @@ static inline double ce_clamp(double value, double low, double high) {
     return value < low ? low : value > high ? high : value;
 }
 
+static inline double ce_log_magnitude(ce_complex value) {
+    const double scale = fmax(fabs(value.re), fabs(value.im));
+    if (scale == 0.0) return CE_DOMAIN_LOG_MAGNITUDE_MIN;
+    const double scaled_re = value.re / scale;
+    const double scaled_im = value.im / scale;
+    return log(scale) + 0.5 * log(scaled_re * scaled_re + scaled_im * scaled_im);
+}
+
+static inline double ce_magnitude_tone(double log_magnitude, double cycles) {
+    if (cycles <= 0.0001) return 0.5;
+    const double normalized = ce_clamp(
+        (log_magnitude - CE_DOMAIN_LOG_MAGNITUDE_MIN) * CE_DOMAIN_INV_LOG_MAGNITUDE_SPAN,
+        0.0, 1.0
+    );
+    return ce_clamp(0.5 + (normalized - 0.5) * fmax(0.05, cycles), 0.0, 1.0);
+}
+
 uint8_t ce_domain_byte(double value) {
     value = ce_clamp(value, 0.0, 1.0);
     return (uint8_t)(value * 255.0 + 0.5);
@@ -59,7 +77,7 @@ uint8_t ce_domain_byte(double value) {
 
 int ce_domain_valid(ce_complex value) {
     return isfinite(value.re) && isfinite(value.im) &&
-        fabs(value.re) < CE_MAX_FINITE && fabs(value.im) < CE_MAX_FINITE;
+        fabs(value.re) < CE_DOMAIN_MAGNITUDE_MAX && fabs(value.im) < CE_DOMAIN_MAGNITUDE_MAX;
 }
 
 int ce_domain_bailout(ce_complex value) {
@@ -87,6 +105,7 @@ static void ce_init_color_lut(ce_color_lut *lut,
 
     const double inverse_sat = 1.0 - lut->saturation;
     const uint32_t palette_last = palette_count - 1;
+    double average_red = 0.0, average_green = 0.0, average_blue = 0.0;
 
     for (uint32_t i = 0; i <= CE_HUE_LUT_SIZE; ++i) {
         const double hue = (i == CE_HUE_LUT_SIZE) ? 0.999999 : (double)i * CE_INV_HUE_LUT_SIZE;
@@ -109,6 +128,11 @@ static void ce_init_color_lut(ce_color_lut *lut,
         lut->hue_lut[base] = out_r;
         lut->hue_lut[base + 1] = out_g;
         lut->hue_lut[base + 2] = out_b;
+        if (i < CE_HUE_LUT_SIZE) {
+            average_red += out_r;
+            average_green += out_g;
+            average_blue += out_b;
+        }
 
         const double flat_lightness = ce_clamp((0.5) * brightness, 0.05, 0.95);
         double scale, bias;
@@ -125,23 +149,25 @@ static void ce_init_color_lut(ce_color_lut *lut,
 
         lut->flat_lut[i] = ((uint32_t)255 << 24) | ((uint32_t)byte_b << 16) | ((uint32_t)byte_g << 8) | (uint32_t)byte_r;
     }
+    lut->average_red = average_red * CE_INV_HUE_LUT_SIZE;
+    lut->average_green = average_green * CE_INV_HUE_LUT_SIZE;
+    lut->average_blue = average_blue * CE_INV_HUE_LUT_SIZE;
 }
 
-static inline uint32_t ce_color_point_fast(ce_complex value, const ce_color_lut *lut) {
-    if (!ce_domain_valid(value)) return 0xFF000000;
-    double hue = ce_fast_atan2(value.im, value.re) * CE_INV_TWO_PI;
-    if (hue < 0.0) hue += 1.0;
+static inline uint32_t ce_color_log_polar_fast(double phase, double log_magnitude,
+                                               int average_phase, const ce_color_lut *lut) {
+    if (!isfinite(phase) || isnan(log_magnitude)) return 0xFF000000;
+    double hue = phase * CE_INV_TWO_PI;
+    hue -= floor(hue);
     uint32_t idx = (uint32_t)(hue * (double)CE_HUE_LUT_SIZE);
-    if (idx > CE_HUE_LUT_SIZE) idx = CE_HUE_LUT_SIZE;
+    if (idx >= CE_HUE_LUT_SIZE) idx = CE_HUE_LUT_SIZE - 1u;
 
-    if (lut->is_flat) {
+    if (lut->is_flat && !average_phase) {
         return lut->flat_lut[idx];
     }
 
-    const double detail = fmax(0.05, lut->cycles);
-    const double hyp = hypot(value.re, value.im);
-    const double tone = (2.0 / CE_PI) * atan(log1p(hyp) * (0.72 + detail * 0.28));
-    const double base_lightness = 0.34 + (0.72 - 0.34) * tone;
+    const double tone = ce_magnitude_tone(log_magnitude, lut->cycles);
+    const double base_lightness = lut->is_flat ? 0.5 : 0.34 + (0.72 - 0.34) * tone;
     const double lightness = ce_clamp((0.5 + (base_lightness - 0.5) * lut->contrast) * lut->brightness, 0.05, 0.95);
 
     double scale, bias;
@@ -152,11 +178,40 @@ static inline uint32_t ce_color_point_fast(ce_complex value, const ce_color_lut 
         bias = (lightness - 0.5) * 2.0;
         scale = 1.0 - bias;
     }
-    const uint32_t base = idx * 3;
-    const uint8_t r = ce_domain_byte(scale * lut->hue_lut[base] + bias);
-    const uint8_t g = ce_domain_byte(scale * lut->hue_lut[base + 1] + bias);
-    const uint8_t b = ce_domain_byte(scale * lut->hue_lut[base + 2] + bias);
+    const uint32_t base = idx * 3u;
+    const double base_red = average_phase ? lut->average_red : lut->hue_lut[base];
+    const double base_green = average_phase ? lut->average_green : lut->hue_lut[base + 1u];
+    const double base_blue = average_phase ? lut->average_blue : lut->hue_lut[base + 2u];
+    const uint8_t r = ce_domain_byte(scale * base_red + bias);
+    const uint8_t g = ce_domain_byte(scale * base_green + bias);
+    const uint8_t b = ce_domain_byte(scale * base_blue + bias);
     return ((uint32_t)255 << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+}
+
+static inline uint32_t ce_color_point_fast(ce_complex value, const ce_color_lut *lut) {
+    if (!ce_domain_valid(value)) return 0xFF000000;
+    return ce_color_log_polar_fast(
+        ce_fast_atan2(value.im, value.re), ce_log_magnitude(value), 0, lut
+    );
+}
+
+int32_t ce_domain_color_points(const ce_complex *values, const uint8_t *valid, uint32_t count,
+                               const ce_complex *palette_rg, const double *palette_b,
+                               uint32_t palette_count, double brightness, double contrast,
+                               double saturation, double cycles, uint8_t *rgba) {
+    if (!values || !palette_rg || !palette_b || palette_count < 2u || !rgba) return -1;
+    ce_color_lut *lut = (ce_color_lut *)malloc(sizeof(ce_color_lut));
+    if (!lut) return -2;
+    ce_init_color_lut(lut, palette_rg, palette_b, palette_count,
+                      brightness, contrast, saturation, cycles);
+    uint32_t *pixels = (uint32_t *)rgba;
+    for (uint32_t index = 0; index < count; ++index) {
+        pixels[index] = (!valid || valid[index])
+            ? ce_color_point_fast(values[index], lut)
+            : 0xFF0F0806u;
+    }
+    free(lut);
+    return 0;
 }
 
 ce_complex ce_domain_step(const ce_map_config *config, ce_complex current, ce_complex c) {
@@ -187,7 +242,7 @@ ce_complex ce_domain_step(const ce_map_config *config, ce_complex current, ce_co
         }
         return value;
     }
-    return ce_eval_function(config->function_id, current, c, &config->function);
+    return ce_eval_map_step(config, current, c);
 }
 
 typedef struct {
@@ -201,9 +256,17 @@ typedef struct {
     uint32_t bailout_step;
 } ce_reference_orbit_context;
 
+struct ce_domain_render_context {
+    const ce_complex *palette_rg;
+    const double *palette_b;
+    uint32_t palette_count;
+    ce_color_lut lut;
+    ce_reference_orbit_context *reference;
+};
+
 static void ce_compute_reference_orbit(const ce_map_config *config, ce_complex center,
                                       uint32_t count, ce_reference_orbit_context *ctx) {
-    ctx->count = count > 1024 ? 1024 : count;
+    ctx->count = count;
     ctx->center = center;
     ctx->bailout_step = ctx->count;
     ce_complex z = config->zero_seed ? (ce_complex){0.0, 0.0} : center;
@@ -255,9 +318,46 @@ static void ce_compute_reference_orbit(const ce_map_config *config, ce_complex c
     }
 }
 
+ce_domain_render_context *ce_create_domain_render_context(
+        const ce_map_config *config,
+        double x_min, double x_max, double y_min, double y_max,
+        const ce_complex *palette_rg, const double *palette_b,
+        uint32_t palette_count, double brightness, double contrast,
+        double saturation, double lightness_cycles) {
+    if (!config || !config->chain_count || config->chain_count > 1024u ||
+        !palette_rg || !palette_b || palette_count < 2u ||
+        !isfinite(x_min) || !isfinite(x_max) || !isfinite(y_min) || !isfinite(y_max) ||
+        !(x_max > x_min) || !(y_max > y_min) ||
+        !isfinite(brightness) || !isfinite(contrast) || !isfinite(saturation) ||
+        !isfinite(lightness_cycles)) return NULL;
+    ce_domain_render_context *context = (ce_domain_render_context *)calloc(1, sizeof(ce_domain_render_context));
+    if (!context) return NULL;
+    context->palette_rg = palette_rg;
+    context->palette_b = palette_b;
+    context->palette_count = palette_count;
+    ce_init_color_lut(&context->lut, palette_rg, palette_b, palette_count,
+                      brightness, contrast, saturation, lightness_cycles);
+    if (x_max - x_min < 1e-4) {
+        context->reference = (ce_reference_orbit_context *)calloc(1, sizeof(ce_reference_orbit_context));
+        if (!context->reference) {
+            free(context);
+            return NULL;
+        }
+        const ce_complex center = { (x_min + x_max) * 0.5, (y_min + y_max) * 0.5 };
+        ce_compute_reference_orbit(config, center, config->chain_count, context->reference);
+    }
+    return context;
+}
+
+void ce_destroy_domain_render_context(ce_domain_render_context *context) {
+    if (!context) return;
+    free(context->reference);
+    free(context);
+}
+
 static ce_complex ce_domain_value_offset(const ce_map_config *config, ce_complex center, ce_complex delta,
                                          const ce_reference_orbit_context *ref, int *valid) {
-    const uint32_t count = config->chain_count ? config->chain_count : 1;
+    const uint32_t count = config->chain_count;
     const ce_complex point = { center.re + delta.re, center.im + delta.im };
     if (config->derivative) {
         ce_map_config plain = *config;
@@ -273,13 +373,20 @@ static ce_complex ce_domain_value_offset(const ce_map_config *config, ce_complex
         return result;
     }
 
+    if (count == 1u && !ref) {
+        const ce_complex current = config->zero_seed ? (ce_complex){0.0, 0.0} : point;
+        const ce_complex output = ce_domain_step(config, current, point);
+        *valid = ce_domain_valid(output);
+        return output;
+    }
+
     ce_complex ez = config->zero_seed ? (ce_complex){0.0, 0.0} : delta;
     ce_complex current = (ref && ref->valid[0]) ? ref->z[0] : (config->zero_seed ? (ce_complex){0.0, 0.0} : point);
     int direct_mode = (ref == NULL);
-    ce_complex checkpoint = current;
-    uint32_t power = 1;
+    const int detect_fixed_point = count >= 64u;
 
     for (uint32_t iteration = 0; iteration < count; ++iteration) {
+        const ce_complex previous = current;
         ce_complex next;
         if (!direct_mode && iteration < ref->bailout_step && ref->valid[iteration] && ref->valid[iteration + 1]) {
             const ce_complex A = ref->A[iteration];
@@ -320,19 +427,16 @@ static ce_complex ce_domain_value_offset(const ce_map_config *config, ce_complex
         }
 
         current = next;
+        if (detect_fixed_point && next.re == previous.re && next.im == previous.im) break;
     }
 
     *valid = ce_domain_valid(current);
     return current;
 }
 
-static ce_complex ce_domain_value(const ce_map_config *config, ce_complex point, int *valid) {
-    return ce_domain_value_offset(config, point, (ce_complex){0.0, 0.0}, NULL, valid);
-}
-
 static ce_orbit_trace ce_trace_orbit_offset(const ce_map_config *config, ce_complex center, ce_complex delta,
                                            const ce_reference_orbit_context *ref, int detect_convergence) {
-    const uint32_t count = config->chain_count ? config->chain_count : 1;
+    const uint32_t count = config->chain_count;
     const ce_complex point = { center.re + delta.re, center.im + delta.im };
 
     ce_complex ez = config->zero_seed ? (ce_complex){0.0, 0.0} : delta;
@@ -410,10 +514,6 @@ static ce_orbit_trace ce_trace_orbit_offset(const ce_map_config *config, ce_comp
     return trace;
 }
 
-static ce_orbit_trace ce_trace_orbit(const ce_map_config *config, ce_complex point, int detect_convergence) {
-    return ce_trace_orbit_offset(config, point, (ce_complex){0.0, 0.0}, NULL, detect_convergence);
-}
-
 static void ce_palette_color(const ce_complex *palette_rg, const double *palette_b,
                              uint32_t count, double hue, double *red, double *green, double *blue) {
     hue = ce_clamp(hue, 0.0, 0.999999);
@@ -451,8 +551,7 @@ void ce_domain_color(ce_complex value, const ce_complex *palette_rg, const doubl
     if (hue < 0.0) hue += 1.0;
     double base_lightness = 0.5;
     if (cycles > 0.0001) {
-        const double detail = fmax(0.05, cycles);
-        const double tone = (2.0 / CE_PI) * atan(log1p(hypot(value.re, value.im)) * (0.72 + detail * 0.28));
+        const double tone = ce_magnitude_tone(ce_log_magnitude(value), cycles);
         base_lightness = 0.34 + (0.72 - 0.34) * tone;
     }
     const double lightness = ce_clamp((0.5 + (base_lightness - 0.5) * contrast) * brightness, 0.05, 0.95);
@@ -482,7 +581,7 @@ static void ce_sample_domain_offset(const ce_map_config *config, ce_complex cent
                                    const ce_color_lut *lut, const ce_complex *palette_rg,
                                    const double *palette_b, uint32_t palette_count,
                                    double *red, double *green, double *blue) {
-    const uint32_t count = config->chain_count ? config->chain_count : 1;
+    const uint32_t count = config->chain_count;
     if (orbit_mode == 0 || config->derivative) {
         int valid = 0;
         ce_complex value = ce_domain_value_offset(config, center, delta, ref, &valid);
@@ -518,18 +617,19 @@ static void ce_sample_domain_offset(const ce_map_config *config, ce_complex cent
     }
 }
 
-static void ce_sample_domain(const ce_map_config *config, ce_complex point, uint32_t orbit_mode,
-                             const ce_color_lut *lut, const ce_complex *palette_rg,
-                             const double *palette_b, uint32_t palette_count,
-                             double *red, double *green, double *blue) {
-    ce_sample_domain_offset(config, point, (ce_complex){0.0, 0.0}, NULL, orbit_mode,
-                            lut, palette_rg, palette_b, palette_count, red, green, blue);
-}
-
-static int ce_is_separable_function(uint32_t function_id, const ce_map_config *config) {
+static int ce_separable_function(const ce_map_config *config, uint32_t *function_id,
+                                 ce_complex *coefficient) {
     if (config->derivative || config->dynamic_source_count || config->use_taylor ||
         config->chain_count > 1 || config->zero_seed) return 0;
-    switch (function_id) {
+    *function_id = config->function_id;
+    *coefficient = (ce_complex){1.0, 0.0};
+    if (config->kernel_kind == CE_MAP_KERNEL_DIRECT_FUNCTION) {
+        const ce_algebraic_term *term = &config->function.algebraic_terms[0];
+        const ce_algebraic_factor *factor = &config->function.algebraic_factors[term->factor_offset];
+        *function_id = factor->function_id;
+        *coefficient = term->coefficient;
+    }
+    switch (*function_id) {
         case CE_FN_COS:
         case CE_FN_TAN:
         case CE_FN_SEC:
@@ -544,6 +644,87 @@ static int ce_is_separable_function(uint32_t function_id, const ce_map_config *c
     }
 }
 
+static inline uint32_t ce_color_scaled_log_polar(double phase, double log_magnitude,
+                                                  ce_complex coefficient, int average_phase,
+                                                  const ce_color_lut *lut) {
+    const double coefficient_magnitude = hypot(coefficient.re, coefficient.im);
+    if (coefficient_magnitude == 0.0) {
+        return ce_color_log_polar_fast(0.0, CE_DOMAIN_LOG_MAGNITUDE_MIN, 0, lut);
+    }
+    return ce_color_log_polar_fast(
+        phase + ce_fast_atan2(coefficient.im, coefficient.re),
+        log_magnitude + log(coefficient_magnitude), average_phase, lut
+    );
+}
+
+static inline double ce_log_norm(double re, double im) {
+    const double norm_sq = re * re + im * im;
+    return norm_sq > 0.0 ? 0.5 * log(norm_sq) : CE_DOMAIN_LOG_MAGNITUDE_MIN;
+}
+
+static uint32_t ce_separable_point_color(const ce_map_config *config, double u, double v,
+                                         int average_phase, const ce_color_lut *lut) {
+    uint32_t function_id;
+    ce_complex coefficient;
+    if (!ce_separable_function(config, &function_id, &coefficient)) return 0xFF000000;
+
+    const double cos_u = cos(u), sin_u = sin(u);
+    const double cos_v = cos(v), sin_v = sin(v);
+    if (function_id == CE_FN_COS || function_id == CE_FN_SEC) {
+        const double magnitude_scale = fabs(v);
+        const double q = exp(-2.0 * magnitude_scale);
+        const double re = cos_u * (1.0 + q);
+        const double im = -sin_u * copysign(1.0 - q, v);
+        const double phase = ce_fast_atan2(im, re);
+        const double log_magnitude = magnitude_scale - 0.693147180559945309417 + ce_log_norm(re, im);
+        return ce_color_scaled_log_polar(
+            function_id == CE_FN_SEC ? -phase : phase,
+            function_id == CE_FN_SEC ? -log_magnitude : log_magnitude,
+            coefficient, average_phase, lut
+        );
+    }
+    if (function_id == CE_FN_EXP) {
+        return ce_color_scaled_log_polar(v, u, coefficient, average_phase, lut);
+    }
+    if (function_id == CE_FN_SINH) {
+        const double magnitude_scale = fabs(u);
+        const double q = exp(-2.0 * magnitude_scale);
+        const double re = copysign(1.0 - q, u) * cos_v;
+        const double im = (1.0 + q) * sin_v;
+        return ce_color_scaled_log_polar(
+            ce_fast_atan2(im, re), magnitude_scale - 0.693147180559945309417 + ce_log_norm(re, im),
+            coefficient, average_phase, lut
+        );
+    }
+    if (function_id == CE_FN_TAN) {
+        const double magnitude_scale = fabs(v);
+        const double q = exp(-2.0 * magnitude_scale);
+        const double q_sq = q * q;
+        const double sin_2u = 2.0 * sin_u * cos_u;
+        const double cos_2u = cos_u * cos_u - sin_u * sin_u;
+        const double denominator = 1.0 + q_sq + 2.0 * q * cos_2u;
+        const double re = 2.0 * q * sin_2u / denominator;
+        const double im = copysign((1.0 - q_sq) / denominator, v);
+        return ce_color_scaled_log_polar(
+            ce_fast_atan2(im, re), ce_log_norm(re, im), coefficient, average_phase, lut
+        );
+    }
+    if (function_id == CE_FN_TANH) {
+        const double magnitude_scale = fabs(u);
+        const double q = exp(-2.0 * magnitude_scale);
+        const double q_sq = q * q;
+        const double sin_2v = 2.0 * sin_v * cos_v;
+        const double cos_2v = cos_v * cos_v - sin_v * sin_v;
+        const double denominator = 1.0 + q_sq + 2.0 * q * cos_2v;
+        const double re = copysign((1.0 - q_sq) / denominator, u);
+        const double im = 2.0 * q * sin_2v / denominator;
+        return ce_color_scaled_log_polar(
+            ce_fast_atan2(im, re), ce_log_norm(re, im), coefficient, average_phase, lut
+        );
+    }
+    return 0xFF000000;
+}
+
 static int ce_render_separable_tile(const ce_map_config *config,
                                     double x_min, double x_max, double y_min, double y_max,
                                     uint32_t frame_width, uint32_t frame_height,
@@ -555,49 +736,136 @@ static int ce_render_separable_tile(const ce_map_config *config,
     const double y_span = y_max - y_min;
     const double inv_w = 1.0 / (double)frame_width;
     const double inv_h = 1.0 / (double)frame_height;
+    const double pixel_span_x = fabs(x_span * (double)scale * inv_w);
+    const double pixel_span_y = fabs(y_span * (double)scale * inv_h);
 
-    double cos_u[512], sin_u[512];
-    double cosh_v[512], sinh_v[512];
-    double exp_u[512], exp_v[512];
-    double u_arr[512], v_arr[512];
+    uint32_t function_id;
+    ce_complex coefficient;
+    if (!ce_separable_function(config, &function_id, &coefficient)) return 0;
+
+    double u_values[512], v_values[512];
+    double cos_u[512], sin_u[512], cos_v[512], sin_v[512];
 
     for (uint32_t x = 0; x < tile_width; ++x) {
         const double u = ((tile_x + x + 0.5) * scale * inv_w - 0.5) * x_span + (x_min + x_max) * 0.5;
-        u_arr[x] = u;
+        u_values[x] = u;
         cos_u[x] = cos(u);
         sin_u[x] = sin(u);
-        exp_u[x] = exp(u);
     }
     for (uint32_t y = 0; y < tile_height; ++y) {
         const double v = (0.5 - (tile_y + y + 0.5) * scale * inv_h) * y_span + (y_min + y_max) * 0.5;
-        v_arr[y] = v;
-        cosh_v[y] = cosh(v);
-        sinh_v[y] = sinh(v);
-        exp_v[y] = exp(v);
+        v_values[y] = v;
+        cos_v[y] = cos(v);
+        sin_v[y] = sin(v);
     }
 
     uint32_t *pixels = (uint32_t *)rgba;
 
-    switch (config->function_id) {
+    switch (function_id) {
         case CE_FN_COS: {
+            const int average_phase = pixel_span_x >= CE_TWO_PI;
             for (uint32_t y = 0; y < tile_height; ++y) {
                 const uint32_t row = y * tile_width;
-                const double ch = cosh_v[y], sh = sinh_v[y];
+                const double magnitude_scale = fabs(v_values[y]);
+                const double q = exp(-2.0 * magnitude_scale);
+                const double positive = 1.0 + q;
+                const double negative = copysign(1.0 - q, v_values[y]);
                 for (uint32_t x = 0; x < tile_width; ++x) {
-                    ce_complex val = { cos_u[x] * ch, -sin_u[x] * sh };
-                    pixels[row + x] = ce_color_point_fast(val, lut);
+                    const double re = cos_u[x] * positive;
+                    const double im = -sin_u[x] * negative;
+                    pixels[row + x] = ce_color_scaled_log_polar(
+                        ce_fast_atan2(im, re), magnitude_scale - 0.693147180559945309417 + ce_log_norm(re, im),
+                        coefficient, average_phase, lut
+                    );
                 }
             }
             return 1;
         }
         case CE_FN_EXP: {
+            const int average_phase = pixel_span_y >= CE_TWO_PI;
             for (uint32_t y = 0; y < tile_height; ++y) {
                 const uint32_t row = y * tile_width;
-                const double cv = cos_u[y], sv = sin_u[y];
                 for (uint32_t x = 0; x < tile_width; ++x) {
-                    const double eu = exp_u[x];
-                    ce_complex val = { eu * cv, eu * sv };
-                    pixels[row + x] = ce_color_point_fast(val, lut);
+                    pixels[row + x] = ce_color_scaled_log_polar(
+                        v_values[y], u_values[x], coefficient, average_phase, lut
+                    );
+                }
+            }
+            return 1;
+        }
+        case CE_FN_TAN: {
+            for (uint32_t y = 0; y < tile_height; ++y) {
+                const uint32_t row = y * tile_width;
+                const double magnitude_scale = fabs(v_values[y]);
+                const double q = exp(-2.0 * magnitude_scale);
+                const double q_sq = q * q;
+                const int average_phase = magnitude_scale < 8.0 && pixel_span_x >= CE_PI;
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const double sin_2u = 2.0 * sin_u[x] * cos_u[x];
+                    const double cos_2u = cos_u[x] * cos_u[x] - sin_u[x] * sin_u[x];
+                    const double denominator = 1.0 + q_sq + 2.0 * q * cos_2u;
+                    const double re = 2.0 * q * sin_2u / denominator;
+                    const double im = copysign((1.0 - q_sq) / denominator, v_values[y]);
+                    pixels[row + x] = ce_color_scaled_log_polar(
+                        ce_fast_atan2(im, re), ce_log_norm(re, im), coefficient, average_phase, lut
+                    );
+                }
+            }
+            return 1;
+        }
+        case CE_FN_SEC: {
+            const int average_phase = pixel_span_x >= CE_TWO_PI;
+            for (uint32_t y = 0; y < tile_height; ++y) {
+                const uint32_t row = y * tile_width;
+                const double magnitude_scale = fabs(v_values[y]);
+                const double q = exp(-2.0 * magnitude_scale);
+                const double positive = 1.0 + q;
+                const double negative = copysign(1.0 - q, v_values[y]);
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const double re = cos_u[x] * positive;
+                    const double im = -sin_u[x] * negative;
+                    const double cosine_log_magnitude = magnitude_scale - 0.693147180559945309417 + ce_log_norm(re, im);
+                    pixels[row + x] = ce_color_scaled_log_polar(
+                        -ce_fast_atan2(im, re), -cosine_log_magnitude,
+                        coefficient, average_phase, lut
+                    );
+                }
+            }
+            return 1;
+        }
+        case CE_FN_SINH: {
+            const int average_phase = pixel_span_y >= CE_TWO_PI;
+            for (uint32_t y = 0; y < tile_height; ++y) {
+                const uint32_t row = y * tile_width;
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const double magnitude_scale = fabs(u_values[x]);
+                    const double q = exp(-2.0 * magnitude_scale);
+                    const double re = copysign(1.0 - q, u_values[x]) * cos_v[y];
+                    const double im = (1.0 + q) * sin_v[y];
+                    pixels[row + x] = ce_color_scaled_log_polar(
+                        ce_fast_atan2(im, re), magnitude_scale - 0.693147180559945309417 + ce_log_norm(re, im),
+                        coefficient, average_phase, lut
+                    );
+                }
+            }
+            return 1;
+        }
+        case CE_FN_TANH: {
+            for (uint32_t y = 0; y < tile_height; ++y) {
+                const uint32_t row = y * tile_width;
+                const double sin_2v = 2.0 * sin_v[y] * cos_v[y];
+                const double cos_2v = cos_v[y] * cos_v[y] - sin_v[y] * sin_v[y];
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const double magnitude_scale = fabs(u_values[x]);
+                    const double q = exp(-2.0 * magnitude_scale);
+                    const double q_sq = q * q;
+                    const double denominator = 1.0 + q_sq + 2.0 * q * cos_2v;
+                    const double re = copysign((1.0 - q_sq) / denominator, u_values[x]);
+                    const double im = 2.0 * q * sin_2v / denominator;
+                    const int average_phase = magnitude_scale < 8.0 && pixel_span_y >= CE_PI;
+                    pixels[row + x] = ce_color_scaled_log_polar(
+                        ce_fast_atan2(im, re), ce_log_norm(re, im), coefficient, average_phase, lut
+                    );
                 }
             }
             return 1;
@@ -613,6 +881,13 @@ static inline uint32_t ce_eval_sample_point_color_offset(const ce_map_config *co
                                                          const ce_complex *palette_rg, const double *palette_b,
                                                          uint32_t palette_count) {
     if (orbit_mode == 0 && !config->derivative) {
+        uint32_t function_id;
+        ce_complex coefficient;
+        if (ce_separable_function(config, &function_id, &coefficient)) {
+            return ce_separable_point_color(
+                config, center.re + delta.re, center.im + delta.im, 0, lut
+            );
+        }
         int valid = 0;
         ce_complex val = ce_domain_value_offset(config, center, delta, ref, &valid);
         return valid ? ce_color_point_fast(val, lut) : 0xFF000000;
@@ -625,33 +900,29 @@ static inline uint32_t ce_eval_sample_point_color_offset(const ce_map_config *co
         (uint32_t)ce_domain_byte(r);
 }
 
-static inline uint32_t ce_eval_sample_point_color(const ce_map_config *config, ce_complex point,
-                                                  uint32_t orbit_mode, const ce_color_lut *lut,
-                                                  const ce_complex *palette_rg, const double *palette_b,
-                                                  uint32_t palette_count) {
-    return ce_eval_sample_point_color_offset(config, point, (ce_complex){0.0, 0.0}, NULL, orbit_mode, lut, palette_rg, palette_b, palette_count);
-}
-
 int32_t ce_render_domain_tile(const ce_map_config *config,
                               double x_min, double x_max, double y_min, double y_max,
                               uint32_t frame_width, uint32_t frame_height,
                               uint32_t tile_x, uint32_t tile_y,
                               uint32_t tile_width, uint32_t tile_height, uint32_t scale,
-                              uint32_t orbit_mode, const ce_complex *palette_rg,
-                              const double *palette_b, uint32_t palette_count,
-                              double brightness, double contrast, double saturation,
-                              double lightness_cycles, uint32_t quality_only,
+                              uint32_t orbit_mode, const ce_domain_render_context *render_context,
+                              uint32_t adaptive_quality,
                               uint8_t *rgba) {
-    if (!config || !palette_rg || !palette_b || palette_count < 2 || !rgba || !frame_width || !frame_height) return -1;
+    if (!config || !render_context || !rgba || !frame_width || !frame_height ||
+        !tile_width || !tile_height || !scale || !config->chain_count || config->chain_count > 1024u ||
+        orbit_mode > 3u || !isfinite(x_min) || !isfinite(x_max) || !isfinite(y_min) || !isfinite(y_max) ||
+        !(x_max > x_min) || !(y_max > y_min)) return -1;
+    if (adaptive_quality && (scale != 1u || tile_width > 512u || tile_height > 512u)) return -2;
+    const ce_color_lut *lut = &render_context->lut;
+    const ce_complex *palette_rg = render_context->palette_rg;
+    const double *palette_b = render_context->palette_b;
+    const uint32_t palette_count = render_context->palette_count;
 
-    ce_color_lut *lut = (ce_color_lut *)malloc(sizeof(ce_color_lut));
-    if (!lut) return -1;
-    ce_init_color_lut(lut, palette_rg, palette_b, palette_count, brightness, contrast, saturation, lightness_cycles);
-
-    if (orbit_mode == 0 && !quality_only && ce_is_separable_function(config->function_id, config)) {
-        if (ce_render_separable_tile(config, x_min, x_max, y_min, y_max, frame_width, frame_height,
-                                     tile_x, tile_y, tile_width, tile_height, scale, lut, rgba)) {
-            free(lut);
+    int base_rendered = 0;
+    if (orbit_mode == 0) {
+        base_rendered = ce_render_separable_tile(config, x_min, x_max, y_min, y_max, frame_width, frame_height,
+                                                 tile_x, tile_y, tile_width, tile_height, scale, lut, rgba);
+        if (base_rendered && !adaptive_quality) {
             return 0;
         }
     }
@@ -665,33 +936,27 @@ int32_t ce_render_domain_tile(const ce_map_config *config,
     const double inv_h = 1.0 / (double)frame_height;
     uint32_t *pixels = (uint32_t *)rgba;
 
-    const uint32_t count = config->chain_count ? config->chain_count : 1;
-    const int use_perturbation = (x_span < 1e-4);
-    ce_reference_orbit_context *ref_ctx = NULL;
-    if (use_perturbation) {
-        ref_ctx = (ce_reference_orbit_context *)malloc(sizeof(ce_reference_orbit_context));
-        if (ref_ctx) {
-            ce_compute_reference_orbit(config, center, count, ref_ctx);
-        }
-    }
-    const ce_reference_orbit_context *ref_ptr = ref_ctx;
+    const ce_reference_orbit_context *ref_ptr = render_context->reference;
 
-    // Base pass: fast 1-sample evaluation across the tile grid
-    for (uint32_t y = 0; y < tile_height; ++y) {
-        const double norm_y = 0.5 - (tile_y + y + 0.5) * scale * inv_h;
-        const double dy = norm_y * y_span;
-        for (uint32_t x = 0; x < tile_width; ++x) {
-            const double norm_x = (tile_x + x + 0.5) * scale * inv_w - 0.5;
-            const double dx = norm_x * x_span;
-            const ce_complex delta = { dx, dy };
-            pixels[y * tile_width + x] = ce_eval_sample_point_color_offset(config, center, delta, ref_ptr, orbit_mode, lut, palette_rg, palette_b, palette_count);
+    if (!base_rendered) {
+        for (uint32_t y = 0; y < tile_height; ++y) {
+            const double norm_y = 0.5 - (tile_y + y + 0.5) * scale * inv_h;
+            const double dy = norm_y * y_span;
+            for (uint32_t x = 0; x < tile_width; ++x) {
+                const double norm_x = (tile_x + x + 0.5) * scale * inv_w - 0.5;
+                const double dx = norm_x * x_span;
+                const ce_complex delta = { dx, dy };
+                pixels[y * tile_width + x] = ce_eval_sample_point_color_offset(config, center, delta, ref_ptr, orbit_mode, lut, palette_rg, palette_b, palette_count);
+            }
         }
     }
 
     // Quality refinement: adaptive 4-neighbor edge detection and 4x4 (16-sample) subpixel anti-aliasing
-    if (quality_only && scale == 1 && tile_width <= 512 && tile_height <= 512) {
-        uint8_t *edge_mask = (uint8_t *)calloc(tile_width * tile_height, sizeof(uint8_t));
-        if (edge_mask) {
+    if (adaptive_quality && scale == 1 && tile_width <= 512 && tile_height <= 512) {
+        static uint8_t edge_mask[512 * 512];
+        const uint32_t total_tile_pixels = tile_width * tile_height;
+        memset(edge_mask, 0, total_tile_pixels);
+        {
             const int threshold = 80;
             int edge_count = 0;
 
@@ -786,36 +1051,32 @@ int32_t ce_render_domain_tile(const ce_map_config *config,
             }
 
             if (edge_count > 0) {
-                static const double offsets[4] = { -0.375, -0.125, 0.125, 0.375 };
+                static const double sub_dx[4] = { -0.375, 0.125, 0.375, -0.125 };
+                static const double sub_dy[4] = { -0.125, -0.375, 0.125, 0.375 };
                 for (uint32_t y = 0; y < tile_height; ++y) {
                     const uint32_t row = y * tile_width;
                     for (uint32_t x = 0; x < tile_width; ++x) {
                         if (!edge_mask[row + x]) continue;
                         double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
-                        for (int sy = 0; sy < 4; ++sy) {
-                            const double sub_y = y + 0.5 + offsets[sy];
+                        for (int s = 0; s < 4; ++s) {
+                            const double sub_y = y + 0.5 + sub_dy[s];
                             const double dy = (0.5 - (tile_y + sub_y) * scale * inv_h) * y_span;
-                            for (int sx = 0; sx < 4; ++sx) {
-                                const double sub_x = x + 0.5 + offsets[sx];
-                                const double dx = ((tile_x + sub_x) * scale * inv_w - 0.5) * x_span;
-                                const uint32_t packed = ce_eval_sample_point_color_offset(config, center, (ce_complex){dx, dy}, ref_ptr, orbit_mode, lut, palette_rg, palette_b, palette_count);
-                                sum_r += (packed & 0xFF);
-                                sum_g += ((packed >> 8) & 0xFF);
-                                sum_b += ((packed >> 16) & 0xFF);
-                            }
+                            const double sub_x = x + 0.5 + sub_dx[s];
+                            const double dx = ((tile_x + sub_x) * scale * inv_w - 0.5) * x_span;
+                            const uint32_t packed = ce_eval_sample_point_color_offset(config, center, (ce_complex){dx, dy}, ref_ptr, orbit_mode, lut, palette_rg, palette_b, palette_count);
+                            sum_r += (packed & 0xFF);
+                            sum_g += ((packed >> 8) & 0xFF);
+                            sum_b += ((packed >> 16) & 0xFF);
                         }
-                        const uint8_t avg_r = (uint8_t)(sum_r * (1.0 / 16.0) + 0.5);
-                        const uint8_t avg_g = (uint8_t)(sum_g * (1.0 / 16.0) + 0.5);
-                        const uint8_t avg_b = (uint8_t)(sum_b * (1.0 / 16.0) + 0.5);
+                        const uint8_t avg_r = (uint8_t)(sum_r * 0.25 + 0.5);
+                        const uint8_t avg_g = (uint8_t)(sum_g * 0.25 + 0.5);
+                        const uint8_t avg_b = (uint8_t)(sum_b * 0.25 + 0.5);
                         pixels[row + x] = ((uint32_t)255 << 24) | ((uint32_t)avg_b << 16) | ((uint32_t)avg_g << 8) | (uint32_t)avg_r;
                     }
                 }
             }
-            free(edge_mask);
         }
     }
 
-    if (ref_ctx) free(ref_ctx);
-    free(lut);
     return 0;
 }

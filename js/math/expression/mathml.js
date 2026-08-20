@@ -1,4 +1,5 @@
 import { parseExpression } from './parser.js';
+import { requireFiniteComplex, requireInteger } from '../../utils/numeric-contracts.js';
 
 const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
 const FUNCTION_NAMES = new Set([
@@ -44,7 +45,8 @@ function variableNode(name, sequenceVariables) {
 
 function renderCall(node, options) {
     const args = node.args.map(argument => renderNode(argument, options));
-    const argument = args[0] || mathNode('mn', '0');
+    if (!args.length) throw new Error(`Function "${node.name}" requires an argument.`);
+    const argument = args[0];
 
     if (node.name === 'sqrt') return mathNode('msqrt', null, [argument]);
     if (node.name === 'factorial') {
@@ -74,15 +76,18 @@ function renderCall(node, options) {
 function renderNode(node, options) {
     switch (node.type) {
         case 'literal':
-            if (Math.abs(node.value?.im || 0) > 1e-12) {
+            {
+                const value = requireFiniteComplex(node.value, 'MathML literal');
+                if (Math.abs(value.im) > 1e-12) {
                 return row(
-                    mathNode('mn', String(node.value.re || 0)),
-                    operator(node.value.im >= 0 ? '+' : '-'),
-                    mathNode('mn', String(Math.abs(node.value.im))),
+                    mathNode('mn', String(value.re)),
+                    operator(value.im >= 0 ? '+' : '-'),
+                    mathNode('mn', String(Math.abs(value.im))),
                     mathNode('mi', 'i')
                 );
+                }
+                return mathNode('mn', String(value.re));
             }
-            return mathNode('mn', String(node.value?.re ?? 0));
         case 'variable':
             return variableNode(node.name, options.sequenceVariables);
         case 'group':
@@ -157,7 +162,7 @@ export function createGeneralTermMathML(source, options = {}) {
 export function createAggregateMathML(source, options = {}) {
     const math = mathNode('math');
     math.setAttribute('display', 'block');
-    const count = Math.max(0, Math.floor(Number(options.count) || 0));
+    const count = Math.max(0, requireInteger(options.count, 'Aggregate MathML count'));
     const parameterSymbols = options.parameterSymbols || [];
     const reduction = options.reduction || 'none';
     const sequenceVariables = new Set(options.sequenceVariables || []);

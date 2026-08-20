@@ -1,32 +1,22 @@
 import assert from 'node:assert/strict';
 
-import { BENCH_PROFILE, runBenchmark } from './utils.js';
+import { runBenchmark } from './utils.js';
 import { compileExpression } from '../../js/math/expression/index.js';
+import { resolveActiveMap } from '../../js/math/active-map.js';
 import { state } from '../../js/store/state.js';
-import { getChainedTransformFunction } from '../../js/native/map-runtime.js';
 
-const TILE_SIZES = Object.freeze({
-    smoke: 48,
-    standard: 160,
-    deep: 256
-});
+const TILE_SIZES = Object.freeze({ smoke: 48, standard: 160, deep: 256 });
+const CHAIN_TILE_SIZES = Object.freeze({ smoke: 32, standard: 96, deep: 160 });
 
-const CHAIN_TILE_SIZES = Object.freeze({
-    smoke: 32,
-    standard: 96,
-    deep: 160
-});
-
-function makePlaneGrid(size, xRange, yRange) {
-    const planeZ = new Float64Array(size * size * 2);
-    for (let y = 0; y < size; y += 1) {
-        for (let x = 0; x < size; x += 1) {
-            const idx = (y * size + x) * 2;
-            planeZ[idx] = xRange[0] + ((x + 0.5) / size) * (xRange[1] - xRange[0]);
-            planeZ[idx + 1] = yRange[1] - ((y + 0.5) / size) * (yRange[1] - yRange[0]);
-        }
-    }
-    return planeZ;
+function makePlanePoints(size, xRange, yRange) {
+    return Array.from({ length: size * size }, (_, index) => {
+        const x = index % size;
+        const y = Math.floor(index / size);
+        return {
+            re: xRange[0] + ((x + 0.5) / size) * (xRange[1] - xRange[0]),
+            im: yRange[1] - ((y + 0.5) / size) * (yRange[1] - yRange[0])
+        };
+    });
 }
 
 function algebraicFactor(func, overrides = {}) {
@@ -41,16 +31,13 @@ function algebraicFactor(func, overrides = {}) {
     };
 }
 
-function setupAlgebraicChainBenchmark(profile, forceFallback = false) {
+function setupAlgebraicChainBenchmark(profile) {
     Object.assign(state, {
         currentFunction: 'algebraic_chaining',
         algebraicChainingEnabled: true,
         algebraicChainingZExpr: 'z',
         polynomialN: 1,
-        polynomialCoeffs: [
-            { re: 0, im: 0 },
-            { re: 1, im: 0 }
-        ],
+        polynomialCoeffs: [{ re: 0, im: 0 }, { re: 1, im: 0 }],
         algebraicChainingTerms: [
             { coeff: { re: 2 / 3, im: 0 }, factors: [algebraicFactor('polynomial')] },
             { coeff: { re: 1 / 3, im: 0 }, factors: [algebraicFactor('polynomial', { power: 2, reciprocal: true })] }
@@ -60,139 +47,72 @@ function setupAlgebraicChainBenchmark(profile, forceFallback = false) {
         chainCount: 40
     });
 
-    const originalFunction = globalThis.Function;
-    if (forceFallback) {
-        globalThis.Function = function blockedDynamicFunction() {
-            throw new Error('Dynamic function construction blocked by benchmark');
-        };
-    }
-
-    try {
-        const size = CHAIN_TILE_SIZES[profile];
-        const evaluator = getChainedTransformFunction('algebraic_chaining');
-        if (forceFallback) evaluator(1, 0);
-        return {
-            evaluator,
-            planeZ: makePlaneGrid(size, [-2, 2], [-2, 2]),
-            length: size * size
-        };
-    } finally {
-        globalThis.Function = originalFunction;
-    }
+    const size = CHAIN_TILE_SIZES[profile];
+    return { evaluator: resolveActiveMap(), points: makePlanePoints(size, [-2, 2], [-2, 2]) };
 }
 
-function evaluateAlgebraicChainTile({ evaluator, planeZ, length }) {
-    const result = new Float64Array(length * 2);
+function summarize(values) {
     let finiteCount = 0;
     let checksum = 0;
-
-    for (let index = 0; index < length; index += 1) {
-        const offset = index * 2;
-        const w = evaluator(planeZ[offset], planeZ[offset + 1]);
-        if (w && Number.isFinite(w.re) && Number.isFinite(w.im)) {
-            result[offset] = w.re;
-            result[offset + 1] = w.im;
-            finiteCount += 1;
-            checksum += w.re - w.im;
-        } else {
-            result[offset] = NaN;
-            result[offset + 1] = NaN;
-        }
+    for (const value of values) {
+        if (!Number.isFinite(value?.re) || !Number.isFinite(value?.im)) continue;
+        finiteCount += 1;
+        checksum += value.re - value.im;
     }
-
-    return { result, finiteCount, checksum };
+    return { values, finiteCount, checksum };
 }
 
 export async function runAlgebraicCompilerBenchmarks() {
-    console.log('\n[Benchmark] Algebraic compiler and transform hot paths\n');
+    console.log('\n[Benchmark] Batched native expression and transform hot paths\n');
 
     await runBenchmark(
-        'compiled rational expression over a dense viewport grid',
+        'native expression VM over a dense viewport grid in one batch',
         ({ profile }) => {
             const size = TILE_SIZES[profile];
+            const points = makePlanePoints(size, [-3, 3], [-3, 3]);
             return {
                 evaluator: compileExpression('(z^2 - 1) * (z - 2 - i)^2 / (z^2 + 2 + 2i)', {
                     allowedVariables: ['z']
                 }),
-                planeZ: makePlaneGrid(size, [-3, 3], [-3, 3]),
-                length: size * size
+                environments: points.map(z => ({ z }))
             };
         },
-        ({ evaluator, planeZ, length }) => {
-            const result = new Float64Array(length * 2);
-            const env = { z: { re: 0, im: 0 } };
-            let finiteCount = 0;
-            let checksum = 0;
-
-            for (let index = 0; index < length; index += 1) {
-                const offset = index * 2;
-                env.z.re = planeZ[offset];
-                env.z.im = planeZ[offset + 1];
-                const w = evaluator(env);
-
-                if (w && Number.isFinite(w.re) && Number.isFinite(w.im)) {
-                    result[offset] = w.re;
-                    result[offset + 1] = w.im;
-                    finiteCount += 1;
-                    checksum += w.re * 0.5 + w.im * 0.25;
-                } else {
-                    result[offset] = NaN;
-                    result[offset + 1] = NaN;
-                }
-            }
-
-            return { result, finiteCount, checksum };
-        },
+        ({ evaluator, environments }) => summarize(evaluator.evaluateBatch(environments)),
         {
             profiles: {
                 smoke: { iterations: 2, warmup: 1 },
                 standard: { iterations: 20, warmup: 5 },
                 deep: { iterations: 80, warmup: 10 }
             },
-            verify: ({ result, finiteCount, checksum }, { length }) => {
-                assert.equal(result.length, length * 2);
-                assert.ok(finiteCount > length * 0.95);
+            verify: ({ values, finiteCount, checksum }, { environments }) => {
+                assert.equal(values.length, environments.length);
+                assert.ok(finiteCount > environments.length * 0.95);
                 assert.ok(Number.isFinite(checksum));
             }
         }
     );
 
-    const chainOptions = {
-        profiles: {
-            smoke: { iterations: 2, warmup: 1 },
-            standard: { iterations: 12, warmup: 3 },
-            deep: { iterations: 40, warmup: 8 }
-        },
-        verify: ({ result, finiteCount, checksum }, { length }) => {
-            assert.equal(result.length, length * 2);
-            assert.ok(finiteCount > length * 0.5);
-            assert.ok(Number.isFinite(checksum));
-        }
-    };
-    const generatedStats = await runBenchmark(
-        'generated algebraic z^3 Newton-style output chain over a tile',
+    const nativeStats = await runBenchmark(
+        'native algebraic z^3 Newton-style output chain in one batch',
         ({ profile }) => setupAlgebraicChainBenchmark(profile),
-        evaluateAlgebraicChainTile,
-        chainOptions
-    );
-    const fallbackStats = await runBenchmark(
-        'CSP fallback algebraic z^3 Newton-style output chain over a tile',
-        ({ profile }) => setupAlgebraicChainBenchmark(profile, true),
-        evaluateAlgebraicChainTile,
-        chainOptions
+        ({ evaluator, points }) => summarize(evaluator.evaluateBatch(points)),
+        {
+            profiles: {
+                smoke: { iterations: 2, warmup: 1 },
+                standard: { iterations: 12, warmup: 3 },
+                deep: { iterations: 40, warmup: 8 }
+            },
+            verify: ({ values, finiteCount, checksum }, { points }) => {
+                assert.equal(values.length, points.length);
+                assert.ok(finiteCount > points.length * 0.5);
+                assert.ok(Number.isFinite(checksum));
+            }
+        }
     );
 
-    const generatedReference = evaluateAlgebraicChainTile(setupAlgebraicChainBenchmark(BENCH_PROFILE));
-    const fallbackReference = evaluateAlgebraicChainTile(setupAlgebraicChainBenchmark(BENCH_PROFILE, true));
-    assert.equal(fallbackReference.finiteCount, generatedReference.finiteCount);
-    assert.equal(fallbackReference.checksum, generatedReference.checksum);
     assert.ok(
-        Number.isFinite(generatedStats.median) && generatedStats.median > 0,
-        `generated kernel median ${generatedStats.median.toFixed(3)}ms should be finite and measured`
-    );
-    assert.ok(
-        Number.isFinite(fallbackStats.median) && fallbackStats.median > 0,
-        `fallback kernel median ${fallbackStats.median.toFixed(3)}ms should be finite and measured`
+        Number.isFinite(nativeStats.median) && nativeStats.median > 0,
+        `native batch median ${nativeStats.median.toFixed(3)}ms should be finite and measured`
     );
 }
 

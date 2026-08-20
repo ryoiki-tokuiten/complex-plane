@@ -113,19 +113,6 @@ test('selected function calls execute the supplied native map', () => {
     );
 });
 
-test('interpreter fallback preserves environment through grouped expressions', () => {
-    const OriginalFunction = globalThis.Function;
-    try {
-        globalThis.Function = () => {
-            throw new Error('code generation unavailable');
-        };
-        const expression = compileExpression('((z)) + 0.125', { allowedVariables: ['z'] });
-        closeComplex(expression({ z: { re: 2, im: -1 } }), { re: 2.125, im: -1 });
-    } finally {
-        globalThis.Function = OriginalFunction;
-    }
-});
-
 test('expression validation reports syntax, variable, and domain errors', () => {
     assert.throws(() => parseExpression('1 + )'), ExpressionSyntaxError);
     assert.throws(

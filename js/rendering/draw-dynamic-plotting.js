@@ -6,6 +6,7 @@ import {
 } from '../analysis/dynamic-plotting.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { drawMappedLineSetOnSphere, drawSphereMappedPoint } from './draw-sphere.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 const COLORS = Object.freeze({
     input: '#78a6c8',
@@ -23,12 +24,14 @@ function finitePoint(value) {
 }
 
 function displayConfig() {
-    return state.dynamicPlotting?.display || {};
+    const display = state.dynamicPlotting?.display;
+    if (!display || typeof display !== 'object') throw new Error('Dynamic plotting requires display configuration.');
+    return display;
 }
 
 function pointRadius() {
-    const value = Number(displayConfig().pointRadius);
-    return Number.isFinite(value) ? Math.max(2, Math.min(6, value)) : 3;
+    const value = requireFiniteNumber(displayConfig().pointRadius, 'Dynamic point radius');
+    return Math.max(2, Math.min(6, value));
 }
 
 function drawMarker(ctx, planeParams, value, options = {}) {
@@ -165,7 +168,10 @@ function selected(sample) {
 
 function sampleLabel(sample) {
     if (!displayConfig().showLabels) return null;
-    const symbols = Object.entries(sample.symbolValues || {})
+    if (!sample.symbolValues || typeof sample.symbolValues !== 'object' || Array.isArray(sample.symbolValues)) {
+        throw new Error(`Dynamic sample ${sample.id} requires symbol values.`);
+    }
+    const symbols = Object.entries(sample.symbolValues)
         .slice(0, 3)
         .map(([name, value]) => `${name}=${formatDynamicValue(value, 3)}`);
     return [`j=${sample.ordinal}`, `d=${sample.label}`, ...symbols].join(', ');
@@ -317,7 +323,9 @@ export function drawDynamicSphere(ctx, sphereParams, options = {}) {
     if (!state.dynamicPlotting?.enabled) return;
 
     const isWPlane = Boolean(options.isWPlane);
-    const stageIndex = Number(options.stageIndex) || 0;
+    const stageIndex = options.stageIndex === undefined
+        ? 0
+        : requireInteger(options.stageIndex, 'Dynamic sphere stage');
     const transform = options.transform;
     const result = getDynamicPlotResult({
         transform: isWPlane && !isDynamicAggregateActive() ? transform : undefined,
@@ -381,7 +389,9 @@ export function drawDynamicSphere(ctx, sphereParams, options = {}) {
 export function getDynamicSphereSceneData(options = {}) {
     if (!state.dynamicPlotting?.enabled) return null;
 
-    const stageIndex = Number(options.stageIndex) || 0;
+    const stageIndex = options.stageIndex === undefined
+        ? 0
+        : requireInteger(options.stageIndex, 'Dynamic sphere stage');
     const transform = options.transform;
     const aggregateActive = isDynamicAggregateActive();
     const result = getDynamicPlotResult({
@@ -430,13 +440,19 @@ export function findNearestDynamicSample(worldPoint, plane = 'z', options = {}) 
 
     const result = getDynamicPlotResult({
         transform: plane === 'w' && !isDynamicAggregateActive() ? options.transform : undefined,
-        stageIndex: options.stageIndex || 0
+        stageIndex: options.stageIndex === undefined
+            ? 0
+            : requireInteger(options.stageIndex, 'Dynamic sample stage')
     });
     if (!result) return null;
 
-    const span = Number(options.worldSpan) || 10;
-    const pixelWidth = Number(options.pixelWidth) || 800;
-    const tolerance = options.tolerance ?? span / pixelWidth * 10;
+    const span = requireFiniteNumber(options.worldSpan, 'Dynamic sample world span');
+    const pixelWidth = requireFiniteNumber(options.pixelWidth, 'Dynamic sample pixel width');
+    if (span <= 0 || pixelWidth <= 0) throw new Error('Dynamic sample span and pixel width must be positive.');
+    const tolerance = options.tolerance === undefined
+        ? span / pixelWidth * 10
+        : requireFiniteNumber(options.tolerance, 'Dynamic sample tolerance');
+    if (tolerance < 0) throw new Error('Dynamic sample tolerance must be non-negative.');
     const toleranceSq = tolerance * tolerance;
     let best = null;
     let bestDistanceSq = Infinity;

@@ -1,7 +1,11 @@
 import { MAX_POINTS_ADAPTIVE_DEFAULT } from '../constants/numerical.js';
 import { generateNativeDiscreteValues } from '../native/complex-engine.js';
+import {
+    requireFiniteComplex,
+    requireFiniteNumber,
+    requireInteger
+} from '../utils/numeric-contracts.js';
 
-const DEFAULT_COUNT = 50;
 export const MAX_DYNAMIC_SOURCE_COUNT = MAX_POINTS_ADAPTIVE_DEFAULT;
 const MAX_GENERATOR_ATTEMPTS = MAX_DYNAMIC_SOURCE_COUNT * 100;
 
@@ -17,28 +21,20 @@ const EXPRESSION_ERROR_MESSAGES = Object.freeze({
     9: 'Expression result is undefined or outside the supported numeric range'
 });
 
-function finiteNumber(value, fallback) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function clampInteger(value, min, max, fallback) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return fallback;
-    return Math.min(max, Math.max(min, Math.floor(numeric)));
-}
-
 function normalizeCount(value) {
-    return clampInteger(value, 0, MAX_DYNAMIC_SOURCE_COUNT, DEFAULT_COUNT);
-}
-
-function finiteComplex(value) {
-    return Number.isFinite(Number(value?.re)) && Number.isFinite(Number(value?.im));
+    const count = requireInteger(value, 'Discrete-source count');
+    if (count < 0 || count > MAX_DYNAMIC_SOURCE_COUNT) {
+        throw new Error(`Discrete-source count must be between 0 and ${MAX_DYNAMIC_SOURCE_COUNT}.`);
+    }
+    return count;
 }
 
 function asComplex(value) {
-    if (typeof value === 'number') return { re: value, im: 0 };
-    return { re: Number(value?.re), im: Number(value?.im) };
+    if (typeof value === 'number') {
+        return { re: requireFiniteNumber(value, 'Discrete-source value'), im: 0 };
+    }
+    const point = requireFiniteComplex(value, 'Discrete-source value');
+    return { re: point.re, im: point.im };
 }
 
 function record(ordinal, domainValue, kind) {
@@ -68,12 +64,13 @@ export function formatComplex(value, digits = 6) {
 }
 
 function parseCustomPoint(value) {
-    if (finiteComplex(value)) return asComplex(value);
     if (Array.isArray(value) && value.length >= 2) {
-        const point = { re: Number(value[0]), im: Number(value[1]) };
-        return finiteComplex(point) ? point : null;
+        return {
+            re: requireFiniteNumber(value[0], 'Custom-point real component'),
+            im: requireFiniteNumber(value[1], 'Custom-point imaginary component')
+        };
     }
-    return null;
+    return asComplex(value);
 }
 
 export function parseCustomPointText(text) {
@@ -93,54 +90,94 @@ export function parseCustomPointText(text) {
         const imaginary = normalized.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)i$/i);
         if (imaginary) return { re: 0, im: imaginaryCoefficient(imaginary[1]) };
         const real = Number(normalized);
-        return Number.isFinite(real) ? { re: real, im: 0 } : null;
-    }).filter(Boolean);
+        if (!Number.isFinite(real)) throw new Error(`Invalid custom complex point: ${entry}.`);
+        return { re: real, im: 0 };
+    });
 }
 
 function nativeConfig(config, kind, count) {
-    const normalized = { ...config, kind, count };
+    const normalized = {
+        start: 0,
+        step: 1,
+        ratio: 1,
+        min: 2,
+        max: Number.MAX_SAFE_INTEGER,
+        bound: 1,
+        maxAttempts: count,
+        kind,
+        count
+    };
     if (kind === 'naturals') {
-        normalized.start = Math.max(0, Number(config.start) || 0);
-        normalized.step = finiteNumber(config.step, 1);
-        if (!normalized.step) normalized.step = 1;
+        normalized.start = requireFiniteNumber(config.start, 'Natural-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Natural-source step');
+        if (normalized.start < 0 || normalized.step === 0) {
+            throw new Error('Natural sources require a non-negative start and non-zero step.');
+        }
     } else if (kind === 'integers') {
-        normalized.start = finiteNumber(config.start, 1);
-        normalized.step = finiteNumber(config.step, 1);
-        if (!normalized.step) normalized.step = 1;
+        normalized.start = requireFiniteNumber(config.start, 'Integer-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Integer-source step');
+        if (normalized.step === 0) throw new Error('Integer-source step must be non-zero.');
+        normalized.ordering = config.ordering;
+        normalized.includeZero = Boolean(config.includeZero);
+        normalized.includeNegative = Boolean(config.includeNegative);
     } else if (kind === 'arithmetic') {
-        normalized.start = finiteNumber(config.start, 1);
-        normalized.step = finiteNumber(config.step, 1);
+        normalized.start = requireFiniteNumber(config.start, 'Arithmetic-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Arithmetic-source step');
     } else if (kind === 'geometric') {
-        normalized.start = finiteNumber(config.start, 1);
-        normalized.ratio = finiteNumber(config.ratio, 2);
+        normalized.start = requireFiniteNumber(config.start, 'Geometric-source start');
+        normalized.ratio = requireFiniteNumber(config.ratio, 'Geometric-source ratio');
     } else if (kind === 'harmonic') {
-        normalized.start = finiteNumber(config.start, 1);
-        normalized.step = finiteNumber(config.step, 1);
+        normalized.start = requireFiniteNumber(config.start, 'Harmonic-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Harmonic-source step');
     } else if (kind === 'primes') {
-        normalized.min = Math.max(2, Math.floor(Number(config.min) || 2));
-        normalized.max = config.max !== '' && config.max !== null && config.max !== undefined &&
-            Number.isFinite(Number(config.max)) ? Math.floor(Number(config.max)) : Number.MAX_SAFE_INTEGER;
+        normalized.min = requireInteger(config.min, 'Prime-source minimum');
+        if (normalized.min < 2) throw new Error('Prime-source minimum must be at least 2.');
+        normalized.max = config.max === '' || config.max === null || config.max === undefined
+            ? Number.MAX_SAFE_INTEGER
+            : requireInteger(config.max, 'Prime-source maximum');
+        normalized.includeNegative = Boolean(config.includeNegative);
     } else if (kind === 'gaussian_integers') {
-        normalized.bound = Math.max(1, Math.floor(Number(config.bound) || 8));
+        normalized.bound = requireInteger(config.bound, 'Gaussian-integer bound');
+        if (normalized.bound < 1) throw new Error('Gaussian-integer bound must be positive.');
+        normalized.boundType = config.boundType;
+        normalized.associatePolicy = config.associatePolicy;
+        normalized.includeConjugates = Boolean(config.includeConjugates);
     } else if (kind === 'gaussian_primes') {
-        normalized.bound = Math.max(1, Math.floor(Number(config.bound) || 12));
+        normalized.bound = requireInteger(config.bound, 'Gaussian-prime bound');
+        if (normalized.bound < 1) throw new Error('Gaussian-prime bound must be positive.');
+        normalized.boundType = config.boundType;
+        normalized.associatePolicy = config.associatePolicy;
+        normalized.includeConjugates = Boolean(config.includeConjugates);
     } else if (kind === 'expression') {
-        normalized.generatorExpression = String(config.generatorExpression ?? 'j');
-        normalized.filterExpression = String(config.filterExpression || '').trim();
-        normalized.maxAttempts = clampInteger(
-            config.maxAttempts, count, MAX_GENERATOR_ATTEMPTS,
-            Math.max(count * 100, MAX_DYNAMIC_SOURCE_COUNT)
-        );
+        if (typeof config.generatorExpression !== 'string' || !config.generatorExpression.trim()) {
+            throw new Error('Expression sources require a generator expression.');
+        }
+        if (config.filterExpression !== undefined && typeof config.filterExpression !== 'string') {
+            throw new Error('Expression-source filters must be strings.');
+        }
+        normalized.generatorExpression = config.generatorExpression;
+        normalized.filterExpression = config.filterExpression?.trim() ?? '';
+        normalized.maxAttempts = config.maxAttempts === undefined
+            ? Math.min(MAX_GENERATOR_ATTEMPTS, Math.max(count * 100, MAX_DYNAMIC_SOURCE_COUNT))
+            : requireInteger(config.maxAttempts, 'Expression-source attempt limit');
+        if (normalized.maxAttempts < count || normalized.maxAttempts > MAX_GENERATOR_ATTEMPTS) {
+            throw new Error(`Expression-source attempt limit must be between ${count} and ${MAX_GENERATOR_ATTEMPTS}.`);
+        }
+    } else {
+        throw new Error(`Unsupported discrete-source kind: ${kind}.`);
     }
     return normalized;
 }
 
-export function generateDiscreteSource(config = {}, runtime = {}) {
-    const kind = config.kind || 'integers';
+export function generateDiscreteSource(config, runtime = { parameters: {} }) {
+    if (!config || typeof config !== 'object') throw new Error('Discrete-source configuration is required.');
+    const kind = config.kind;
+    if (typeof kind !== 'string' || !kind) throw new Error('Discrete-source kind is required.');
     const count = normalizeCount(config.count);
     if (kind === 'custom_points') {
+        if (!Array.isArray(config.points)) throw new Error('Custom-point sources require a points array.');
         const values = [
-            ...(Array.isArray(config.points) ? config.points.map(parseCustomPoint).filter(Boolean) : []),
+            ...config.points.map(parseCustomPoint),
             ...parseCustomPointText(config.pointsText)
         ].slice(0, count);
         return { kind, records: values.map((value, ordinal) => record(ordinal, value, kind)), diagnostics: [] };

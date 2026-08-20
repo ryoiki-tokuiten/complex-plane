@@ -1,5 +1,4 @@
-import { state } from '../store/state.js';
-import { buildNativeTissot, nativeMapOptions } from '../native/complex-engine.js';
+import { buildNativeTissot } from '../native/complex-engine.js';
 
 const INDICATRIX_COLORS = Object.freeze([
     'rgba(80, 219, 255, 0.94)',
@@ -18,13 +17,9 @@ const INDICATRIX_COLORS = Object.freeze([
 const INDICATRIX_SCALE_OUTLIER_FACTOR = 4;
 const INDICATRIX_VIEWPORT_PADDING = 0.14;
 
-export function generateTissotIndicatrices(map, xRange, yRange, density = 8, segments = 72) {
-    const mapConfig = map?.functionKey ? map : nativeMapOptions(state, {
-        stage: map?.stage,
-        derivativeMode: map?.presentation === 'derivative',
-        ...(map?.evaluate?.nativeMapOptions || {})
-    });
-    return buildNativeTissot({ map: mapConfig, xRange, yRange, density, segments })
+export function generateTissotIndicatrices(mapOptions, xRange, yRange, density = 8, segments = 72) {
+    if (!mapOptions?.functionKey) throw new Error('Tissot geometry requires native map options.');
+    return buildNativeTissot({ map: mapOptions, xRange, yRange, density, segments })
         .map((indicatrix, index) => ({
             ...indicatrix,
             color: INDICATRIX_COLORS[index % INDICATRIX_COLORS.length]

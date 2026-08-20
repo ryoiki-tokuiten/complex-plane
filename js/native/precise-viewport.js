@@ -1,4 +1,5 @@
 import { precisePixelCoordinate } from './complex-engine.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
 
 export const PRECISE_ZOOM_THRESHOLD = 12;
 
@@ -7,8 +8,9 @@ function precisionFor(zoomPower) {
 }
 
 function planeCenter(planeParams) {
-    const xRange = planeParams.currentVisXRange || planeParams.xRange;
-    const yRange = planeParams.currentVisYRange || planeParams.yRange;
+    requireVisibleViewport(planeParams, 'Precise viewport');
+    const xRange = planeParams.currentVisXRange;
+    const yRange = planeParams.currentVisYRange;
     return {
         re: (Number(xRange[0]) + Number(xRange[1])) * 0.5,
         im: (Number(yRange[0]) + Number(yRange[1])) * 0.5
@@ -21,24 +23,24 @@ function updateSize(planeParams) {
     planeParams.preciseViewport.height = Math.max(1, Math.floor(planeParams.height));
 }
 
-export function isPreciseViewport(planeParams) {
-    return !!planeParams?.preciseViewport;
-}
-
 export function shouldBePrecise(planeParams, zoom) {
     const center = planeCenter(planeParams);
     const maxCoord = Math.max(Math.abs(center.re), Math.abs(center.im), 1.0);
     const z = Number(zoom);
-    if (!Number.isFinite(z) || z <= 0) return false;
+    if (!Number.isFinite(z) || z <= 0) throw new Error('Precise viewport requires a finite positive zoom.');
+    if (!Number.isFinite(planeParams.width) || planeParams.width <= 0) {
+        throw new Error('Precise viewport requires a finite positive width.');
+    }
     const span = 7 / z;
-    const pixelSpan = span / Math.max(1, planeParams.width || 800);
+    const pixelSpan = span / planeParams.width;
     return pixelSpan <= maxCoord * 1.0e-100;
 }
 
 export function synchronizePreciseViewport(planeParams, zoom) {
     const exactPower = Math.log10(Number(zoom));
-    if (!Number.isFinite(exactPower) || !shouldBePrecise(planeParams, zoom)) {
-        if (planeParams.preciseViewport) leavePreciseViewport(planeParams, Number.isFinite(exactPower) ? exactPower : 0);
+    if (!Number.isFinite(exactPower)) throw new Error('Precise viewport requires finite zoom power.');
+    if (!shouldBePrecise(planeParams, zoom)) {
+        if (planeParams.preciseViewport) leavePreciseViewport(planeParams, exactPower);
         return false;
     }
     const zoomPower = exactPower;
@@ -67,8 +69,8 @@ export function leavePreciseViewport(planeParams, zoomPower) {
     const centerIm = Number(viewport.centerIm);
     const xSpan = 7 * 10 ** -zoomPower;
     const ySpan = xSpan * planeParams.height / planeParams.width;
-    const xRange = planeParams.currentVisXRange || planeParams.xRange;
-    const yRange = planeParams.currentVisYRange || planeParams.yRange;
+    const xRange = planeParams.currentVisXRange;
+    const yRange = planeParams.currentVisYRange;
     xRange[0] = centerRe - xSpan * 0.5;
     xRange[1] = centerRe + xSpan * 0.5;
     yRange[0] = centerIm - ySpan * 0.5;

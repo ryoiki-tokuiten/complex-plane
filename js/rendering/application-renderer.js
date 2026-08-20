@@ -25,19 +25,15 @@ let surfaceRedrawFirstRequestTime = 0;
 function runSurfaceRedraw() {
     surfaceRedrawFrame = null;
     surfaceRedrawFirstRequestTime = 0;
-    try {
-        if (state.riemannSurfaceEnabled && !state.realPlotsEnabled) {
-            drawWPlaneContent({ renderRiemannSurface: true });
-        }
-        if (state.realPlotsEnabled && state.show2DContourPlot) {
-            draw2DContourPlot(controls.contour2DCanvas);
-        }
-        if (state.realPlotsEnabled) drawRealPlot();
-        if (state.show2DContourPlot && !state.realPlotsEnabled && state.riemannSurfaceEnabled) {
-            draw2DContourPlot(controls.contour2DCanvas);
-        }
-    } catch (error) {
-        console.error('Error during deferred surface redraw:', error);
+    if (state.riemannSurfaceEnabled && !state.realPlotsEnabled) {
+        drawWPlaneContent({ renderRiemannSurface: true });
+    }
+    if (state.realPlotsEnabled && state.show2DContourPlot) {
+        draw2DContourPlot(controls.contour2DCanvas);
+    }
+    if (state.realPlotsEnabled) drawRealPlot();
+    if (state.show2DContourPlot && !state.realPlotsEnabled && state.riemannSurfaceEnabled) {
+        draw2DContourPlot(controls.contour2DCanvas);
     }
 }
 

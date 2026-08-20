@@ -6,22 +6,36 @@ import {
     COLOR_STREAMLINE
 } from '../constants/colors.js';
 import { traceNativeStreamlines } from '../native/complex-engine.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 export function traceStreamlines(seeds, map, planeParams, renderState, options = null) {
-    const xRange = planeParams.currentVisXRange || planeParams.xRange;
-    const yRange = planeParams.currentVisYRange || planeParams.yRange;
+    requireVisibleViewport(planeParams, 'Streamline viewport');
+    const xRange = planeParams.currentVisXRange;
+    const yRange = planeParams.currentVisYRange;
     const viewSpan = Math.max(xRange[1] - xRange[0], yRange[1] - yRange[0]);
-    const requested = Math.max(0, Math.floor(Number(renderState.streamlineMaxLength) || 0));
-    const maxSteps = Number.isFinite(options?.maxSteps)
-        ? Math.min(requested, Math.max(0, Math.floor(options.maxSteps)))
-        : requested;
+    const requested = requireInteger(renderState.streamlineMaxLength, 'Streamline maximum length');
+    if (requested < 1 || requested > 10000) {
+        throw new Error('Streamline maximum length must be from one through 10,000.');
+    }
+    const optionLimit = options?.maxSteps === undefined
+        ? requested
+        : requireInteger(options.maxSteps, 'Streamline option step limit');
+    if (optionLimit < 1 || optionLimit > requested) {
+        throw new Error('Streamline option step limit must be positive and not exceed the configured maximum.');
+    }
+    const stepSize = requireFiniteNumber(renderState.streamlineStepSize, 'Streamline step size');
+    if (stepSize <= 0) throw new Error('Streamline step size must be positive.');
+    if (renderState.vectorFieldFunction !== 'f(z)' && renderState.vectorFieldFunction !== '1/f(z)') {
+        throw new Error(`Unsupported vector-field function: ${renderState.vectorFieldFunction}.`);
+    }
     return traceNativeStreamlines({
         seeds,
         map,
         xRange,
         yRange,
-        stepSize: Number(renderState.streamlineStepSize) * viewSpan * 0.1,
-        maxSteps,
+        stepSize: stepSize * viewSpan * 0.1,
+        maxSteps: optionLimit,
         inverse: renderState.vectorFieldFunction === '1/f(z)'
     });
 }

@@ -4,6 +4,8 @@ import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import {
     anchorPreciseViewport,
     leavePreciseViewport,
@@ -16,6 +18,10 @@ import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
 import { updateLaplaceTransform, updateLaplaceEvaluationPoint } from '../analysis/laplace-transform.js';
 import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
+import {
+    DOMAIN_COLOR_LOG_MAGNITUDE_MAX,
+    DOMAIN_COLOR_LOG_MAGNITUDE_MIN
+} from '../constants/domain-dynamics.js';
 import {
     SPHERE_SENSITIVITY,
     SPHERE_INITIAL_ROT_X,
@@ -40,6 +46,7 @@ import {
 } from './dynamic-plotting-ui.js';
 import { domainColorForValue } from '../rendering/domain-coloring.js';
 import { resolveActiveMap } from '../math/active-map.js';
+import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import {
     disposeTransformationGraphRenderer,
     isFullGridPerspectiveSupported,
@@ -442,22 +449,15 @@ function syncDomainColoringKeyVisibility() {
     );
 }
 
-function parseControlValue(control, parser = parseFloat, fallback = 0) {
-    if (!control) return fallback;
-    const value = parser(control.value);
-    return typeof value === 'number' && Number.isNaN(value) ? fallback : value;
+function parseControlValue(control, parser = parseFloat) {
+    if (!control) throw new Error('Cannot read a missing UI control.');
+    return requireFiniteNumber(parser(control.value), `Control ${control.id || '(unnamed)'}`);
 }
 
 function bindElementListener(element, eventName, handler, options) {
     if (!element) return;
 
-    element.addEventListener(eventName, event => {
-        try {
-            handler(event, element);
-        } catch (error) {
-            console.error(`Error in ${element.id || element.nodeName || 'element'} ${eventName} listener:`, error);
-        }
-    }, options);
+    element.addEventListener(eventName, event => handler(event, element), options);
 }
 
 function bindControlListener(controlKey, eventName, handler, options) {
@@ -466,7 +466,7 @@ function bindControlListener(controlKey, eventName, handler, options) {
 
 function readSliderState(controlKey, stateKey, parser = parseFloat) {
     const control = controls[controlKey];
-    if (control) state[stateKey] = parseControlValue(control, parser, state[stateKey]);
+    if (control) state[stateKey] = parseControlValue(control, parser);
     return state[stateKey];
 }
 
@@ -490,7 +490,7 @@ function shouldMarkDomainDirty(controlKey, stateKey) {
 
 function bindSlider(controlKey, stateKey, parser = parseFloat, customCallback = null) {
     bindControlListener(controlKey, 'input', (event, slider) => {
-        state[stateKey] = parseControlValue(slider, parser, state[stateKey]);
+        state[stateKey] = parseControlValue(slider, parser);
 
         if (customCallback) {
             customCallback(state[stateKey], slider, event);
@@ -763,8 +763,8 @@ function setPlaneViewport(planeParams, xRange, yRange) {
     const scale = Math.min(planeParams.width / xSpan, planeParams.height / ySpan);
     const centerX = (xRange[0] + xRange[1]) * 0.5;
     const centerY = (yRange[0] + yRange[1]) * 0.5;
-    const targetXRange = planeParams.currentVisXRange || planeParams.xRange;
-    const targetYRange = planeParams.currentVisYRange || planeParams.yRange;
+    const targetXRange = planeParams.currentVisXRange;
+    const targetYRange = planeParams.currentVisYRange;
 
     targetXRange[0] = xRange[0];
     targetXRange[1] = xRange[1];
@@ -789,8 +789,8 @@ function snapshotNormalViewports() {
             yRange: copyRange(zPlaneParams.currentVisYRange)
         },
         w: {
-            xRange: copyRange(wPlaneParams.xRange),
-            yRange: copyRange(wPlaneParams.yRange)
+            xRange: copyRange(wPlaneParams.currentVisXRange),
+            yRange: copyRange(wPlaneParams.currentVisYRange)
         },
         zZoom: state.zPlaneZoom,
         wZoom: state.wPlaneZoom
@@ -807,8 +807,8 @@ function restoreNormalViewports() {
         zPlaneParams.currentVisYRange.splice(0, 2, ...snapshot.z.yRange);
     }
     if (snapshot.w.xRange && snapshot.w.yRange) {
-        wPlaneParams.xRange.splice(0, 2, ...snapshot.w.xRange);
-        wPlaneParams.yRange.splice(0, 2, ...snapshot.w.yRange);
+        wPlaneParams.currentVisXRange.splice(0, 2, ...snapshot.w.xRange);
+        wPlaneParams.currentVisYRange.splice(0, 2, ...snapshot.w.yRange);
     }
 
     state.zPlaneZoom = snapshot.zZoom;
@@ -927,7 +927,7 @@ function processUploadedImage(img) {
 }
 
 function complexState(key) {
-    return state[key] || (state[key] = { re: 0, im: 0 });
+    return requireFiniteComplex(state[key], `State ${key}`);
 }
 
 function initializeMobiusState() {
@@ -936,7 +936,7 @@ function initializeMobiusState() {
         const value = { ...complexState(stateKey) };
         COMPLEX_PARTS.forEach(part => {
             const slider = controls[`mobius${param}${part === 're' ? 'Re' : 'Im'}Slider`];
-            if (slider) value[part] = parseControlValue(slider, parseFloat, value[part]);
+            if (slider) value[part] = parseControlValue(slider, parseFloat);
         });
         state[stateKey] = value;
     });
@@ -987,7 +987,7 @@ function bindMobiusControls() {
         bindControlListener(sliderKey, 'input', (_event, slider) => {
             state[stateKey] = {
                 ...complexState(stateKey),
-                [part]: parseControlValue(slider, parseFloat, 0)
+                [part]: parseControlValue(slider, parseFloat)
             };
             requestDomainRedraw(true);
         });
@@ -1118,7 +1118,7 @@ function bindDerivativeControls() {
 
 function fitConformalGridOutputViewport() {
     const indicatrices = selectStableTissotIndicatrices(generateTissotIndicatrices(
-        resolveActiveMap(),
+        nativeOptionsForActiveMap(resolveActiveMap()),
         zPlaneParams.currentVisXRange,
         zPlaneParams.currentVisYRange,
         state.gridDensity,
@@ -1169,8 +1169,6 @@ function disableRiemannSurface() {
 
 function syncFoldSurfaceControls() {
     checked('gridSurface3DCb', state.foldSurface3dEnabled);
-    checked('imageSurface3DCb', state.foldSurface3dEnabled);
-    checked('videoSurface3DCb', state.foldSurface3dEnabled);
     hidden(
         controls.gridSurface3DOptions,
         !state.foldSurface3dEnabled || !isFoldableInputShape(state.currentInputShape)
@@ -1852,7 +1850,10 @@ function handleCanvasLeave(ctx) {
 
 function zoomPlaneAt(ctx, pos, factor) {
     const zoomKey = ctx.isZ ? 'zPlaneZoom' : 'wPlaneZoom';
-    const oldZoom = state[zoomKey] || 1;
+    const oldZoom = requireFiniteNumber(state[zoomKey], `${ctx.planeType}-plane zoom`);
+    if (oldZoom < MIN_STATE_ZOOM_LEVEL || oldZoom > MAX_STATE_ZOOM_LEVEL) {
+        throw new Error(`${ctx.planeType}-plane zoom is outside the supported range.`);
+    }
     const nextZoom = clamp(oldZoom * factor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
     const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
 
@@ -1921,11 +1922,12 @@ function bindContourCanvasInteractions() {
 
     contourCanvas.addEventListener('mousedown', event => {
         if (event.button !== 0) return;
+        requireVisibleViewport(zPlaneParams, 'Contour viewport');
         isPanning = true;
         startX = event.clientX;
         startY = event.clientY;
-        startXRange = [...(zPlaneParams.currentVisXRange || [-3.5, 3.5])];
-        startYRange = [...(zPlaneParams.currentVisYRange || [-3.5, 3.5])];
+        startXRange = [...zPlaneParams.currentVisXRange];
+        startYRange = [...zPlaneParams.currentVisYRange];
     }, PASSIVE_LISTENER_OPTIONS);
 
     bindElementListener(window, 'mousemove', event => {
@@ -1953,27 +1955,31 @@ function bindContourCanvasInteractions() {
 
     contourCanvas.addEventListener('wheel', event => {
         event.preventDefault();
+        requireVisibleViewport(zPlaneParams, 'Contour viewport');
         const rect = contourCanvas.getBoundingClientRect();
         const width = Math.max(1, rect.width);
         const height = Math.max(1, rect.height);
         const px = clamp(event.clientX - rect.left, 0, width);
         const py = clamp(event.clientY - rect.top, 0, height);
-        const xRange = zPlaneParams.currentVisXRange || [-3.5, 3.5];
-        const yRange = zPlaneParams.currentVisYRange || [-3.5, 3.5];
+        const xRange = zPlaneParams.currentVisXRange;
+        const yRange = zPlaneParams.currentVisYRange;
         const xSpan = xRange[1] - xRange[0];
         const ySpan = yRange[1] - yRange[0];
         const u = xRange[0] + (px / width) * xSpan;
         const v = yRange[1] - (py / height) * ySpan;
-        const factor = event.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
-        const newXSpan = xSpan / factor;
-        const newYSpan = ySpan / factor;
+        const requestedFactor = event.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
+        const oldZoom = requireFiniteNumber(state.zPlaneZoom, 'Contour zoom');
+        const nextZoom = clamp(oldZoom * requestedFactor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
+        const appliedFactor = nextZoom / oldZoom;
+        const newXSpan = xSpan / appliedFactor;
+        const newYSpan = ySpan / appliedFactor;
         const newX0 = u - (px / width) * newXSpan;
         const newY1 = v + (py / height) * newYSpan;
         zPlaneParams.currentVisXRange = [newX0, newX0 + newXSpan];
         zPlaneParams.currentVisYRange = [newY1 - newYSpan, newY1];
-        state.zPlaneZoom = clamp((state.zPlaneZoom || 1) * factor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
-        zPlaneParams.scale.x = zPlaneParams.width / (newXSpan || 1);
-        zPlaneParams.scale.y = zPlaneParams.height / (newYSpan || 1);
+        state.zPlaneZoom = nextZoom;
+        zPlaneParams.scale.x = zPlaneParams.width / newXSpan;
+        zPlaneParams.scale.y = zPlaneParams.height / newYSpan;
         zPlaneParams.origin.x = -newX0 * zPlaneParams.scale.x;
         zPlaneParams.origin.y = newY1 * zPlaneParams.scale.y;
         requestDomainRedraw(true);
@@ -2040,10 +2046,14 @@ function onCanvasClick(event) {
     if (!ctx.isZ && state.preimageExplorerEnabled) {
         const target = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
         const map = resolveActiveMap();
-        const xRange = zPlaneParams.currentVisXRange || zPlaneParams.xRange;
-        const yRange = zPlaneParams.currentVisYRange || zPlaneParams.yRange;
+        const xRange = zPlaneParams.currentVisXRange;
+        const yRange = zPlaneParams.currentVisYRange;
         state.preimageTarget = { re: target.x, im: target.y };
-        state.preimageRoots = findPreimages(state.preimageTarget, map, { xRange, yRange });
+        state.preimageRoots = findPreimages(
+            state.preimageTarget,
+            nativeOptionsForActiveMap(map),
+            { xRange, yRange }
+        );
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
         requestUiRedraw();
         return;
@@ -2099,13 +2109,13 @@ function rememberFullscreenOrigin(element) {
     });
 }
 
-function restoreFullscreenOrigin(element, fallback = null, restoreSize = false) {
+function restoreFullscreenOrigin(element, restoreSize = false) {
     const origin = fullscreenOrigins.get(element);
-    const parent = origin?.parent || fallback;
-    if (parent) parent.appendChild(element);
+    if (!origin?.parent) throw new Error('Fullscreen element has no recorded origin.');
+    origin.parent.appendChild(element);
     if (restoreSize) {
-        element.style.width = origin?.width || '';
-        element.style.height = origin?.height || '';
+        element.style.width = origin.width;
+        element.style.height = origin.height;
     }
     fullscreenOrigins.delete(element);
 }
@@ -2470,7 +2480,7 @@ function handleFullScreenToggle(planeType, index = 0) {
 
         if (target.isThree && target.canvas) target.canvas.classList.add('hidden');
     } else {
-        restoreFullscreenOrigin(target.element, target.card?.querySelector('div'), true);
+        restoreFullscreenOrigin(target.element, true);
         resetFullscreenShell(shell);
         if (target.card) target.card.classList.remove('hidden-visually');
         if (target.isThree && target.canvas) target.canvas.classList.remove('hidden');
@@ -2665,13 +2675,14 @@ export function drawAmplitudeStrip(canvas, paletteId) {
 
     // Horizontal axis is magnitude at a representative phase, so the strip stays
     // palette-aware without adding a second phase dimension.
-    const maxLogMod = Math.log(1e12 + 1);
     const phase = Math.PI;
     const phaseRe = Math.cos(phase);
     const phaseIm = Math.sin(phase);
     for (let x = 0; x < w; x++) {
-        const logMod = (x / Math.max(1, w - 1)) * maxLogMod;
-        const modVal = Math.expm1(logMod);
+        const normalized = x / Math.max(1, w - 1);
+        const logMod = DOMAIN_COLOR_LOG_MAGNITUDE_MIN + normalized *
+            (DOMAIN_COLOR_LOG_MAGNITUDE_MAX - DOMAIN_COLOR_LOG_MAGNITUDE_MIN);
+        const modVal = Math.exp(logMod);
         const rgb = domainColorForValue(
             modVal * phaseRe,
             modVal * phaseIm,

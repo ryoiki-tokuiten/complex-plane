@@ -1,16 +1,39 @@
 import { state } from '../store/state.js';
 import {
+    buildNativeLaplaceWinding,
     buildNativeLaplaceAnalysis,
     evaluateNativeLaplace
 } from '../native/complex-engine.js';
+import { requireFiniteNumber } from '../utils/numeric-contracts.js';
+
+let windingCache = null;
 
 function currentOptions() {
+    if (typeof state.laplaceFunction !== 'string' || !state.laplaceFunction) {
+        throw new Error('Laplace analysis requires a function key.');
+    }
     return {
-        functionKey: state.laplaceFunction || 'exponential',
-        frequency: Number(state.laplaceFrequency) || 2,
-        damping: Number(state.laplaceDamping) || 0.5,
-        amplitude: Number(state.laplaceAmplitude) || 1
+        functionKey: state.laplaceFunction,
+        frequency: requireFiniteNumber(state.laplaceFrequency, 'Laplace frequency'),
+        damping: requireFiniteNumber(state.laplaceDamping, 'Laplace damping'),
+        amplitude: requireFiniteNumber(state.laplaceAmplitude, 'Laplace amplitude')
     };
+}
+
+export function getLaplaceFrameData(signal = state.laplaceTimeDomainSignal, progress = state.laplaceAnimationTime) {
+    if (!Array.isArray(signal) || signal.length < 2) {
+        throw new Error('Laplace frame rendering requires at least two signal samples.');
+    }
+    const sigma = requireFiniteNumber(state.laplaceSigma, 'Laplace sigma');
+    const omega = requireFiniteNumber(state.laplaceOmega, 'Laplace omega');
+    const animationProgress = requireFiniteNumber(progress, 'Laplace animation progress');
+    if (windingCache?.signal === signal && windingCache.sigma === sigma &&
+        windingCache.omega === omega && windingCache.progress === animationProgress) {
+        return windingCache.value;
+    }
+    const value = buildNativeLaplaceWinding(signal, sigma, omega, animationProgress);
+    windingCache = { signal, sigma, omega, progress: animationProgress, value };
+    return value;
 }
 
 function featureLabel(point) {
@@ -26,7 +49,9 @@ function featureLabel(point) {
 export function updateLaplaceEvaluationPoint() {
     if (!state.laplaceModeEnabled) return;
     state.laplaceCurrentValue = evaluateNativeLaplace(
-        currentOptions(), Number(state.laplaceSigma) || 0, Number(state.laplaceOmega) || 0
+        currentOptions(),
+        requireFiniteNumber(state.laplaceSigma, 'Laplace sigma'),
+        requireFiniteNumber(state.laplaceOmega, 'Laplace omega')
     );
 }
 

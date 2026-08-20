@@ -20,6 +20,7 @@ function makeState(overrides = {}) {
         currentFunction: 'cos',
         fractionalPowerN: 0.5,
         algebraicChainingTerms: [],
+        algebraicChainingZExpr: 'z',
         taylorSeriesEnabled: false,
         chainingEnabled: false,
         chainingMode: 'recursion',
@@ -92,7 +93,8 @@ test('recursive chaining modes do not introduce sheets without a branch-bearing 
 test('branch windows remain odd, bounded, and centered', () => {
     assert.deepEqual(getVisibleBranchIndices(5, 0, true), [-2, -1, 0, 1, 2]);
     assert.deepEqual(getVisibleBranchIndices(8, 3, true), [0, 1, 2, 3, 4, 5, 6]);
-    assert.deepEqual(getVisibleBranchIndices(99, -2, true), [-6, -5, -4, -3, -2, -1, 0, 1, 2]);
+    assert.deepEqual(getVisibleBranchIndices(9, -2, true), [-6, -5, -4, -3, -2, -1, 0, 1, 2]);
+    assert.throws(() => getVisibleBranchIndices(99, -2, true), /between 1 and 9/);
     assert.equal(getBranchWindowLabel([-2, -1, 0, 1, 2]), 'sheets k = -2...2');
 });
 
@@ -143,6 +145,24 @@ test('Riemann program signatures keep algebraic parameter edits uniform-backed',
     runtimeState.algebraicChainingTerms[0].factors[0].exp = true;
     const afterModifierEdit = getRiemannSurfaceProgramSignature(runtimeState);
     assert.equal(afterModifierEdit, before);
+});
+
+test('Riemann shaders specialize their static loop bound to the active chain depth', () => {
+    const ordinaryState = makeState({ chainCount: 1 });
+    assert.match(
+        buildRiemannSurfaceMathLibrary(ordinaryState),
+        /const int RIEMANN_SURFACE_ITERATION_LIMIT = 1;/
+    );
+
+    const chainedState = makeState({ chainingEnabled: true, chainCount: 37 });
+    assert.match(
+        buildRiemannSurfaceMathLibrary(chainedState),
+        /const int RIEMANN_SURFACE_ITERATION_LIMIT = 37;/
+    );
+
+    const before = getRiemannSurfaceProgramSignature(chainedState);
+    chainedState.chainCount = 38;
+    assert.notEqual(getRiemannSurfaceProgramSignature(chainedState), before);
 });
 
 test('drawn branch-cut shader inputs declare their scalar uniforms', async () => {

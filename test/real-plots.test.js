@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
     buildRealPlotSurface,
+    renderRealPlotContour,
     validateRealPlotExpression
 } from '../js/rendering/real-plots-renderer.js';
+import { renderNativeMapContour } from '../js/native/complex-engine.js';
+import { completeNativeMapOptions } from './helpers/native-map.js';
 
 function allFinite(values) {
     return values.every(Number.isFinite);
@@ -68,7 +71,7 @@ test('native real surface preserves component range and unit normals', () => {
 
 test('native real surface evaluates generic complex input expressions in one job', () => {
     const sampled = buildRealPlotSurface({
-        mapOptions: { functionKey: 'identity', chainingEnabled: false },
+        mapOptions: completeNativeMapOptions({ functionKey: 'identity', chainingEnabled: false }),
         segments: 4,
         xRange: [-1, 1],
         yRange: [-1, 1],
@@ -80,4 +83,48 @@ test('native real surface evaluates generic complex input expressions in one job
     assert.equal(sampled.vertexCount, 25);
     assert.equal(sampled.finiteResultCount, 25);
     assert.ok(sampled.values.every(Number.isFinite));
+});
+
+test('native map contour renders mapped values and contour ink in one job', () => {
+    const pixels = renderNativeMapContour({
+        mapOptions: completeNativeMapOptions({ functionKey: 'identity', chainingEnabled: false }),
+        xRange: [-1, 1],
+        yRange: [-1, 1],
+        width: 24,
+        height: 20,
+        component: 'real',
+        contoursEnabled: true,
+        contourInterval: 0.25,
+        contourThickness: 1.5,
+        paletteStops: [[0.1, 0.2, 0.9], [0.9, 0.2, 0.1]],
+        style: { brightness: 1, contrast: 1, saturation: 1, lightnessCycles: 1 }
+    });
+
+    assert.equal(pixels.length, 24 * 20 * 4);
+    assert.equal(pixels.every((value, index) => index % 4 !== 3 || value === 255), true);
+    assert.notDeepEqual(Array.from(pixels.subarray(0, 3)), Array.from(pixels.subarray(pixels.length - 4, pixels.length - 1)));
+});
+
+test('real-plot contour rasterization stays inside one native full-resolution job', () => {
+    const pixels = renderRealPlotContour({
+        mapOptions: completeNativeMapOptions({ functionKey: 'identity', chainingEnabled: false }),
+        width: 24,
+        height: 20,
+        xRange: [-1, 1],
+        yRange: [-1, 1],
+        inputExpr: 'x',
+        imagExpr: 'y',
+        outputComponent: 'real',
+        palette: 'viridis',
+        contoursEnabled: true,
+        contourInterval: 0.25,
+        contourThickness: 1.5
+    });
+
+    assert.equal(pixels.length, 24 * 20 * 4);
+    assert.equal(pixels.every((value, index) => index % 4 !== 3 || value === 255), true);
+    assert.notDeepEqual(
+        Array.from(pixels.subarray(0, 3)),
+        Array.from(pixels.subarray(pixels.length - 4, pixels.length - 1))
+    );
 });

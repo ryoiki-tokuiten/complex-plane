@@ -7,8 +7,6 @@ test('control ids map consistently across underscore and kebab naming', () => {
     assert.equal(controlKeyFromId('grid_density_slider'), 'gridDensitySlider');
     assert.equal(controlKeyFromId('function-controls-panel'), 'functionControlsPanel');
     assert.equal(controlKeyFromId('mobiusA_re_slider'), 'mobiusAReSlider');
-    assert.equal(controlKeyFromId('image_surface_3d_cb'), 'imageSurface3DCb');
-    assert.equal(controlKeyFromId('video_surface_3d_cb'), 'videoSurface3DCb');
 });
 
 test('control registration indexes the document using canonical keys', () => {

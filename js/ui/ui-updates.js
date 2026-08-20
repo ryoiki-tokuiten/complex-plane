@@ -21,6 +21,7 @@ import { compileExpression, createExpressionMathML } from '../math/expression/in
 import { createFormulaFragment } from './dom-components.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import { isFullGridPerspectiveSupported, isGraphViewSupported } from '../rendering/transformation-graph.js';
+import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 
 const { controls = {} } = context;
 
@@ -183,12 +184,8 @@ function resolveControl(target) {
     return typeof target === 'string' ? control(target) : target;
 }
 
-function runUiTransaction(name, action) {
-    try {
-        action();
-    } catch (error) {
-        console.error(`Error in ${name}:`, error);
-    }
+function runUiTransaction(_name, action) {
+    action();
 }
 
 function setHidden(target, hidden = true) {
@@ -278,8 +275,9 @@ function syncValueBindings(bindings) {
     }
 }
 
-function safeArray(value) {
-    return Array.isArray(value) ? value : [];
+function requireArray(value, label = 'UI state array') {
+    if (!Array.isArray(value)) throw new Error(`${label} is required.`);
+    return value;
 }
 
 function escapeFormulaText(value) {
@@ -335,8 +333,8 @@ function collectActiveFunctionKeys() {
         return keys;
     }
 
-    for (const term of safeArray(state.algebraicChainingTerms)) {
-        for (const factor of safeArray(term?.factors)) {
+    for (const term of requireArray(state.algebraicChainingTerms, 'Algebraic terms')) {
+        for (const factor of requireArray(term?.factors, 'Algebraic factors')) {
             if (factor?.func) {
                 keys.add(factor.func);
             }
@@ -452,8 +450,10 @@ function syncComplexParameterControls() {
     const isMobiusFunc = activeFunctions.has('mobius');
     const isPolyFunc = activeFunctions.has('polynomial');
     const isPowerFunc = activeFunctions.has('power');
-    const hasExp = activeFunctions.has('exp') || safeArray(state.algebraicChainingTerms).some(term => safeArray(term?.factors).some(factor => factor?.exp));
-    const hasLog = activeFunctions.has('ln') || safeArray(state.algebraicChainingTerms).some(term => safeArray(term?.factors).some(factor => factor?.log));
+    const hasExp = activeFunctions.has('exp') || requireArray(state.algebraicChainingTerms, 'Algebraic terms')
+        .some(term => requireArray(term?.factors, 'Algebraic factors').some(factor => factor?.exp));
+    const hasLog = activeFunctions.has('ln') || requireArray(state.algebraicChainingTerms, 'Algebraic terms')
+        .some(term => requireArray(term?.factors, 'Algebraic factors').some(factor => factor?.log));
 
     setHidden('commonParamsSliders', !(showCommonParams || showMediaCenterParams));
     setHidden('mobiusParamsSliders', !isMobiusFunc);
@@ -771,15 +771,14 @@ export function updateProbeInfo() {
     });
 }
 
-function formatNumberForFormula(value, fallback = 0) {
-    const number = typeof value === 'number' ? value : fallback;
+function formatNumberForFormula(value) {
+    const number = requireFiniteNumber(value, 'Formula number');
     return Number(number.toFixed(2));
 }
 
-function normalizeComplex(c, fallbackRe = 1, fallbackIm = 0) {
-    const re = typeof c?.re === 'number' && !Number.isNaN(c.re) ? c.re : fallbackRe;
-    const im = typeof c?.im === 'number' && !Number.isNaN(c.im) ? c.im : fallbackIm;
-    return { re, im };
+function normalizeComplex(c) {
+    const value = requireFiniteComplex(c, 'Formula coefficient');
+    return { re: value.re, im: value.im };
 }
 
 function formatComplexCoeff(c) {
@@ -893,7 +892,8 @@ function formatFuncForFormula(funcKey, termFactor = null) {
 }
 
 function formatAlgebraicTerm(term) {
-    const activeFactors = safeArray(term?.factors).filter(factor => factor?.func && factor.func !== 'none');
+    const activeFactors = requireArray(term?.factors, 'Algebraic factors')
+        .filter(factor => factor?.func && factor.func !== 'none');
     const factorsStr = activeFactors.map(factor => formatFuncForFormula(factor.func, factor)).join('·');
     const coeffStr = formatComplexCoeff(term?.coeff);
 
@@ -915,7 +915,7 @@ function currentFunctionFormulaHtml() {
     }
 
     if (state.currentFunction === 'algebraic_chaining') {
-        const terms = safeArray(state.algebraicChainingTerms);
+        const terms = requireArray(state.algebraicChainingTerms, 'Algebraic terms');
         return terms.length
             ? terms.map(formatAlgebraicTerm).join(' + ').replace(/\+ \-/g, '- ')
             : '0';
@@ -1628,7 +1628,7 @@ export function syncRealPlotsUI() {
 export function updateCustomFormulaPreview(inputEl, displayEl, options = {}) {
     if (!inputEl || !displayEl) return;
     displayEl.replaceChildren();
-    const source = inputEl.value.trim() || '0';
+    const source = inputEl.value.trim();
     try {
         compileExpression(source, options);
         const mathNode = createExpressionMathML(source, options);

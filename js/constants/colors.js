@@ -6,8 +6,6 @@ export const COLOR_TEXT_ON_CANVAS = '#d0d7e2';
 
 // Grid and Axes
 export const COLOR_AXES = 'rgba(130, 130, 180, 0.8)';
-export const COLOR_Z_GRID_HORZ = 'rgba(200, 150, 255, 0.7)';
-export const COLOR_Z_GRID_VERT = 'rgba(255, 150, 100, 0.7)';
 export const COLOR_Z_GRID_ZETA_UNDEFINED_SUM_REGION = 'rgba(160, 168, 216, 0.25)';
 
 // Input Shapes
@@ -32,8 +30,6 @@ export const COLOR_PROBE_CONFORMAL_LINE_Z_V = 'rgba(255, 165, 0, 0.9)';
 export const COLOR_PROBE_CONFORMAL_LINE_W_H = 'rgba(255, 255, 0, 0.9)';
 export const COLOR_PROBE_CONFORMAL_LINE_W_V = 'rgba(255, 165, 0, 0.9)';
 
-// Sphere
-export const COLOR_SPHERE_OUTLINE = 'rgba(150, 180, 220, 0.8)';
 export const COLOR_SPHERE_GRID = 'rgba(128, 137, 255, 0.45)';
 
 // Cauchy Contour

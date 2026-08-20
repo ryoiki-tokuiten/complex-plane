@@ -9,6 +9,20 @@ import {
 import { getMappedTransformProfile, transformFunctions } from '../js/native/map-runtime.js';
 import { state, zPlaneParams } from '../js/store/state.js';
 
+const IDENTITY_MAP = Object.freeze({
+    stage: 0,
+    presentation: 'function',
+    evaluate: transformFunctions.identity
+});
+
+class TestPath2D {
+    constructor() { this.commands = []; }
+    moveTo(x, y) { this.commands.push(['M', x, y]); }
+    lineTo(x, y) { this.commands.push(['L', x, y]); }
+}
+
+if (typeof globalThis.Path2D !== 'function') globalThis.Path2D = TestPath2D;
+
 class LineCaptureContext {
     constructor() {
         this.paths = [];
@@ -19,7 +33,12 @@ class LineCaptureContext {
     beginPath() { this.currentPath = []; }
     moveTo(x, y) { this.currentPath.push(x, y); }
     lineTo(x, y) { this.currentPath.push(x, y); }
-    stroke() { this.paths.push(this.currentPath.slice()); }
+    stroke(path) {
+        this.paths.push(path
+            ? path.commands.flatMap(([_operation, x, y]) => [x, y])
+            : this.currentPath.slice());
+    }
+    translate() {}
     setLineDash() {}
 }
 
@@ -66,7 +85,8 @@ test('drawPointSetCollectionOnPlane supports ordinary source x ordinary destinat
 
     drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
         transformFunc: transformFunctions.identity,
-        transformProfile: getMappedTransformProfile('identity', transformFunctions.identity)
+        transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
+        map: IDENTITY_MAP
     });
     assert.ok(capture.paths.length > 0);
 });
@@ -96,7 +116,8 @@ test('drawPointSetCollectionOnPlane supports ordinary source x precise destinati
 
     drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
         transformFunc: transformFunctions.identity,
-        transformProfile: getMappedTransformProfile('identity', transformFunctions.identity)
+        transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
+        map: IDENTITY_MAP
     });
     assert.ok(capture.paths.length > 0);
 });
@@ -130,7 +151,8 @@ test('drawPointSetCollectionOnPlane supports precise source x ordinary destinati
 
         drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
             transformFunc: transformFunctions.identity,
-            transformProfile: getMappedTransformProfile('identity', transformFunctions.identity)
+            transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
+            map: IDENTITY_MAP
         });
         assert.ok(capture.paths.length > 0);
     } finally {
@@ -173,7 +195,8 @@ test('drawPointSetCollectionOnPlane supports precise source x precise destinatio
 
         drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
             transformFunc: transformFunctions.identity,
-            transformProfile: getMappedTransformProfile('identity', transformFunctions.identity)
+            transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
+            map: IDENTITY_MAP
         });
         assert.ok(capture.paths.length > 0);
     } finally {
@@ -182,16 +205,9 @@ test('drawPointSetCollectionOnPlane supports precise source x precise destinatio
 });
 
 
-test('transformed polylines emit identical subpaths with and without Path2D', () => {
+test('transformed polylines require Path2D and preserve disconnected subpaths', () => {
     const previousPath2D = globalThis.Path2D;
-    const previousCanvasContext = globalThis.CanvasRenderingContext2D;
-    const previousOffscreenContext = globalThis.OffscreenCanvasRenderingContext2D;
 
-    class FakePath2D {
-        constructor() { this.commands = []; }
-        moveTo(x, y) { this.commands.push(['M', x, y]); }
-        lineTo(x, y) { this.commands.push(['L', x, y]); }
-    }
     class NativeContext {
         constructor() { this.commands = []; }
         beginPath() { this.commands = []; }
@@ -220,26 +236,20 @@ test('transformed polylines emit identical subpaths with and without Path2D', ()
     ];
 
     try {
-        globalThis.Path2D = FakePath2D;
-        globalThis.CanvasRenderingContext2D = NativeContext;
-        delete globalThis.OffscreenCanvasRenderingContext2D;
+        globalThis.Path2D = TestPath2D;
 
         const native = new NativeContext();
         drawPlanarTransformedLine(native, planeParams, profile, points, '#fff');
 
-        const fallback = new class extends NativeContext {}();
-        globalThis.CanvasRenderingContext2D = class {};
-        drawPlanarTransformedLine(fallback, planeParams, profile, points, '#fff');
-
-        assert.deepEqual(fallback.commands, native.commands);
         assert.equal(native.commands.filter(command => command[0] === 'M').length, 2);
+        delete globalThis.Path2D;
+        assert.throws(
+            () => drawPlanarTransformedLine(new NativeContext(), planeParams, profile, points, '#fff'),
+            /requires Path2D/
+        );
     } finally {
         if (previousPath2D === undefined) delete globalThis.Path2D;
         else globalThis.Path2D = previousPath2D;
-        if (previousCanvasContext === undefined) delete globalThis.CanvasRenderingContext2D;
-        else globalThis.CanvasRenderingContext2D = previousCanvasContext;
-        if (previousOffscreenContext === undefined) delete globalThis.OffscreenCanvasRenderingContext2D;
-        else globalThis.OffscreenCanvasRenderingContext2D = previousOffscreenContext;
     }
 });
 

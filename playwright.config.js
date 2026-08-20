@@ -5,6 +5,7 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
 export default defineConfig({
     testDir: './test/e2e',
     fullyParallel: false,
+    workers: 1,
     use: {
         baseURL: 'http://127.0.0.1:4173/complex-plane/',
         viewport: { width: 1440, height: 1000 },

@@ -14,15 +14,17 @@ import {
     ZERO_POLE_GRID_SIZE,
     ZETA_POLE
 } from '../constants/numerical.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
 
 function cacheKey() {
+    requireVisibleViewport(zPlaneParams, 'Feature-detection viewport');
     return [
         state.currentFunction, state.mapPresentation, state.chainingEnabled, state.chainCount,
         getAlgebraicStructureSignatureShared(state.algebraicChainingTerms),
-        state.algebraicChainingZExpr || 'z', JSON.stringify(state.polynomialCoeffs),
+        state.algebraicChainingZExpr, JSON.stringify(state.polynomialCoeffs),
         JSON.stringify([state.mobiusA, state.mobiusB, state.mobiusC, state.mobiusD]),
         state.fractionalPowerN, state.zetaContinuationEnabled,
-        zPlaneParams.currentVisXRange?.join(','), zPlaneParams.currentVisYRange?.join(',')
+        zPlaneParams.currentVisXRange.join(','), zPlaneParams.currentVisYRange.join(',')
     ].join('|');
 }
 
@@ -125,7 +127,10 @@ export function findZerosAndPoles() {
             zeros.push({ re: n * Math.PI, im: 0 });
         }
     } else if (single && state.currentFunction === 'polynomial') {
-        zeros = findNativePolynomialRoots([...state.polynomialCoeffs].reverse());
+        zeros = findNativePolynomialRoots([...state.polynomialCoeffs].reverse(), {
+            maxIterations: 1000,
+            tolerance: 1e-7
+        });
     } else {
         zeros = findNativePreimages({
             map, target: { re: 0, im: 0 }, xRange, yRange,

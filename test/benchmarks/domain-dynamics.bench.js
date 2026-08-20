@@ -3,13 +3,24 @@ import assert from 'node:assert/strict';
 import { runBenchmark } from './utils.js';
 import { state } from '../../js/store/state.js';
 import { buildPlanarDomainDynamicsSnapshot } from '../../js/rendering/domain-dynamics.js';
-import { renderDomainDynamicsTile } from '../../js/native/domain-engine.js';
+import {
+    createDomainDynamicsTileRenderer
+} from '../../js/native/domain-engine.js';
 
 const TILE_SIZES = Object.freeze({
     smoke: 32,
     standard: 96,
     deep: 160
 });
+
+function renderDomainDynamicsTile(snapshot, tile) {
+    const renderer = createDomainDynamicsTileRenderer(snapshot);
+    try {
+        return renderer(tile);
+    } finally {
+        renderer.dispose();
+    }
+}
 
 function factor(func, overrides = {}) {
     return {
@@ -57,12 +68,25 @@ function configureAlgebraicDynamics() {
 }
 
 function makePlane(size, centerRe = 0, centerIm = 0, span = 3) {
-    return {
+    const plane = {
         width: size,
         height: size,
         currentVisXRange: [centerRe - span * 0.5, centerRe + span * 0.5],
         currentVisYRange: [centerIm - span * 0.5, centerIm + span * 0.5]
     };
+    if (!(plane.currentVisXRange[1] > plane.currentVisXRange[0]) ||
+        !(plane.currentVisYRange[1] > plane.currentVisYRange[0])) {
+        const zoomPower = Math.log10(7 / span);
+        plane.preciseViewport = {
+            centerRe: String(centerRe),
+            centerIm: String(centerIm),
+            zoomPower,
+            precisionBits: 256,
+            width: size,
+            height: size
+        };
+    }
+    return plane;
 }
 
 function assertOpaqueTile(pixels, expectedLength) {
@@ -144,10 +168,11 @@ export async function runDomainDynamicsBenchmarks() {
         ({ profile }) => {
             configureAlgebraicDynamics();
             const size = TILE_SIZES[profile];
-            const snapshot = buildPlanarDomainDynamicsSnapshot(state, makePlane(size), { isWPlaneColoring: false });
-            return { snapshot, tile: { x: 0, y: 0, width: size, height: size, scale: 1 } };
+            const snapshot = buildPlanarDomainDynamicsSnapshot(state, makePlane(size));
+            const renderer = createDomainDynamicsTileRenderer(snapshot);
+            return { renderer, tile: { x: 0, y: 0, width: size, height: size, scale: 1, adaptiveQuality: true } };
         },
-        ({ snapshot, tile }) => renderDomainDynamicsTile(snapshot, tile),
+        ({ renderer, tile }) => renderer(tile),
         {
             profiles: {
                 smoke: { iterations: 2, warmup: 1 },
@@ -159,7 +184,7 @@ export async function runDomainDynamicsBenchmarks() {
     );
 
     await runBenchmark(
-        'viewport-churn progressive tile passes',
+        'viewport-churn final adaptive-quality tiles',
         ({ profile }) => {
             configureAlgebraicDynamics();
             const size = Math.max(16, TILE_SIZES[profile] >> 1);
@@ -169,23 +194,19 @@ export async function runDomainDynamicsBenchmarks() {
                 makePlane(size, 0.15, -0.1, 0.25)
             ];
             const snapshots = planes.map(plane =>
-                buildPlanarDomainDynamicsSnapshot(state, plane, { isWPlaneColoring: false })
+                buildPlanarDomainDynamicsSnapshot(state, plane)
             );
-            const tiles = [
-                { x: 0, y: 0, width: size, height: size, scale: 4 },
-                { x: 0, y: 0, width: size, height: size, scale: 1 }
-            ];
-            return { snapshots, tiles, size };
+            const renderers = snapshots.map(createDomainDynamicsTileRenderer);
+            const tile = { x: 0, y: 0, width: size, height: size, scale: 1, adaptiveQuality: true };
+            return { renderers, tile, size };
         },
-        ({ snapshots, tiles }) => {
+        ({ renderers, tile }) => {
             let checksum = 0;
             let pixelCount = 0;
-            for (const snapshot of snapshots) {
-                for (const tile of tiles) {
-                    const pixels = renderDomainDynamicsTile(snapshot, tile);
-                    pixelCount += pixels.length;
-                    checksum += pixels[0] + pixels[1] + pixels[2];
-                }
+            for (const renderer of renderers) {
+                const pixels = renderer(tile);
+                pixelCount += pixels.length;
+                checksum += pixels[0] + pixels[1] + pixels[2];
             }
             return { pixelCount, checksum };
         },
@@ -195,8 +216,8 @@ export async function runDomainDynamicsBenchmarks() {
                 standard: { iterations: 15, warmup: 3 },
                 deep: { iterations: 60, warmup: 6 }
             },
-            verify: ({ pixelCount, checksum }, { snapshots, tiles, size }) => {
-                assert.equal(pixelCount, snapshots.length * tiles.length * size * size * 4);
+            verify: ({ pixelCount, checksum }, { renderers, size }) => {
+                assert.equal(pixelCount, renderers.length * size * size * 4);
                 assert.ok(Number.isFinite(checksum));
             }
         }
@@ -211,7 +232,7 @@ export async function runDomainDynamicsBenchmarks() {
             const size = Math.max(16, TILE_SIZES[profile] >> 1);
             const zoomSpans = [3.0, 3e-6, 3e-12, 3e-14, 3e-17];
             const span = zoomSpans[profile === 'deep' ? 4 : profile === 'standard' ? 2 : 0];
-            const snapshot = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0.2, 0.1, span), { isWPlaneColoring: false });
+            const snapshot = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0.2, 0.1, span));
             return { snapshot, tile: { x: 0, y: 0, width: size, height: size, scale: 1 } };
         },
         ({ snapshot, tile }) => renderDomainDynamicsTile(snapshot, tile),
@@ -232,9 +253,9 @@ export async function runDomainDynamicsBenchmarks() {
             const depth = depths[profile === 'deep' ? 6 : profile === 'standard' ? 2 : 0];
             configureDeepTrigChain(depth, 1.4);
             const size = Math.max(16, TILE_SIZES[profile] >> 1);
-            const snapshot1 = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0, 0, 2.5), { isWPlaneColoring: false });
+            const snapshot1 = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0, 0, 2.5));
             configureSecExpChain(depth);
-            const snapshot2 = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0.1, -0.1, 1e-14), { isWPlaneColoring: false });
+            const snapshot2 = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0.1, -0.1, 1e-14));
             return { snapshots: [snapshot1, snapshot2], tile: { x: 0, y: 0, width: size, height: size, scale: 1 } };
         },
         ({ snapshots, tile }) => {
@@ -259,7 +280,7 @@ export async function runDomainDynamicsBenchmarks() {
             const depth = depths[profile === 'deep' ? 2 : profile === 'standard' ? 1 : 0];
             configureDeepTrigChain(depth, 15);
             const size = Math.max(16, TILE_SIZES[profile] >> 1);
-            const snapshot = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0.3, 0.2, 1e-17), { isWPlaneColoring: false });
+            const snapshot = buildPlanarDomainDynamicsSnapshot(state, makePlane(size, 0.3, 0.2, 1e-17));
             return { snapshot, tile: { x: 0, y: 0, width: size, height: size, scale: 1 } };
         },
         ({ snapshot, tile }) => renderDomainDynamicsTile(snapshot, tile),
@@ -302,8 +323,7 @@ export async function runDomainDynamicsBenchmarks() {
 
                 const snapshot = buildPlanarDomainDynamicsSnapshot(
                     state,
-                    makePlane(size, centerRe, centerIm, span),
-                    { isWPlaneColoring: false }
+                    makePlane(size, centerRe, centerIm, span)
                 );
                 jobs.push({ snapshot, tile: { x: 0, y: 0, width: size, height: size, scale: 1 } });
             }

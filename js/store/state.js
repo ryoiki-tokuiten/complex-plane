@@ -26,8 +26,8 @@ export const wPlaneParams = {
     height: DEFAULT_CANVAS_HEIGHT,
     origin: { x: 0, y: 0 },
     scale: { x: 1, y: 1 },
-    xRange: [...wPlaneInitialRanges.x],
-    yRange: [...wPlaneInitialRanges.y],
+    currentVisXRange: [...wPlaneInitialRanges.x],
+    currentVisYRange: [...wPlaneInitialRanges.y],
     preciseViewport: null
 };
 
@@ -46,7 +46,7 @@ const rawState = {
     mobiusC: { re: 0, im: 0 },
     mobiusD: { re: 1, im: 0 },
     polynomialN: 2,
-    polynomialCoeffs: [], 
+    polynomialCoeffs: [{ re: 1, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }],
     fractionalPowerN: 0.5,
     expBase: { re: Math.E, im: 0 },
     logBase: { re: Math.E, im: 0 },
@@ -337,9 +337,7 @@ export const context = {
     zCtx: null,
     wCtx: null,
     zDomainColorCanvas: null,
-    wDomainColorCanvas: null,
     zDomainColorCtx: null,
-    wDomainColorCtx: null,
 
     wCanvasList: [],
     wCtxList: [],

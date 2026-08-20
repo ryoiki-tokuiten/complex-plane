@@ -3,19 +3,22 @@ import { TWO_PI } from '../constants/numerical.js';
 import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_THICK } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { state } from '../store/state.js';
+import { requireFiniteNumber } from '../utils/numeric-contracts.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
 
 /**
  * Shared canvas primitives used across planar, Fourier, and Laplace renderers.
  */
 
 export function getCanvasPlaneRanges(params) {
+    requireVisibleViewport(params, 'Canvas plane');
     return {
-        xRange: params.currentVisXRange || params.xRange || [0, 0],
-        yRange: params.currentVisYRange || params.yRange || [0, 0]
+        xRange: params.currentVisXRange,
+        yRange: params.currentVisYRange
     };
 }
 
-export function createRgbTuple(r, g, b) {
+function createRgbTuple(r, g, b) {
     const rgb = [r, g, b];
     rgb.r = r;
     rgb.g = g;
@@ -23,23 +26,10 @@ export function createRgbTuple(r, g, b) {
     return rgb;
 }
 
-export function parseHslString(hsl) {
-    if (typeof hsl !== 'string') return null;
-    const match = hsl.match(/hsl\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)%\s*,\s*(\d+(?:\.\d+)?)%\s*\)/i);
-    if (!match) return null;
-
-    return {
-        h: parseFloat(match[1]) / 360,
-        s: parseFloat(match[2]) / 100,
-        l: parseFloat(match[3]) / 100
-    };
-}
-
 export function hslToRgb(h, s, l) {
-    if (typeof h === 'string') {
-        const parsed = parseHslString(h);
-        return parsed ? hslToRgb(parsed.h, parsed.s, parsed.l) : createRgbTuple(0, 0, 0);
-    }
+    h = requireFiniteNumber(h, 'HSL hue');
+    s = requireFiniteNumber(s, 'HSL saturation');
+    l = requireFiniteNumber(l, 'HSL lightness');
 
     let r;
     let g;
@@ -110,8 +100,10 @@ function drawGridLines(ctx, params, stepX, stepY, verticalColor, horizontalColor
 }
 
 export function calculateGridStep(span, targetCount = 10) {
+    span = requireFiniteNumber(span, 'Grid span');
+    targetCount = requireFiniteNumber(targetCount, 'Grid target count');
+    if (span <= 0 || targetCount <= 0) throw new Error('Grid span and target count must be positive.');
     const rawStep = span / targetCount;
-    if (rawStep <= 0) return 1;
     const log = Math.log10(rawStep);
     const power = Math.floor(log);
     const base = Math.pow(10, power);
@@ -128,12 +120,11 @@ export function calculateGridStep(span, targetCount = 10) {
 
 export function drawGrid(ctx, params, options = {}) {
     const { xRange, yRange } = getCanvasPlaneRanges(params);
-    if (!xRange || !yRange) return;
 
     const spanX = xRange[1] - xRange[0];
     const spanY = yRange[1] - yRange[0];
 
-    const targetCount = options.targetCount ?? (state?.gridDensity ?? 10);
+    const targetCount = options.targetCount ?? requireFiniteNumber(state.gridDensity, 'Grid density');
     const stepX = calculateGridStep(spanX, targetCount);
     const stepY = calculateGridStep(spanY, targetCount);
 
@@ -166,8 +157,8 @@ export function drawGrid(ctx, params, options = {}) {
     }
 
     // Dynamic fade-out based on pixel spacing
-    const scaleX = Math.abs(params.scale?.x ?? 1);
-    const scaleY = Math.abs(params.scale?.y ?? 1);
+    const scaleX = Math.abs(requireFiniteNumber(params.scale?.x, 'Canvas x scale'));
+    const scaleY = Math.abs(requireFiniteNumber(params.scale?.y, 'Canvas y scale'));
     const pixelSpacingX = stepX * scaleX;
     const pixelSpacingY = stepY * scaleY;
 

@@ -8,10 +8,11 @@
 int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, double amplitude,
                                   double time_window, uint32_t sample_count, uint32_t random_seed,
                                   double *times, double *values) {
-    if (!times || !values || !sample_count || time_window <= 0.0) return -1;
+    if (!times || !values || !sample_count || signal_type > 14u ||
+        !isfinite(frequency) || !isfinite(amplitude) || !isfinite(time_window) || time_window <= 0.0) return -1;
     const double dt = time_window / (double)sample_count;
     const double omega = CE_TWO_PI * frequency;
-    uint32_t lcg_state = random_seed ? random_seed : 123456789u;
+    uint32_t lcg_state = random_seed;
 
     for (uint32_t i = 0; i < sample_count; ++i) {
         const double t = (double)i * dt;
@@ -103,9 +104,7 @@ int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, doubl
                 value = amplitude * (2.0 * unit - 1.0);
                 break;
             }
-            default:
-                value = amplitude * sin(omega * t);
-                break;
+            default: return -2;
         }
         values[i] = value;
     }
@@ -172,26 +171,23 @@ int32_t ce_build_fourier_winding(const double *times, const double *values,
                                  uint32_t count, double frequency, double progress,
                                  double time_window, ce_complex *wound,
                                  ce_complex *center, double *max_amplitude) {
-    if (!times || !values || !wound || !center || !max_amplitude || !count) return -1;
-    const double safe_progress = progress < 0.0 ? 0.0 : (progress > 1.0 ? 1.0 : progress);
-    const double safe_window = time_window > 0.0 ? time_window : 1.0;
-    const double cutoff = safe_progress * safe_window;
+    if (!times || !values || !wound || !center || !max_amplitude || !count ||
+        !isfinite(frequency) || !isfinite(progress) || progress < 0.0 || progress > 1.0 ||
+        !isfinite(time_window) || time_window <= 0.0) return -1;
+    const double cutoff = progress * time_window;
 
     double max_amp = 0.0;
     uint32_t visible = 0;
     for (uint32_t i = 0; i < count; ++i) {
         const double t = times[i];
         const double val = values[i];
-        if (!isfinite(t) || !isfinite(val)) continue;
+        if (!isfinite(t) || !isfinite(val) || (i > 0u && t <= times[i - 1u])) return -2;
         const double abs_val = fabs(val);
         if (abs_val > max_amp) max_amp = abs_val;
         if (t <= cutoff || visible == 0) {
             visible = i + 1u;
         }
     }
-    if (visible == 0) visible = 1u;
-    if (visible > count) visible = count;
-
     double sum_re = 0.0, sum_im = 0.0;
     for (uint32_t i = 0; i < visible; ++i) {
         const double t = times[i];
@@ -207,5 +203,61 @@ int32_t ce_build_fourier_winding(const double *times, const double *values,
     center->re = sum_re / (double)visible;
     center->im = sum_im / (double)visible;
     *max_amplitude = max_amp;
+    return (int32_t)visible;
+}
+
+int32_t ce_build_laplace_winding(const double *times, const double *values,
+                                 uint32_t count, double sigma, double omega,
+                                 double progress, ce_complex *wound,
+                                 double *weighted, double *envelope,
+                                 ce_complex *integral, double *max_radius,
+                                 double *max_amplitude_output) {
+    if (!times || !values || !wound || !weighted || !envelope || !integral || !max_radius ||
+        !max_amplitude_output || count < 2u) {
+        return -1;
+    }
+    if (!isfinite(sigma) || !isfinite(omega) || !isfinite(progress) || progress < 0.0 || progress > 1.0) {
+        return -2;
+    }
+
+    double max_amplitude = 0.0;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!isfinite(times[i]) || !isfinite(values[i])) return -3;
+        if (i > 0u && times[i] <= times[i - 1u]) return -4;
+        max_amplitude = fmax(max_amplitude, fabs(values[i]));
+    }
+
+    const double dt = times[1] - times[0];
+    if (!isfinite(dt) || dt <= 0.0) return -4;
+    const double cutoff = times[count - 1u] * progress;
+    uint32_t visible = 0u;
+    double sum_re = 0.0;
+    double sum_im = 0.0;
+    double radius = max_amplitude * 1.35;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        const double damping = exp(-sigma * times[i]);
+        const double weighted_value = values[i] * damping;
+        if (!isfinite(damping) || !isfinite(weighted_value)) return -5;
+        weighted[i] = weighted_value;
+        envelope[i] = max_amplitude * damping;
+
+        if (times[i] > cutoff) continue;
+        const double angle = -omega * times[i];
+        const double real = weighted_value * cos(angle);
+        const double imaginary = weighted_value * sin(angle);
+        if (!isfinite(real) || !isfinite(imaginary)) return -6;
+        wound[visible] = (ce_complex){real, imaginary};
+        sum_re += real * dt;
+        sum_im += imaginary * dt;
+        radius = fmax(radius, hypot(real, imaginary));
+        radius = fmax(radius, hypot(sum_re, sum_im));
+        visible += 1u;
+    }
+
+    integral->re = sum_re;
+    integral->im = sum_im;
+    *max_radius = radius;
+    *max_amplitude_output = max_amplitude;
     return (int32_t)visible;
 }

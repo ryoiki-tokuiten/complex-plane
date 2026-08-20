@@ -1,10 +1,16 @@
 import { collectExpressionDependencies, parseExpression } from '../math/expression/parser.js';
+import {
+    requireFiniteComplex,
+    requireFiniteNumber,
+    requireInteger
+} from '../utils/numeric-contracts.js';
 
 const wasmUrl = new URL('../../native/build/complex_engine.wasm', import.meta.url);
 
 async function loadBytes() {
     if (wasmUrl.protocol === 'file:') {
-        const { readFile } = await import('node:fs/promises');
+        const nodeFileSystemModule = 'node:fs/promises';
+        const { readFile } = await import(/* @vite-ignore */ nodeFileSystemModule);
         return readFile(wasmUrl);
     }
     const response = await fetch(wasmUrl, { cache: 'no-cache' });
@@ -38,7 +44,7 @@ const wasm = instance.exports;
 wasmMemory = wasm.memory;
 wasm._initialize();
 
-if (wasm.ce_abi_version() !== 1) {
+if (wasm.ce_abi_version() !== 2) {
     throw new Error(`Unsupported native complex engine ABI ${wasm.ce_abi_version()}.`);
 }
 
@@ -64,7 +70,7 @@ export const NATIVE_FUNCTION_IDS = Object.freeze({
     identity: 18
 });
 
-const MAP_CONFIG_SIZE = 272;
+const MAP_CONFIG_SIZE = 312;
 const FUNCTION_CONFIG_OFFSET = 16;
 const FUNCTION_POLYNOMIAL_PTR = FUNCTION_CONFIG_OFFSET + 112;
 const FUNCTION_POLYNOMIAL_COUNT = FUNCTION_CONFIG_OFFSET + 116;
@@ -78,23 +84,21 @@ const FUNCTION_FACTORS_PTR = FUNCTION_CONFIG_OFFSET + 152;
 const FUNCTION_FACTORS_COUNT = FUNCTION_CONFIG_OFFSET + 156;
 const FUNCTION_EXPRESSION_PTR = FUNCTION_CONFIG_OFFSET + 160;
 const FUNCTION_EXPRESSION_COUNT = FUNCTION_CONFIG_OFFSET + 164;
-const FUNCTION_STEPS_PTR = FUNCTION_CONFIG_OFFSET + 168;
-const FUNCTION_STEPS_COUNT = FUNCTION_CONFIG_OFFSET + 172;
-const MAP_TAYLOR_PTR = 192;
-const MAP_TAYLOR_COUNT = 196;
-const MAP_TAYLOR_CENTER = 200;
-const MAP_TAYLOR_RADIUS_SQ = 216;
-const MAP_USE_TAYLOR = 224;
-const MAP_DYNAMIC_POINT_PTR = 232;
-const MAP_DYNAMIC_POINT_COUNT = 236;
-const MAP_DYNAMIC_TERM_PTR = 240;
-const MAP_DYNAMIC_TERM_COUNT = 244;
-const MAP_DYNAMIC_VARIABLES_PTR = 248;
-const MAP_DYNAMIC_FLAGS_PTR = 252;
-const MAP_DYNAMIC_VARIABLE_COUNT = 256;
-const MAP_DYNAMIC_SOURCE_COUNT = 260;
-const MAP_DYNAMIC_REDUCTION = 264;
-const MAP_DYNAMIC_INVALID_POLICY = 268;
+const MAP_TAYLOR_PTR = 184;
+const MAP_TAYLOR_COUNT = 188;
+const MAP_TAYLOR_CENTER = 192;
+const MAP_TAYLOR_RADIUS_SQ = 208;
+const MAP_USE_TAYLOR = 216;
+const MAP_DYNAMIC_POINT_PTR = 224;
+const MAP_DYNAMIC_POINT_COUNT = 228;
+const MAP_DYNAMIC_TERM_PTR = 232;
+const MAP_DYNAMIC_TERM_COUNT = 236;
+const MAP_DYNAMIC_VARIABLES_PTR = 240;
+const MAP_DYNAMIC_FLAGS_PTR = 244;
+const MAP_DYNAMIC_VARIABLE_COUNT = 248;
+const MAP_DYNAMIC_SOURCE_COUNT = 252;
+const MAP_DYNAMIC_REDUCTION = 256;
+const MAP_DYNAMIC_INVALID_POLICY = 260;
 
 const EXPRESSION_OPS = Object.freeze({
     constant: 0, z: 1, c: 2, add: 3, subtract: 4, multiply: 5, divide: 6,
@@ -111,6 +115,8 @@ const GENERIC_EXPRESSION_OPS = Object.freeze({
     min: 33, max: 34, mod: 35, gcd: 36, isPrime: 37,
     complex: 38, bessel: 39, selected: 40, sqrt: 41
 });
+
+const NATIVE_EXPRESSION_CONSTANTS = new Set(['i', 'pi', 'e', 'true', 'false']);
 
 const EXPRESSION_ERROR_MESSAGES = Object.freeze({
     1: 'Invalid native expression program',
@@ -139,8 +145,16 @@ function normalizeExpressionNode(node) {
     return node;
 }
 
+function nativeLiteral(value, label) {
+    if (typeof value === 'number') return { re: requireFiniteNumber(value, label), im: 0 };
+    return requireFiniteComplex(value, label);
+}
+
 function parseNativeExpression(source) {
-    if (!source || source === 'z') return [];
+    if (source === 'z') return [];
+    if (source === null || source === undefined || source === '') {
+        throw new Error('Native algebraic evaluation requires an explicit z expression.');
+    }
     if (typeof source !== 'string') return compileNativeExpression(normalizeExpressionNode(source));
     return compileNativeExpression(parseExpression(source));
 }
@@ -152,7 +166,10 @@ function compileNativeExpression(root) {
         const node = normalizeExpressionNode(rawNode);
         switch (node.type) {
             case 'literal':
-                emit(EXPRESSION_OPS.constant, 0, Number(node.value?.re ?? node.value ?? 0), Number(node.value?.im ?? 0));
+                {
+                    const value = nativeLiteral(node.value, 'Native expression literal');
+                    emit(EXPRESSION_OPS.constant, 0, value.re, value.im);
+                }
                 return;
             case 'variable':
                 if (node.name === 'z') emit(EXPRESSION_OPS.z);
@@ -182,7 +199,9 @@ function compileNativeExpression(root) {
                 return;
             }
             case 'call': {
-                if (node.args?.length !== 1) throw new Error(`Native function ${node.name} requires one argument here.`);
+                if (!Array.isArray(node.args) || node.args.length !== 1) {
+                    throw new Error(`Native function ${node.name} requires one argument here.`);
+                }
                 visit(node.args[0]);
                 const special = ({ conj: EXPRESSION_OPS.conjugate, abs: EXPRESSION_OPS.absolute,
                     arg: EXPRESSION_OPS.argument, re: EXPRESSION_OPS.real, im: EXPRESSION_OPS.imaginary,
@@ -218,7 +237,14 @@ function expressionReturnsBoolean(node) {
 }
 
 export function compileNativeExpressionProgram(root, variableNames) {
-    const variables = Array.from(variableNames || []);
+    if (!Array.isArray(variableNames)) throw new Error('Native expression variable names must be an array.');
+    variableNames.forEach((name, index) => {
+        if (typeof name !== 'string' || !name) throw new Error(`Native expression variable ${index} is invalid.`);
+    });
+    const variables = variableNames.filter(name => !NATIVE_EXPRESSION_CONSTANTS.has(name));
+    if (new Set(variables).size !== variables.length) {
+        throw new Error('Native expression variable names must be unique.');
+    }
     const slots = new Map(variables.map((name, index) => [name, index]));
     const instructions = [];
     const emit = (opcode, argument = 0, re = 0, im = 0) => {
@@ -231,8 +257,10 @@ export function compileNativeExpressionProgram(root, variableNames) {
         switch (node.type) {
             case 'literal': {
                 if (typeof node.value === 'boolean') emit(GENERIC_EXPRESSION_OPS.constant, 0, node.value ? 1 : 0, 0);
-                else emit(GENERIC_EXPRESSION_OPS.constant, 0,
-                    Number(node.value?.re ?? node.value ?? 0), Number(node.value?.im ?? 0));
+                else {
+                    const value = nativeLiteral(node.value, 'Native generic-expression literal');
+                    emit(GENERIC_EXPRESSION_OPS.constant, 0, value.re, value.im);
+                }
                 return;
             }
             case 'variable': {
@@ -297,6 +325,7 @@ export function compileNativeExpressionProgram(root, variableNames) {
                 return;
             }
             case 'call': {
+                if (!Array.isArray(node.args)) throw new Error(`Native function ${node.name} requires an argument array.`);
                 const name = node.name === 'log' ? 'ln' : node.name;
                 if (['selected', 'selectedFunction', 'f'].includes(name)) {
                     if (node.args.length !== 1) throw new Error(`${node.name} requires one argument.`);
@@ -346,23 +375,52 @@ export function compileNativeExpressionProgram(root, variableNames) {
 }
 
 export function compileNativeDynamicAggregate(aggregate) {
-    if (!aggregate || !Array.isArray(aggregate.sourceRecords)) return null;
-    const pointSource = String(aggregate.pointExpression ?? 'd');
+    if (!aggregate || !Array.isArray(aggregate.sourceRecords)) {
+        throw new Error('Native dynamic aggregate requires source records.');
+    }
+    if (typeof aggregate.pointExpression !== 'string' || !aggregate.pointExpression.trim()) {
+        throw new Error('Native dynamic aggregate requires a point expression.');
+    }
+    if (!aggregate.term || (aggregate.term.kind !== 'expression' && aggregate.term.kind !== 'selected-function')) {
+        throw new Error('Native dynamic aggregate requires an explicit term kind.');
+    }
+    if (aggregate.term.kind === 'expression' &&
+        (typeof aggregate.term.expression !== 'string' || !aggregate.term.expression.trim())) {
+        throw new Error('Native dynamic aggregate requires a term expression.');
+    }
+    if (!Array.isArray(aggregate.bindings) || !aggregate.bindingSeries ||
+        typeof aggregate.bindingSeries !== 'object' || !aggregate.parameters ||
+        typeof aggregate.parameters !== 'object') {
+        throw new Error('Native dynamic aggregate requires explicit bindings, series, and parameters.');
+    }
+    if (aggregate.reductionKind !== 'none' && aggregate.reductionKind !== 'sum' && aggregate.reductionKind !== 'product') {
+        throw new Error(`Unsupported native aggregate reduction: ${aggregate.reductionKind}.`);
+    }
+    if (aggregate.invalidPolicy !== 'stop' && aggregate.invalidPolicy !== 'skip') {
+        throw new Error(`Unsupported native aggregate invalid policy: ${aggregate.invalidPolicy}.`);
+    }
+    const pointSource = aggregate.pointExpression;
     const termSource = aggregate.term?.kind === 'selected-function'
         ? 'selected(z)'
-        : String(aggregate.term?.expression ?? 'z');
+        : aggregate.term.expression;
     const pointAst = parseExpression(pointSource);
     const termAst = parseExpression(termSource);
     const names = new Set([
         ...collectExpressionDependencies(pointAst).variables,
         ...collectExpressionDependencies(termAst).variables
     ]);
-    const variableNames = Array.from(names);
+    const variableNames = Array.from(names)
+        .filter(name => !NATIVE_EXPRESSION_CONSTANTS.has(name));
     const pointProgram = compileNativeExpressionProgram(pointAst, variableNames);
     const termProgram = compileNativeExpressionProgram(termAst, variableNames);
-    const bindings = new Map((aggregate.bindings || []).map(binding => [binding?.symbol, binding]));
-    const bindingSeries = aggregate.bindingSeries || {};
-    const parameters = aggregate.parameters || {};
+    const bindings = new Map(aggregate.bindings.map((binding, index) => {
+        if (!binding || typeof binding.symbol !== 'string' || !binding.symbol) {
+            throw new Error(`Native aggregate binding ${index} requires a symbol.`);
+        }
+        return [binding.symbol, binding];
+    }));
+    const bindingSeries = aggregate.bindingSeries;
+    const parameters = aggregate.parameters;
     const variableFlags = variableNames.map(name => {
         if (name === 's' || name === 'c') return 1;
         if (name === 'z') return 3;
@@ -373,10 +431,16 @@ export function compileNativeDynamicAggregate(aggregate) {
     });
     const variables = aggregate.sourceRecords.map((record, index) => variableNames.map(name => {
         if (name === 'd') return record.domainValue;
-        if (name === 'j') return { re: Number(record.ordinal) || 0, im: 0 };
+        if (name === 'j') {
+            if (!Number.isFinite(record.ordinal)) throw new Error(`Native aggregate record ${index} has invalid ordinal.`);
+            return { re: Number(record.ordinal), im: 0 };
+        }
         if (name === 's' || name === 'c' || name === 'z') return { re: 0, im: 0 };
         if (Object.prototype.hasOwnProperty.call(parameters, name)) return parameters[name];
-        return bindingSeries[name]?.[index] || { re: NaN, im: NaN };
+        if (!Array.isArray(bindingSeries[name]) || bindingSeries[name][index] === undefined) {
+            throw new Error(`Native aggregate is missing binding ${name} at source index ${index}.`);
+        }
+        return bindingSeries[name][index];
     }));
     return {
         pointProgram,
@@ -384,7 +448,7 @@ export function compileNativeDynamicAggregate(aggregate) {
         variableNames,
         variableFlags,
         variables,
-        reduction: aggregate.reductionKind === 'sum' ? 1 : aggregate.reductionKind === 'product' ? 2 : 0,
+        reduction: aggregate.reductionKind === 'none' ? 0 : aggregate.reductionKind === 'sum' ? 1 : 2,
         invalidPolicy: aggregate.invalidPolicy === 'skip' ? 1 : 0
     };
 }
@@ -398,28 +462,28 @@ function functionIdFor(name) {
 }
 
 function writeAlgebraicConfig(view, pointer, options, allocations) {
-    const terms = Array.isArray(options.algebraicChainingTerms) ? options.algebraicChainingTerms : [];
+    if (!Array.isArray(options.algebraicChainingTerms)) {
+        throw new Error('Native algebraic evaluation requires an explicit terms array.');
+    }
+    const terms = options.algebraicChainingTerms;
     const packedTerms = [];
     const packedFactors = [];
-    const packedSteps = [];
-    for (const term of terms) {
+    for (const [termIndex, term] of terms.entries()) {
+        if (!Array.isArray(term?.factors)) throw new Error(`Native algebraic term ${termIndex} requires factors.`);
         const factorOffset = packedFactors.length;
-        for (const factor of term?.factors || []) {
-            if (!factor || factor.func === 'none') break;
-            const pipeline = Array.isArray(factor.chain) ? factor.chain :
-                Array.isArray(factor.pipeline) ? factor.pipeline : null;
-            const stepOffset = packedSteps.length;
-            if (pipeline) {
-                for (const step of pipeline) packedSteps.push(functionIdFor(typeof step === 'string' ? step : step?.func));
-            }
+        for (const [factorIndex, factor] of term.factors.entries()) {
+            if (!factor) throw new Error(`Native algebraic factor ${termIndex}:${factorIndex} is missing.`);
+            if (factor.func === 'none') break;
+            const power = Number(factor.power);
+            if (!Number.isFinite(power)) throw new Error(`Native algebraic factor ${termIndex}:${factorIndex} requires finite power.`);
             packedFactors.push({
                 functionId: functionIdFor(factor.func),
                 chainedId: factor.chainedFunc && factor.chainedFunc !== 'none' ? functionIdFor(factor.chainedFunc) : -1,
                 flags: (factor.reciprocal ? 1 : 0) | (factor.log ? 2 : 0) | (factor.exp ? 4 : 0),
-                power: Number(factor.power ?? 1), stepOffset, stepCount: pipeline?.length || 0
+                power
             });
         }
-        packedTerms.push({ coefficient: term?.coeff || { re: 1, im: 0 }, factorOffset,
+        packedTerms.push({ coefficient: term.coeff, factorOffset,
             factorCount: packedFactors.length - factorOffset });
     }
 
@@ -428,7 +492,7 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
         const termsView = memoryView();
         packedTerms.forEach((term, index) => {
             const at = termsPointer + index * 24;
-            writeComplex(termsView, at, term.coefficient, 1, 0);
+            writeComplex(termsView, at, requireFiniteComplex(term.coefficient, `Native algebraic coefficient ${index}`));
             termsView.setUint32(at + 16, term.factorOffset, true);
             termsView.setUint32(at + 20, term.factorCount, true);
         });
@@ -436,27 +500,18 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
         view.setUint32(pointer + FUNCTION_TERMS_COUNT, packedTerms.length, true);
     }
     if (packedFactors.length) {
-        const factorsPointer = alloc(packedFactors.length * 32); allocations.push(factorsPointer);
+        const factorsPointer = alloc(packedFactors.length * 24); allocations.push(factorsPointer);
         const factorsView = memoryView();
         packedFactors.forEach((factor, index) => {
-            const at = factorsPointer + index * 32;
+            const at = factorsPointer + index * 24;
             factorsView.setUint32(at, factor.functionId, true);
             factorsView.setInt32(at + 4, factor.chainedId, true);
             factorsView.setUint32(at + 8, factor.flags, true);
-            factorsView.setUint32(at + 12, factor.stepOffset, true);
+            factorsView.setUint32(at + 12, 0, true);
             factorsView.setFloat64(at + 16, factor.power, true);
-            factorsView.setUint32(at + 24, factor.stepCount, true);
-            factorsView.setUint32(at + 28, 0, true);
         });
         view.setUint32(pointer + FUNCTION_FACTORS_PTR, factorsPointer, true);
         view.setUint32(pointer + FUNCTION_FACTORS_COUNT, packedFactors.length, true);
-    }
-    if (packedSteps.length) {
-        const stepsPointer = alloc(packedSteps.length * 4); allocations.push(stepsPointer);
-        const stepsView = memoryView();
-        packedSteps.forEach((step, index) => stepsView.setUint32(stepsPointer + index * 4, step, true));
-        view.setUint32(pointer + FUNCTION_STEPS_PTR, stepsPointer, true);
-        view.setUint32(pointer + FUNCTION_STEPS_COUNT, packedSteps.length, true);
     }
     const instructions = options.algebraicExpressionAst
         ? compileNativeExpression(options.algebraicExpressionAst)
@@ -476,10 +531,12 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
     }
 }
 
-function complexParts(value, fallbackRe = 0, fallbackIm = 0) {
-    const re = Number(value?.re ?? value?.real ?? fallbackRe);
-    const im = Number(value?.im ?? value?.imag ?? fallbackIm);
-    return [Number.isFinite(re) ? re : fallbackRe, Number.isFinite(im) ? im : fallbackIm];
+function complexParts(value, defaultRe, defaultIm) {
+    const re = Number(value?.re);
+    const im = Number(value?.im);
+    if (Number.isFinite(re) && Number.isFinite(im)) return [re, im];
+    if (defaultRe !== undefined && defaultIm !== undefined) return [defaultRe, defaultIm];
+    throw new Error('Native complex input requires finite real and imaginary components.');
 }
 
 function alloc(size) {
@@ -490,6 +547,35 @@ function alloc(size) {
 
 function memoryView() {
     return new DataView(wasm.memory.buffer);
+}
+
+function requireBoolean(value, label) {
+    if (typeof value !== 'boolean') throw new Error(`${label} must be boolean.`);
+    return value;
+}
+
+function requireIncreasingRange(range, label) {
+    if (!Array.isArray(range) || range.length !== 2) throw new Error(`${label} requires two endpoints.`);
+    const minimum = requireFiniteNumber(range[0], `${label} minimum`);
+    const maximum = requireFiniteNumber(range[1], `${label} maximum`);
+    if (minimum >= maximum) throw new Error(`${label} must increase.`);
+    return [minimum, maximum];
+}
+
+function requirePlanarRenderOptions(options) {
+    const scaleX = requireFiniteNumber(options.scaleX, 'Native planar x scale');
+    const scaleY = requireFiniteNumber(options.scaleY, 'Native planar y scale');
+    const renderLimit = requireFiniteNumber(options.renderLimit, 'Native planar render limit');
+    const jumpThresholdSq = requireFiniteNumber(options.jumpThresholdSq, 'Native planar jump threshold');
+    const toleranceSq = requireFiniteNumber(options.toleranceSq, 'Native planar simplification tolerance');
+    if (scaleX === 0 || scaleY === 0 || renderLimit <= 0 || jumpThresholdSq < 0 || toleranceSq < 0) {
+        throw new Error('Native planar scale, render limit, and squared tolerances are invalid.');
+    }
+    requireBoolean(options.hasBranchCuts, 'Native planar hasBranchCuts');
+    if (options.branchCutType !== 'ray' && options.branchCutType !== 'draw') {
+        throw new Error(`Unsupported native planar branch-cut type: ${options.branchCutType}.`);
+    }
+    requireFiniteNumber(options.branchCutAngle, 'Native planar branch-cut angle');
 }
 
 const textEncoder = new TextEncoder();
@@ -512,33 +598,34 @@ function readCString(pointer, capacity) {
     return textDecoder.decode(bytes.subarray(0, end));
 }
 
-function writeComplex(view, offset, value, fallbackRe = 0, fallbackIm = 0) {
-    const [re, im] = complexParts(value, fallbackRe, fallbackIm);
+function writeComplex(view, offset, value, defaultRe, defaultIm) {
+    const [re, im] = complexParts(value, defaultRe, defaultIm);
     view.setFloat64(offset, re, true);
     view.setFloat64(offset + 8, im, true);
 }
 
 function writeInstructionBuffer(program, allocations) {
-    const instructions = program?.instructions || [];
+    if (program === null || program === undefined) return 0;
+    if (!Array.isArray(program.instructions)) {
+        throw new Error('Native expression programs require an instruction array.');
+    }
+    const instructions = program.instructions;
     if (!instructions.length) return 0;
     const pointer = alloc(instructions.length * 24);
     allocations.push(pointer);
     const view = memoryView();
     instructions.forEach((instruction, index) => {
         const offset = pointer + index * 24;
-        view.setUint32(offset, instruction.opcode, true);
-        view.setUint32(offset + 4, instruction.argument || 0, true);
-        view.setFloat64(offset + 8, instruction.re || 0, true);
-        view.setFloat64(offset + 16, instruction.im || 0, true);
+        view.setUint32(offset, requireInteger(instruction.opcode, `Native instruction ${index} opcode`), true);
+        view.setUint32(offset + 4, requireInteger(instruction.argument, `Native instruction ${index} argument`), true);
+        view.setFloat64(offset + 8, requireFiniteNumber(instruction.re, `Native instruction ${index} real operand`), true);
+        view.setFloat64(offset + 16, requireFiniteNumber(instruction.im, `Native instruction ${index} imaginary operand`), true);
     });
     return pointer;
 }
 
-function writeDynamicConfig(view, pointer, rawAggregate, allocations) {
-    if (!rawAggregate) return;
-    const dynamic = rawAggregate.native || rawAggregate.pointProgram
-        ? (rawAggregate.native || rawAggregate)
-        : compileNativeDynamicAggregate(rawAggregate);
+function writeDynamicConfig(view, pointer, dynamic, allocations) {
+    if (!dynamic) return;
     if (!dynamic?.pointProgram?.instructions?.length || !dynamic?.termProgram?.instructions?.length ||
         !dynamic.variables?.length || !dynamic.variableNames?.length) {
         throw new Error('Native dynamic aggregate is incomplete.');
@@ -567,35 +654,48 @@ function writeDynamicConfig(view, pointer, rawAggregate, allocations) {
 }
 
 function writeMapConfig(pointer, options, allocations) {
+    if (!options || typeof options !== 'object') throw new Error('Native map options are required.');
     const view = memoryView();
     new Uint8Array(wasm.memory.buffer, pointer, MAP_CONFIG_SIZE).fill(0);
-    const functionKey = options.functionKey || 'cos';
+    const functionKey = options.functionKey;
     const functionId = NATIVE_FUNCTION_IDS[functionKey];
     if (functionId === undefined) throw new Error(`Unsupported native function: ${functionKey}`);
+    if (typeof options.chainingEnabled !== 'boolean') {
+        throw new Error('Native map options require an explicit chainingEnabled flag.');
+    }
     view.setUint32(pointer, functionId, true);
-    const chainCount = options.chainingEnabled === false
-        ? 1
-        : Math.max(1, Math.min(1024, Math.floor(Number(options.chainCount) || 1)));
+    const requestedChainCount = Number(options.chainCount);
+    if (options.chainingEnabled && (!Number.isInteger(requestedChainCount) || requestedChainCount < 1 || requestedChainCount > 1024)) {
+        throw new Error('Native map options require a chain count from 1 through 1024.');
+    }
+    if (options.chainingEnabled && options.chainMode !== 'zero_seed' && options.chainMode !== 'recursion') {
+        throw new Error(`Unsupported native chain mode: ${options.chainMode}`);
+    }
+    const chainCount = options.chainingEnabled ? requestedChainCount : 1;
     view.setUint32(pointer + 4, chainCount, true);
     view.setUint32(pointer + 8, options.chainMode === 'zero_seed' ? 1 : 0, true);
-    view.setUint32(pointer + 12, Math.max(0, Math.min(2, Math.floor(
-        Number(options.derivativeOrder ?? (options.derivativeMode ? 1 : 0))
-    ))), true);
+    const derivativeOrder = Number(options.derivativeOrder);
+    if (!Number.isInteger(derivativeOrder) || derivativeOrder < 0 || derivativeOrder > 2) {
+        throw new Error('Native map derivative order must be 0, 1, or 2.');
+    }
+    view.setUint32(pointer + 12, derivativeOrder, true);
 
     let offset = FUNCTION_CONFIG_OFFSET;
-    writeComplex(view, pointer + offset, options.expBase, Math.E, 0); offset += 16;
-    writeComplex(view, pointer + offset, options.logBase, Math.E, 0); offset += 16;
-    writeComplex(view, pointer + offset, options.besselOrder, 0, 0); offset += 16;
-    writeComplex(view, pointer + offset, options.mobiusA, 1, 0); offset += 16;
-    writeComplex(view, pointer + offset, options.mobiusB); offset += 16;
-    writeComplex(view, pointer + offset, options.mobiusC); offset += 16;
-    writeComplex(view, pointer + offset, options.mobiusD, 1, 0);
+    writeComplex(view, pointer + offset, requireFiniteComplex(options.expBase, 'Native exponential base')); offset += 16;
+    writeComplex(view, pointer + offset, requireFiniteComplex(options.logBase, 'Native logarithm base')); offset += 16;
+    writeComplex(view, pointer + offset, requireFiniteComplex(options.besselOrder, 'Native Bessel order')); offset += 16;
+    writeComplex(view, pointer + offset, requireFiniteComplex(options.mobiusA, 'Native Möbius coefficient a')); offset += 16;
+    writeComplex(view, pointer + offset, requireFiniteComplex(options.mobiusB, 'Native Möbius coefficient b')); offset += 16;
+    writeComplex(view, pointer + offset, requireFiniteComplex(options.mobiusC, 'Native Möbius coefficient c')); offset += 16;
+    writeComplex(view, pointer + offset, requireFiniteComplex(options.mobiusD, 'Native Möbius coefficient d'));
 
-    const requestedDegree = Math.max(0, Math.min(10, Math.floor(Number(options.polynomialN) || 0)));
-    const coefficients = Array.isArray(options.polynomialCoeffs)
-        ? options.polynomialCoeffs.slice(0, requestedDegree + 1)
-        : [];
-    while (coefficients.length < requestedDegree + 1) coefficients.push({ re: 0, im: 0 });
+    const requestedDegree = Number(options.polynomialN);
+    if (!Number.isInteger(requestedDegree) || requestedDegree < 0 || requestedDegree > 10 ||
+        !Array.isArray(options.polynomialCoeffs) || options.polynomialCoeffs.length < requestedDegree + 1) {
+        throw new Error('Native map configuration requires complete polynomial coefficients for degree 0 through 10.');
+    }
+    const coefficients = options.polynomialCoeffs.slice(0, requestedDegree + 1);
+    coefficients.forEach((coefficient, index) => requireFiniteComplex(coefficient, `Native polynomial coefficient ${index}`));
     if (coefficients.length) {
         const coefficientPointer = alloc(coefficients.length * 16);
         allocations.push(coefficientPointer);
@@ -607,16 +707,20 @@ function writeMapConfig(pointer, options, allocations) {
         view.setUint32(pointer + FUNCTION_POLYNOMIAL_PTR, 0, true);
         view.setUint32(pointer + FUNCTION_POLYNOMIAL_COUNT, 0, true);
     }
-    view.setFloat64(pointer + FUNCTION_FRACTIONAL_POWER, Number(options.fractionalPowerN ?? 0.5), true);
-    view.setFloat64(pointer + FUNCTION_BRANCH_ANGLE, Number(options.branchCutAngle ?? Math.PI), true);
+    const fractionalPower = Number(options.fractionalPowerN);
+    const branchCutAngle = Number(options.branchCutAngle);
+    if (!Number.isFinite(fractionalPower) || !Number.isFinite(branchCutAngle)) {
+        throw new Error('Native map configuration requires finite power and branch-cut parameters.');
+    }
+    if (options.branchCutType !== 'ray' && options.branchCutType !== 'draw') {
+        throw new Error(`Unsupported native branch-cut type: ${options.branchCutType}.`);
+    }
+    view.setFloat64(pointer + FUNCTION_FRACTIONAL_POWER, fractionalPower, true);
+    view.setFloat64(pointer + FUNCTION_BRANCH_ANGLE, branchCutAngle, true);
     view.setUint32(pointer + FUNCTION_BRANCH_RAY, options.branchCutType === 'ray' ? 1 : 0, true);
     view.setUint32(pointer + FUNCTION_ZETA_CONTINUATION, options.zetaContinuationEnabled ? 1 : 0, true);
     if (functionKey === 'algebraic_chaining') writeAlgebraicConfig(view, pointer, options, allocations);
-    const taylor = options.taylor || (options.taylorEnabled ? {
-        coefficients: options.taylorCoefficients,
-        center: options.taylorCenter,
-        radius: options.taylorRadius
-    } : null);
+    const taylor = options.taylor;
     if (taylor) {
         const coefficients = Array.isArray(taylor.coefficients) ? taylor.coefficients : [];
         if (!coefficients.length) throw new Error('Native Taylor map requires coefficients.');
@@ -624,18 +728,21 @@ function writeMapConfig(pointer, options, allocations) {
         allocations.push(coefficientPointer);
         const coefficientView = memoryView();
         coefficients.forEach((coefficient, index) => writeComplex(
-            coefficientView, coefficientPointer + index * 16, coefficient, NaN, NaN
+            coefficientView,
+            coefficientPointer + index * 16,
+            requireFiniteComplex(coefficient, `Native Taylor coefficient ${index}`)
         ));
         const configView = memoryView();
         configView.setUint32(pointer + MAP_TAYLOR_PTR, coefficientPointer, true);
         configView.setUint32(pointer + MAP_TAYLOR_COUNT, coefficients.length, true);
-        writeComplex(configView, pointer + MAP_TAYLOR_CENTER, taylor.center);
+        writeComplex(configView, pointer + MAP_TAYLOR_CENTER, requireFiniteComplex(taylor.center, 'Native Taylor center'));
         const radius = Number(taylor.radius);
-        configView.setFloat64(pointer + MAP_TAYLOR_RADIUS_SQ,
-            Number.isFinite(radius) ? radius * radius : Infinity, true);
+        if (!(radius >= 0) && radius !== Infinity) throw new Error('Native Taylor radius must be non-negative or infinite.');
+        configView.setFloat64(pointer + MAP_TAYLOR_RADIUS_SQ, radius * radius, true);
         configView.setUint32(pointer + MAP_USE_TAYLOR, 1, true);
     }
-    writeDynamicConfig(view, pointer, options.dynamicAggregate || options.dynamic, allocations);
+    writeDynamicConfig(view, pointer, options.dynamicAggregate, allocations);
+    wasm.ce_prepare_map_config(pointer);
 }
 
 function writePointBuffer(pointer, points) {
@@ -644,20 +751,17 @@ function writePointBuffer(pointer, points) {
 }
 
 export function evaluateNativeExpressionProgram(program, environments, mapOptions, settled = false) {
-    if (!program?.instructions?.length || !Array.isArray(environments) || !environments.length) return [];
+    if (!program || !Array.isArray(program.instructions) || !Array.isArray(program.variableNames)) {
+        throw new Error('Native expression evaluation requires a compiled program.');
+    }
+    if (!Array.isArray(environments)) throw new Error('Native expression environments must be an array.');
+    if (!environments.length) return [];
+    if (!program.instructions.length) throw new Error('Native expression programs cannot be empty.');
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
         writeMapConfig(configPointer, mapOptions, allocations);
-        const instructionPointer = alloc(program.instructions.length * 24); allocations.push(instructionPointer);
-        const instructionView = memoryView();
-        program.instructions.forEach((instruction, index) => {
-            const offset = instructionPointer + index * 24;
-            instructionView.setUint32(offset, instruction.opcode, true);
-            instructionView.setUint32(offset + 4, instruction.argument || 0, true);
-            instructionView.setFloat64(offset + 8, instruction.re || 0, true);
-            instructionView.setFloat64(offset + 16, instruction.im || 0, true);
-        });
+        const instructionPointer = writeInstructionBuffer(program, allocations);
         const variableCount = program.variableNames.length;
         const variablePointer = variableCount ? alloc(environments.length * variableCount * 16) : 0;
         if (variablePointer) allocations.push(variablePointer);
@@ -682,7 +786,10 @@ export function evaluateNativeExpressionProgram(program, environments, mapOption
         const sheetsPointer = alloc(environments.length * 4); allocations.push(sheetsPointer);
         const sheetsView = memoryView();
         environments.forEach((environment, index) => {
-            sheetsView.setInt32(sheetsPointer + index * 4, Math.trunc(Number(environment.__sheet) || 0), true);
+            const sheet = environment.__sheet === undefined
+                ? 0
+                : requireInteger(environment.__sheet, `Native expression sheet ${index}`);
+            sheetsView.setInt32(sheetsPointer + index * 4, sheet, true);
         });
         const status = wasm.ce_evaluate_expression(
             configPointer, instructionPointer, program.instructions.length,
@@ -722,7 +829,9 @@ const NATIVE_SOURCE_KINDS = Object.freeze({
 });
 
 export function generateNativeDiscreteValues(config, runtime = {}) {
-    const requestedCount = Math.max(0, Math.floor(Number(config.count) || 0));
+    if (!config || typeof config !== 'object') throw new Error('Native discrete source requires configuration.');
+    const requestedCount = requireInteger(config.count, 'Native discrete source count');
+    if (requestedCount < 0) throw new Error('Native discrete source count must be non-negative.');
     if (!requestedCount) return { values: [], attempts: 0, invalidCount: 0, attemptErrors: [] };
     let kind = NATIVE_SOURCE_KINDS[config.kind];
     if (kind === undefined) throw new Error(`Unknown native discrete source kind "${config.kind}".`);
@@ -735,15 +844,24 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
     if (config.associatePolicy !== 'representatives') flags |= 8;
     if (config.includeConjugates !== false) flags |= 16;
 
-    const parameterEntries = Object.entries(runtime.parameters || {});
+    if (!runtime.parameters || typeof runtime.parameters !== 'object' || Array.isArray(runtime.parameters)) {
+        throw new Error('Native discrete source requires an explicit parameter environment.');
+    }
+    const parameterEntries = Object.entries(runtime.parameters);
     let generatorProgram = null;
     let predicateProgram = null;
     if (config.kind === 'expression') {
+        if (typeof config.generatorExpression !== 'string' || !config.generatorExpression.trim()) {
+            throw new Error('Native expression sources require a generator expression.');
+        }
         generatorProgram = compileNativeExpressionProgram(
-            parseExpression(String(config.generatorExpression ?? 'j')),
+            parseExpression(config.generatorExpression),
             ['j', ...parameterEntries.map(([name]) => name)]
         );
-        const predicateSource = String(config.filterExpression || '').trim();
+        if (typeof config.filterExpression !== 'string') {
+            throw new Error('Native expression-source filters must be strings.');
+        }
+        const predicateSource = config.filterExpression.trim();
         if (predicateSource) {
             predicateProgram = compileNativeExpressionProgram(
                 parseExpression(predicateSource),
@@ -766,7 +884,19 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
                 parameterView, parametersPointer + index * 16, value, NaN, NaN
             ));
         }
-        const maxAttempts = Math.max(requestedCount, Math.floor(Number(config.maxAttempts) || requestedCount));
+        const maxAttempts = config.kind === 'expression'
+            ? requireInteger(config.maxAttempts, 'Native discrete-source attempt limit')
+            : requestedCount;
+        if (maxAttempts < requestedCount) {
+            throw new Error('Native discrete-source attempt limit cannot be smaller than its requested count.');
+        }
+        const start = requireFiniteNumber(config.start, 'Native discrete-source start');
+        const step = requireFiniteNumber(config.step, 'Native discrete-source step');
+        const ratio = requireFiniteNumber(config.ratio, 'Native discrete-source ratio');
+        const minimum = requireFiniteNumber(config.min, 'Native discrete-source minimum');
+        const maximum = requireFiniteNumber(config.max, 'Native discrete-source maximum');
+        const bound = requireInteger(config.bound, 'Native discrete-source bound');
+        if (bound < 1) throw new Error('Native discrete-source bound must be positive.');
         let errorsPointer = 0;
         if (config.kind === 'expression') {
             errorsPointer = alloc(maxAttempts); allocations.push(errorsPointer);
@@ -774,8 +904,7 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
         }
         const status = wasm.ce_generate_discrete_values(
             kind, requestedCount,
-            Number(config.start), Number(config.step), Number(config.ratio),
-            Number(config.min), Number(config.max), Math.max(1, Math.floor(Number(config.bound) || 1)),
+            start, step, ratio, minimum, maximum, bound,
             flags, maxAttempts,
             generatorPointer, generatorProgram?.instructions.length || 0,
             predicatePointer, predicateProgram?.instructions.length || 0,
@@ -829,9 +958,10 @@ export function evaluateNativePoints(options, points) {
 }
 
 export function evaluateNativeAlgebraic(options, points, parameters = points) {
-    if (!Array.isArray(points) || !points.length || parameters.length !== points.length) {
-        return { values: [], valid: new Uint8Array() };
+    if (!Array.isArray(points) || !Array.isArray(parameters) || parameters.length !== points.length) {
+        throw new Error('Native algebraic evaluation requires equally sized point and parameter arrays.');
     }
+    if (!points.length) return { values: [], valid: new Uint8Array() };
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
@@ -862,7 +992,10 @@ export function evaluateNativeAlgebraic(options, points, parameters = points) {
 }
 
 export function evaluateNativeSheets(options, points, sheets) {
-    if (!Array.isArray(points) || !points.length || !Array.isArray(sheets) || sheets.length !== points.length) {
+    if (!Array.isArray(points) || !Array.isArray(sheets) || sheets.length !== points.length) {
+        throw new Error('Native sheet evaluation requires equally sized point and sheet arrays.');
+    }
+    if (!points.length) {
         return { values: [], valid: new Uint8Array() };
     }
     const allocations = [];
@@ -876,7 +1009,9 @@ export function evaluateNativeSheets(options, points, sheets) {
         writePointBuffer(inputPointer, points);
         const sheetView = memoryView();
         sheets.forEach((sheet, index) => sheetView.setInt32(
-            sheetsPointer + index * 4, Math.round(Number(sheet) || 0), true
+            sheetsPointer + index * 4,
+            requireInteger(sheet, `Native sheet ${index}`),
+            true
         ));
         const status = wasm.ce_evaluate_sheets(
             configPointer, inputPointer, sheetsPointer, points.length, outputPointer, validPointer
@@ -895,9 +1030,7 @@ export function evaluateNativeSheets(options, points, sheets) {
 }
 
 export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
-    const dynamic = aggregate?.native || aggregate?.pointProgram
-        ? (aggregate.native || aggregate)
-        : compileNativeDynamicAggregate(aggregate);
+    const dynamic = aggregate;
     if (!dynamic?.variables?.length) {
         return {
             pointValues: [], termValues: [], errors: new Uint8Array(),
@@ -910,7 +1043,7 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-        writeMapConfig(configPointer, { ...mapOptions, dynamic }, allocations);
+        writeMapConfig(configPointer, { ...mapOptions, dynamicAggregate: dynamic }, allocations);
         const pointPointer = alloc(count * 16); allocations.push(pointPointer);
         const termPointer = alloc(count * 16); allocations.push(termPointer);
         const errorsPointer = alloc(count); allocations.push(errorsPointer);
@@ -972,6 +1105,10 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
 
 export function continuationNativeSheet(path, branchCutType, branchCutAngle, branchCutPoints = []) {
     if (!Array.isArray(path) || path.length < 2) return 0;
+    if (branchCutType !== 'ray' && branchCutType !== 'draw') {
+        throw new Error(`Unsupported native continuation cut: ${branchCutType}.`);
+    }
+    const angle = requireFiniteNumber(branchCutAngle, 'Native continuation branch angle');
     const allocations = [];
     try {
         const pathPointer = alloc(path.length * 16); allocations.push(pathPointer);
@@ -979,12 +1116,14 @@ export function continuationNativeSheet(path, branchCutType, branchCutAngle, bra
         const drawn = branchCutType === 'draw';
         let cutPointer = 0;
         if (drawn) {
-            if (!Array.isArray(branchCutPoints) || branchCutPoints.length < 2) return 0;
+            if (!Array.isArray(branchCutPoints) || branchCutPoints.length < 2) {
+                throw new Error('Drawn native branch cuts require at least two points.');
+            }
             cutPointer = alloc(branchCutPoints.length * 16); allocations.push(cutPointer);
             writePointBuffer(cutPointer, branchCutPoints);
         }
         return wasm.ce_continuation_sheets(
-            pathPointer, path.length, drawn ? 1 : 0, Number(branchCutAngle ?? Math.PI),
+            pathPointer, path.length, drawn ? 1 : 0, angle,
             cutPointer, drawn ? branchCutPoints.length : 0
         );
     } finally {
@@ -992,61 +1131,23 @@ export function continuationNativeSheet(path, branchCutType, branchCutAngle, bra
     }
 }
 
-export function evaluateNativeFunction(functionKey, re, im, options = {}) {
-    const result = evaluateNativePoints({ ...options, functionKey, chainCount: 1 }, [{ re, im }]);
-    return result.valid[0] ? result.values[0] : result.values[0];
-}
-
-export function evaluateNativePower(base, exponent) {
-    const allocations = [];
-    try {
-        const basePointer = alloc(16); allocations.push(basePointer);
-        const exponentPointer = alloc(16); allocations.push(exponentPointer);
-        const outputPointer = alloc(16); allocations.push(outputPointer);
-        const view = memoryView();
-        writeComplex(view, basePointer, base);
-        writeComplex(view, exponentPointer, exponent);
-        const status = wasm.ce_pow_points(basePointer, exponentPointer, 1, outputPointer);
-        if (status !== 0) throw new Error(`Native complex power failed with status ${status}.`);
-        const resultView = memoryView();
-        return {
-            re: resultView.getFloat64(outputPointer, true),
-            im: resultView.getFloat64(outputPointer + 8, true)
-        };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function evaluateNativeZetaSeries(value, algorithm, workCount) {
-    const allocations = [];
-    try {
-        const inputPointer = alloc(16); allocations.push(inputPointer);
-        const outputPointer = alloc(16); allocations.push(outputPointer);
-        writeComplex(memoryView(), inputPointer, value);
-        const algorithmId = ({ direct: 0, eta: 1, hasse: 2 })[algorithm];
-        if (algorithmId === undefined) throw new Error(`Unsupported native zeta algorithm: ${algorithm}`);
-        const status = wasm.ce_zeta_points(inputPointer, 1, algorithmId, Math.max(1, Math.floor(workCount)), outputPointer);
-        if (status !== 0) throw new Error(`Native zeta series failed with status ${status}.`);
-        const view = memoryView();
-        return { re: view.getFloat64(outputPointer, true), im: view.getFloat64(outputPointer + 8, true) };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
 export function computeNativeTaylorCoefficients(map, center, radius, order) {
-    const boundedOrder = Math.max(0, Math.min(128, Math.floor(order)));
+    requireFiniteComplex(center, 'Native Taylor center');
+    const radiusValue = requireFiniteNumber(radius, 'Native Taylor sampling radius');
+    const boundedOrder = requireInteger(order, 'Native Taylor order');
+    if (radiusValue <= 0 || boundedOrder < 0 || boundedOrder > 128) {
+        throw new Error('Native Taylor radius must be positive and order must be between zero and 128.');
+    }
     const stepCount = Math.max(192, 48 * (boundedOrder + 1));
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-        writeMapConfig(configPointer, { ...map, taylorEnabled: false }, allocations);
+        writeMapConfig(configPointer, { ...map, taylor: null }, allocations);
         const outputPointer = alloc((boundedOrder + 1) * 16); allocations.push(outputPointer);
         const status = wasm.ce_compute_taylor_coefficients(
-            configPointer, center.re, center.im, radius, stepCount, boundedOrder, outputPointer
+            configPointer, center.re, center.im, radiusValue, stepCount, boundedOrder, outputPointer
         );
-        if (status !== 0) return null;
+        if (status !== 0) throw new Error(`Native Taylor coefficient job failed with status ${status}.`);
         const view = memoryView();
         return Array.from({ length: boundedOrder + 1 }, (_, index) => ({
             re: view.getFloat64(outputPointer + index * 16, true),
@@ -1057,20 +1158,37 @@ export function computeNativeTaylorCoefficients(map, center, radius, order) {
     }
 }
 
-export function mapNativePlanarGeometry(options, points) {
-    return evaluateNativePoints(options, points);
-}
-
 export function nativeMapOptions(runtimeState, overrides = {}) {
-    const stage = Number.isFinite(overrides.stage) ? Math.max(0, Math.floor(overrides.stage)) : null;
+    if (!runtimeState || typeof runtimeState !== 'object') throw new Error('Native map runtime state is required.');
+    if (!overrides || typeof overrides !== 'object') throw new Error('Native map overrides must be an object.');
+    if (Object.prototype.hasOwnProperty.call(overrides, 'derivativeMode')) {
+        throw new Error('Native map options require derivativeOrder; derivativeMode is not supported.');
+    }
+    let stage = null;
+    if (overrides.stage !== undefined) {
+        stage = requireInteger(overrides.stage, 'Native map stage');
+        if (stage < 0) throw new Error('Native map stage must be non-negative.');
+    }
+    const derivativeOrder = overrides.derivativeOrder === undefined
+        ? (runtimeState.mapPresentation === 'derivative' ? 1 : 0)
+        : requireInteger(overrides.derivativeOrder, 'Native map derivative order');
+    if (derivativeOrder < 0 || derivativeOrder > 2) {
+        throw new Error('Native map derivative order must be 0, 1, or 2.');
+    }
+    const chainingEnabled = overrides.chainingEnabled === undefined
+        ? runtimeState.chainingEnabled
+        : overrides.chainingEnabled;
+    if (typeof chainingEnabled !== 'boolean') {
+        throw new Error('Native map chainingEnabled must be boolean.');
+    }
+    const chainMode = overrides.chainMode ?? runtimeState.chainingMode;
+    const chainCount = overrides.chainCount === undefined
+        ? (stage === null
+            ? (chainingEnabled ? runtimeState.chainCount : 1)
+            : (chainingEnabled ? stage + 1 : 1))
+        : requireInteger(overrides.chainCount, 'Native map chain count');
+    const functionKey = overrides.functionKey ?? runtimeState.currentFunction;
     return {
-        functionKey: overrides.functionKey || runtimeState.currentFunction,
-        chainCount: stage === null
-            ? (runtimeState.chainingEnabled ? runtimeState.chainCount : 1)
-            : (runtimeState.chainingEnabled ? stage + 1 : 1),
-        chainingEnabled: runtimeState.chainingEnabled,
-        chainMode: runtimeState.chainingMode,
-        derivativeMode: overrides.derivativeMode ?? runtimeState.mapPresentation === 'derivative',
         expBase: runtimeState.expBase,
         logBase: runtimeState.logBase,
         besselOrder: runtimeState.besselOrder,
@@ -1087,12 +1205,20 @@ export function nativeMapOptions(runtimeState, overrides = {}) {
         algebraicChainingTerms: runtimeState.algebraicChainingTerms,
         algebraicChainingZExpr: runtimeState.algebraicChainingZExpr,
         dynamicAggregate: runtimeState.dynamicAggregate,
-        ...overrides
+        ...overrides,
+        functionKey,
+        chainCount,
+        chainingEnabled,
+        chainMode,
+        derivativeOrder
     };
 }
 
 function writeBranchCutPoints(points, allocations) {
-    if (!Array.isArray(points) || points.length < 2) return { pointer: 0, count: 0 };
+    if (!Array.isArray(points)) throw new Error('Native branch-cut points must be an array.');
+    if (!points.length) return { pointer: 0, count: 0 };
+    if (points.length < 2) throw new Error('A drawn native branch cut requires at least two points.');
+    points.forEach((point, index) => requireFiniteComplex(point, `Native branch-cut point ${index}`));
     const pointer = alloc(points.length * 16);
     allocations.push(pointer);
     writePointBuffer(pointer, points);
@@ -1121,26 +1247,35 @@ const NATIVE_INPUT_SHAPES = Object.freeze({
 });
 
 export function generateNativeInputShape(config, mapOptions) {
-    const density = Math.max(1, Math.floor(Number(config.gridDensity) || 1));
-    const curvePoints = Math.max(2, Math.floor(Number(config.curvePoints) || 2));
+    const density = requireInteger(config.gridDensity, 'Native input-shape density');
+    const curvePoints = requireInteger(config.curvePoints, 'Native input-shape curve-point count');
+    if (density < 1 || curvePoints < 2) {
+        throw new Error('Native input-shape density must be positive and curve-point count must be at least two.');
+    }
     let shape = NATIVE_INPUT_SHAPES[config.currentInputShape];
     let expressionProgram = null;
     const drawPoints = [];
     if (config.currentInputShape === 'arbitrary') {
         if (config.arbitraryShapeMode === 'draw') {
             shape = 6;
-            for (const point of config.arbitraryShapePoints || []) {
+            if (!Array.isArray(config.arbitraryShapePoints)) {
+                throw new Error('Drawn arbitrary shapes require a points array.');
+            }
+            for (const point of config.arbitraryShapePoints) {
                 drawPoints.push(point && Number.isFinite(point.re) && Number.isFinite(point.im)
                     ? point : { re: NaN, im: NaN });
             }
         } else {
             shape = 5;
-            const source = String(config.arbitraryShapeExpression || '').trim();
-            if (!source) return [];
+            const source = String(config.arbitraryShapeExpression ?? '').trim();
+            if (!source) throw new Error('Parametric arbitrary shapes require an expression.');
             expressionProgram = compileNativeExpressionProgram(parseExpression(source), ['t']);
+            const minimum = requireFiniteNumber(config.arbitraryShapeTMin, 'Arbitrary-shape parameter minimum');
+            const maximum = requireFiniteNumber(config.arbitraryShapeTMax, 'Arbitrary-shape parameter maximum');
+            if (minimum === maximum) throw new Error('Arbitrary-shape parameter range must be nonzero.');
         }
     }
-    if (shape === undefined) return [];
+    if (shape === undefined) throw new Error(`Unsupported native input shape: ${config.currentInputShape}.`);
 
     const linearSamples = Math.max(2, Math.floor(curvePoints / 2));
     const angularLines = Math.max(4, density);
@@ -1221,9 +1356,14 @@ export function generateNativeInputShape(config, mapOptions) {
 export function generateNativeViewportGridPixels(config) {
     const shape = config.currentInputShape === 'grid_cartesian' ? 0
         : config.currentInputShape === 'grid_dots' ? 4 : -1;
-    if (shape < 0) return [];
-    const density = Math.max(1, Math.floor(Number(config.gridDensity) || 1));
-    const curvePoints = Math.max(2, Math.floor(Number(config.curvePoints) || 2));
+    if (shape < 0) throw new Error(`Unsupported native viewport-grid shape: ${config.currentInputShape}.`);
+    const density = requireInteger(config.gridDensity, 'Native viewport-grid density');
+    const curvePoints = requireInteger(config.curvePoints, 'Native viewport-grid curve points');
+    const viewportWidth = requireInteger(config.preciseViewport?.width, 'Native viewport-grid width');
+    const viewportHeight = requireInteger(config.preciseViewport?.height, 'Native viewport-grid height');
+    if (density < 1 || curvePoints < 2 || viewportWidth < 1 || viewportHeight < 1) {
+        throw new Error('Native viewport-grid dimensions and density must be positive.');
+    }
     const samples = Math.max(2, Math.floor(curvePoints / 2));
     const lineCapacity = shape === 0 ? 2 * (density + 1) : 1;
     const pointCapacity = shape === 0
@@ -1237,8 +1377,7 @@ export function generateNativeViewportGridPixels(config) {
         const statsPointer = alloc(8); allocations.push(statsPointer);
         const status = wasm.ce_generate_viewport_grid_pixels(
             shape, density, curvePoints,
-            Math.max(1, Math.floor(Number(config.preciseViewport?.width))),
-            Math.max(1, Math.floor(Number(config.preciseViewport?.height))),
+            viewportWidth, viewportHeight,
             outputPointer, pointCapacity, offsetsPointer, rolesPointer, lineCapacity, statsPointer
         );
         if (status !== 0) throw new Error(`Native precise grid job failed with status ${status}.`);
@@ -1260,9 +1399,15 @@ export function generateNativeViewportGridPixels(config) {
 }
 
 export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePoints) {
-    const steps = Math.max(0, Math.floor(Number(stepCount) || 0));
+    const steps = requireInteger(stepCount, 'Native radial-step count');
+    if (steps < 0) throw new Error('Native radial-step count must be non-negative.');
     if (steps < 2) return [];
-    const pointsPerCircle = Math.max(24, Math.floor(Number(curvePoints) || 24)) + 1;
+    const curvePointCount = requireInteger(curvePoints, 'Native radial curve points');
+    if (curvePointCount < 24) throw new Error('Native radial curves require at least 24 points.');
+    const domainMin = requireFiniteNumber(domain?.min, 'Native radial domain minimum');
+    const domainMax = requireFiniteNumber(domain?.max, 'Native radial domain maximum');
+    if (domainMin >= domainMax) throw new Error('Native radial domain must increase.');
+    const pointsPerCircle = curvePointCount + 1;
     const pointCapacity = steps * pointsPerCircle;
     const allocations = [];
     try {
@@ -1272,7 +1417,7 @@ export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePo
         const offsetsPointer = alloc((steps + 1) * 4); allocations.push(offsetsPointer);
         const statsPointer = alloc(8); allocations.push(statsPointer);
         const status = wasm.ce_generate_radial_steps(
-            configPointer, Number(domain.min), Number(domain.max), steps, pointsPerCircle - 1,
+            configPointer, domainMin, domainMax, steps, pointsPerCircle - 1,
             outputPointer, pointCapacity, offsetsPointer, steps, statsPointer
         );
         if (status !== 0) throw new Error(`Native radial-step job failed with status ${status}.`);
@@ -1292,7 +1437,13 @@ export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePo
 }
 
 export function buildNativePlanarLine(options) {
-    const sampleCount = Math.max(1, Math.floor(options.sampleCount));
+    const sampleCount = requireInteger(options.sampleCount, 'Native planar-line sample count');
+    if (sampleCount < 1 || sampleCount > 1_000_000) {
+        throw new Error('Native planar-line sample count must be from one through 1,000,000.');
+    }
+    requireFiniteComplex(options.start, 'Native planar-line start');
+    requireFiniteComplex(options.end, 'Native planar-line end');
+    requirePlanarRenderOptions(options);
     const outputCapacity = (sampleCount + 1) * 2 + 2;
     const allocations = [];
     try {
@@ -1317,6 +1468,7 @@ export function buildNativePlanarLine(options) {
 
 export function buildNativePlanarLines(options) {
     if (!Array.isArray(options.lines) || !options.lines.length) return [];
+    requirePlanarRenderOptions(options);
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
@@ -1329,7 +1481,12 @@ export function buildNativePlanarLines(options) {
         const lineView = memoryView();
         let outputCapacity = 0;
         options.lines.forEach((line, index) => {
-            const sampleCount = Math.max(1, Math.floor(line.sampleCount));
+            const sampleCount = requireInteger(line.sampleCount, `Native planar line ${index} sample count`);
+            if (sampleCount < 1 || sampleCount > 1_000_000) {
+                throw new Error(`Native planar line ${index} sample count is outside one through 1,000,000.`);
+            }
+            requireFiniteComplex(line.start, `Native planar line ${index} start`);
+            requireFiniteComplex(line.end, `Native planar line ${index} end`);
             writeComplex(lineView, startsPointer + index * 16, line.start);
             writeComplex(lineView, endsPointer + index * 16, line.end);
             lineView.setUint32(countsPointer + index * 4, sampleCount, true);
@@ -1356,7 +1513,15 @@ export function buildNativePlanarLines(options) {
 
 export function buildNativePlanarPolyline(options) {
     if (!Array.isArray(options.points) || !options.points.length) return new Float64Array();
-    const maxDepth = Math.max(0, Math.min(20, Math.floor(options.maxDepth)));
+    const maxDepth = requireInteger(options.maxDepth, 'Native planar-polyline subdivision depth');
+    if (maxDepth < 0 || maxDepth > 20) {
+        throw new Error('Native planar-polyline subdivision depth must be from zero through 20.');
+    }
+    requirePlanarRenderOptions(options);
+    requireFiniteNumber(options.originX, 'Native planar-polyline x origin');
+    requireFiniteNumber(options.originY, 'Native planar-polyline y origin');
+    const maxSegmentSq = requireFiniteNumber(options.maxSegmentSq, 'Native planar-polyline segment limit');
+    if (maxSegmentSq <= 0) throw new Error('Native planar-polyline segment limit must be positive.');
     const theoretical = options.points.length * 2 ** Math.min(maxDepth, 12);
     const outputCapacity = Math.min(1_000_000, Math.max(4096, theoretical));
     const allocations = [];
@@ -1389,9 +1554,22 @@ export function buildNativePlanarPolyline(options) {
 }
 
 export function traceNativeStreamlines(options) {
-    const seeds = Array.isArray(options.seeds) ? options.seeds : [];
-    const maxSteps = Math.max(0, Math.min(10000, Math.floor(options.maxSteps)));
-    if (!seeds.length || !maxSteps) return seeds.map(() => []);
+    if (!Array.isArray(options.seeds)) throw new Error('Native streamline seeds must be an array.');
+    const seeds = options.seeds;
+    const maxSteps = requireInteger(options.maxSteps, 'Native streamline step limit');
+    if (maxSteps < 1 || maxSteps > 10000) {
+        throw new Error('Native streamline step limit must be from one through 10,000.');
+    }
+    if (!seeds.length) return [];
+    seeds.forEach((seed, index) => requireFiniteComplex(
+        { re: seed?.x ?? seed?.re, im: seed?.y ?? seed?.im },
+        `Native streamline seed ${index}`
+    ));
+    const xRange = requireIncreasingRange(options.xRange, 'Native streamline x range');
+    const yRange = requireIncreasingRange(options.yRange, 'Native streamline y range');
+    const stepSize = requireFiniteNumber(options.stepSize, 'Native streamline step size');
+    if (stepSize <= 0) throw new Error('Native streamline step size must be positive.');
+    requireBoolean(options.inverse, 'Native streamline inverse');
     const capacity = seeds.length * maxSteps;
     const allocations = [];
     try {
@@ -1402,11 +1580,9 @@ export function traceNativeStreamlines(options) {
         const positionsPointer = alloc(capacity * 16); allocations.push(positionsPointer);
         const magnitudesPointer = alloc(capacity * 8); allocations.push(magnitudesPointer);
         const offsetsPointer = alloc((seeds.length + 1) * 4); allocations.push(offsetsPointer);
-        const xRange = options.xRange;
-        const yRange = options.yRange;
         const count = wasm.ce_trace_streamlines(
             configPointer, seedsPointer, seeds.length,
-            xRange[0], xRange[1], yRange[0], yRange[1], options.stepSize,
+            xRange[0], xRange[1], yRange[0], yRange[1], stepSize,
             maxSteps, options.inverse ? 1 : 0,
             positionsPointer, magnitudesPointer, capacity, offsetsPointer
         );
@@ -1430,7 +1606,13 @@ export function traceNativeStreamlines(options) {
 }
 
 export function buildNativeVectorField(options) {
-    const density = Math.max(1, Math.min(256, Math.floor(options.density)));
+    const density = requireInteger(options.density, 'Native vector-field density');
+    if (density < 1 || density > 256) {
+        throw new Error('Native vector-field density must be from one through 256.');
+    }
+    const xRange = requireIncreasingRange(options.xRange, 'Native vector-field x range');
+    const yRange = requireIncreasingRange(options.yRange, 'Native vector-field y range');
+    requireBoolean(options.inverse, 'Native vector-field inverse');
     const count = (density + 1) ** 2;
     const allocations = [];
     try {
@@ -1441,7 +1623,7 @@ export function buildNativeVectorField(options) {
         const magnitudesPointer = alloc(count * 8); allocations.push(magnitudesPointer);
         const validPointer = alloc(count); allocations.push(validPointer);
         const status = wasm.ce_build_vector_field(
-            configPointer, options.xRange[0], options.xRange[1], options.yRange[0], options.yRange[1],
+            configPointer, xRange[0], xRange[1], yRange[0], yRange[1],
             density, options.inverse ? 1 : 0,
             positionsPointer, vectorsPointer, magnitudesPointer, validPointer
         );
@@ -1466,8 +1648,9 @@ export function buildNativeVectorField(options) {
 }
 
 export function buildNativeTissot(options) {
-    const density = Math.max(1, Math.floor(options.density));
-    const segments = Math.max(3, Math.floor(options.segments));
+    const density = requireInteger(options.density, 'Native Tissot density');
+    const segments = requireInteger(options.segments, 'Native Tissot segment count');
+    if (density < 1 || segments < 3) throw new Error('Native Tissot density and segment count are invalid.');
     const columns = Math.max(4, Math.min(10, Math.round(density * 0.48)));
     const capacity = (columns - 1) ** 2;
     const circlePoints = segments + 1;
@@ -1519,12 +1702,36 @@ export function buildNativeTissot(options) {
 }
 
 export function findNativePreimages(options) {
-    const density = Math.max(8, Math.min(64, Math.floor(options.density || 18)));
+    if (!options || !Array.isArray(options.xRange) || !Array.isArray(options.yRange) ||
+        options.xRange.length !== 2 || options.yRange.length !== 2) {
+        throw new Error('Native preimage search requires viewport ranges.');
+    }
+    requireFiniteComplex(options.target, 'Native preimage target');
+    const xMin = requireFiniteNumber(options.xRange[0], 'Native preimage x minimum');
+    const xMax = requireFiniteNumber(options.xRange[1], 'Native preimage x maximum');
+    const yMin = requireFiniteNumber(options.yRange[0], 'Native preimage y minimum');
+    const yMax = requireFiniteNumber(options.yRange[1], 'Native preimage y maximum');
+    if (xMin >= xMax || yMin >= yMax) throw new Error('Native preimage ranges must increase.');
+    const requestedDensity = requireInteger(options.density, 'Native preimage density');
+    if (requestedDensity < 8 || requestedDensity > 64) {
+        throw new Error('Native preimage density must be between eight and 64.');
+    }
+    const density = requestedDensity;
     const capacity = Math.max(16, (density + 1) ** 2);
-    const span = Math.max(options.xRange[1] - options.xRange[0], options.yRange[1] - options.yRange[0], 1e-6);
-    const tolerance = options.tolerance ?? Math.max(1e-8, span * 2e-6);
-    const derivativeStep = options.derivativeStep ?? Math.max(1e-7, span * 2e-6);
-    const mergeDistance = options.mergeDistance ?? Math.max(tolerance * 12, span / (density * 120));
+    const span = Math.max(xMax - xMin, yMax - yMin);
+    const tolerance = options.tolerance === undefined
+        ? Math.max(1e-8, span * 2e-6)
+        : requireFiniteNumber(options.tolerance, 'Native preimage tolerance');
+    const derivativeStep = options.derivativeStep === undefined
+        ? Math.max(1e-7, span * 2e-6)
+        : requireFiniteNumber(options.derivativeStep, 'Native preimage derivative step');
+    const mergeDistance = options.mergeDistance === undefined
+        ? Math.max(tolerance * 12, span / (density * 120))
+        : requireFiniteNumber(options.mergeDistance, 'Native preimage merge distance');
+    const maxIterations = requireInteger(options.maxIterations, 'Native preimage iteration limit');
+    if (tolerance <= 0 || derivativeStep <= 0 || mergeDistance <= 0 || maxIterations < 1) {
+        throw new Error('Native preimage search tolerances and iteration limit must be positive.');
+    }
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
@@ -1532,8 +1739,8 @@ export function findNativePreimages(options) {
         const rootsPointer = alloc(capacity * 16); allocations.push(rootsPointer);
         const count = wasm.ce_find_preimages(
             configPointer, options.target.re, options.target.im,
-            options.xRange[0], options.xRange[1], options.yRange[0], options.yRange[1],
-            density, Math.max(1, Math.floor(options.maxIterations || 28)),
+            xMin, xMax, yMin, yMax,
+            density, maxIterations,
             tolerance, derivativeStep, mergeDistance, options.inverseOutput ? 1 : 0,
             rootsPointer, capacity
         );
@@ -1548,8 +1755,13 @@ export function findNativePreimages(options) {
     }
 }
 
-export function findNativePolynomialRoots(coefficients, options = {}) {
+export function findNativePolynomialRoots(coefficients, options) {
     if (!Array.isArray(coefficients) || coefficients.length < 2) return [];
+    const maxIterations = requireInteger(options?.maxIterations, 'Native polynomial-root iteration limit');
+    const tolerance = requireFiniteNumber(options?.tolerance, 'Native polynomial-root tolerance');
+    if (maxIterations < 1 || tolerance <= 0) {
+        throw new Error('Native polynomial-root iterations and tolerance must be positive.');
+    }
     const allocations = [];
     try {
         const coefficientsPointer = alloc(coefficients.length * 16); allocations.push(coefficientsPointer);
@@ -1557,8 +1769,7 @@ export function findNativePolynomialRoots(coefficients, options = {}) {
         const rootsPointer = alloc((coefficients.length - 1) * 16); allocations.push(rootsPointer);
         const count = wasm.ce_find_polynomial_roots(
             coefficientsPointer, coefficients.length,
-            Math.max(1, Math.floor(options.maxIterations || 1000)),
-            Number(options.tolerance) || 1e-7, rootsPointer
+            maxIterations, tolerance, rootsPointer
         );
         if (count < 0) throw new Error(`Native polynomial-root job failed with status ${count}.`);
         const view = memoryView();
@@ -1573,16 +1784,14 @@ export function findNativePolynomialRoots(coefficients, options = {}) {
 
 export function analyzeNativeContour(map, points) {
     if (!Array.isArray(points) || points.length < 2) return null;
+    points.forEach((point, index) => requireFiniteComplex(point, `Native contour point ${index}`));
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
         writeMapConfig(configPointer, map, allocations);
         const pointsPointer = alloc(points.length * 16); allocations.push(pointsPointer);
         const pointsView = memoryView();
-        points.forEach((point, index) => {
-            pointsView.setFloat64(pointsPointer + index * 16, Number.isFinite(point?.re) ? point.re : NaN, true);
-            pointsView.setFloat64(pointsPointer + index * 16 + 8, Number.isFinite(point?.im) ? point.im : NaN, true);
-        });
+        points.forEach((point, index) => writeComplex(pointsView, pointsPointer + index * 16, point));
         const integralPointer = alloc(16); allocations.push(integralPointer);
         const windingPointer = alloc(8); allocations.push(windingPointer);
         const statusPointer = alloc(4); allocations.push(statusPointer);
@@ -1605,15 +1814,21 @@ export function analyzeNativeContour(map, points) {
 }
 
 export function estimateNativeResidue(map, pole, radius, samples) {
+    requireFiniteComplex(pole, 'Native residue pole');
+    const radiusValue = requireFiniteNumber(radius, 'Native residue radius');
+    const sampleCount = requireInteger(samples, 'Native residue sample count');
+    if (radiusValue <= 0 || sampleCount < 8) {
+        throw new Error('Native residue radius must be positive and sample count must be at least eight.');
+    }
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
         writeMapConfig(configPointer, map, allocations);
         const outputPointer = alloc(16); allocations.push(outputPointer);
         const status = wasm.ce_estimate_residue(
-            configPointer, pole.re, pole.im, radius, Math.max(8, Math.floor(samples)), outputPointer
+            configPointer, pole.re, pole.im, radiusValue, sampleCount, outputPointer
         );
-        if (status !== 0) return { re: NaN, im: NaN };
+        if (status !== 0) throw new Error(`Native residue estimation failed with status ${status}.`);
         const view = memoryView();
         return { re: view.getFloat64(outputPointer, true), im: view.getFloat64(outputPointer + 8, true) };
     } finally {
@@ -1622,18 +1837,22 @@ export function estimateNativeResidue(map, pole, radius, samples) {
 }
 
 export function generateNativeContourPoints(type, params, stepCount) {
-    const count = Math.max(1, Math.floor(stepCount));
+    const count = requireInteger(stepCount, 'Native contour step count');
+    if (count < 1) throw new Error('Native contour step count must be positive.');
     const typeId = type === 'circle' ? 1 : (type === 'ellipse' ? 2 : 0);
-    if (!typeId) return [];
-    const paramA = typeId === 1 ? Number(params.r) : Number(params.a);
-    const paramB = typeId === 1 ? 0 : Number(params.b);
+    if (!typeId) throw new Error(`Unsupported native contour type: ${type}.`);
+    const centerX = requireFiniteNumber(params?.cx, 'Native contour center x');
+    const centerY = requireFiniteNumber(params?.cy, 'Native contour center y');
+    const paramA = requireFiniteNumber(typeId === 1 ? params?.r : params?.a, 'Native contour first radius');
+    const paramB = typeId === 1 ? 0 : requireFiniteNumber(params?.b, 'Native contour second radius');
+    if (paramA <= 0 || (typeId === 2 && paramB <= 0)) throw new Error('Native contour radii must be positive.');
     const allocations = [];
     try {
         const outputPointer = alloc((count + 1) * 16); allocations.push(outputPointer);
         const total = wasm.ce_generate_contour_points(
-            typeId, Number(params.cx) || 0, Number(params.cy) || 0, paramA, paramB, count, outputPointer
+            typeId, centerX, centerY, paramA, paramB, count, outputPointer
         );
-        if (total < 0) return [];
+        if (total < 0) throw new Error(`Native contour generation failed with status ${total}.`);
         const view = memoryView();
         return Array.from({ length: total }, (_, index) => ({
             re: view.getFloat64(outputPointer + index * 16, true),
@@ -1647,31 +1866,39 @@ export function generateNativeContourPoints(type, params, stepCount) {
 export function classifyNativeContourSingularities(contourType, params, polygonContours, epsilon, singularities) {
     if (!Array.isArray(singularities) || !singularities.length) return [];
     const typeId = contourType === 'circle' ? 1 : (contourType === 'ellipse' ? 2 : (contourType === 'contour' || contourType === 'contours' ? 3 : 0));
-    const cx = Number(params?.cx) || 0;
-    const cy = Number(params?.cy) || 0;
-    const paramA = typeId === 1 ? Number(params?.r) || 0 : Number(params?.a) || 0;
-    const paramB = typeId === 2 ? Number(params?.b) || 0 : 0;
+    if (!typeId) throw new Error(`Unsupported native contour type: ${contourType}.`);
+    const cx = typeId === 3 ? 0 : requireFiniteNumber(params?.cx, 'Native contour center x');
+    const cy = typeId === 3 ? 0 : requireFiniteNumber(params?.cy, 'Native contour center y');
+    const paramA = typeId === 1 ? requireFiniteNumber(params?.r, 'Native contour radius')
+        : typeId === 2 ? requireFiniteNumber(params?.a, 'Native contour first radius') : 0;
+    const paramB = typeId === 2 ? requireFiniteNumber(params?.b, 'Native contour second radius') : 0;
+    const epsilonValue = requireFiniteNumber(epsilon, 'Native contour epsilon');
+    if (epsilonValue < 0) throw new Error('Native contour epsilon must be non-negative.');
+    singularities.forEach((singularity, index) =>
+        requireFiniteComplex(singularity, `Native contour singularity ${index}`));
     const allocations = [];
     try {
         let polygonPointsPointer = 0;
         let polygonOffsetsPointer = 0;
         let polygonCount = 0;
-        if (typeId === 3 && Array.isArray(polygonContours) && polygonContours.length) {
+        if (typeId === 3) {
+            if (!Array.isArray(polygonContours) || !polygonContours.length ||
+                polygonContours.some(points => !Array.isArray(points) || !points.length)) {
+                throw new Error('Native polygon contour classification requires non-empty contours.');
+            }
             polygonCount = polygonContours.length;
-            const totalPoints = polygonContours.reduce((sum, points) => sum + (Array.isArray(points) ? points.length : 0), 0);
+            const totalPoints = polygonContours.reduce((sum, points) => sum + points.length, 0);
             polygonPointsPointer = alloc(totalPoints * 16); allocations.push(polygonPointsPointer);
             polygonOffsetsPointer = alloc((polygonCount + 1) * 4); allocations.push(polygonOffsetsPointer);
             const view = memoryView();
             let currentOffset = 0;
             polygonContours.forEach((points, pIndex) => {
                 view.setUint32(polygonOffsetsPointer + pIndex * 4, currentOffset, true);
-                if (Array.isArray(points)) {
-                    points.forEach(point => {
-                        view.setFloat64(polygonPointsPointer + currentOffset * 16, Number(point?.re) || 0, true);
-                        view.setFloat64(polygonPointsPointer + currentOffset * 16 + 8, Number(point?.im) || 0, true);
-                        currentOffset += 1;
-                    });
-                }
+                points.forEach((point, pointIndex) => {
+                    requireFiniteComplex(point, `Native polygon ${pIndex} point ${pointIndex}`);
+                    writeComplex(view, polygonPointsPointer + currentOffset * 16, point);
+                    currentOffset += 1;
+                });
             });
             view.setUint32(polygonOffsetsPointer + polygonCount * 4, currentOffset, true);
         }
@@ -1680,15 +1907,12 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
         const insidePointer = alloc(singularities.length); allocations.push(insidePointer);
         const safePointer = alloc(singularities.length); allocations.push(safePointer);
         const singView = memoryView();
-        singularities.forEach((sing, index) => {
-            singView.setFloat64(singPointer + index * 16, Number.isFinite(sing?.re) ? sing.re : NaN, true);
-            singView.setFloat64(singPointer + index * 16 + 8, Number.isFinite(sing?.im) ? sing.im : NaN, true);
-        });
+        singularities.forEach((sing, index) => writeComplex(singView, singPointer + index * 16, sing));
 
         const status = wasm.ce_classify_contour_singularities(
             typeId, cx, cy, paramA, paramB,
             polygonPointsPointer, polygonOffsetsPointer, polygonCount,
-            Number(epsilon) || 0, singPointer, singularities.length,
+            epsilonValue, singPointer, singularities.length,
             insidePointer, safePointer
         );
         if (status !== 0) throw new Error(`Native singularity classification failed with status ${status}.`);
@@ -1703,41 +1927,54 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
     }
 }
 
-export function createCompiledDomainTileRenderer(snapshot) {
-    const allocations = [];
-    const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-    writeMapConfig(configPointer, snapshot, allocations);
-    const palette = Array.isArray(snapshot.paletteStops) && snapshot.paletteStops.length >= 2
-        ? snapshot.paletteStops
-        : [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0]];
+function writeDomainPalette(palette, allocations) {
+    if (!Array.isArray(palette) || palette.length < 2) {
+        throw new Error('Native domain rendering requires at least two palette stops.');
+    }
     const paletteRgPointer = alloc(palette.length * 16); allocations.push(paletteRgPointer);
     const paletteBPointer = alloc(palette.length * 8); allocations.push(paletteBPointer);
     const paletteView = memoryView();
     palette.forEach((stop, index) => {
-        paletteView.setFloat64(paletteRgPointer + index * 16, Number(stop?.[0]) || 0, true);
-        paletteView.setFloat64(paletteRgPointer + index * 16 + 8, Number(stop?.[1]) || 0, true);
-        paletteView.setFloat64(paletteBPointer + index * 8, Number(stop?.[2]) || 0, true);
+        if (!Array.isArray(stop) || stop.length < 3 || !stop.slice(0, 3).every(Number.isFinite)) {
+            throw new Error(`Invalid native domain palette stop at index ${index}.`);
+        }
+        paletteView.setFloat64(paletteRgPointer + index * 16, stop[0], true);
+        paletteView.setFloat64(paletteRgPointer + index * 16 + 8, stop[1], true);
+        paletteView.setFloat64(paletteBPointer + index * 8, stop[2], true);
     });
+    return { paletteRgPointer, paletteBPointer, paletteCount: palette.length };
+}
+
+export function createCompiledDomainTileRenderer(snapshot) {
+    const allocations = [];
+    const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    writeMapConfig(configPointer, snapshot, allocations);
+    const palette = snapshot.paletteStops;
+    const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(palette, allocations);
 
     const viewport = snapshot.viewport;
-    const orbitMode = ({ value: 0, escape: 1, attractor: 2, hybrid: 3 })[snapshot.orbitColoringMode] ?? 0;
-    const style = snapshot.style || {};
+    const orbitMode = ({ value: 0, escape: 1, attractor: 2, hybrid: 3 })[snapshot.orbitColoringMode];
+    if (orbitMode === undefined) throw new Error(`Unsupported native orbit-coloring mode: ${snapshot.orbitColoringMode}`);
+    const style = snapshot.style;
+    if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
+        throw new Error('Native domain rendering requires finite style parameters.');
+    }
     const precise = typeof viewport.centerRe === 'string' && typeof viewport.centerIm === 'string' &&
         Number.isFinite(viewport.zoomPower) && Number.isInteger(viewport.precisionBits);
 
     let xMin, xMax, yMin, yMax;
+    let centerRePointer = 0;
+    let centerImPointer = 0;
+    let repairCountPointer = 0;
     if (precise) {
-        const span = 7.0 * (10 ** -Number(viewport.zoomPower));
-        const aspect = (Number(viewport.width) || 1) / (Number(viewport.height) || 1);
-        const xSpan = aspect >= 1 ? span * aspect : span;
-        const ySpan = aspect >= 1 ? span : span / aspect;
-        const cRe = Number(viewport.centerRe) || 0;
-        const cIm = Number(viewport.centerIm) || 0;
-        xMin = cRe - xSpan * 0.5;
-        xMax = cRe + xSpan * 0.5;
-        yMin = cIm - ySpan * 0.5;
-        yMax = cIm + ySpan * 0.5;
+        centerRePointer = writeCString(viewport.centerRe, allocations);
+        centerImPointer = writeCString(viewport.centerIm, allocations);
+        repairCountPointer = alloc(4); allocations.push(repairCountPointer);
     } else {
+        if (!Array.isArray(viewport.xRange) || !Array.isArray(viewport.yRange) ||
+            ![...viewport.xRange, ...viewport.yRange].every(Number.isFinite)) {
+            throw new Error('Native domain rendering requires finite viewport ranges.');
+        }
         xMin = viewport.xRange[0];
         xMax = viewport.xRange[1];
         yMin = viewport.yRange[0];
@@ -1745,6 +1982,24 @@ export function createCompiledDomainTileRenderer(snapshot) {
     }
     let outputCapacity = 0;
     let outputPointer = 0;
+    const preciseRenderContextPointer = precise ? wasm.ce_create_precise_domain_render_context(
+        configPointer, centerRePointer, centerImPointer,
+        viewport.zoomPower, viewport.precisionBits,
+        viewport.width, viewport.height,
+        orbitMode, paletteRgPointer, paletteBPointer, paletteCount,
+        style.brightness, style.contrast, style.saturation, style.lightnessCycles, 1
+    ) : 0;
+    if (precise && !preciseRenderContextPointer) {
+        throw new Error('Native precise domain render-context allocation failed.');
+    }
+    const renderContextPointer = precise ? 0 : wasm.ce_create_domain_render_context(
+        configPointer, xMin, xMax, yMin, yMax,
+        paletteRgPointer, paletteBPointer, paletteCount,
+        style.brightness, style.contrast, style.saturation, style.lightnessCycles
+    );
+    if (!precise && !renderContextPointer) {
+        throw new Error('Native domain render-context allocation failed.');
+    }
 
     const render = tile => {
         const outputLength = tile.width * tile.height * 4;
@@ -1753,45 +2008,99 @@ export function createCompiledDomainTileRenderer(snapshot) {
             outputCapacity = Math.max(outputLength, 256 * 256 * 4);
             outputPointer = alloc(outputCapacity);
         }
-        const status = wasm.ce_render_domain_tile(
-            configPointer,
-            xMin, xMax, yMin, yMax,
+        const geometry = [
             viewport.width, viewport.height,
-            tile.x, tile.y, tile.width, tile.height, tile.scale,
-            orbitMode, paletteRgPointer, paletteBPointer, palette.length,
-            Number(style.brightness) || 1, Number(style.contrast) || 1,
-            Number(style.saturation) || 1, Number(style.lightnessCycles) || 0,
-            tile.qualityOnly ? 1 : 0, outputPointer
-        );
+            tile.x, tile.y, tile.width, tile.height, tile.scale
+        ];
+        const status = precise
+            ? wasm.ce_render_precise_domain_tile(
+                preciseRenderContextPointer,
+                tile.x, tile.y, tile.width, tile.height, tile.scale,
+                tile.adaptiveQuality ? 1 : 0, repairCountPointer, outputPointer
+            )
+            : wasm.ce_render_domain_tile(
+                configPointer, xMin, xMax, yMin, yMax, ...geometry,
+                orbitMode, renderContextPointer, tile.adaptiveQuality ? 1 : 0, outputPointer
+            );
         if (status !== 0) throw new Error(`Native domain tile failed with status ${status}.`);
+        render.lastStats = Object.freeze({
+            precise,
+            perturbationRepairs: precise ? memoryView().getUint32(repairCountPointer, true) : 0
+        });
         const result = new Uint8ClampedArray(outputLength);
         result.set(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
         return result;
     };
+    render.lastStats = Object.freeze({ precise, perturbationRepairs: 0 });
 
     render.dispose = () => {
         if (outputPointer) wasm.ce_free(outputPointer);
+        if (preciseRenderContextPointer) wasm.ce_destroy_precise_domain_render_context(preciseRenderContextPointer);
+        if (renderContextPointer) wasm.ce_destroy_domain_render_context(renderContextPointer);
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     };
 
     return render;
 }
 
-export function renderNativeDomainTile(snapshot, tile) {
-    const renderer = createCompiledDomainTileRenderer(snapshot);
+const CONTOUR_COMPONENT_IDS = Object.freeze({ real: 0, imaginary: 1, imag: 1, magnitude: 2, phase: 3 });
+
+export function renderNativeMapContour(options) {
+    const width = requireInteger(options.width, 'Native contour width');
+    const height = requireInteger(options.height, 'Native contour height');
+    const component = CONTOUR_COMPONENT_IDS[options.component];
+    if (width < 1 || height < 1 || width * height > 0x3fffffff) {
+        throw new Error('Native contour rendering requires positive integer dimensions.');
+    }
+    if (component === undefined) throw new Error(`Unsupported native contour component: ${options.component}`);
+    if (typeof options.contoursEnabled !== 'boolean') {
+        throw new Error('Native contour rendering requires an explicit contoursEnabled flag.');
+    }
+    if (!Array.isArray(options.xRange) || !Array.isArray(options.yRange) ||
+        options.xRange.length !== 2 || options.yRange.length !== 2 ||
+        ![...options.xRange, ...options.yRange].every(Number.isFinite) ||
+        options.xRange[0] >= options.xRange[1] || options.yRange[0] >= options.yRange[1]) {
+        throw new Error('Native contour rendering requires finite viewport ranges.');
+    }
+    const contourInterval = requireFiniteNumber(options.contourInterval, 'Native contour interval');
+    const contourThickness = requireFiniteNumber(options.contourThickness, 'Native contour thickness');
+    if (contourInterval <= 0 || contourThickness <= 0) {
+        throw new Error('Native contour interval and thickness must be positive.');
+    }
+    const style = options.style;
+    if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
+        throw new Error('Native contour rendering requires finite style parameters.');
+    }
+    const allocations = [];
     try {
-        return renderer(tile);
+        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+        writeMapConfig(configPointer, options.mapOptions, allocations);
+        const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(options.paletteStops, allocations);
+        const outputLength = width * height * 4;
+        const outputPointer = alloc(outputLength); allocations.push(outputPointer);
+        const status = wasm.ce_render_map_contour(
+            configPointer,
+            options.xRange[0], options.xRange[1], options.yRange[0], options.yRange[1],
+            width, height, component, options.contoursEnabled ? 1 : 0,
+            contourInterval, contourThickness,
+            paletteRgPointer, paletteBPointer, paletteCount,
+            style.brightness, style.contrast, style.saturation, style.lightnessCycles,
+            outputPointer
+        );
+        if (status !== 0) throw new Error(`Native contour rendering failed with status ${status}.`);
+        return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
     } finally {
-        renderer.dispose();
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }
 }
 
 export function precisePixelCoordinate(viewport, pixelX, pixelY) {
-    const width = Math.max(1, Math.floor(Number(viewport?.width)));
-    const height = Math.max(1, Math.floor(Number(viewport?.height)));
-    const precisionBits = Math.max(128, Math.min(4096, Math.floor(Number(viewport?.precisionBits) || 512)));
+    const width = requireInteger(viewport?.width, 'Precise viewport width');
+    const height = requireInteger(viewport?.height, 'Precise viewport height');
+    const precisionBits = requireInteger(viewport?.precisionBits, 'Precise viewport precision');
     const zoomPower = Number(viewport?.zoomPower);
-    if (!Number.isFinite(zoomPower) || !Number.isFinite(pixelX) || !Number.isFinite(pixelY)) {
+    if (width < 1 || height < 1 || precisionBits < 128 || precisionBits > 4096 ||
+        !Number.isFinite(zoomPower) || !Number.isFinite(pixelX) || !Number.isFinite(pixelY)) {
         throw new Error('Precise pixel coordinates require finite pixel and zoom values.');
     }
     const allocations = [];
@@ -1817,21 +2126,31 @@ export function precisePixelCoordinate(viewport, pixelX, pixelY) {
 }
 
 function preciseViewportArguments(viewport) {
-    const width = Math.max(1, Math.floor(Number(viewport?.width)));
-    const height = Math.max(1, Math.floor(Number(viewport?.height)));
+    const width = requireInteger(viewport?.width, 'Precise viewport width');
+    const height = requireInteger(viewport?.height, 'Precise viewport height');
     const zoomPower = Number(viewport?.zoomPower);
-    const precisionBits = Math.max(128, Math.min(4096, Math.floor(Number(viewport?.precisionBits) || 512)));
+    const precisionBits = requireInteger(viewport?.precisionBits, 'Precise viewport precision');
     if (typeof viewport?.centerRe !== 'string' || typeof viewport?.centerIm !== 'string' ||
+        width < 1 || height < 1 || precisionBits < 128 || precisionBits > 4096 ||
         !Number.isFinite(zoomPower)) throw new Error('Native precise geometry requires a precise viewport.');
     return { width, height, zoomPower, precisionBits };
+}
+
+function packPrecisePixelPairs(pixels, label) {
+    if (pixels instanceof Float32Array) return pixels;
+    if (!Array.isArray(pixels)) throw new Error(`${label} requires pixel pairs.`);
+    const packed = new Float32Array(pixels.length * 2);
+    pixels.forEach((point, index) => {
+        packed[index * 2] = requireFiniteNumber(point?.x, `${label} point ${index} x`);
+        packed[index * 2 + 1] = requireFiniteNumber(point?.y, `${label} point ${index} y`);
+    });
+    return packed;
 }
 
 export function projectNativePrecisePixels(options, pixels) {
     const input = preciseViewportArguments(options.inputViewport);
     const output = preciseViewportArguments(options.outputViewport);
-    const packed = pixels instanceof Float32Array
-        ? pixels
-        : new Float32Array((pixels || []).flatMap(point => [Number(point?.x), Number(point?.y)]));
+    const packed = packPrecisePixelPairs(pixels, 'Native precise pixel geometry');
     if (packed.length % 2) throw new Error('Native precise pixel geometry requires x/y pairs.');
     const pointCount = packed.length / 2;
     if (!pointCount) return new Float32Array();
@@ -1861,9 +2180,7 @@ export function projectNativePrecisePixels(options, pixels) {
 
 export function projectNativePrecisePixelsToCanvas(options, pixels) {
     const input = preciseViewportArguments(options.inputViewport);
-    const packed = pixels instanceof Float32Array
-        ? pixels
-        : new Float32Array((pixels || []).flatMap(point => [Number(point?.x), Number(point?.y)]));
+    const packed = packPrecisePixelPairs(pixels, 'Native precise canvas geometry');
     if (packed.length % 2) throw new Error('Native precise canvas geometry requires x/y pairs.');
     const pointCount = packed.length / 2;
     if (!pointCount) return new Float32Array();
@@ -1879,8 +2196,10 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
         const status = wasm.ce_project_precise_pixels_to_canvas(
             mapPointer, inputRePointer, inputImPointer, input.zoomPower, input.precisionBits,
             input.width, input.height, pixelsPointer, pointCount, options.mapPoints ? 1 : 0,
-            Number(options.outputOrigin?.x), Number(options.outputOrigin?.y),
-            Number(options.outputScale?.x), Number(options.outputScale?.y),
+            requireFiniteNumber(options.outputOrigin?.x, 'Precise canvas origin x'),
+            requireFiniteNumber(options.outputOrigin?.y, 'Precise canvas origin y'),
+            requireFiniteNumber(options.outputScale?.x, 'Precise canvas scale x'),
+            requireFiniteNumber(options.outputScale?.y, 'Precise canvas scale y'),
             resultPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native precise-to-canvas geometry failed with status ${status}.`);
@@ -1933,17 +2252,23 @@ const FOURIER_SIGNAL_TYPES = Object.freeze({
     noise: 14
 });
 
-export function generateNativeFourierSignal(funcType, frequency, amplitude, timeWindow, sampleCount, randomSeed = 0) {
-    const samples = Math.max(1, Math.floor(sampleCount));
-    const signalType = FOURIER_SIGNAL_TYPES[funcType] ?? 0;
-    const window = Number(timeWindow) > 0 ? Number(timeWindow) : 1;
+export function generateNativeFourierSignal(funcType, frequency, amplitude, timeWindow, sampleCount, randomSeed) {
+    const samples = requireInteger(sampleCount, 'Fourier sample count');
+    if (samples < 1) throw new Error('Fourier sample count must be positive.');
+    const signalType = FOURIER_SIGNAL_TYPES[funcType];
+    if (signalType === undefined) throw new Error(`Unsupported Fourier signal type: ${funcType}.`);
+    const frequencyValue = requireFiniteNumber(frequency, 'Fourier frequency');
+    const amplitudeValue = requireFiniteNumber(amplitude, 'Fourier amplitude');
+    const window = requireFiniteNumber(timeWindow, 'Fourier time window');
+    if (window <= 0) throw new Error('Fourier time window must be positive.');
+    const seed = requireInteger(randomSeed, 'Fourier random seed');
+    if (seed < 0 || seed > 0xffffffff) throw new Error('Fourier random seed must be an unsigned 32-bit integer.');
     const allocations = [];
     try {
         const timesPointer = alloc(samples * 8); allocations.push(timesPointer);
         const valuesPointer = alloc(samples * 8); allocations.push(valuesPointer);
         const status = wasm.ce_generate_fourier_signal(
-            signalType, Number(frequency) || 0, Number(amplitude) || 0,
-            window, samples, randomSeed || 0,
+            signalType, frequencyValue, amplitudeValue, window, samples, seed,
             timesPointer, valuesPointer
         );
         if (status !== 0) throw new Error(`Native Fourier signal generation failed with status ${status}.`);
@@ -1972,7 +2297,7 @@ export function computeNativeFourierSpectrum(values) {
 
         const valBuf = new Float64Array(wasm.memory.buffer, valuesPointer, count);
         for (let i = 0; i < count; i++) {
-            valBuf[i] = Number(values[i]) || 0;
+            valBuf[i] = requireFiniteNumber(values[i], `Fourier sample ${i}`);
         }
 
         const status = wasm.ce_compute_fourier_spectrum(
@@ -2009,6 +2334,11 @@ export function buildNativeFourierWinding(signal, frequency, progress = 1, timeW
         };
     }
     const count = signal.length;
+    const frequencyValue = requireFiniteNumber(frequency, 'Fourier winding frequency');
+    const progressValue = requireFiniteNumber(progress, 'Fourier winding progress');
+    if (progressValue < 0 || progressValue > 1) throw new Error('Fourier winding progress must be between zero and one.');
+    const windowValue = requireFiniteNumber(timeWindow, 'Fourier winding time window');
+    if (windowValue <= 0) throw new Error('Fourier winding time window must be positive.');
     const allocations = [];
     try {
         const timesPointer = alloc(count * 8); allocations.push(timesPointer);
@@ -2020,13 +2350,13 @@ export function buildNativeFourierWinding(signal, frequency, progress = 1, timeW
         const timeBuf = new Float64Array(wasm.memory.buffer, timesPointer, count);
         const valBuf = new Float64Array(wasm.memory.buffer, valuesPointer, count);
         signal.forEach((sample, index) => {
-            timeBuf[index] = Number(sample?.t) || 0;
-            valBuf[index] = Number(sample?.value) || 0;
+            timeBuf[index] = requireFiniteNumber(sample?.t, `Fourier sample ${index} time`);
+            valBuf[index] = requireFiniteNumber(sample?.value, `Fourier sample ${index} value`);
         });
 
         const visible = wasm.ce_build_fourier_winding(
-            timesPointer, valuesPointer, count, Number(frequency) || 0,
-            Number(progress) ?? 1, Number(timeWindow) || 1,
+            timesPointer, valuesPointer, count, frequencyValue,
+            progressValue, windowValue,
             woundPointer, centerPointer, maxAmpPointer
         );
         if (visible < 0) throw new Error(`Native Fourier winding failed with status ${visible}.`);
@@ -2056,6 +2386,68 @@ export function buildNativeFourierWinding(signal, frequency, progress = 1, timeW
     }
 }
 
+export function buildNativeLaplaceWinding(signal, sigma, omega, progress = 1) {
+    if (!Array.isArray(signal) || signal.length < 2) {
+        throw new Error('Native Laplace winding requires at least two signal samples.');
+    }
+    const count = signal.length;
+    const sigmaValue = requireFiniteNumber(sigma, 'Laplace sigma');
+    const omegaValue = requireFiniteNumber(omega, 'Laplace omega');
+    const progressValue = requireFiniteNumber(progress, 'Laplace animation progress');
+    if (progressValue < 0 || progressValue > 1) {
+        throw new Error('Laplace animation progress must be between zero and one.');
+    }
+
+    const allocations = [];
+    try {
+        const timesPointer = alloc(count * 8); allocations.push(timesPointer);
+        const valuesPointer = alloc(count * 8); allocations.push(valuesPointer);
+        const woundPointer = alloc(count * 16); allocations.push(woundPointer);
+        const weightedPointer = alloc(count * 8); allocations.push(weightedPointer);
+        const envelopePointer = alloc(count * 8); allocations.push(envelopePointer);
+        const integralPointer = alloc(16); allocations.push(integralPointer);
+        const maxRadiusPointer = alloc(8); allocations.push(maxRadiusPointer);
+        const maxAmplitudePointer = alloc(8); allocations.push(maxAmplitudePointer);
+
+        const times = new Float64Array(wasm.memory.buffer, timesPointer, count);
+        const values = new Float64Array(wasm.memory.buffer, valuesPointer, count);
+        signal.forEach((sample, index) => {
+            times[index] = requireFiniteNumber(sample?.t, `Laplace sample ${index} time`);
+            values[index] = requireFiniteNumber(sample?.value, `Laplace sample ${index} value`);
+        });
+
+        const visible = wasm.ce_build_laplace_winding(
+            timesPointer, valuesPointer, count, sigmaValue, omegaValue, progressValue,
+            woundPointer, weightedPointer, envelopePointer, integralPointer, maxRadiusPointer,
+            maxAmplitudePointer
+        );
+        if (visible < 0) throw new Error(`Native Laplace winding failed with status ${visible}.`);
+
+        const view = memoryView();
+        const points = Array.from({ length: visible }, (_, index) => ({
+            t: times[index],
+            real: view.getFloat64(woundPointer + index * 16, true),
+            imag: view.getFloat64(woundPointer + index * 16 + 8, true)
+        }));
+        return {
+            points,
+            weighted: new Float64Array(wasm.memory.buffer, weightedPointer, count).slice(),
+            envelope: new Float64Array(wasm.memory.buffer, envelopePointer, count).slice(),
+            integral: {
+                real: view.getFloat64(integralPointer, true),
+                imag: view.getFloat64(integralPointer + 8, true)
+            },
+            maxRadius: view.getFloat64(maxRadiusPointer, true),
+            maxAmplitude: view.getFloat64(maxAmplitudePointer, true),
+            sigma: sigmaValue,
+            omega: omegaValue,
+            animTime: progressValue
+        };
+    } finally {
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    }
+}
+
 export const NATIVE_LAPLACE_FUNCTION_IDS = Object.freeze({
     step: 0,
     exponential: 1,
@@ -2078,7 +2470,13 @@ function laplaceFunctionId(name) {
 }
 
 export function buildNativeLaplaceAnalysis(options) {
-    const sampleCount = Math.max(1, Math.floor(options.sampleCount));
+    const sampleCount = requireInteger(options.sampleCount, 'Laplace sample count');
+    if (sampleCount < 1) throw new Error('Laplace sample count must be positive.');
+    const frequency = requireFiniteNumber(options.frequency, 'Laplace frequency');
+    const damping = requireFiniteNumber(options.damping, 'Laplace damping');
+    const amplitude = requireFiniteNumber(options.amplitude, 'Laplace amplitude');
+    const timeWindow = requireFiniteNumber(options.timeWindow, 'Laplace time window');
+    if (timeWindow <= 0) throw new Error('Laplace time window must be positive.');
     const allocations = [];
     try {
         const timesPointer = alloc(sampleCount * 8); allocations.push(timesPointer);
@@ -2090,8 +2488,8 @@ export function buildNativeLaplaceAnalysis(options) {
         const zeroCountPointer = alloc(4); allocations.push(zeroCountPointer);
         const rocPointer = alloc(8); allocations.push(rocPointer);
         const status = wasm.ce_generate_laplace_analysis(
-            laplaceFunctionId(options.functionKey), Number(options.frequency),
-            Number(options.damping), Number(options.amplitude), Number(options.timeWindow),
+            laplaceFunctionId(options.functionKey), frequency,
+            damping, amplitude, timeWindow,
             sampleCount, timesPointer, signalPointer, polesPointer, poleOrdersPointer,
             zerosPointer, poleCountPointer, zeroCountPointer, rocPointer
         );
@@ -2122,12 +2520,17 @@ export function buildNativeLaplaceAnalysis(options) {
 }
 
 export function evaluateNativeLaplace(options, sigma, omega) {
+    const sigmaValue = requireFiniteNumber(sigma, 'Laplace sigma');
+    const omegaValue = requireFiniteNumber(omega, 'Laplace omega');
+    const frequency = requireFiniteNumber(options.frequency, 'Laplace frequency');
+    const damping = requireFiniteNumber(options.damping, 'Laplace damping');
+    const amplitude = requireFiniteNumber(options.amplitude, 'Laplace amplitude');
     const allocations = [];
     try {
         const outputPointer = alloc(16); allocations.push(outputPointer);
         const status = wasm.ce_evaluate_laplace(
-            laplaceFunctionId(options.functionKey), Number(sigma), Number(omega),
-            Number(options.frequency), Number(options.damping), Number(options.amplitude), outputPointer
+            laplaceFunctionId(options.functionKey), sigmaValue, omegaValue,
+            frequency, damping, amplitude, outputPointer
         );
         if (status !== 0) throw new Error(`Native Laplace evaluation failed with status ${status}.`);
         const view = memoryView();
@@ -2140,11 +2543,28 @@ export function evaluateNativeLaplace(options, sigma, omega) {
 }
 
 export function buildNativeLaplaceSurface(specification, options) {
-    const sigmaSteps = Math.max(1, Math.floor(specification.sigmaSteps));
-    const omegaSteps = Math.max(1, Math.floor(specification.omegaSteps));
+    const sigmaSteps = requireInteger(specification.sigmaSteps, 'Laplace sigma steps');
+    const omegaSteps = requireInteger(specification.omegaSteps, 'Laplace omega steps');
+    if (sigmaSteps < 1 || omegaSteps < 1) throw new Error('Laplace surface steps must be positive.');
+    if (!Array.isArray(specification.sigmaRange) || !Array.isArray(specification.omegaRange) ||
+        specification.sigmaRange.length !== 2 || specification.omegaRange.length !== 2) {
+        throw new Error('Laplace surface requires sigma and omega ranges.');
+    }
+    const sigmaMin = requireFiniteNumber(specification.sigmaRange[0], 'Laplace sigma minimum');
+    const sigmaMax = requireFiniteNumber(specification.sigmaRange[1], 'Laplace sigma maximum');
+    const omegaMin = requireFiniteNumber(specification.omegaRange[0], 'Laplace omega minimum');
+    const omegaMax = requireFiniteNumber(specification.omegaRange[1], 'Laplace omega maximum');
+    if (sigmaMin >= sigmaMax || omegaMin >= omegaMax) throw new Error('Laplace surface ranges must increase.');
+    const frequency = requireFiniteNumber(specification.frequency, 'Laplace frequency');
+    const damping = requireFiniteNumber(specification.damping, 'Laplace damping');
+    const amplitude = requireFiniteNumber(specification.amplitude, 'Laplace amplitude');
+    const clipHeight = requireFiniteNumber(options.clipHeight, 'Laplace clip height');
+    if (clipHeight <= 0) throw new Error('Laplace clip height must be positive.');
     const vertexCount = (sigmaSteps + 1) * (omegaSteps + 1);
     const indexCapacity = sigmaSteps * omegaSteps * 6;
-    const mode = options.mode === 'phase' ? 1 : options.mode === 'combined' ? 2 : 0;
+    const mode = options.mode === 'magnitude' ? 0 : options.mode === 'phase' ? 1
+        : options.mode === 'combined' ? 2 : -1;
+    if (mode < 0) throw new Error(`Unsupported Laplace surface mode: ${options.mode}.`);
     const allocations = [];
     try {
         const positionsPointer = alloc(vertexCount * 12); allocations.push(positionsPointer);
@@ -2152,11 +2572,10 @@ export function buildNativeLaplaceSurface(specification, options) {
         const colorsPointer = alloc(vertexCount * 12); allocations.push(colorsPointer);
         const indicesPointer = alloc(indexCapacity * 4); allocations.push(indicesPointer);
         const indexCount = wasm.ce_build_laplace_surface(
-            laplaceFunctionId(specification.functionKey), Number(specification.frequency),
-            Number(specification.damping), Number(specification.amplitude),
-            specification.sigmaRange[0], specification.sigmaRange[1],
-            specification.omegaRange[0], specification.omegaRange[1],
-            sigmaSteps, omegaSteps, mode, Math.max(0.001, Number(options.clipHeight)),
+            laplaceFunctionId(specification.functionKey), frequency,
+            damping, amplitude,
+            sigmaMin, sigmaMax, omegaMin, omegaMax,
+            sigmaSteps, omegaSteps, mode, clipHeight,
             positionsPointer, normalsPointer, colorsPointer, indicesPointer
         );
         if (indexCount < 0) throw new Error(`Native Laplace surface failed with status ${indexCount}.`);
@@ -2165,10 +2584,10 @@ export function buildNativeLaplaceSurface(specification, options) {
             normals: new Float32Array(new Float32Array(wasm.memory.buffer, normalsPointer, vertexCount * 3)),
             colors: new Float32Array(new Float32Array(wasm.memory.buffer, colorsPointer, vertexCount * 3)),
             indices: new Uint32Array(new Uint32Array(wasm.memory.buffer, indicesPointer, indexCount)),
-            minSigma: specification.sigmaRange[0],
-            maxSigma: specification.sigmaRange[1],
-            minOmega: specification.omegaRange[0],
-            maxOmega: specification.omegaRange[1]
+            minSigma: sigmaMin,
+            maxSigma: sigmaMax,
+            minOmega: omegaMin,
+            maxOmega: omegaMax
         };
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
@@ -2176,21 +2595,46 @@ export function buildNativeLaplaceSurface(specification, options) {
 }
 
 export function buildNativeImageMesh(options) {
-    const baseResolution = Math.max(1, Math.floor(options.baseResolution ?? 16));
-    const maxDepth = Math.max(0, Math.floor(options.maxDepth ?? 5));
-    const maxCells = Math.max(1, Math.min(16383, Math.floor(options.maxCells ?? 8192)));
-    const maxVertices = Math.max(1, Math.min(65535, Math.floor(options.maxVertices ?? 32768)));
-    const maxSamples = Math.max(1, Math.floor(options.maxSamples ?? 65536));
+    const baseResolution = requireInteger(options.baseResolution, 'Native image-mesh base resolution');
+    const maxDepth = requireInteger(options.maxDepth, 'Native image-mesh depth');
+    const maxCells = requireInteger(options.maxCells, 'Native image-mesh cell budget');
+    const maxVertices = requireInteger(options.maxVertices, 'Native image-mesh vertex budget');
+    const maxSamples = requireInteger(options.maxSamples, 'Native image-mesh sample budget');
+    const pixelWidth = requireInteger(options.pixelWidth, 'Native image-mesh pixel width');
+    const pixelHeight = requireInteger(options.pixelHeight, 'Native image-mesh pixel height');
+    const sourceCenter = requireFiniteComplex(options.sourceCenter, 'Native image-mesh source center');
+    const sourceWidth = requireFiniteNumber(options.sourceSize?.width, 'Native image-mesh source width');
+    const sourceHeight = requireFiniteNumber(options.sourceSize?.height, 'Native image-mesh source height');
+    if (baseResolution < 1 || baseResolution > 127 || maxDepth < 0 || maxDepth > 12 ||
+        maxCells < baseResolution ** 2 || maxCells > 16383 ||
+        maxVertices < 1 || maxVertices > 65535 || maxSamples < 1 ||
+        pixelWidth < 1 || pixelHeight < 1 || sourceWidth <= 0 || sourceHeight <= 0) {
+        throw new Error('Native image-mesh dimensions and work budgets are invalid.');
+    }
+    const buildFold = options.buildFold === true;
+    const foldHeightScale = requireFiniteNumber(options.foldHeightScale, 'Native image-fold height scale');
+    if (foldHeightScale <= 0) throw new Error('Native image-fold height scale must be positive.');
+    let bounds = null;
+    if (!options.preciseViewport) {
+        bounds = {
+            x0: requireFiniteNumber(options.bounds?.x0, 'Native image-mesh x minimum'),
+            x1: requireFiniteNumber(options.bounds?.x1, 'Native image-mesh x maximum'),
+            y0: requireFiniteNumber(options.bounds?.y0, 'Native image-mesh y minimum'),
+            y1: requireFiniteNumber(options.bounds?.y1, 'Native image-mesh y maximum')
+        };
+        if (bounds.x0 >= bounds.x1 || bounds.y0 >= bounds.y1) {
+            throw new Error('Native image-mesh bounds must increase.');
+        }
+    }
     const indexCapacity = maxCells * 24;
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-        writeMapConfig(configPointer, options.mapOptions || options, allocations);
+        writeMapConfig(configPointer, options.mapOptions, allocations);
         const texturePointer = alloc(maxVertices * 8); allocations.push(texturePointer);
         const mappedPointer = alloc(maxVertices * 8); allocations.push(mappedPointer);
         const indicesPointer = alloc(indexCapacity * 2); allocations.push(indicesPointer);
         const statsPointer = alloc(16); allocations.push(statsPointer);
-        const buildFold = options.buildFold === true;
         const foldPositionsPointer = buildFold ? alloc(maxVertices * 12) : 0;
         const foldUvsPointer = buildFold ? alloc(maxVertices * 8) : 0;
         const foldMappingPointer = buildFold ? alloc(32) : 0;
@@ -2205,25 +2649,21 @@ export function buildNativeImageMesh(options) {
             const centerImPointer = writeCString(options.preciseViewport.centerIm, allocations);
             status = wasm.ce_build_image_mesh_precise(
                 configPointer,
-                Number(options.sourceCenter?.re), Number(options.sourceCenter?.im),
-                Number(options.sourceSize?.width), Number(options.sourceSize?.height),
+                sourceCenter.re, sourceCenter.im, sourceWidth, sourceHeight,
                 centerRePointer, centerImPointer, viewport.zoomPower, viewport.precisionBits,
-                Math.max(1, Math.floor(options.pixelWidth || viewport.width)),
-                Math.max(1, Math.floor(options.pixelHeight || viewport.height)),
+                pixelWidth, pixelHeight,
                 baseResolution, maxDepth, maxCells, maxVertices, maxSamples,
                 texturePointer, mappedPointer, indicesPointer, indexCapacity, statsPointer
             );
         } else {
             status = wasm.ce_build_image_mesh(
                 configPointer,
-                Number(options.sourceCenter?.re), Number(options.sourceCenter?.im),
-                Number(options.sourceSize?.width), Number(options.sourceSize?.height),
-                options.bounds.x0, options.bounds.x1, options.bounds.y0, options.bounds.y1,
-                Math.max(1, Math.floor(options.pixelWidth || 1024)),
-                Math.max(1, Math.floor(options.pixelHeight || 1024)),
+                sourceCenter.re, sourceCenter.im, sourceWidth, sourceHeight,
+                bounds.x0, bounds.x1, bounds.y0, bounds.y1,
+                pixelWidth, pixelHeight,
                 baseResolution, maxDepth, maxCells, maxVertices, maxSamples,
                 texturePointer, mappedPointer, indicesPointer, indexCapacity, statsPointer,
-                buildFold ? 1 : 0, Number(options.foldHeightScale ?? 1),
+                buildFold ? 1 : 0, foldHeightScale,
                 foldPositionsPointer, foldUvsPointer, foldMappingPointer
             );
         }
@@ -2257,25 +2697,41 @@ export function buildNativeImageMesh(options) {
 }
 
 export function buildNativeGridFold(options, pointSets) {
-    if (!Array.isArray(pointSets) || !pointSets.length) return { lines: [], points: [] };
+    if (!Array.isArray(pointSets) || !pointSets.length) {
+        throw new Error('Native grid-fold rendering requires at least one point set.');
+    }
+    const sourceXMin = requireFiniteNumber(options.sourceXRange?.[0], 'Native grid-fold source minimum');
+    const sourceXMax = requireFiniteNumber(options.sourceXRange?.[1], 'Native grid-fold source maximum');
+    const outputXMin = requireFiniteNumber(options.outputXRange?.[0], 'Native grid-fold output x minimum');
+    const outputXMax = requireFiniteNumber(options.outputXRange?.[1], 'Native grid-fold output x maximum');
+    const outputYMin = requireFiniteNumber(options.outputYRange?.[0], 'Native grid-fold output y minimum');
+    const outputYMax = requireFiniteNumber(options.outputYRange?.[1], 'Native grid-fold output y maximum');
+    const heightScale = requireFiniteNumber(options.heightScale, 'Native grid-fold height scale');
+    if (sourceXMin >= sourceXMax || outputXMin >= outputXMax || outputYMin >= outputYMax || heightScale <= 0) {
+        throw new Error('Native grid-fold ranges must increase and height scale must be positive.');
+    }
     const offsets = new Uint32Array(pointSets.length + 1);
     let sourceCount = 0;
     pointSets.forEach((set, index) => {
+        if (!Array.isArray(set?.points)) throw new Error(`Native grid-fold set ${index} requires points.`);
+        if (set.color === undefined || set.color === null) {
+            throw new Error(`Native grid-fold set ${index} requires a color.`);
+        }
         offsets[index] = sourceCount;
-        sourceCount += Array.isArray(set?.points) ? set.points.length : 0;
+        sourceCount += set.points.length;
     });
     offsets[pointSets.length] = sourceCount;
-    if (!sourceCount) return { lines: [], points: [] };
+    if (!sourceCount) throw new Error('Native grid-fold rendering requires source points.');
     const lineCapacity = sourceCount + pointSets.length * 4096 + 8;
     const pointCapacity = sourceCount;
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-        writeMapConfig(configPointer, options.mapOptions || options, allocations);
+        writeMapConfig(configPointer, options.mapOptions, allocations);
         const sourcePointer = alloc(sourceCount * 16); allocations.push(sourcePointer);
         const offsetsPointer = alloc(offsets.byteLength); allocations.push(offsetsPointer);
         const rolesPointer = alloc(pointSets.length); allocations.push(rolesPointer);
-        const flattened = pointSets.flatMap(set => Array.isArray(set?.points) ? set.points : []);
+        const flattened = pointSets.flatMap(set => set.points);
         writePointBuffer(sourcePointer, flattened);
         new Uint32Array(wasm.memory.buffer, offsetsPointer, offsets.length).set(offsets);
         new Uint8Array(wasm.memory.buffer, rolesPointer, pointSets.length).set(
@@ -2291,10 +2747,8 @@ export function buildNativeGridFold(options, pointSets) {
         const mappingPointer = alloc(32); allocations.push(mappingPointer);
         const status = wasm.ce_build_grid_fold(
             configPointer, sourcePointer, offsetsPointer, rolesPointer, pointSets.length,
-            options.sourceXRange[0], options.sourceXRange[1],
-            options.outputXRange[0], options.outputXRange[1],
-            options.outputYRange[0], options.outputYRange[1],
-            Number(options.heightScale ?? 1),
+            sourceXMin, sourceXMax, outputXMin, outputXMax, outputYMin, outputYMax,
+            heightScale,
             linePositionsPointer, lineCapacity, lineOffsetsPointer, lineSetsPointer,
             pointPositionsPointer, pointCapacity, pointOffsetsPointer, pointSetsPointer,
             statsPointer, mappingPointer
@@ -2313,7 +2767,7 @@ export function buildNativeGridFold(options, pointSets) {
             const setIndex = view.getUint32(setsAt + index * 4, true);
             return {
                 positions: new Float32Array(positionsAt.subarray(start * 3, end * 3)),
-                color: pointSets[setIndex]?.color
+                color: pointSets[setIndex].color
             };
         });
         return {
@@ -2332,7 +2786,7 @@ export function buildNativeGridFold(options, pointSets) {
 }
 
 function sphereParameters(options) {
-    const sphere = options.sphere || options;
+    const sphere = options.sphere;
     const centerX = Number(sphere.centerX);
     const centerY = Number(sphere.centerY);
     const radius = Number(sphere.radius);
@@ -2348,7 +2802,7 @@ function sphereMapPointer(options, allocations) {
     if (!options.mapPoints) return 0;
     const pointer = alloc(MAP_CONFIG_SIZE);
     allocations.push(pointer);
-    writeMapConfig(pointer, options.mapOptions || options.map, allocations);
+    writeMapConfig(pointer, options.mapOptions, allocations);
     return pointer;
 }
 
@@ -2454,14 +2908,23 @@ export function buildNativeSphereProbe(options) {
 }
 
 export function buildNativeRiemannSphereGeometry(options, pointSets) {
-    if (!Array.isArray(pointSets) || !pointSets.length) {
+    if (!Array.isArray(pointSets)) throw new Error('Native Riemann geometry point sets must be an array.');
+    if (!pointSets.length) {
         return { start: new Float32Array(), target: new Float32Array(), positions: new Float32Array(), offsets: new Uint32Array(1) };
+    }
+    if (typeof options?.mapPoints !== 'boolean') throw new Error('Native Riemann geometry requires mapPoints.');
+    const scale = requireFiniteNumber(options.scale, 'Native Riemann geometry scale');
+    const radius = requireFiniteNumber(options.radius, 'Native Riemann geometry radius');
+    const progress = requireFiniteNumber(options.progress, 'Native Riemann geometry progress');
+    if (scale <= 0 || radius <= 0 || progress < 0 || progress > 1) {
+        throw new Error('Native Riemann geometry requires positive scale/radius and progress from zero to one.');
     }
     const offsets = new Uint32Array(pointSets.length + 1);
     let pointCount = 0;
     pointSets.forEach((set, index) => {
+        if (!Array.isArray(set?.points)) throw new Error(`Native Riemann point set ${index} requires points.`);
         offsets[index] = pointCount;
-        pointCount += Array.isArray(set?.points) ? set.points.length : 0;
+        pointCount += set.points.length;
     });
     offsets[pointSets.length] = pointCount;
     const allocations = [];
@@ -2471,16 +2934,16 @@ export function buildNativeRiemannSphereGeometry(options, pointSets) {
         const startPointer = alloc(Math.max(1, pointCount) * 12); allocations.push(startPointer);
         const targetPointer = alloc(Math.max(1, pointCount) * 12); allocations.push(targetPointer);
         const positionsPointer = alloc(Math.max(1, pointCount) * 12); allocations.push(positionsPointer);
-        const points = pointSets.flatMap(set => Array.isArray(set?.points) ? set.points : []);
+        const points = pointSets.flatMap(set => set.points);
         const pointView = memoryView();
         points.forEach((point, index) => writeComplex(pointView, pointsPointer + index * 16, point, NaN, NaN));
         let status = wasm.ce_build_riemann_sphere_targets(
             mapPointer, pointsPointer, pointCount, options.mapPoints ? 1 : 0,
-            Number(options.scale), Number(options.radius), startPointer, targetPointer
+            scale, radius, startPointer, targetPointer
         );
         if (status !== 0) throw new Error(`Native Riemann sphere geometry failed with status ${status}.`);
         status = wasm.ce_interpolate_geometry(
-            startPointer, targetPointer, pointCount * 3, Number(options.progress), positionsPointer
+            startPointer, targetPointer, pointCount * 3, progress, positionsPointer
         );
         if (status !== 0) throw new Error(`Native Riemann interpolation failed with status ${status}.`);
         return {
@@ -2499,6 +2962,10 @@ export function interpolateNativeGeometry(start, target, progress) {
         throw new Error('Native geometry interpolation requires matching Float32Array inputs.');
     }
     if (!start.length) return new Float32Array();
+    const progressValue = requireFiniteNumber(progress, 'Native geometry interpolation progress');
+    if (progressValue < 0 || progressValue > 1) {
+        throw new Error('Native geometry interpolation progress must be between zero and one.');
+    }
     const allocations = [];
     try {
         const startPointer = alloc(start.byteLength); allocations.push(startPointer);
@@ -2506,7 +2973,7 @@ export function interpolateNativeGeometry(start, target, progress) {
         const outputPointer = alloc(start.byteLength); allocations.push(outputPointer);
         new Float32Array(wasm.memory.buffer, startPointer, start.length).set(start);
         new Float32Array(wasm.memory.buffer, targetPointer, target.length).set(target);
-        const status = wasm.ce_interpolate_geometry(startPointer, targetPointer, start.length, Number(progress), outputPointer);
+        const status = wasm.ce_interpolate_geometry(startPointer, targetPointer, start.length, progressValue, outputPointer);
         if (status !== 0) throw new Error(`Native geometry interpolation failed with status ${status}.`);
         return new Float32Array(new Float32Array(wasm.memory.buffer, outputPointer, start.length));
     } finally {
@@ -2515,14 +2982,20 @@ export function interpolateNativeGeometry(start, target, progress) {
 }
 
 export function buildNativeRiemannSpherePositions(points, scale, radius) {
-    if (!Array.isArray(points) || !points.length) return new Float32Array();
+    if (!Array.isArray(points)) throw new Error('Native Riemann positions require a point array.');
+    if (!points.length) return new Float32Array();
+    const scaleValue = requireFiniteNumber(scale, 'Native Riemann position scale');
+    const radiusValue = requireFiniteNumber(radius, 'Native Riemann position radius');
+    if (scaleValue <= 0 || radiusValue <= 0) {
+        throw new Error('Native Riemann position scale and radius must be positive.');
+    }
     const allocations = [];
     try {
         const pointsPointer = alloc(points.length * 16); allocations.push(pointsPointer);
         const positionsPointer = alloc(points.length * 12); allocations.push(positionsPointer);
         writePointBuffer(pointsPointer, points);
         const status = wasm.ce_build_riemann_sphere_positions(
-            pointsPointer, points.length, Number(scale), Number(radius), positionsPointer
+            pointsPointer, points.length, scaleValue, radiusValue, positionsPointer
         );
         if (status !== 0) throw new Error(`Native Riemann point geometry failed with status ${status}.`);
         return new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, points.length * 3));
@@ -2532,6 +3005,14 @@ export function buildNativeRiemannSpherePositions(points, scale, radius) {
 }
 
 export function buildNativeRiemannProbe(options, point) {
+    if (typeof options?.mapPoints !== 'boolean') throw new Error('Native Riemann probe requires mapPoints.');
+    const source = requireFiniteComplex(point, 'Native Riemann probe point');
+    const scale = requireFiniteNumber(options.scale, 'Native Riemann probe scale');
+    const radius = requireFiniteNumber(options.radius, 'Native Riemann probe radius');
+    const progress = requireFiniteNumber(options.progress, 'Native Riemann probe progress');
+    if (scale <= 0 || radius <= 0 || progress < 0 || progress > 1) {
+        throw new Error('Native Riemann probe requires positive scale/radius and progress from zero to one.');
+    }
     const allocations = [];
     try {
         const mapPointer = sphereMapPointer(options, allocations);
@@ -2539,8 +3020,8 @@ export function buildNativeRiemannProbe(options, point) {
         const spherePointer = alloc(12); allocations.push(spherePointer);
         const rayPointer = alloc(24); allocations.push(rayPointer);
         const status = wasm.ce_build_riemann_probe(
-            mapPointer, Number(point?.re), Number(point?.im), options.mapPoints ? 1 : 0,
-            Number(options.scale), Number(options.radius), Number(options.progress),
+            mapPointer, source.re, source.im, options.mapPoints ? 1 : 0,
+            scale, radius, progress,
             activePointer, spherePointer, rayPointer
         );
         if (status !== 0) throw new Error(`Native Riemann probe failed with status ${status}.`);
@@ -2576,37 +3057,45 @@ export function buildNativeFoldPreimageMarkers(options, roots) {
     }
 }
 
-function writeExpressionProgram(program, allocations) {
-    if (!program?.instructions?.length) return 0;
-    const pointer = alloc(program.instructions.length * 24);
-    allocations.push(pointer);
-    const view = memoryView();
-    program.instructions.forEach((instruction, index) => {
-        const offset = pointer + index * 24;
-        view.setUint32(offset, instruction.opcode, true);
-        view.setUint32(offset + 4, instruction.argument || 0, true);
-        view.setFloat64(offset + 8, instruction.re || 0, true);
-        view.setFloat64(offset + 16, instruction.im || 0, true);
-    });
-    return pointer;
-}
-
 export function buildNativeRealSurface(options) {
-    const segments = Math.max(1, Math.floor(options.segments));
+    const segments = requireInteger(options.segments, 'Native real-surface segment count');
+    if (segments < 1) throw new Error('Native real-surface segment count must be positive.');
+    if (!Array.isArray(options.xRange) || !Array.isArray(options.yRange) ||
+        options.xRange.length !== 2 || options.yRange.length !== 2) {
+        throw new Error('Native real surface requires x and y ranges.');
+    }
+    const xMin = requireFiniteNumber(options.xRange[0], 'Native real-surface x minimum');
+    const xMax = requireFiniteNumber(options.xRange[1], 'Native real-surface x maximum');
+    const yMin = requireFiniteNumber(options.yRange[0], 'Native real-surface y minimum');
+    const yMax = requireFiniteNumber(options.yRange[1], 'Native real-surface y maximum');
+    if (xMin >= xMax || yMin >= yMax) throw new Error('Native real-surface ranges must increase.');
+    const inputUPreset = requireInteger(options.inputUPreset, 'Native real-surface u input preset');
+    const inputVPreset = requireInteger(options.inputVPreset, 'Native real-surface v input preset');
+    const component = requireInteger(options.component, 'Native real-surface component');
+    const heightScale = requireFiniteNumber(options.heightScale, 'Native real-surface height scale');
+    if (inputUPreset < 0 || inputUPreset > 9 || inputVPreset < 0 || inputVPreset > 9 ||
+        component < 0 || component > 2 || heightScale <= 0) {
+        throw new Error('Native real-surface presets, component, or height scale are invalid.');
+    }
+    if ((inputUPreset === 0) !== Boolean(options.inputUProgram?.instructions?.length) ||
+        (inputVPreset === 0) !== Boolean(options.inputVProgram?.instructions?.length)) {
+        throw new Error('Generic native real-surface inputs require exactly one expression program.');
+    }
     const stride = segments + 1;
     const vertexCount = stride * stride;
     const maxIndexCount = segments * segments * 6;
     const valuesOnly = options.valuesOnly === true;
     const palette = options.palette;
-    if (!valuesOnly && (!(palette instanceof Float32Array) || palette.length < 3 || palette.length % 3)) {
-        throw new Error('Native real surface requires an RGB Float32 palette.');
+    if (!valuesOnly && (!(palette instanceof Float32Array) || palette.length < 6 || palette.length % 3 ||
+        !palette.every(value => Number.isFinite(value) && value >= 0 && value <= 1))) {
+        throw new Error('Native real surface requires a normalized RGB Float32 palette.');
     }
     const allocations = [];
     try {
         const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-        writeMapConfig(configPointer, options.mapOptions || options, allocations);
-        const inputUPointer = writeExpressionProgram(options.inputUProgram, allocations);
-        const inputVPointer = writeExpressionProgram(options.inputVProgram, allocations);
+        writeMapConfig(configPointer, options.mapOptions, allocations);
+        const inputUPointer = writeInstructionBuffer(options.inputUProgram, allocations);
+        const inputVPointer = writeInstructionBuffer(options.inputVProgram, allocations);
         const palettePointer = valuesOnly ? 0 : alloc(palette.byteLength);
         if (palettePointer) {
             allocations.push(palettePointer);
@@ -2625,11 +3114,11 @@ export function buildNativeRealSurface(options) {
         const maximumPointer = alloc(8); allocations.push(maximumPointer);
         const finitePointer = alloc(4); allocations.push(finitePointer);
         const indexCount = wasm.ce_build_real_surface(
-            configPointer, options.xRange[0], options.xRange[1], options.yRange[0], options.yRange[1],
+            configPointer, xMin, xMax, yMin, yMax,
             segments,
-            options.inputUPreset || 0, inputUPointer, options.inputUProgram?.instructions?.length || 0,
-            options.inputVPreset || 0, inputVPointer, options.inputVProgram?.instructions?.length || 0,
-            options.component || 0, Number(options.heightScale ?? 1), options.phaseColor ? 1 : 0,
+            inputUPreset, inputUPointer, options.inputUProgram?.instructions?.length ?? 0,
+            inputVPreset, inputVPointer, options.inputVProgram?.instructions?.length ?? 0,
+            component, heightScale, options.phaseColor ? 1 : 0,
             palettePointer, valuesOnly ? 0 : palette.length / 3, valuesOnly ? 1 : 0,
             positionsPointer, normalsPointer, colorsPointer, rawValuesPointer,
             valuesPointer, phasesPointer, indicesPointer,
@@ -2658,8 +3147,68 @@ export function buildNativeRealSurface(options) {
     }
 }
 
-export function nativeEngineInfo() {
-    return Object.freeze({ abiVersion: wasm.ce_abi_version(), simd: true, strictFloat: true });
-}
+export function renderNativeRealContour(options) {
+    const width = requireInteger(options.width, 'Native real-contour width');
+    const height = requireInteger(options.height, 'Native real-contour height');
+    if (width < 1 || height < 1 || width * height > 0x3fffffff) {
+        throw new Error('Native real-contour rendering requires positive integer dimensions.');
+    }
+    if (!Array.isArray(options.xRange) || !Array.isArray(options.yRange) ||
+        options.xRange.length !== 2 || options.yRange.length !== 2) {
+        throw new Error('Native real-contour rendering requires x and y ranges.');
+    }
+    const xMin = requireFiniteNumber(options.xRange[0], 'Native real-contour x minimum');
+    const xMax = requireFiniteNumber(options.xRange[1], 'Native real-contour x maximum');
+    const yMin = requireFiniteNumber(options.yRange[0], 'Native real-contour y minimum');
+    const yMax = requireFiniteNumber(options.yRange[1], 'Native real-contour y maximum');
+    if (xMin >= xMax || yMin >= yMax) {
+        throw new Error('Native real-contour ranges must increase.');
+    }
+    const inputUPreset = requireInteger(options.inputUPreset, 'Native real-contour u input preset');
+    const inputVPreset = requireInteger(options.inputVPreset, 'Native real-contour v input preset');
+    const component = requireInteger(options.component, 'Native real-contour component');
+    if (inputUPreset < 0 || inputUPreset > 9 || inputVPreset < 0 || inputVPreset > 9 ||
+        component < 0 || component > 2) {
+        throw new Error('Native real-contour presets or component are invalid.');
+    }
+    if ((inputUPreset === 0) !== Boolean(options.inputUProgram?.instructions?.length) ||
+        (inputVPreset === 0) !== Boolean(options.inputVProgram?.instructions?.length)) {
+        throw new Error('Generic native real-contour inputs require exactly one expression program.');
+    }
+    if (typeof options.contoursEnabled !== 'boolean') {
+        throw new Error('Native real-contour rendering requires an explicit contoursEnabled flag.');
+    }
+    const contourInterval = requireFiniteNumber(options.contourInterval, 'Native real-contour interval');
+    const contourThickness = requireFiniteNumber(options.contourThickness, 'Native real-contour thickness');
+    if (contourInterval <= 0 || contourThickness <= 0) {
+        throw new Error('Native real-contour interval and thickness must be positive.');
+    }
+    const palette = options.palette;
+    if (!(palette instanceof Float32Array) || palette.length < 6 || palette.length % 3 ||
+        !palette.every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
+        throw new Error('Native real-contour rendering requires a normalized RGB Float32 palette.');
+    }
 
-export { wasm as nativeWasmExports };
+    const allocations = [];
+    try {
+        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+        writeMapConfig(configPointer, options.mapOptions, allocations);
+        const inputUPointer = writeInstructionBuffer(options.inputUProgram, allocations);
+        const inputVPointer = writeInstructionBuffer(options.inputVProgram, allocations);
+        const palettePointer = alloc(palette.byteLength); allocations.push(palettePointer);
+        new Float32Array(wasm.memory.buffer, palettePointer, palette.length).set(palette);
+        const outputLength = width * height * 4;
+        const outputPointer = alloc(outputLength); allocations.push(outputPointer);
+        const status = wasm.ce_render_real_contour(
+            configPointer, xMin, xMax, yMin, yMax, width, height,
+            inputUPreset, inputUPointer, options.inputUProgram?.instructions?.length ?? 0,
+            inputVPreset, inputVPointer, options.inputVProgram?.instructions?.length ?? 0,
+            component, options.contoursEnabled ? 1 : 0, contourInterval, contourThickness,
+            palettePointer, palette.length / 3, outputPointer
+        );
+        if (status !== 0) throw new Error(`Native real-contour rendering failed with status ${status}.`);
+        return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
+    } finally {
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    }
+}

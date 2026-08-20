@@ -1,8 +1,5 @@
 import {
-    createCompiledDomainTileRenderer,
-    evaluateNativeAlgebraic,
-    evaluateNativePoints,
-    renderNativeDomainTile
+    createCompiledDomainTileRenderer
 } from './complex-engine.js';
 
 function deepFreeze(value, seen = new WeakSet()) {
@@ -16,50 +13,14 @@ export function freezeDomainDynamicsSnapshot(snapshot) {
     return deepFreeze(snapshot);
 }
 
-function pointResult(snapshot, re, im) {
-    const point = { re, im };
-    try {
-        const result = snapshot.functionKey === 'algebraic_chaining'
-            ? evaluateNativeAlgebraic(snapshot, [point], [point])
-            : evaluateNativePoints(snapshot, [point]);
-        return result.valid[0] ? result.values[0] : null;
-    } catch {
-        return null;
-    }
-}
-
-export function evaluateDomainDynamicsValue(snapshot, re, im) {
-    return pointResult(snapshot, re, im);
-}
-
 export function createDomainDynamicsTileRenderer(snapshot) {
     return createCompiledDomainTileRenderer(snapshot);
-}
-
-export function renderDomainDynamicsTile(snapshot, tile) {
-    return renderNativeDomainTile(snapshot, tile);
-}
-
-export function colorDomainDynamicsPoint(snapshot, re, im) {
-    const pointSnapshot = {
-        ...snapshot,
-        viewport: {
-            width: 1,
-            height: 1,
-            xRange: [re - 0.5, re + 0.5],
-            yRange: [im - 0.5, im + 0.5]
-        }
-    };
-    const pixel = renderNativeDomainTile(pointSnapshot, {
-        x: 0, y: 0, width: 1, height: 1, scale: 1
-    });
-    return [pixel[0], pixel[1], pixel[2]];
 }
 
 export function domainDynamicsSignature(snapshot) {
     return JSON.stringify({
         functionKey: snapshot.functionKey,
-        derivativeMode: !!snapshot.derivativeMode,
+        derivativeOrder: snapshot.derivativeOrder,
         expBase: snapshot.expBase,
         logBase: snapshot.logBase,
         besselOrder: snapshot.besselOrder,
@@ -86,9 +47,4 @@ export function domainDynamicsSignature(snapshot) {
         paletteStops: snapshot.paletteStops,
         viewport: snapshot.viewport
     });
-}
-
-export function isDomainDynamicsSnapshot(snapshot) {
-    return !!snapshot &&
-        (snapshot.chainMode === 'recursion' || snapshot.chainMode === 'zero_seed');
 }

@@ -1,5 +1,5 @@
 import { state } from '../store/state.js';
-import { COLOR_TEXT_ON_CANVAS, COLOR_CANVAS_BACKGROUND } from '../constants/colors.js';
+import { COLOR_CANVAS_BACKGROUND } from '../constants/colors.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import { drawLaplaceWindingPremium } from './draw-laplace-winding-3b1b.js';
@@ -11,15 +11,10 @@ import { drawLaplaceWindingPremium } from './draw-laplace-winding-3b1b.js';
  * Draw LEFT PANEL: Time domain signal with exponential weighting e^(-σt)
  * Shows both original signal f(t) and weighted version f(t)·e^(-σt)
  */
-export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
-    if (!signal || signal.length === 0) {
-        ctx.save();
-        ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
-        ctx.font = '16px "SF Pro Text", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No signal data', planeParams.width / 2, planeParams.height / 2);
-        ctx.restore();
-        return;
+export function drawLaplaceTimeDomain(ctx, signal, planeParams, frameData) {
+    if (!Array.isArray(signal) || signal.length < 2 || frameData?.weighted?.length !== signal.length ||
+        frameData?.envelope?.length !== signal.length) {
+        throw new Error('Laplace time-domain rendering requires complete native frame data.');
     }
 
     ctx.save();
@@ -32,8 +27,8 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
     drawGrid(ctx, planeParams);
     drawAxes(ctx, planeParams, "Time (t)", "f(t)");
 
-    const sigma = state.laplaceSigma || 0;
-    const maxAmp = Math.max(1, ...signal.map(pt => Math.abs(pt.value)));
+    const sigma = frameData.sigma;
+    const maxAmp = frameData.maxAmplitude;
 
     // Draw ORIGINAL signal f(t) in light blue
     ctx.beginPath();
@@ -62,8 +57,7 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
 
     for (let i = 0; i < signal.length; i++) {
         const pt = signal[i];
-        const weight = Math.exp(-sigma * pt.t);
-        const weightedValue = pt.value * weight;
+        const weightedValue = frameData.weighted[i];
 
         const canvasPos = mapToCanvasCoords(pt.t, weightedValue, planeParams);
 
@@ -74,8 +68,7 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
 
         if (i > 0) {
             const prevPt = signal[i - 1];
-            const prevWeight = Math.exp(-sigma * prevPt.t);
-            const prevWeightedValue = prevPt.value * prevWeight;
+            const prevWeightedValue = frameData.weighted[i - 1];
             const prevCanvasPos = mapToCanvasCoords(prevPt.t, prevWeightedValue, planeParams);
 
             ctx.beginPath();
@@ -95,7 +88,7 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
 
         for (let i = 0; i < signal.length; i++) {
             const pt = signal[i];
-            const envelope = Math.exp(-sigma * pt.t) * maxAmp;
+            const envelope = frameData.envelope[i];
             const canvasPos = mapToCanvasCoords(pt.t, envelope, planeParams);
 
             if (i === 0) {
@@ -110,7 +103,7 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
         ctx.beginPath();
         for (let i = 0; i < signal.length; i++) {
             const pt = signal[i];
-            const envelope = -Math.exp(-sigma * pt.t) * maxAmp;
+            const envelope = -frameData.envelope[i];
             const canvasPos = mapToCanvasCoords(pt.t, envelope, planeParams);
 
             if (i === 0) {
@@ -126,12 +119,12 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
     // Draw sample points with color coding based on damping
     for (let i = 0; i < signal.length; i += Math.max(1, Math.floor(signal.length / 50))) {
         const pt = signal[i];
-        const weight = Math.exp(-sigma * pt.t);
-        const weightedValue = pt.value * weight;
+        const weightedValue = frameData.weighted[i];
 
         const canvasPos = mapToCanvasCoords(pt.t, weightedValue, planeParams);
 
-        const dampingIntensity = sigma > 0 ? weight : Math.min(1, weight);
+        const damping = maxAmp > 0 ? frameData.envelope[i] / maxAmp : 0;
+        const dampingIntensity = sigma > 0 ? damping : Math.min(1, damping);
 
         // Outer glow
         ctx.beginPath();
@@ -156,9 +149,8 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams) {
 /**
  * Draw MIDDLE PANEL: Premium 3b1b-quality winding visualization
  */
-export function drawLaplaceWindingVisualization(ctx, signal, planeParams) {
-    // Use the new premium renderer
-    drawLaplaceWindingPremium(ctx, signal, planeParams);
+export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameData) {
+    drawLaplaceWindingPremium(ctx, signal, planeParams, frameData);
 
     // Draw poles and zeros overlay on top
     drawPolesAndZerosOverlay(ctx, planeParams);

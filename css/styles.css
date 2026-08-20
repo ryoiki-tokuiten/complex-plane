@@ -926,11 +926,11 @@ main {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     background: transparent;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 9px;
     color: var(--text-color);
     cursor: pointer;
     flex-shrink: 0;
@@ -943,13 +943,14 @@ main {
 
 .expand-plane-btn svg,
 .expand-plane-btn i svg {
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
     stroke: currentColor;
     fill: none;
-    stroke-width: 2.5;
+    stroke-width: 2.3;
     display: block;
     overflow: visible;
+    transition: transform 0.2s ease;
 }
 
 /* Vertical rotated label */
@@ -1122,7 +1123,9 @@ canvas {
     align-items: center;
     color: var(--text-secondary-color);
     letter-spacing: 0.01em;
-
+    position: relative;
+    cursor: pointer;
+    user-select: none;
 }
 
 /* Override for checkbox labels to align left */
@@ -1604,6 +1607,7 @@ button:active {
     width: 18px;
     height: 18px;
     stroke-width: 1.8;
+    transition: transform 0.2s ease;
 }
 
 .canvas-icon-button {
@@ -1611,6 +1615,13 @@ button:active {
     height: 36px;
     border-radius: 12px;
     transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#collapse_z_btn svg,
+#collapse_w_btn svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2.2;
 }
 
 .canvas-icon-button:hover,
@@ -1839,12 +1850,6 @@ select:focus {
     position: absolute;
     width: 0;
     height: 0;
-}
-
-.control-group label {
-    position: relative;
-    cursor: pointer;
-    user-select: none;
 }
 
 /* The custom checkbox box */
@@ -4148,8 +4153,7 @@ textarea.dynamic-formula-input {
     }
 }
 
-/* Refining indicator glassmorphic badge for domain coloring background calculations */
-.refining-indicator {
+.domain-rendering-indicator {
     position: absolute;
     bottom: 12px;
     left: 12px;
@@ -4170,13 +4174,13 @@ textarea.dynamic-formula-input {
     transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-.refining-indicator.hidden {
+.domain-rendering-indicator.hidden {
     opacity: 0;
     transform: translateY(5px);
     pointer-events: none;
 }
 
-.pulsing-dot {
+.domain-rendering-indicator__dot {
     width: 6px;
     height: 6px;
     background-color: #a78bfa;
@@ -4268,11 +4272,6 @@ body.vertical-layout #controls_options_section.is-collapsed #controls_panels_row
     overflow: hidden;
 }
 
-body.vertical-layout .controls-panel {
-    min-height: 260px;
-    flex: 0 0 auto;
-}
-
 body.vertical-layout #visualization-options-panel {
     flex: 1 1 auto;
 }
@@ -4341,6 +4340,18 @@ body.vertical-layout #canvases_section .plane-column.plane-collapsed .collapsed-
     writing-mode: horizontal-tb !important;
     transform: none !important;
     white-space: nowrap;
+}
+
+/* Rotate plane collapse and expand chevron icons to match vertical stacking */
+body.vertical-layout #collapse_z_btn > svg,
+body.vertical-layout #collapse_z_btn > i,
+body.vertical-layout #expand_z_btn > svg,
+body.vertical-layout #expand_z_btn > i,
+body.vertical-layout #collapse_w_btn > svg,
+body.vertical-layout #collapse_w_btn > i,
+body.vertical-layout #expand_w_btn > svg,
+body.vertical-layout #expand_w_btn > i {
+    transform: rotate(90deg);
 }
 
 /* Force specific horizontal multi-column grids in sidebars to stack vertically */
@@ -4781,7 +4792,6 @@ body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column
 .formula-editor-stack { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
 .formula-editor-label { color: var(--text-secondary-color); font-size: 0.8rem; }
 .compact-step-copy { margin-bottom: 0.45rem; }
-.button-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .compact-status-text { margin-top: 0.4rem; color: var(--text-secondary-color); font-size: 0.78rem; }
 
 .arbitrary-shape-mode-row {

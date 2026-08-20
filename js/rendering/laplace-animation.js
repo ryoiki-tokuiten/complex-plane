@@ -1,6 +1,7 @@
 import { state } from '../store/state.js';
 import { requestRedrawAll } from './redraw-scheduler.js';
 import { syncLaplacePlayPauseButton } from '../ui/ui-updates.js';
+import { requireFiniteNumber } from '../utils/numeric-contracts.js';
 
 // Laplace Transform Animation Controller
 // Smooth progressive animation of winding spiral
@@ -32,7 +33,8 @@ export function startLaplaceAnimation() {
         laplaceLastFrameTime = timestamp;
         
         // Animation speed (0 to 1 over N seconds)
-        const animationDuration = state.laplaceAnimationSpeed || 3.0; // seconds
+        const animationDuration = requireFiniteNumber(state.laplaceAnimationSpeed, 'Laplace animation duration');
+        if (animationDuration <= 0) throw new Error('Laplace animation duration must be positive.');
         const increment = deltaTime / animationDuration;
         
         state.laplaceAnimationTime += increment;

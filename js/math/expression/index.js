@@ -9,11 +9,9 @@ export {
 
 export {
     ExpressionEvaluationError,
-    asBoolean,
     asComplex,
     compileExpression,
-    finiteComplex,
-    isPrimeInteger
+    finiteComplex
 } from './evaluator.js';
 
 export {

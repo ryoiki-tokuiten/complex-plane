@@ -70,7 +70,6 @@ static int add_segment(shape_output *output, uint32_t role,
                        double start_re, double start_im, double end_re, double end_im,
                        uint32_t segments) {
     if (!begin_line(output, role)) return 0;
-    if (!segments) segments = 1u;
     const double step_re = (end_re - start_re) / segments;
     const double step_im = (end_im - start_im) / segments;
     for (uint32_t index = 0; index < segments; ++index) {
@@ -83,7 +82,6 @@ static int add_circle(shape_output *output, uint32_t role,
                       double center_re, double center_im, double radius_re, double radius_im,
                       uint32_t segments) {
     if (!begin_line(output, role)) return 0;
-    if (!segments) segments = 1u;
     for (uint32_t index = 0; index <= segments; ++index) {
         const double angle = SHAPE_TWO_PI * index / segments;
         if (!add_point(output, shape_point(
@@ -134,9 +132,8 @@ int32_t ce_generate_input_shape(const ce_map_config *config, uint32_t shape,
                                 ce_complex *points, uint32_t point_capacity,
                                 uint32_t *line_offsets, uint32_t *line_roles,
                                 uint32_t line_capacity, uint32_t stats[2]) {
-    if (!config || !points || !line_offsets || !line_roles || !stats) return -1;
-    if (!density) density = 1u;
-    if (curve_points < 2u) curve_points = 2u;
+    if (!config || !points || !line_offsets || !line_roles || !stats ||
+        !density || curve_points < 2u) return -1;
     shape_output output = {points, point_capacity, 0u, line_offsets, line_roles, line_capacity, 0u};
     int ok = 1;
     if (shape == SHAPE_CARTESIAN) {
@@ -220,8 +217,7 @@ int32_t ce_generate_input_shape(const ce_map_config *config, uint32_t shape,
     } else if (shape == SHAPE_ARBITRARY_EXPRESSION) {
         if (!expression || !expression_count || !isfinite(parameter_min) || !isfinite(parameter_max) ||
             parameter_min == parameter_max) {
-            stats[0] = stats[1] = 0u;
-            return 0;
+            return -1;
         }
         uint32_t count = curve_points > density * 16u ? curve_points : density * 16u;
         if (count < 32u) count = 32u;
@@ -254,8 +250,7 @@ int32_t ce_generate_radial_steps(const ce_map_config *config,
                                  ce_complex *points, uint32_t point_capacity,
                                  uint32_t *line_offsets, uint32_t line_capacity,
                                  uint32_t stats[2]) {
-    if (!config || !points || !line_offsets || !stats || step_count < 2u) return -1;
-    if (curve_points < 24u) curve_points = 24u;
+    if (!config || !points || !line_offsets || !stats || step_count < 2u || curve_points < 24u) return -1;
     shape_output output = {points, point_capacity, 0u, line_offsets, NULL, line_capacity, 0u};
     const double delta = domain_max - domain_min;
     for (uint32_t index = 0; index < step_count; ++index) {
@@ -314,8 +309,8 @@ int32_t ce_generate_viewport_grid_pixels(uint32_t shape, uint32_t density,
                                          float *points, uint32_t point_capacity,
                                          uint32_t *line_offsets, uint32_t *line_roles,
                                          uint32_t line_capacity, uint32_t stats[2]) {
-    if (!points || !line_offsets || !line_roles || !stats || !width || !height) return -1;
-    if (!density) density = 1u;
+    if (!points || !line_offsets || !line_roles || !stats || !width || !height ||
+        !density || curve_points < 2u) return -1;
     pixel_shape_output output = {
         points, point_capacity, 0u, line_offsets, line_roles, line_capacity, 0u
     };

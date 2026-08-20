@@ -1,7 +1,6 @@
 import { state } from '../store/state.js';
 import { NUM_POINTS_CURVE } from '../constants/numerical.js';
 import {
-    COLOR_Z_GRID_HORZ, COLOR_Z_GRID_VERT,
     COLOR_Z_GRID_ZETA_UNDEFINED_SUM_REGION,
     COLOR_INPUT_SHAPE_Z, COLOR_INPUT_LINE_IM_Z
 } from '../constants/colors.js';
@@ -12,44 +11,48 @@ import {
     generateNativeViewportGridPixels,
     nativeMapOptions
 } from '../native/complex-engine.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
 
 const RADIAL_DISCRETE_STEP_COLOR = 'rgba(255, 255, 0, 0.7)';
-const RADIAL_STEP_DOMAIN_DEFAULT = Object.freeze({ min: -5, max: 5 });
+const GENERAL_RADIAL_STEP_DOMAIN = Object.freeze({ min: -5, max: 5 });
 const RADIAL_STEP_DOMAINS = Object.freeze({
+    identity: GENERAL_RADIAL_STEP_DOMAIN,
     cos: Object.freeze({ min: 0, max: Math.PI / 2 }),
     tan: Object.freeze({ min: 0, max: Math.PI / 2 }),
     sec: Object.freeze({ min: 0, max: Math.PI / 2 }),
     exp: Object.freeze({ min: -5, max: 5 }),
     ln: Object.freeze({ min: 0.01, max: 10 }),
+    sinh: GENERAL_RADIAL_STEP_DOMAIN,
+    tanh: GENERAL_RADIAL_STEP_DOMAIN,
+    asin: GENERAL_RADIAL_STEP_DOMAIN,
+    atan: GENERAL_RADIAL_STEP_DOMAIN,
+    gamma: GENERAL_RADIAL_STEP_DOMAIN,
+    loggamma: GENERAL_RADIAL_STEP_DOMAIN,
+    bessel: GENERAL_RADIAL_STEP_DOMAIN,
+    power: GENERAL_RADIAL_STEP_DOMAIN,
     polynomial: Object.freeze({ min: 0, max: 5 }),
     mobius: Object.freeze({ min: -5, max: 5 }),
-    zeta: Object.freeze({ min: -10, max: 10 })
+    zeta: Object.freeze({ min: -10, max: 10 }),
+    algebraic_chaining: GENERAL_RADIAL_STEP_DOMAIN
 });
 
 const GRID_INPUT_SHAPES = new Set([
     'grid_cartesian', 'grid_polar', 'grid_logpolar', 'grid_logcartesian', 'grid_dots'
 ]);
 
-function defaultRange() {
-    return [-1, 1];
-}
-
-function firstRange(primary, secondary) {
-    if (Array.isArray(primary) && primary.length >= 2) return primary;
-    if (Array.isArray(secondary) && secondary.length >= 2) return secondary;
-    return defaultRange();
-}
-
 function integerAtLeast(value, minimum) {
     const numeric = Number(value);
-    return Number.isFinite(numeric) ? Math.max(minimum, Math.floor(numeric)) : minimum;
+    if (!Number.isInteger(numeric) || numeric < minimum) {
+        throw new Error(`Input-shape geometry requires an integer sample count of at least ${minimum}.`);
+    }
+    return numeric;
 }
 
 export function getVisiblePlaneRanges(planeParams) {
-    const params = planeParams || {};
+    const params = requireVisibleViewport(planeParams, 'Input-shape viewport');
     return {
-        xRange: firstRange(params.currentVisXRange, params.xRange),
-        yRange: firstRange(params.currentVisYRange, params.yRange)
+        xRange: params.currentVisXRange,
+        yRange: params.currentVisYRange
     };
 }
 
@@ -83,8 +86,11 @@ export function buildInputShapeGeometryConfig(planeParams, options = {}) {
 }
 
 function styleForRole(role) {
-    const horizontal = state.gridColor1 || COLOR_Z_GRID_HORZ;
-    const vertical = state.gridColor2 || COLOR_Z_GRID_VERT;
+    const horizontal = state.gridColor1;
+    const vertical = state.gridColor2;
+    if (typeof horizontal !== 'string' || !horizontal || typeof vertical !== 'string' || !vertical) {
+        throw new Error('Native input-shape rendering requires both grid colors.');
+    }
     switch (role) {
         case 1: return { role: 'grid-horizontal', color: horizontal, lineWidth: LINE_WIDTH_NORMAL };
         case 2: return { role: 'grid-vertical', color: vertical, lineWidth: LINE_WIDTH_NORMAL };
@@ -104,22 +110,19 @@ function styleForRole(role) {
 
 export function generateInputShapePointSets(config) {
     if (['empty_grid', 'image', 'video'].includes(config?.currentInputShape)) return [];
-    let lines;
-    try {
-        lines = generateNativeInputShape(config, nativeMapOptions(state, {
-            functionKey: config?.currentFunction || state.currentFunction,
-            chainingEnabled: false,
-            chainCount: 1
-        }));
-    } catch (error) {
-        if (config?.currentInputShape === 'arbitrary') return [];
-        throw error;
-    }
+    const lines = generateNativeInputShape(config, nativeMapOptions(state, {
+        functionKey: config.currentFunction,
+        chainingEnabled: false,
+        chainCount: 1
+    }));
     const pointSets = lines.map(line => ({ points: line.points, ...styleForRole(line.role) }));
     if (config.preciseViewport && ['grid_cartesian', 'grid_dots'].includes(config.currentInputShape)) {
         const exact = generateNativeViewportGridPixels(config);
         for (let index = 0; index < pointSets.length; ++index) {
-            pointSets[index].canvasPoints = exact[index]?.canvasPoints || null;
+            if (!exact[index]?.canvasPoints) {
+                throw new Error(`Native precise input-shape geometry ${index} is missing canvas points.`);
+            }
+            pointSets[index].canvasPoints = exact[index].canvasPoints;
         }
     }
     return pointSets;
@@ -132,9 +135,11 @@ export function generateCurrentInputShapePointSets(planeParams, options = {}) {
 export function generateRadialDiscreteStepPointSets(functionKey, stepsCount, options = {}) {
     const steps = integerAtLeast(stepsCount, 0);
     if (steps < 2) return [];
+    const domain = RADIAL_STEP_DOMAINS[functionKey];
+    if (!domain) throw new Error(`Radial discrete steps do not support ${functionKey}.`);
     const points = generateNativeRadialSteps(
         nativeMapOptions(state, { functionKey }),
-        RADIAL_STEP_DOMAINS[functionKey] || RADIAL_STEP_DOMAIN_DEFAULT,
+        domain,
         steps,
         integerAtLeast(options.curvePoints ?? NUM_POINTS_CURVE / 2, 24)
     );
@@ -144,10 +149,6 @@ export function generateRadialDiscreteStepPointSets(functionKey, stepsCount, opt
         role: 'radial-discrete-step',
         lineWidth: LINE_WIDTH_THIN
     }));
-}
-
-export function isGridInputShape(shape) {
-    return GRID_INPUT_SHAPES.has(shape);
 }
 
 export function isFoldableInputShape(shape) {
