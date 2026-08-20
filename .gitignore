@@ -9,3 +9,5 @@ Experiment
 fractal-garden-master
 playwright-report/
 test-results/
+.cache/
+bertbaron_mandelbrot/
