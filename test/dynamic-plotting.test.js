@@ -253,9 +253,9 @@ test('GLSL compiler emits finite-domain and sheet-aware aggregate evaluators', (
     });
 
     const functionIds = {
-        cos: 1, sin: 2, tan: 3, sec: 4, exp: 5, ln: 6,
-        reciprocal: 7, mobius: 8, polynomial: 9, poincare: 10,
-        zeta: 11, sinh: 12, cosh: 13, tanh: 14, power: 15
+        cos: 1, tan: 3, sec: 4, exp: 5, ln: 6,
+        mobius: 8, polynomial: 9,
+        zeta: 11, sinh: 12, tanh: 14, power: 15
     };
     const compiled = buildDynamicAggregateGLSL(state, name => functionIds[name] || 0);
 

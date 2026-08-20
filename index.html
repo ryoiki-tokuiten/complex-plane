@@ -39,20 +39,17 @@
                                 data-tooltip="Laplace Transform: Visualize s-plane, poles/zeros, and 3D surface">Laplace
                                 Transform</button>
                             <button id="select_cos_btn" data-tooltip="Select w = cos(z) function">w = cos(z)</button>
-                            <button id="select_sin_btn" data-tooltip="Select w = sin(z) function">w = sin(z)</button>
                             <button id="select_tan_btn" data-tooltip="Select w = tan(z) function">w = tan(z)</button>
                             <button id="select_sec_btn" data-tooltip="Select w = sec(z) function">w = sec(z)</button>
                             <button id="select_exp_btn" data-tooltip="Select w = e^z function">w =
                                 e<sup>z</sup></button>
                             <button id="select_ln_btn" data-tooltip="Select w = ln(z) function">w = ln(z)</button>
                             <button id="select_sinh_btn" data-tooltip="Select w = sinh(z) function">w = sinh(z)</button>
-                            <button id="select_cosh_btn" data-tooltip="Select w = cosh(z) function">w = cosh(z)</button>
                             <button id="select_tanh_btn" data-tooltip="Select w = tanh(z) function">w = tanh(z)</button>
                             <button id="select_asin_btn" data-tooltip="Select w = asin(z) function">w = asin(z)</button>
                             <button id="select_atan_btn" data-tooltip="Select w = atan(z) function">w = atan(z)</button>
                             <button id="select_power_btn" data-tooltip="Select fractional power w = z^n">w =
                                 z<sup>n</sup></button>
-                            <button id="select_reciprocal_btn" data-tooltip="Select w = 1/z function">w = 1/z</button>
                             <button id="select_mobius_btn"
                                 data-tooltip="Select w = (az+b)/(cz+d) Möbius transformation">Möbius</button>
                             <button id="select_zeta_btn" data-tooltip="Select w = ζ(z) Riemann Zeta function">w =
@@ -62,8 +59,6 @@
                             <button id="select_bessel_btn" data-tooltip="Select the generalized Bessel function">w = J<sub>ν</sub>(z)</button>
                             <button id="select_polynomial_btn"
                                 data-tooltip="Select w = P(z) polynomial function">Polynomial</button>
-                            <button id="select_poincare_btn"
-                                data-tooltip="Select Poincare Disk transformation">Poincare</button>
                             <button id="select_mandelbrot_btn"
                                 data-tooltip="Load Mandelbrot as zero-seed output chaining of f(w,c)=w²+c">Mandelbrot</button>
                             <button id="select_newton_fractal_btn"
@@ -421,6 +416,7 @@
                     </div>
 
                     <div id="core_application_controls">
+                        <div id="function_equation_container" class="control-group dependent-settings-block hidden"></div>
                         <div id="zeta_specific_controls" class="control-group dependent-settings-block hidden">
                             <button id="toggle_zeta_continuation_btn"
                                 data-tooltip="Toggle analytic continuation for ζ(z) beyond Re(z) > 1">Enable Analytic
@@ -645,7 +641,7 @@
                                 <output id="chain_count_value_display">1</output>
                             </label>
                             <div class="slider-container">
-                                <input type="range" id="chain_count_slider" name="chain_count_slider" min="1" max="512"
+                                <input type="range" id="chain_count_slider" name="chain_count_slider" min="1" max="1024"
                                     step="1" value="1" data-tooltip="Number of repeated applications">
                             </div>
 

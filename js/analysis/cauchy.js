@@ -106,10 +106,6 @@ export function performCauchyAnalysis() {
     }
 
     const map = nativeMapOptions(state);
-    if (state.currentFunction === 'poincare') { 
-        publish(`${analysisKey}|poincare`, { text: 'Cauchy/Residue analysis not applicable for Poincare map.' });
-        return;
-    }
 
 
     let contourC_points = null;

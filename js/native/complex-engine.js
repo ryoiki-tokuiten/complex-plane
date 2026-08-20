@@ -45,27 +45,23 @@ if (wasm.ce_abi_version() !== 1) {
 export const NATIVE_FUNCTION_IDS = Object.freeze({
     c: 0,
     cos: 1,
-    sin: 2,
-    tan: 3,
-    sec: 4,
-    exp: 5,
-    ln: 6,
-    reciprocal: 7,
-    sinh: 8,
-    cosh: 9,
-    tanh: 10,
-    asin: 11,
-    atan: 12,
-    gamma: 13,
-    loggamma: 14,
-    bessel: 15,
-    power: 16,
-    mobius: 17,
-    zeta: 18,
-    polynomial: 19,
-    poincare: 20,
-    algebraic_chaining: 21,
-    identity: 22
+    tan: 2,
+    sec: 3,
+    exp: 4,
+    ln: 5,
+    sinh: 6,
+    tanh: 7,
+    asin: 8,
+    atan: 9,
+    gamma: 10,
+    loggamma: 11,
+    bessel: 12,
+    power: 13,
+    mobius: 14,
+    zeta: 15,
+    polynomial: 16,
+    algebraic_chaining: 17,
+    identity: 18
 });
 
 const MAP_CONFIG_SIZE = 272;
@@ -573,13 +569,13 @@ function writeDynamicConfig(view, pointer, rawAggregate, allocations) {
 function writeMapConfig(pointer, options, allocations) {
     const view = memoryView();
     new Uint8Array(wasm.memory.buffer, pointer, MAP_CONFIG_SIZE).fill(0);
-    const functionKey = options.functionKey || 'sin';
+    const functionKey = options.functionKey || 'cos';
     const functionId = NATIVE_FUNCTION_IDS[functionKey];
     if (functionId === undefined) throw new Error(`Unsupported native function: ${functionKey}`);
     view.setUint32(pointer, functionId, true);
     const chainCount = options.chainingEnabled === false
         ? 1
-        : Math.max(1, Math.min(512, Math.floor(Number(options.chainCount) || 1)));
+        : Math.max(1, Math.min(1024, Math.floor(Number(options.chainCount) || 1)));
     view.setUint32(pointer + 4, chainCount, true);
     view.setUint32(pointer + 8, options.chainMode === 'zero_seed' ? 1 : 0, true);
     view.setUint32(pointer + 12, Math.max(0, Math.min(2, Math.floor(
@@ -1802,7 +1798,7 @@ export function precisePixelCoordinate(viewport, pixelX, pixelY) {
     try {
         const centerRePointer = writeCString(viewport.centerRe, allocations);
         const centerImPointer = writeCString(viewport.centerIm, allocations);
-        const capacity = Math.ceil(precisionBits * Math.LOG10E * Math.LN2) + 64;
+        const capacity = Math.max(2048, Math.ceil(precisionBits) * 2 + 512);
         const realPointer = alloc(capacity); allocations.push(realPointer);
         const imaginaryPointer = alloc(capacity); allocations.push(imaginaryPointer);
         const status = wasm.ce_precise_pixel_coordinate(

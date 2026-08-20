@@ -89,7 +89,7 @@ function restoreState(snapshot) {
 
 function configureDynamics(overrides = {}) {
     Object.assign(state, {
-        currentFunction: 'sin',
+        currentFunction: 'cos',
         currentFunctionPreset: null,
         domainColoringEnabled: true,
         domainBrightness: 1,
@@ -363,7 +363,7 @@ test('domain dynamics accepts single functions and derivative presentation witho
 
     try {
         configureDynamics({
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             chainingEnabled: false,
             chainCount: 1
         });
@@ -374,8 +374,8 @@ test('domain dynamics accepts single functions and derivative presentation witho
         });
         assert.ok(snapshot);
         approxComplex(evaluateDomainDynamicsValue(snapshot, 0.5, 0.2), {
-            re: Math.sin(0.5) * Math.cosh(0.2),
-            im: Math.cos(0.5) * Math.sinh(0.2)
+            re: Math.cos(0.5) * Math.cosh(0.2),
+            im: -Math.sin(0.5) * Math.sinh(0.2)
         }, 1e-8);
 
         const derivativeSnapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, {
@@ -384,8 +384,8 @@ test('domain dynamics accepts single functions and derivative presentation witho
         });
         assert.ok(derivativeSnapshot);
         approxComplex(evaluateDomainDynamicsValue(derivativeSnapshot, 0.5, 0.2), {
-            re: Math.cos(0.5) * Math.cosh(0.2),
-            im: -Math.sin(0.5) * Math.sinh(0.2)
+            re: -Math.sin(0.5) * Math.cosh(0.2),
+            im: -Math.cos(0.5) * Math.sinh(0.2)
         }, 1e-6);
     } finally {
         restoreState(before);
@@ -401,7 +401,7 @@ test('built dynamics snapshots isolate and freeze nested algebraic data', () => 
     };
     const terms = [{
         coeff: { re: 1, im: 0 },
-        factors: [algebraicFactor('sin', { pipeline: [{ func: 'cos' }] })]
+        factors: [algebraicFactor('exp', { pipeline: [{ func: 'cos' }] })]
     }];
 
     try {
@@ -420,7 +420,7 @@ test('built dynamics snapshots isolate and freeze nested algebraic data', () => 
         assert.notEqual(snapshot.algebraicChainingTerms[0].factors[0], terms[0].factors[0]);
 
         zExpr.right.value = 2;
-        terms[0].factors[0].pipeline[0].func = 'sin';
+        terms[0].factors[0].pipeline[0].func = 'tan';
         assert.equal(snapshot.algebraicChainingZExpr.right.value, 1);
         assert.equal(snapshot.algebraicChainingTerms[0].factors[0].pipeline[0].func, 'cos');
     } finally {
@@ -575,11 +575,11 @@ test('worker dynamics evaluator matches current mapped output-chain semantics', 
     const before = snapshotState();
 
     try {
-        configureDynamics({ currentFunction: 'sin', chainingMode: 'recursion', chainCount: 5 });
+        configureDynamics({ currentFunction: 'cos', chainingMode: 'recursion', chainCount: 5 });
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
-        const base = getEffectiveBaseTransformFunction('sin');
-        const profile = getMappedTransformProfile('sin', base);
-        const expected = evaluateDomainColoringMappedTransform(profile, 0.2, -0.3, 'sin');
+        const base = getEffectiveBaseTransformFunction('cos');
+        const profile = getMappedTransformProfile('cos', base);
+        const expected = evaluateDomainColoringMappedTransform(profile, 0.2, -0.3, 'cos');
         const actual = evaluateDomainDynamicsValue(snapshot, 0.2, -0.3);
 
         approxComplex(actual, expected);
@@ -751,7 +751,7 @@ test('async renderer reaches final scale one without another redraw trigger', as
 
     try {
         cancelPlanarDomainDynamics();
-        configureDynamics({ currentFunction: 'sin', chainCount: 2 });
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
 
         assert.equal(renderPlanarDomainDynamics(targetCtx, PLANE, snapshot), true);
@@ -776,7 +776,7 @@ test('domain-coloring redraws reuse an active CPU job while dirty state is being
 
     try {
         cancelPlanarDomainDynamics();
-        configureDynamics({ currentFunction: 'sin', chainCount: 2 });
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
         assert.ok(snapshot);
 
@@ -803,7 +803,7 @@ test('async renderer ignores canceled old final tiles after viewport changes', a
 
     try {
         cancelPlanarDomainDynamics();
-        configureDynamics({ currentFunction: 'sin', chainCount: 2 });
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
         const oldSnapshot = buildPlanarDomainDynamicsSnapshot(state, oldPlane, { isWPlaneColoring: false });
         const nextSnapshot = buildPlanarDomainDynamicsSnapshot(state, nextPlane, { isWPlaneColoring: false });
 
@@ -860,9 +860,9 @@ test('worker algebraic output chains match the main domain-coloring pipeline acr
     };
     const algebraicTerms = [
         { coeff: { re: 0.7, im: -0.2 }, factors: [algebraicFactor('polynomial')] },
-        { coeff: { re: 0.25, im: 0.1 }, factors: [algebraicFactor('sin')] },
+        { coeff: { re: 0.25, im: 0.1 }, factors: [algebraicFactor('cos')] },
         { coeff: { re: 0.08, im: -0.04 }, factors: [algebraicFactor('c')] },
-        { coeff: { re: 0.05, im: 0 }, factors: [algebraicFactor('cosh', { reciprocal: true })] }
+        { coeff: { re: 0.05, im: 0 }, factors: [algebraicFactor('sinh', { reciprocal: true })] }
     ];
     const points = [
         { re: -0.4, im: 0.2 },

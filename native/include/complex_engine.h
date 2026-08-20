@@ -38,14 +38,11 @@ typedef struct {
 enum ce_function_id {
     CE_FN_C = 0,
     CE_FN_COS,
-    CE_FN_SIN,
     CE_FN_TAN,
     CE_FN_SEC,
     CE_FN_EXP,
     CE_FN_LN,
-    CE_FN_RECIPROCAL,
     CE_FN_SINH,
-    CE_FN_COSH,
     CE_FN_TANH,
     CE_FN_ASIN,
     CE_FN_ATAN,
@@ -56,7 +53,6 @@ enum ce_function_id {
     CE_FN_MOBIUS,
     CE_FN_ZETA,
     CE_FN_POLYNOMIAL,
-    CE_FN_POINCARE,
     CE_FN_ALGEBRAIC,
     CE_FN_IDENTITY
 };

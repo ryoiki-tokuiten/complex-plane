@@ -247,19 +247,6 @@ static inline ce_complex ce_sinh(ce_complex z) {
     return ce_make(sinh_x * cos(z.im), cosh_x * sin(z.im));
 }
 
-static inline ce_complex ce_cosh(ce_complex z) {
-    if (fabs(z.re) > 700.0) {
-        const double ex = ce_exp_safe(fabs(z.re));
-        const double s = 0.5 * ex * copysign(1.0, z.re);
-        return ce_make(0.5 * ex * cos(z.im), s * sin(z.im));
-    }
-    const double ex = ce_exp_safe(z.re);
-    const double ex_inv = 1.0 / ex;
-    const double sinh_x = 0.5 * (ex - ex_inv);
-    const double cosh_x = 0.5 * (ex + ex_inv);
-    return ce_make(cosh_x * cos(z.im), sinh_x * sin(z.im));
-}
-
 static inline ce_complex ce_tanh(ce_complex z) {
     if (fabs(z.re) > 30.0) {
         return ce_make(copysign(1.0, z.re), 0.0);
@@ -580,15 +567,12 @@ static ce_complex ce_eval_algebraic(ce_complex input, ce_complex c, const ce_fun
                 const uint32_t step_count = factor->step_count;
                 for (uint32_t step = 0; step < step_count; ++step) {
                     switch (steps[step]) {
-                        case CE_FN_SIN: argument = ce_sin(argument); break;
                         case CE_FN_COS: argument = ce_cos(argument); break;
                         case CE_FN_TAN: argument = ce_tan(argument); break;
                         case CE_FN_SEC: argument = ce_sec(argument); break;
                         case CE_FN_EXP: argument = ce_exp(argument); break;
                         case CE_FN_LN: argument = ce_log(argument, config); break;
-                        case CE_FN_RECIPROCAL: argument = ce_div(ce_make(1.0, 0.0), argument); break;
                         case CE_FN_SINH: argument = ce_sinh(argument); break;
-                        case CE_FN_COSH: argument = ce_cosh(argument); break;
                         case CE_FN_TANH: argument = ce_tanh(argument); break;
                         default: argument = ce_eval_function(steps[step], argument, c, config); break;
                     }
@@ -627,7 +611,6 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
     switch (function_id) {
         case CE_FN_C: return c;
         case CE_FN_COS: return ce_cos(z);
-        case CE_FN_SIN: return ce_sin(z);
         case CE_FN_TAN: return ce_tan(z);
         case CE_FN_SEC: return ce_sec(z);
         case CE_FN_EXP: return ce_exp_at_base(z, config->exp_base);
@@ -637,12 +620,7 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
             if (denominator.re == 0.0 && denominator.im == 0.0) return ce_make(NAN, NAN);
             return ce_div(numerator, denominator);
         }
-        case CE_FN_RECIPROCAL: {
-            const double d = z.re * z.re + z.im * z.im;
-            return ce_make(z.re / d, -z.im / d);
-        }
         case CE_FN_SINH: return ce_sinh(z);
-        case CE_FN_COSH: return ce_cosh(z);
         case CE_FN_TANH: return ce_tanh(z);
         case CE_FN_ASIN: return ce_asin(z);
         case CE_FN_ATAN: return ce_atan(z);
@@ -658,9 +636,6 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
             if (z.im == 0.0 && z.re < 0.0 && fmod(z.re, 2.0) == 0.0) return ce_make(0.0, 0.0);
             return ce_zeta_eta(z.re, z.im, 32);
         case CE_FN_POLYNOMIAL: return ce_polynomial(z, config);
-        case CE_FN_POINCARE:
-            if (z.im <= 1e-9) return ce_make(NAN, NAN);
-            return ce_make(z.re / sqrt(z.im), sqrt(z.im));
         case CE_FN_ALGEBRAIC: return ce_eval_algebraic(z, c, config);
         case CE_FN_IDENTITY: return z;
         default: return ce_make(NAN, NAN);

@@ -4,16 +4,16 @@ import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
 import { syncParameterControlsPanelVisibility, updateTitlesAndGlobalUI } from '../../ui/ui-updates.js';
 
 const FUNCTION_OPTIONS = [
-    ['none', 'None'], ['c', 'c'], ['cos', 'cos(z)'], ['sin', 'sin(z)'], ['tan', 'tan(z)'],
+    ['none', 'None'], ['c', 'c'], ['cos', 'cos(z)'], ['tan', 'tan(z)'],
     ['sec', 'sec(z)'], ['exp', 'e^z'], ['ln', 'ln(z)'], ['sinh', 'sinh(z)'],
-    ['cosh', 'cosh(z)'], ['tanh', 'tanh(z)'], ['power', 'z^n'], ['reciprocal', '1/z'],
+    ['tanh', 'tanh(z)'], ['power', 'z^n'],
     ['asin', 'asin(z)'], ['atan', 'atan(z)'], ['gamma', 'Γ(z)'], ['loggamma', 'log Γ(z)'],
-    ['bessel', 'Jν(z)'], ['mobius', 'Möbius'], ['zeta', 'ζ(z)'], ['polynomial', 'Polynomial'], ['poincare', 'Poincare Disk']
+    ['bessel', 'Jν(z)'], ['mobius', 'Möbius'], ['zeta', 'ζ(z)'], ['polynomial', 'Polynomial']
 ];
 
 const SYMBOLS = new Map([
     ['c', 'c'], ['power', 'z^n'], ['zeta', 'ζ'], ['polynomial', 'P'],
-    ['mobius', 'Möbius'], ['poincare', 'Poincare'], ['gamma', 'Γ'],
+    ['mobius', 'Möbius'], ['gamma', 'Γ'],
     ['loggamma', 'log Γ'], ['bessel', 'Jν']
 ]);
 

@@ -99,7 +99,7 @@ test('Dots grid density controls the two-dimensional point count', () => {
 
 test('parametric and drawn arbitrary shapes share the closed point-set contract', () => {
     const parametric = generate('arbitrary', {
-        arbitraryShapeMode: 'parametric', arbitraryShapeExpression: 'cos(t)+i*sin(t)',
+        arbitraryShapeMode: 'parametric', arbitraryShapeExpression: 'exp(i*t)',
         arbitraryShapeTMin: 0, arbitraryShapeTMax: Math.PI * 2, arbitraryShapeClosed: true,
         curvePoints: 64, gridDensity: 5
     });

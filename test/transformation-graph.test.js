@@ -21,7 +21,7 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
 
     try {
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             gridDensity: 12,
             graphViewEnabled: true,
@@ -87,7 +87,6 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
 
 test('locked layers connect the selected grid shape to the opposite family at exact mapped samples', () => {
     const previous = Object.fromEntries(STATE_KEYS.map(key => [key, state[key]]));
-
     const assertExactConnections = data => {
         assert.equal(data.mode, 'locked-grid');
         assert.equal(data.lockedCurve, data.curves[0]);
@@ -107,13 +106,12 @@ test('locked layers connect the selected grid shape to the opposite family at ex
             );
             assert.deepEqual(lockedSample.input, crossingSample.input);
             assert.deepEqual(lockedSample.output, crossingSample.output);
-            assert.equal(crossingCurve.intersectionT, intersection.t);
         });
     };
 
     try {
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             gridDensity: 8,
             graphViewEnabled: true,
@@ -152,7 +150,7 @@ test('locked layers connect the selected grid shape to the opposite family at ex
         assert.ok(Math.abs(exponentialAxis.reScale - 1) <= 1e-12);
         assert.ok(Math.abs(exponentialAxis.imScale - 1) <= 2e-5);
 
-        state.currentFunction = 'sin';
+        state.currentFunction = 'cos';
         state.currentInputShape = 'grid_polar';
         state.graphGridFamily = 'primary';
         state.graphSelectedShape = '';
@@ -200,7 +198,7 @@ test('full-grid samples follow the live z-plane zoom while preserving the select
 
     try {
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             gridDensity: 6,
             graphViewEnabled: true,

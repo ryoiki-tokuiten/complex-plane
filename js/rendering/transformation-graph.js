@@ -53,7 +53,7 @@ const GRID_RADIUS = 0.0045;
 const TRACE_RADIUS = 0.014;
 const FRUSTUM_HEIGHT = 6.3;
 const FRUSTUM_MIN_HALF_WIDTH = 5.65;
-const FULL_GRID_FRAME_SPACING = 8.25;
+const FULL_GRID_FRAME_SPACING = 7.5;
 const FOURIER_RING_RADIUS = 0.72;
 const EPSILON = 1e-10;
 
@@ -1346,6 +1346,7 @@ class TransformationGraphRenderer {
         this.controls.enablePan = true;
         this.controls.enableZoom = true;
         this.controls.zoomToCursor = true;
+        this.controls.screenSpacePanning = true;
         this.controls.target.copy(cameraTarget);
         this.controls.update();
         this.controls.saveState();

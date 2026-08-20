@@ -84,9 +84,9 @@ function nativeTransform(functionKey) {
 }
 
 export const transformFunctions = Object.freeze(Object.fromEntries([
-    'identity', 'cos', 'sin', 'tan', 'sec', 'exp', 'ln', 'reciprocal', 'sinh', 'cosh',
+    'identity', 'cos', 'tan', 'sec', 'exp', 'ln', 'sinh',
     'tanh', 'asin', 'atan', 'gamma', 'loggamma', 'bessel', 'power', 'mobius', 'zeta',
-    'polynomial', 'poincare', 'algebraic_chaining'
+    'polynomial', 'algebraic_chaining'
 ].map(key => [key, nativeTransform(key)])));
 
 export function evaluateAlgebraicTerm(term, re, im, context = null) {
@@ -401,7 +401,7 @@ export function evaluateDomainColoringMappedTransform(_profile, re, im, function
     return evaluateMap(options, asPoint(re, im));
 }
 
-const ENTIRE_FUNCTIONS = new Set(['exp', 'sin', 'cos', 'polynomial']);
+const ENTIRE_FUNCTIONS = new Set(['exp', 'cos', 'polynomial']);
 
 export function updateTaylorSeriesCenterAndRadius() {
     state.taylorSeriesCenter = state.taylorSeriesCustomCenterEnabled

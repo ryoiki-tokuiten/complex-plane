@@ -873,7 +873,7 @@ export function drawZPlaneContent(timestamp) {
             shouldUseZPlanarInputLayerCache(),
             cacheCtx => drawPlanarInputShape(cacheCtx, zPlaneParams)
         );
-        if ((state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare') || surfaceStageHasBranches(state)) {
+        if (state.radialDiscreteStepsEnabled || surfaceStageHasBranches(state)) {
             drawPlanarInputOverlays(zCtx, zPlaneParams);
         }
     }

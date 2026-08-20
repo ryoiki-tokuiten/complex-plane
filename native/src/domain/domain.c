@@ -193,17 +193,17 @@ ce_complex ce_domain_step(const ce_map_config *config, ce_complex current, ce_co
 typedef struct {
     uint32_t count;
     ce_complex center;
-    ce_complex z[513];
-    ce_complex A[513];
-    ce_complex B[513];
-    ce_complex C[513];
-    uint8_t valid[513];
+    ce_complex z[1025];
+    ce_complex A[1025];
+    ce_complex B[1025];
+    ce_complex C[1025];
+    uint8_t valid[1025];
     uint32_t bailout_step;
 } ce_reference_orbit_context;
 
 static void ce_compute_reference_orbit(const ce_map_config *config, ce_complex center,
                                       uint32_t count, ce_reference_orbit_context *ctx) {
-    ctx->count = count > 512 ? 512 : count;
+    ctx->count = count > 1024 ? 1024 : count;
     ctx->center = center;
     ctx->bailout_step = ctx->count;
     ce_complex z = config->zero_seed ? (ce_complex){0.0, 0.0} : center;
@@ -530,14 +530,11 @@ static int ce_is_separable_function(uint32_t function_id, const ce_map_config *c
     if (config->derivative || config->dynamic_source_count || config->use_taylor ||
         config->chain_count > 1 || config->zero_seed) return 0;
     switch (function_id) {
-        case CE_FN_SIN:
         case CE_FN_COS:
         case CE_FN_TAN:
         case CE_FN_SEC:
         case CE_FN_SINH:
-        case CE_FN_COSH:
         case CE_FN_TANH:
-        case CE_FN_POINCARE:
             return 1;
         case CE_FN_EXP:
             return fabs(config->function.exp_base.re - 2.718281828459045) < 1e-12 &&
@@ -582,17 +579,6 @@ static int ce_render_separable_tile(const ce_map_config *config,
     uint32_t *pixels = (uint32_t *)rgba;
 
     switch (config->function_id) {
-        case CE_FN_SIN: {
-            for (uint32_t y = 0; y < tile_height; ++y) {
-                const uint32_t row = y * tile_width;
-                const double ch = cosh_v[y], sh = sinh_v[y];
-                for (uint32_t x = 0; x < tile_width; ++x) {
-                    ce_complex val = { sin_u[x] * ch, cos_u[x] * sh };
-                    pixels[row + x] = ce_color_point_fast(val, lut);
-                }
-            }
-            return 1;
-        }
         case CE_FN_COS: {
             for (uint32_t y = 0; y < tile_height; ++y) {
                 const uint32_t row = y * tile_width;
@@ -681,12 +667,14 @@ int32_t ce_render_domain_tile(const ce_map_config *config,
 
     const uint32_t count = config->chain_count ? config->chain_count : 1;
     const int use_perturbation = (x_span < 1e-4);
-    ce_reference_orbit_context ref_ctx;
-    const ce_reference_orbit_context *ref_ptr = NULL;
+    ce_reference_orbit_context *ref_ctx = NULL;
     if (use_perturbation) {
-        ce_compute_reference_orbit(config, center, count, &ref_ctx);
-        ref_ptr = &ref_ctx;
+        ref_ctx = (ce_reference_orbit_context *)malloc(sizeof(ce_reference_orbit_context));
+        if (ref_ctx) {
+            ce_compute_reference_orbit(config, center, count, ref_ctx);
+        }
     }
+    const ce_reference_orbit_context *ref_ptr = ref_ctx;
 
     // Base pass: fast 1-sample evaluation across the tile grid
     for (uint32_t y = 0; y < tile_height; ++y) {
@@ -827,6 +815,7 @@ int32_t ce_render_domain_tile(const ce_map_config *config,
         }
     }
 
+    if (ref_ctx) free(ref_ctx);
     free(lut);
     return 0;
 }

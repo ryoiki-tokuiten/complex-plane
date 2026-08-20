@@ -97,7 +97,7 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             wPlanarTransformedLayerCacheList: []
         });
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'circle',
             gridDensity: 2,
             domainColoringEnabled: false,
@@ -141,7 +141,7 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             algebraicChainingTerms: [{
                 coeff: { re: 1, im: 0 },
                 factors: [{
-                    func: 'sin', chainedFunc: 'none', power: 1,
+                    func: 'cos', chainedFunc: 'none', power: 1,
                     reciprocal: false, log: false, exp: false
                 }]
             }]
@@ -153,7 +153,7 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
         assert.equal(counters.clear, 4);
 
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             taylorSeriesEnabled: true,
             taylorSeriesCenter: { re: 0, im: 0 },
             taylorSeriesOrder: 2,

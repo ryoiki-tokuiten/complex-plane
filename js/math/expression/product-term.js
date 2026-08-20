@@ -1,8 +1,8 @@
 import { parseExpression } from './parser.js';
 
 const WRAPPERS = new Set([
-    'factorial', 'ln', 'log', 'exp', 'sqrt', 'sin', 'cos', 'tan',
-    'sinh', 'cosh', 'tanh', 'abs', 'conj', 'selected'
+    'factorial', 'ln', 'log', 'exp', 'sqrt', 'cos', 'tan',
+    'sinh', 'tanh', 'abs', 'conj', 'selected'
 ]);
 
 function sliceNode(source, node) {

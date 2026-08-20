@@ -1525,7 +1525,7 @@ export function getPointSetEndpoints(pointSet) {
 }
 
 export function drawFunctionFociOverlay(ctx, planeParams) {
-    if (appState.currentFunction !== 'cos' && appState.currentFunction !== 'sin') {
+    if (appState.currentFunction !== 'cos') {
         return;
     }
 
@@ -1548,12 +1548,11 @@ export function drawFunctionFociOverlay(ctx, planeParams) {
 }
 
 export function shouldDrawPlanarFunctionFociOverlay() {
-    return appState.currentInputShape === 'line' &&
-        (appState.currentFunction === 'cos' || appState.currentFunction === 'sin');
+    return appState.currentInputShape === 'line' && appState.currentFunction === 'cos';
 }
 
 export function shouldDrawPlanarInputRadialOverlay() {
-    return appState.radialDiscreteStepsEnabled && appState.currentFunction !== 'poincare';
+    return appState.radialDiscreteStepsEnabled;
 }
 
 export function drawPlanarInputOverlays(ctx, planeParams) {

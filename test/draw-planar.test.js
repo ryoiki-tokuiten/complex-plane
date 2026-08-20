@@ -243,9 +243,9 @@ test('transformed polylines emit identical subpaths with and without Path2D', ()
     }
 });
 
-test('transformed grid sampling cannot certify oscillatory sin lines as flat', () => {
+test('transformed grid sampling cannot certify oscillatory cos lines as flat', () => {
     const previousFunction = state.currentFunction;
-    state.currentFunction = 'sin';
+    state.currentFunction = 'cos';
 
     try {
         const planeParams = {
@@ -265,8 +265,8 @@ test('transformed grid sampling cannot certify oscillatory sin lines as flat', (
         };
 
         drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
-            transformFunc: transformFunctions.sin,
-            transformProfile: getMappedTransformProfile('sin', transformFunctions.sin)
+            transformFunc: transformFunctions.cos,
+            transformProfile: getMappedTransformProfile('cos', transformFunctions.cos)
         });
 
         const points = capture.paths.flat();

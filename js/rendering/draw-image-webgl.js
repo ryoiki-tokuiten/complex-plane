@@ -25,10 +25,8 @@ const MAX_INVERSE_CHAIN_INDEX = 15;
 const IMAGE_INVERSE_FUNCTIONS = new Set([
     'exp',
     'ln',
-    'reciprocal',
     'mobius',
     'polynomial',
-    'poincare',
     'power'
 ]);
 

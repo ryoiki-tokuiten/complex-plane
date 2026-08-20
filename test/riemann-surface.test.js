@@ -49,7 +49,7 @@ test('algebraic chaining detects branch-bearing functions and modifiers', () => 
     const terms = [{
         coeff: { re: 1, im: 0 },
         factors: [{
-            func: 'sin',
+            func: 'exp',
             chainedFunc: 'cos',
             power: 0.5,
             reciprocal: false,
@@ -68,7 +68,7 @@ test('algebraic custom z expressions contribute branch metadata', () => {
     const runtimeState = makeState({
         currentFunction: 'algebraic_chaining',
         algebraicChainingZExpr: 'sqrt(z)',
-        algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'sin' }] }]
+        algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'cos' }] }]
     });
     assert.equal(surfaceStageHasBranches(runtimeState), true);
 });
@@ -117,7 +117,7 @@ test('Riemann program signatures keep algebraic parameter edits uniform-backed',
         algebraicChainingTerms: [{
             coeff: { re: 1, im: 0 },
             factors: [{
-                func: 'sin',
+                func: 'exp',
                 chainedFunc: 'none',
                 power: 1,
                 reciprocal: false,
@@ -156,7 +156,7 @@ test('sheet-aware algebraic expressions use the active cut helpers', () => {
         algebraicChainingZExpr: 'sqrt(z) + ln(z)',
         algebraicChainingTerms: [{
             coeff: { re: 1, im: 0 },
-            factors: [{ func: 'sin', power: 1 }]
+            factors: [{ func: 'cos', power: 1 }]
         }]
     });
     const source = buildRiemannSurfaceMathLibrary(runtimeState);

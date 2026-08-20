@@ -60,7 +60,14 @@ test('dot folds batch points into one typed geometry per color', () => {
 
 test('grid folds split invalid mapped regions without emitting non-finite geometry', () => {
     const data = buildNativeGridFold({
-        mapOptions: { functionKey: 'reciprocal', chainingEnabled: false },
+        mapOptions: {
+            functionKey: 'mobius',
+            mobiusA: { re: 0, im: 0 },
+            mobiusB: { re: 1, im: 0 },
+            mobiusC: { re: 1, im: 0 },
+            mobiusD: { re: 0, im: 0 },
+            chainingEnabled: false
+        },
         sourceXRange: [-2, 2], outputXRange: [-2, 2], outputYRange: [-1, 1]
     }, [
         {

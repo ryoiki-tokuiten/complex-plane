@@ -21,14 +21,11 @@ const TILE_SIZE = 64;
 const MAX_WORKERS = 16;
 const SUPPORTED_FUNCTIONS = new Set([
     'cos',
-    'sin',
     'tan',
     'sec',
     'exp',
     'ln',
-    'reciprocal',
     'sinh',
-    'cosh',
     'tanh',
     'asin',
     'atan',
@@ -39,7 +36,6 @@ const SUPPORTED_FUNCTIONS = new Set([
     'mobius',
     'zeta',
     'polynomial',
-    'poincare',
     'algebraic_chaining'
 ]);
 

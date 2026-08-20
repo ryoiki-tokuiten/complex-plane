@@ -9,7 +9,7 @@ import { buildNativeImageMesh } from '../js/native/complex-engine.js';
 
 function rasterSnapshot(overrides = {}) {
     return {
-        currentFunction: 'sin',
+        currentFunction: 'cos',
         chainingMode: 'recursion',
         polynomialN: 2,
         navigationModeEnabled: false,
@@ -74,13 +74,13 @@ test('collapsed raster output uses the resolved map stage instead of display pan
 test('only supported invertible ordinary maps use the inverse GPU path', () => {
     const snapshot = rasterSnapshot();
     assert.equal(shouldUseInverseImagePath(true, snapshot, 0), false);
-    assert.equal(shouldUseInverseImagePath(true, { ...snapshot, currentFunction: 'reciprocal' }, 0), true);
+    assert.equal(shouldUseInverseImagePath(true, { ...snapshot, currentFunction: 'exp' }, 0), true);
     assert.equal(shouldUseInverseImagePath(true, snapshot, 16), false);
     assert.equal(shouldUseInverseImagePath(false, snapshot, 100), true);
 });
 
 test('native adaptive image mesh omits cells surrounding invalid poles', () => {
-    const mesh = nativeMesh({ mapOptions: { functionKey: 'reciprocal' } });
+    const mesh = nativeMesh({ mapOptions: { functionKey: 'power', fractionalPower: -1 } });
     assert.ok(mesh.indices.length > 0);
     assert.ok(mesh.indices.every(index => index < mesh.vertices.length / 2));
     assert.ok(mesh.mappedPositions.every(Number.isFinite));

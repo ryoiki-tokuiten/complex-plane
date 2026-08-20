@@ -30,18 +30,18 @@ function factor(func, overrides = {}) {
 
 test('native streamline tracing stops immediately on invalid vectors', () => {
     const paths = traceStreamlines([{ x: 0, y: 0 }], {
-        functionKey: 'poincare', chainCount: 1
+        functionKey: 'ln', chainCount: 1
     }, planeParams, streamlineState);
     assert.deepEqual(paths, [[]]);
 });
 
 test('native vector-field job omits invalid map samples', () => {
     const vectors = buildNativeVectorField({
-        map: { functionKey: 'poincare', chainCount: 1 },
+        map: { functionKey: 'ln', chainCount: 1 },
         xRange: [-1, 1], yRange: [-1, 1], density: 8, inverse: false
     });
     assert.ok(vectors.length > 0);
-    assert.ok(vectors.every(vector => vector.y > 1e-9 && Number.isFinite(vector.re) && Number.isFinite(vector.im)));
+    assert.ok(vectors.every(vector => Number.isFinite(vector.re) && Number.isFinite(vector.im)));
 });
 
 test('native normalized RK2 streamline preserves circular flow geometry', () => {

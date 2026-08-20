@@ -8,8 +8,6 @@
 #define CE_SURFACE_HALF 3.0
 #define CE_SURFACE_HEIGHT_HALF 1.75
 #define CE_SURFACE_CLAMP 8.0
-#define CE_RECIPROCAL_EPSILON 1e-15
-#define CE_RECIPROCAL_CAP 10000.0
 
 enum ce_surface_input_preset {
     CE_SURFACE_INPUT_GENERIC = 0,
@@ -56,18 +54,6 @@ static int ce_surface_input(const ce_map_config *config, uint32_t preset,
 }
 
 static int ce_surface_map(const ce_map_config *config, ce_complex input, ce_complex *output) {
-    if (config->function_id == CE_FN_RECIPROCAL && config->chain_count == 1u &&
-        !config->derivative && !config->use_taylor) {
-        const double scale = fmax(fabs(input.re), fabs(input.im));
-        if (scale == 0.0) return 0;
-        if (scale < CE_RECIPROCAL_EPSILON) {
-            const double normalized = hypot(input.re / scale, input.im / scale);
-            if (!(normalized > 0.0)) return 0;
-            output->re = input.re / scale / normalized * CE_RECIPROCAL_CAP;
-            output->im = -input.im / scale / normalized * CE_RECIPROCAL_CAP;
-            return 1;
-        }
-    }
     uint8_t valid = 0;
     return ce_evaluate_points(config, &input, 1u, output, &valid) == 0 && valid;
 }

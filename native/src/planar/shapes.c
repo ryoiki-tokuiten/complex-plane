@@ -261,7 +261,6 @@ int32_t ce_generate_radial_steps(const ce_map_config *config,
     for (uint32_t index = 0; index < step_count; ++index) {
         const double x = domain_min + delta * index / (step_count - 1u);
         if ((config->function_id == CE_FN_ZETA && fabs(x - 1.0) < SHAPE_EPSILON) ||
-            (config->function_id == CE_FN_RECIPROCAL && fabs(x) < SHAPE_EPSILON) ||
             (config->function_id == CE_FN_LN && x <= SHAPE_EPSILON)) continue;
         ce_complex mapped;
         uint8_t valid = 0;

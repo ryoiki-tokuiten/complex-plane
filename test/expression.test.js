@@ -105,7 +105,7 @@ test('conditionals, predicates, factorial, gcd, and custom parameters work', () 
 
 test('selected function calls execute the supplied native map', () => {
     const expression = compileExpression('selected(z) + f(z)', { allowedVariables: ['z'] });
-    const selectedFunction = transformFunctions.sin;
+    const selectedFunction = transformFunctions.cos;
     const selected = selectedFunction(2, -1);
     closeComplex(
         expression({ z: { re: 2, im: -1 }, selectedFunction }),

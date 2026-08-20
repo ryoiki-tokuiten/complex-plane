@@ -158,7 +158,7 @@ const compileArgs = [
     '-I', join(nativeRoot, 'include'),
     '-I', join(dependencyPrefix, 'include'),
     '-std=c11', '-O3', '-flto', '-msimd128', '-fno-fast-math',
-    '-sSTANDALONE_WASM=1', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=16777216',
+    '-sSTANDALONE_WASM=1', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=16777216', '-sSTACK_SIZE=1048576',
     join(dependencyPrefix, 'lib', 'libmpfr.a'), join(dependencyPrefix, 'lib', 'libgmp.a'),
     '-sMALLOC=emmalloc', `-sEXPORTED_FUNCTIONS=${JSON.stringify(exported)}`,
     '--no-entry', '-o', output

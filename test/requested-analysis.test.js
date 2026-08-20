@@ -63,7 +63,7 @@ test('continued algebraic maps preserve custom input expressions and recursive c
 test('continued algebraic custom expressions use the active sheet', () => {
     const runtimeState = {
         algebraicChainingZExpr: 'sqrt(z) + ln(z)',
-        algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'sin', power: 1 }] }],
+        algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'cos', power: 1 }] }],
         chainingEnabled: false,
         branchCutType: 'ray',
         branchCutAngle: Math.PI,

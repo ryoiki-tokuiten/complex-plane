@@ -44,8 +44,8 @@ function configureSurfaceState() {
             { re: 0.08, im: -0.02 }
         ],
         algebraicChainingTerms: [
-            { coeff: { re: 0.24, im: -0.08 }, factors: [factor('sin', { chainedFunc: 'polynomial', power: 2 })] },
-            { coeff: { re: -0.12, im: 0.05 }, factors: [factor('cosh', { reciprocal: true })] },
+            { coeff: { re: 0.24, im: -0.08 }, factors: [factor('cos', { chainedFunc: 'polynomial', power: 2 })] },
+            { coeff: { re: -0.12, im: 0.05 }, factors: [factor('sinh', { reciprocal: true })] },
             { coeff: { re: 0.06, im: 0.02 }, factors: [factor('ln', { chainedFunc: 'exp' })] },
             { coeff: { re: 0.1, im: -0.03 }, factors: [factor('c')] }
         ],

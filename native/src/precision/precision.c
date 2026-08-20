@@ -693,9 +693,6 @@ static int pc_eval_function(ce_precise_complex *output, uint32_t function_id,
         case CE_FN_COS:
             pc_cos(output, z);
             break;
-        case CE_FN_SIN:
-            pc_sin(output, z);
-            break;
         case CE_FN_TAN:
             pc_sin(&a, z); pc_cos(&b, z); valid = pc_div(output, &a, &b);
             break;
@@ -714,14 +711,8 @@ static int pc_eval_function(ce_precise_complex *output, uint32_t function_id,
             pc_log(&b, &b, NULL);
             valid = pc_div(output, &a, &b);
             break;
-        case CE_FN_RECIPROCAL:
-            valid = pc_div(output, &one, z);
-            break;
         case CE_FN_SINH:
             pc_sinh(output, z);
-            break;
-        case CE_FN_COSH:
-            pc_cosh(output, z);
             break;
         case CE_FN_TANH:
             pc_sinh(&a, z); pc_cosh(&b, z); valid = pc_div(output, &a, &b);
@@ -774,13 +765,6 @@ static int pc_eval_function(ce_precise_complex *output, uint32_t function_id,
                 pc_mul(output, output, z);
                 pc_set_complex(&a, config->polynomial[index]);
                 pc_add(output, output, &a);
-            }
-            break;
-        case CE_FN_POINCARE:
-            if (mpfr_cmp_d(z->im, 1e-9) <= 0) valid = 0;
-            else {
-                mpfr_sqrt(output->im, z->im, MPFR_RNDN);
-                mpfr_div(output->re, z->re, output->im, MPFR_RNDN);
             }
             break;
         case CE_FN_ALGEBRAIC:

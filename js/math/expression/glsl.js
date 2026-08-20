@@ -37,11 +37,11 @@ function isSafeIdentifierName(name) {
     return true;
 }
 const GPU_ARITY = Object.freeze({
-    sin: [1, 1], cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
+    cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
     exp: [1, 1], ln: [1, 1], log: [1, 1],
     gamma: [1, 1], loggamma: [1, 1], bessel: [1, 2],
-    sinh: [1, 1], cosh: [1, 1], tanh: [1, 1],
-    sqrt: [1, 1], reciprocal: [1, 1],
+    sinh: [1, 1], tanh: [1, 1],
+    sqrt: [1, 1],
     abs: [1, 1], arg: [1, 1], re: [1, 1], im: [1, 1], conj: [1, 1],
     complex: [1, 2], floor: [1, 1], ceil: [1, 1], round: [1, 1],
     trunc: [1, 1], sign: [1, 1], min: [1, Infinity], max: [1, Infinity],
@@ -338,13 +338,11 @@ function compileCallExpression(node, args, context) {
                 ? `dynamicLnOnSheet(${first}, branchIndex, branchCutWidth)`
                 : `complexLogWithBase(${first})`;
         case 'sinh': return `complexSinh(${first})`;
-        case 'cosh': return `complexCosh(${first})`;
         case 'tanh': return `complexTanh(${first})`;
         case 'sqrt':
             return context.sheet
                 ? `dynamicComplexPowOnSheet(${first}, vec2(0.5, 0.0), branchIndex, branchCutWidth)`
                 : `dynamicComplexPow(${first}, vec2(0.5, 0.0))`;
-        case 'reciprocal': return `complexDiv(${ONE_VEC}, ${first})`;
         case 'abs': return `vec2(length(${first}), 0.0)`;
         case 'arg': return `vec2(atan((${first}).y, (${first}).x), 0.0)`;
         case 're': return `vec2((${first}).x, 0.0)`;

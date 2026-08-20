@@ -69,10 +69,10 @@ test('algebraic term cache observes in-place term edits', () => {
     try {
         state.algebraicChainingZExpr = 'z';
         approxComplex(evaluateAlgebraicTerm(term, z), { re: 0, im: 0 });
-        term.factors[0].func = 'sin';
-        approxComplex(evaluateAlgebraicTerm(term, z), { re: 1, im: 0 });
+        term.factors[0].func = 'exp';
+        approxComplex(evaluateAlgebraicTerm(term, { re: 0, im: 0 }), { re: 1, im: 0 });
         term.coeff.re = 2;
-        approxComplex(evaluateAlgebraicTerm(term, z), { re: 2, im: 0 });
+        approxComplex(evaluateAlgebraicTerm(term, { re: 0, im: 0 }), { re: 2, im: 0 });
         term.factors[0].func = 'missing_transform';
         assert.ok(Number.isNaN(evaluateAlgebraicTerm(term, z).re));
     } finally {
@@ -458,9 +458,9 @@ test('algebraic modifier chains agree between domain coloring and staged output 
             ],
             algebraicChainingTerms: [
                 { coeff: { re: 0.7, im: -0.2 }, factors: [factor('polynomial')] },
-                { coeff: { re: 0.25, im: 0.1 }, factors: [factor('sin', { power: 2 })] },
+                { coeff: { re: 0.25, im: 0.1 }, factors: [factor('cos', { power: 2 })] },
                 { coeff: { re: 0.08, im: -0.04 }, factors: [factor('c')] },
-                { coeff: { re: 0.05, im: 0 }, factors: [factor('cosh', { reciprocal: true })] }
+                { coeff: { re: 0.05, im: 0 }, factors: [factor('sinh', { reciprocal: true })] }
             ],
             chainingEnabled: true
         });
@@ -544,8 +544,8 @@ test('compiled and fallback algebraic chains agree for composite expressions acr
                 { re: 0.08, im: -0.02 }
             ],
             algebraicChainingTerms: [
-                { coeff: { re: 0.42, im: -0.17 }, factors: [factor('sin', { chainedFunc: 'exp', power: 2 })] },
-                { coeff: { re: -0.3, im: 0.11 }, factors: [factor('cosh', { reciprocal: true })] },
+                { coeff: { re: 0.42, im: -0.17 }, factors: [factor('cos', { chainedFunc: 'exp', power: 2 })] },
+                { coeff: { re: -0.3, im: 0.11 }, factors: [factor('sinh', { reciprocal: true })] },
                 { coeff: { re: 0.07, im: 0.05 }, factors: [factor('ln', { chainedFunc: 'polynomial', exp: true })] },
                 { coeff: { re: 0.2, im: -0.08 }, factors: [factor('c')] }
             ],

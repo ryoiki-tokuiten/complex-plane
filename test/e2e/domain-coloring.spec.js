@@ -37,7 +37,7 @@ test.describe('Domain Coloring Rendering', () => {
         const errors = [];
         page.on('pageerror', err => errors.push(err.message));
 
-        await page.locator('#select_sin_btn').click();
+        await page.locator('#select_cos_btn').click();
         await page.locator('#enable_domain_coloring_cb').evaluate(el => {
             el.checked = true;
             el.dispatchEvent(new Event('change', { bubbles: true }));

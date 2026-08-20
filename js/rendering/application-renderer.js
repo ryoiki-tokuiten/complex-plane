@@ -81,13 +81,13 @@ export function renderApplicationFrame(timestamp) {
         && !state.fourierModeEnabled
         && !state.laplaceModeEnabled;
     const zIsPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
-    if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar && state.currentFunction !== 'poincare') {
+    if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar) {
         findZerosAndPoles();
     } else {
         state.zeros = [];
         state.poles = [];
     }
-    if (state.showCriticalPoints && !state.navigationModeEnabled && zIsPlanar && state.currentFunction !== 'poincare') {
+    if (state.showCriticalPoints && !state.navigationModeEnabled && zIsPlanar) {
         findCriticalPoints();
     } else {
         state.criticalPoints = [];

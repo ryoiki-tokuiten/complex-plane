@@ -17,14 +17,12 @@ const RADIAL_DISCRETE_STEP_COLOR = 'rgba(255, 255, 0, 0.7)';
 const RADIAL_STEP_DOMAIN_DEFAULT = Object.freeze({ min: -5, max: 5 });
 const RADIAL_STEP_DOMAINS = Object.freeze({
     cos: Object.freeze({ min: 0, max: Math.PI / 2 }),
-    sin: Object.freeze({ min: 0, max: Math.PI / 2 }),
     tan: Object.freeze({ min: 0, max: Math.PI / 2 }),
     sec: Object.freeze({ min: 0, max: Math.PI / 2 }),
     exp: Object.freeze({ min: -5, max: 5 }),
     ln: Object.freeze({ min: 0.01, max: 10 }),
     polynomial: Object.freeze({ min: 0, max: 5 }),
     mobius: Object.freeze({ min: -5, max: 5 }),
-    reciprocal: Object.freeze({ min: -5, max: 5 }),
     zeta: Object.freeze({ min: -10, max: 10 })
 });
 

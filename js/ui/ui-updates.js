@@ -75,13 +75,11 @@ const SHAPE_SPECIFIC_GROUPS = Object.freeze({
 
 const SIMPLE_FUNCTION_LABELS = Object.freeze({
     cos: 'cos',
-    sin: 'sin',
     tan: 'tan',
     sec: 'sec',
     exp: 'exp',
     ln: 'ln',
     sinh: 'sinh',
-    cosh: 'cosh',
     tanh: 'tanh',
     asin: 'asin',
     atan: 'atan',
@@ -92,24 +90,20 @@ const SIMPLE_FUNCTION_LABELS = Object.freeze({
 
 const FUNCTION_ARGUMENT_HTML = Object.freeze({
     cos: 'cos(z)',
-    sin: 'sin(z)',
     tan: 'tan(z)',
     sec: 'sec(z)',
     exp: 'e<sup>z</sup>',
     ln: 'ln(z)',
     sinh: 'sinh(z)',
-    cosh: 'cosh(z)',
     tanh: 'tanh(z)',
     asin: 'asin(z)',
     atan: 'atan(z)',
     gamma: 'Γ(z)',
     loggamma: 'log Γ(z)',
     bessel: 'J<sub>ν</sub>(z)',
-    reciprocal: '1/z',
     mobius: 'Möbius(z)',
     zeta: 'ζ(z)',
-    polynomial: 'P(z)',
-    poincare: 'Poincare(z)'
+    polynomial: 'P(z)'
 });
 
 const NORMAL_MODE_VALUE_BINDINGS = Object.freeze([
@@ -468,6 +462,7 @@ function syncComplexParameterControls() {
     setHidden('expBaseSpecificControls', !hasExp);
     setHidden('logBaseSpecificControls', !hasLog);
     setHidden('besselOrderSpecificControls', !activeFunctions.has('bessel'));
+    syncFunctionEquationCard();
     const hasBranches = surfaceStageHasBranches(state);
     setHidden('branchToolsControls', !hasBranches);
     setHidden('branchCutAngleGroup', !hasBranches || state.branchCutType !== 'ray');
@@ -713,13 +708,6 @@ function showProbeInfo(zHtml, wHtml) {
 }
 
 function derivativeProbeHtml() {
-    if (state.currentFunction === 'poincare') {
-        return [
-            "f'(z): N/A for Poincare map",
-            'Conformality: N/A'
-        ].join('<br>') + '<br>';
-    }
-
     const activeMap = resolveActiveMap();
     const derivativeLabel = activeMap.presentation === 'derivative' ? "f''(z)" : "f'(z)";
     const deriv = activeMap.derivative(state.probeZ.re, state.probeZ.im);
@@ -829,16 +817,12 @@ function baseFunctionHtml(funcKey) {
             return 'c';
         case 'power':
             return `(·)<sup>${fractionalPowerExponent()}</sup>`;
-        case 'reciprocal':
-            return 'reciprocal';
         case 'mobius':
             return 'Möbius';
         case 'zeta':
             return 'ζ';
         case 'polynomial':
             return `P (deg ${state.polynomialN})`;
-        case 'poincare':
-            return 'Poincare';
         default:
             return funcKey;
     }
@@ -883,9 +867,7 @@ function formatFuncForFormula(funcKey, termFactor = null) {
         ? 'c'
         : funcKey === 'power'
         ? base.replace('(·)', innerArg)
-        : funcKey === 'reciprocal'
-            ? `1/${innerArg}`
-            : `${base}(${innerArg})`;
+        : `${base}(${innerArg})`;
 
     if (!termFactor) {
         return result;
@@ -946,20 +928,14 @@ function currentFunctionFormulaHtml() {
             return 'e<sup>z</sup>';
         case 'ln':
             return 'ln(z)';
-        case 'reciprocal':
-            return '1/z';
         case 'mobius':
             return '(az+b)/(cz+d)';
         case 'zeta':
             return 'ζ(z)';
-        case 'poincare':
-            return 'Poincare Map';
         case 'power':
             return 'z<sup>n</sup>';
         case 'sinh':
             return 'sinh(z)';
-        case 'cosh':
-            return 'cosh(z)';
         case 'tanh':
             return 'tanh(z)';
         default:
@@ -973,8 +949,6 @@ function compositionSymbol() {
             return 'e<sup>(·)</sup>';
         case 'ln':
             return 'ln(·)';
-        case 'reciprocal':
-            return '1/(·)';
         case 'zeta':
             return 'ζ(·)';
         case 'polynomial':
@@ -983,12 +957,8 @@ function compositionSymbol() {
             return 'Möbius(·)';
         case 'power':
             return `(·)<sup>${fractionalPowerExponent()}</sup>`;
-        case 'poincare':
-            return 'Poincare(·)';
         case 'sinh':
             return 'sinh(·)';
-        case 'cosh':
-            return 'cosh(·)';
         case 'tanh':
             return 'tanh(·)';
         default:
@@ -1067,7 +1037,7 @@ function outputFormulaModel() {
 function defaultZPlaneTitle(fND) {
     const suffix = INPUT_SHAPE_TITLE_SUFFIX[state.currentInputShape] ?? '';
     let title = `z-plane (Input${suffix})`;
-    const showRadialSteps = state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare';
+    const showRadialSteps = state.radialDiscreteStepsEnabled;
     const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
 
     if (state.domainColoringEnabled) {
@@ -1086,7 +1056,7 @@ function defaultZPlaneTitle(fND) {
 }
 
 function splitViewZPlaneTitle(fND) {
-    const showRadialSteps = state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare';
+    const showRadialSteps = state.radialDiscreteStepsEnabled;
     const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
 
     if (state.domainColoringEnabled) {
@@ -1311,34 +1281,188 @@ function syncZetaControls() {
     setActive('toggleZetaContinuationBtn', state.zetaContinuationEnabled);
 }
 
-function syncPoincareRestrictions() {
-    const isPoincare = state.currentFunction === 'poincare';
+function syncFunctionEquationCard() {
+    const container = document.getElementById('function_equation_container');
+    if (!container) return;
 
-    setDisabled('showZerosPolesCb', isPoincare);
-    setDisabled('showCriticalPointsCb', isPoincare);
-    setDisabled('enableCauchyIntegralModeCb', isPoincare);
-
-    if (isPoincare) {
-        setChecked('showZerosPolesCb', false);
-        setChecked('showCriticalPointsCb', false);
-        setChecked('enableCauchyIntegralModeCb', false);
-        state.showZerosPoles = false;
-        state.showCriticalPoints = false;
-        state.cauchyIntegralModeEnabled = false;
+    if (state.algebraicChainingEnabled || state.fourierModeActive || state.laplaceModeActive) {
+        container.classList.add('hidden');
+        container.replaceChildren();
+        return;
     }
 
-    setDisabled('enableRadialDiscreteStepsCb', isPoincare);
-    if (isPoincare && control('enableRadialDiscreteStepsCb')) {
-        setChecked('enableRadialDiscreteStepsCb', false);
-        setHidden('radialDiscreteStepsOptionsDiv', true);
+    const func = state.currentFunction;
+    if (!['gamma', 'loggamma', 'zeta', 'bessel'].includes(func)) {
+        container.classList.add('hidden');
+        container.replaceChildren();
+        return;
     }
 
-    setDisabled('enableTaylorSeriesCb', isPoincare);
-    if (isPoincare && control('enableTaylorSeriesCb')) {
-        setChecked('enableTaylorSeriesCb', false);
-        state.taylorSeriesEnabled = false;
-        setHidden('taylorSeriesOptionsDetailDiv', true);
+    container.classList.remove('hidden');
+
+    let title = '';
+    let badge = '';
+    let mathHtml = '';
+    let subtext = '';
+
+    if (func === 'gamma') {
+        title = 'Γ(z) Evaluation Formula';
+        badge = 'Lanczos Approximation';
+        mathHtml = `
+            <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+              <mrow>
+                <mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mo>=</mo>
+                <msqrt><mrow><mn>2</mn><mi>π</mi></mrow></msqrt>
+                <msup>
+                  <mrow><mo stretchy="false">(</mo><mi>z</mi><mo>+</mo><mi>g</mi><mo>−</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow>
+                  <mrow><mi>z</mi><mo>−</mo><mfrac><mn>1</mn><mn>2</mn></mfrac></mrow>
+                </msup>
+                <msup>
+                  <mi>e</mi>
+                  <mrow><mo>−</mo><mo stretchy="false">(</mo><mi>z</mi><mo>+</mo><mi>g</mi><mo>−</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow>
+                </msup>
+                <mrow><mo>[</mo><mrow>
+                  <msub><mi>c</mi><mn>0</mn></msub><mo>+</mo>
+                  <munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover>
+                  <mfrac><msub><mi>c</mi><mi>k</mi></msub><mrow><mi>z</mi><mo>−</mo><mn>1</mn><mo>+</mo><mi>k</mi></mrow></mfrac>
+                </mrow><mo>]</mo></mrow>
+              </mrow>
+            </math>
+            <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+              <mrow>
+                <mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mo>=</mo>
+                <mfrac>
+                  <mi>π</mi>
+                  <mrow><mi>sin</mi><mo stretchy="false">(</mo><mi>π</mi><mi>z</mi><mo stretchy="false">)</mo><mspace width="0.16em"/><mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>z</mi><mo stretchy="false">)</mo></mrow>
+                </mfrac>
+                <mspace width="1em"/><mtext class="math-condition">(for Re(z) &lt; 0.5)</mtext>
+              </mrow>
+            </math>`;
+        subtext = 'Lanczos series (g = 6.5, N = 8) with Euler reflection for left half-plane.';
+    } else if (func === 'loggamma') {
+        title = 'log Γ(z) Evaluation Formula';
+        badge = 'Analytic Continuation';
+        mathHtml = `
+            <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+              <mrow>
+                <mi>log</mi><mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mo>=</mo>
+                <mfrac><mn>1</mn><mn>2</mn></mfrac><mi>ln</mi><mo stretchy="false">(</mo><mn>2</mn><mi>π</mi><mo stretchy="false">)</mo>
+                <mo>+</mo>
+                <mrow><mo stretchy="false">(</mo><mi>z</mi><mo>−</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow>
+                <mi>ln</mi><mrow><mo stretchy="false">(</mo><mi>z</mi><mo>+</mo><mi>g</mi><mo>−</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow>
+                <mo>−</mo>
+                <mrow><mo stretchy="false">(</mo><mi>z</mi><mo>+</mo><mi>g</mi><mo>−</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow>
+                <mo>+</mo>
+                <mi>ln</mi><mrow><mo>[</mo><mrow>
+                  <msub><mi>c</mi><mn>0</mn></msub><mo>+</mo>
+                  <munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover>
+                  <mfrac><msub><mi>c</mi><mi>k</mi></msub><mrow><mi>z</mi><mo>−</mo><mn>1</mn><mo>+</mo><mi>k</mi></mrow></mfrac>
+                </mrow><mo>]</mo></mrow>
+              </mrow>
+            </math>
+            <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+              <mrow>
+                <mi>log</mi><mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mo>=</mo>
+                <mi>ln</mi><mo stretchy="false">(</mo><mi>π</mi><mo stretchy="false">)</mo>
+                <mo>−</mo>
+                <mi>ln</mi><mrow><mo stretchy="false">(</mo><mi>sin</mi><mo stretchy="false">(</mo><mi>π</mi><mi>z</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo></mrow>
+                <mo>−</mo>
+                <mi>log</mi><mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mspace width="1em"/><mtext class="math-condition">(for Re(z) &lt; 0.5)</mtext>
+              </mrow>
+            </math>`;
+        subtext = 'Direct Log-Gamma evaluation with unwrapped phase continuation.';
+    } else if (func === 'zeta') {
+        if (!state.zetaContinuationEnabled) {
+            title = 'ζ(z) Dirichlet Series';
+            badge = 'Re(s) > 1 Only';
+            mathHtml = `
+                <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+                  <mrow>
+                    <mi>ζ</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo>
+                    <mo>=</mo>
+                    <munderover><mo>∑</mo><mrow><mi>n</mi><mo>=</mo><mn>1</mn></mrow><mi>∞</mi></munderover>
+                    <mfrac><mn>1</mn><msup><mi>n</mi><mi>s</mi></msup></mfrac>
+                    <mo>=</mo>
+                    <mfrac><mn>1</mn><mrow><mn>1</mn><mo>−</mo><msup><mn>2</mn><mrow><mn>1</mn><mo>−</mo><mi>s</mi></mrow></msup></mrow></mfrac>
+                    <munderover><mo>∑</mo><mrow><mi>n</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover>
+                    <mfrac><msup><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><mrow><mi>n</mi><mo>−</mo><mn>1</mn></mrow></msup><msup><mi>n</mi><mi>s</mi></msup></mfrac>
+                    <mspace width="1em"/><mtext class="math-condition">(Re(s) &gt; 1)</mtext>
+                  </mrow>
+                </math>`;
+            subtext = 'Standard Dirichlet series. Non-convergent for Re(s) ≤ 1.';
+        } else {
+            title = 'ζ(z) Analytic Continuation';
+            badge = 'Dirichlet η(s) & Functional Eq';
+            mathHtml = `
+                <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+                  <mrow>
+                    <mi>ζ</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo>
+                    <mo>=</mo>
+                    <mfrac><mrow><mi>η</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><mrow><mn>1</mn><mo>−</mo><msup><mn>2</mn><mrow><mn>1</mn><mo>−</mo><mi>s</mi></mrow></msup></mrow></mfrac>
+                    <mo>=</mo>
+                    <mfrac><mn>1</mn><mrow><mn>1</mn><mo>−</mo><msup><mn>2</mn><mrow><mn>1</mn><mo>−</mo><mi>s</mi></mrow></msup></mrow></mfrac>
+                    <munderover><mo>∑</mo><mrow><mi>n</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover>
+                    <mfrac><msup><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><mrow><mi>n</mi><mo>−</mo><mn>1</mn></mrow></msup><msup><mi>n</mi><mi>s</mi></msup></mfrac>
+                    <mspace width="1em"/><mtext class="math-condition">(s ≠ 1)</mtext>
+                  </mrow>
+                </math>
+                <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+                  <mrow>
+                    <mi>ζ</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo>
+                    <mo>=</mo>
+                    <msup><mn>2</mn><mi>s</mi></msup>
+                    <msup><mi>π</mi><mrow><mi>s</mi><mo>−</mo><mn>1</mn></mrow></msup>
+                    <mi>sin</mi><mrow><mo stretchy="false">(</mo><mfrac><mrow><mi>π</mi><mi>s</mi></mrow><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow>
+                    <mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>s</mi><mo stretchy="false">)</mo>
+                    <mi>ζ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>s</mi><mo stretchy="false">)</mo>
+                    <mspace width="1em"/><mtext class="math-condition">(Re(s) &lt; 0)</mtext>
+                  </mrow>
+                </math>`;
+            subtext = 'Analytic continuation via alternating Dirichlet Eta series and Riemann functional reflection.';
+        }
+    } else if (func === 'bessel') {
+        title = 'J_ν(z) Bessel Series';
+        badge = 'Order ν Power Series';
+        mathHtml = `
+            <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+              <mrow>
+                <msub><mi>J</mi><mi>ν</mi></msub><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mo>=</mo>
+                <msup><mrow><mo stretchy="false">(</mo><mfrac><mi>z</mi><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow><mi>ν</mi></msup>
+                <munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mi>∞</mi></munderover>
+                <mfrac><msup><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><mi>k</mi></msup><mrow><mi>k</mi><mo>!</mo><mspace width="0.16em"/><mi mathvariant="normal">Γ</mi><mo stretchy="false">(</mo><mi>ν</mi><mo>+</mo><mi>k</mi><mo>+</mo><mn>1</mn><mo stretchy="false">)</mo></mrow></mfrac>
+                <msup><mrow><mo stretchy="false">(</mo><mfrac><mi>z</mi><mn>2</mn></mfrac><mo stretchy="false">)</mo></mrow><mrow><mn>2</mn><mi>k</mi></mrow></msup>
+              </mrow>
+            </math>
+            <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+              <mrow>
+                <msub><mi>J</mi><mrow><mo>−</mo><mi>n</mi></mrow></msub><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mo>=</mo>
+                <msup><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><mi>n</mi></msup>
+                <msub><mi>J</mi><mi>n</mi></msub><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo>
+                <mspace width="1em"/><mtext class="math-condition">(for integer n)</mtext>
+              </mrow>
+            </math>`;
+        subtext = 'Frobenius power series expansion of the Bessel function of the first kind.';
     }
+
+    container.innerHTML = `
+        <div class="function-equation-card">
+            <div class="function-equation-header">
+                <span class="function-equation-title">${title}</span>
+                <span class="function-equation-badge">${badge}</span>
+            </div>
+            <div class="function-equation-content">
+                ${mathHtml}
+            </div>
+            <div class="function-equation-subtext">${subtext}</div>
+        </div>
+    `;
 }
 
 function syncVisualizationOptionControls() {
@@ -1348,7 +1472,7 @@ function syncVisualizationOptionControls() {
     syncDomainColoringControls();
     setHidden('radialDiscreteStepsOptionsDiv', !state.radialDiscreteStepsEnabled);
     syncZetaControls();
-    syncPoincareRestrictions();
+    syncFunctionEquationCard();
 }
 
 export function updateTitlesAndGlobalUI() {
@@ -1357,6 +1481,7 @@ export function updateTitlesAndGlobalUI() {
         updateProbeInfo();
 
         if (syncTransformModeTitles()) {
+            sync2DContourUI();
             return;
         }
 
@@ -1520,6 +1645,7 @@ export function updateCustomFormulaPreview(inputEl, displayEl, options = {}) {
 
 export function sync2DContourUI() {
     const is3D = state.realPlotsEnabled || state.riemannSurfaceEnabled;
+    if (!is3D) state.show2DContourPlot = false;
     const showContour = state.show2DContourPlot && is3D;
 
     // Toggle button active states and labels

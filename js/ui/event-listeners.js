@@ -643,6 +643,10 @@ function disableRealPlots() {
     checked('enableRealPlotsCb', false);
     hidden(controls.realPlotsControlsContainer, true);
     hidden(controls.realPlotsColumn, true);
+    if (!state.riemannSurfaceEnabled) {
+        state.show2DContourPlot = false;
+        hidden(controls.contour2DColumn, true);
+    }
     disposeRealPlotsRenderer();
     restoreRealPlotsLayout();
     refreshPlanesAfterLayoutChange();
@@ -872,7 +876,11 @@ function activateFunctionMode(key) {
 
     if (enteringTransform) snapshotNormalViewports();
 
-    if (enteringTransform) disableGraphView();
+    if (enteringTransform) {
+        disableGraphView();
+        disableRealPlots();
+        disableRiemannSurface();
+    }
 
     if (!restoringFractalState) {
         disableAlgebraicChaining();
@@ -1153,6 +1161,10 @@ function disableRiemannSurface() {
     state.riemannSurfaceEnabled = false;
     checked('enableRiemannSurfaceCb', false);
     hidden(controls.riemannSurfaceOptionsDiv, true);
+    if (!state.realPlotsEnabled) {
+        state.show2DContourPlot = false;
+        hidden(controls.contour2DColumn, true);
+    }
 }
 
 function syncFoldSurfaceControls() {
@@ -1894,19 +1906,79 @@ function bindCanvasInteractions() {
         }
     }, PASSIVE_LISTENER_OPTIONS);
 
-    // Wire up contour_2d_canvas organically to the z-plane transformation state
+    bindContourCanvasInteractions();
+}
+
+function bindContourCanvasInteractions() {
     const contourCanvas = document.getElementById('contour_2d_canvas');
-    if (contourCanvas) {
-        // We reuse the 'z' context logic since the 2D contour plot maps the input domain [x, y] = z.
-        // Doing this instantly connects pan/zoom here directly to the Real/Riemann 3D plot calculations!
-        canvasContextByElement.set(contourCanvas, canvasInteractionContexts['z']);
-        
-        contourCanvas.addEventListener('mousemove', onCanvasMouseMove, PASSIVE_LISTENER_OPTIONS);
-        contourCanvas.addEventListener('mousedown', onCanvasMouseDown, PASSIVE_LISTENER_OPTIONS);
-        contourCanvas.addEventListener('mouseup', onCanvasMouseUp, PASSIVE_LISTENER_OPTIONS);
-        contourCanvas.addEventListener('mouseleave', onCanvasMouseLeave, PASSIVE_LISTENER_OPTIONS);
-        contourCanvas.addEventListener('wheel', onCanvasWheel, ACTIVE_LISTENER_OPTIONS);
-    }
+    if (!contourCanvas) return;
+
+    let isPanning = false;
+    let startX = 0;
+    let startY = 0;
+    let startXRange = [-3.5, 3.5];
+    let startYRange = [-3.5, 3.5];
+
+    contourCanvas.addEventListener('mousedown', event => {
+        if (event.button !== 0) return;
+        isPanning = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        startXRange = [...(zPlaneParams.currentVisXRange || [-3.5, 3.5])];
+        startYRange = [...(zPlaneParams.currentVisYRange || [-3.5, 3.5])];
+    }, PASSIVE_LISTENER_OPTIONS);
+
+    bindElementListener(window, 'mousemove', event => {
+        if (!isPanning) return;
+        const rect = contourCanvas.getBoundingClientRect();
+        const width = Math.max(1, rect.width);
+        const height = Math.max(1, rect.height);
+        const dx = event.clientX - startX;
+        const dy = event.clientY - startY;
+        const xSpan = startXRange[1] - startXRange[0];
+        const ySpan = startYRange[1] - startYRange[0];
+        const shiftX = -dx * (xSpan / width);
+        const shiftY = dy * (ySpan / height);
+        zPlaneParams.currentVisXRange = [startXRange[0] + shiftX, startXRange[1] + shiftX];
+        zPlaneParams.currentVisYRange = [startYRange[0] + shiftY, startYRange[1] + shiftY];
+        zPlaneParams.origin.x = -zPlaneParams.currentVisXRange[0] * zPlaneParams.scale.x;
+        zPlaneParams.origin.y = zPlaneParams.currentVisYRange[1] * zPlaneParams.scale.y;
+        requestDomainRedraw(true);
+        requestRedrawAll();
+    }, PASSIVE_LISTENER_OPTIONS);
+
+    bindElementListener(window, 'mouseup', () => {
+        isPanning = false;
+    }, PASSIVE_LISTENER_OPTIONS);
+
+    contourCanvas.addEventListener('wheel', event => {
+        event.preventDefault();
+        const rect = contourCanvas.getBoundingClientRect();
+        const width = Math.max(1, rect.width);
+        const height = Math.max(1, rect.height);
+        const px = clamp(event.clientX - rect.left, 0, width);
+        const py = clamp(event.clientY - rect.top, 0, height);
+        const xRange = zPlaneParams.currentVisXRange || [-3.5, 3.5];
+        const yRange = zPlaneParams.currentVisYRange || [-3.5, 3.5];
+        const xSpan = xRange[1] - xRange[0];
+        const ySpan = yRange[1] - yRange[0];
+        const u = xRange[0] + (px / width) * xSpan;
+        const v = yRange[1] - (py / height) * ySpan;
+        const factor = event.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
+        const newXSpan = xSpan / factor;
+        const newYSpan = ySpan / factor;
+        const newX0 = u - (px / width) * newXSpan;
+        const newY1 = v + (py / height) * newYSpan;
+        zPlaneParams.currentVisXRange = [newX0, newX0 + newXSpan];
+        zPlaneParams.currentVisYRange = [newY1 - newYSpan, newY1];
+        state.zPlaneZoom = clamp((state.zPlaneZoom || 1) * factor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
+        zPlaneParams.scale.x = zPlaneParams.width / (newXSpan || 1);
+        zPlaneParams.scale.y = zPlaneParams.height / (newYSpan || 1);
+        zPlaneParams.origin.x = -newX0 * zPlaneParams.scale.x;
+        zPlaneParams.origin.y = newY1 * zPlaneParams.scale.y;
+        requestDomainRedraw(true);
+        requestRedrawAll();
+    }, ACTIVE_LISTENER_OPTIONS);
 }
 
 function bindCanvasRectInvalidation() {

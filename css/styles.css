@@ -2779,6 +2779,77 @@ select:focus {
     background: rgba(0, 0, 0, 0.08);
 }
 
+.function-equation-card {
+    position: relative;
+    padding: 0.75rem 0.85rem;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--accent-purple, #a78bfa) 42%, var(--border-color));
+    border-radius: 10px;
+    background:
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent-purple, #a78bfa) 16%, transparent), transparent 45%),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.035), transparent),
+        color-mix(in srgb, var(--card-bg-color) 85%, black);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    margin-bottom: 0.5rem;
+}
+
+.function-equation-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+
+.function-equation-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-purple, #a78bfa);
+}
+
+.function-equation-badge {
+    padding: 0.14rem 0.4rem;
+    border: 1px solid color-mix(in srgb, var(--accent-purple, #a78bfa) 35%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent-purple, #a78bfa) 10%, transparent);
+    color: color-mix(in srgb, var(--accent-purple, #a78bfa) 40%, white);
+    font-size: 0.64rem;
+    font-weight: 650;
+}
+
+.function-equation-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    overflow-x: auto;
+}
+
+.function-equation-content > math {
+    width: 100%;
+    overflow-x: auto;
+    padding: 0.15rem 0;
+    color: #fff;
+    font-family: 'STIX Two Math', 'Cambria Math', serif;
+    font-size: 1.15rem;
+}
+
+.function-equation-content > math + math {
+    margin-top: 0.2rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+}
+
+.function-equation-subtext {
+    font-size: 0.72rem;
+    color: var(--text-secondary-color, #94a3b8);
+    line-height: 1.35;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+    padding-top: 0.35rem;
+    margin-top: 0.2rem;
+}
+
 .dynamic-example-summary {
     display: flex;
     align-items: center;

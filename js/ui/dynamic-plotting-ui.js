@@ -66,18 +66,14 @@ const OPERATION_COPY = Object.freeze({
 
 const FUNCTION_LABELS = Object.freeze({
     cos: 'cos',
-    sin: 'sin',
     tan: 'tan',
     sec: 'sec',
     exp: 'exp',
     ln: 'ln',
-    reciprocal: 'reciprocal',
     mobius: 'Mobius',
     polynomial: 'P',
-    poincare: 'Poincare',
     zeta: 'zeta',
     sinh: 'sinh',
-    cosh: 'cosh',
     tanh: 'tanh',
     power: 'power',
     algebraic_chaining: 'algebraic expression'

@@ -103,18 +103,14 @@ vec2 complexTanh(vec2 z) { vec2 den = complexCosh(z); if (dot(den,den) < 1.0e-18
 
 bool evaluateBasicFuncShared(float fId, vec2 z, vec2 mA, vec2 mB, vec2 mC, vec2 mD, int polyDeg, vec2 polyCoeffs[11], float zetaCont, float zetaRefl, float fracPower, out vec2 mapped) {
   if (abs(fId - 1.0) < 0.5) { mapped = complexCos(z); return isFiniteVec2Compat(mapped); }
-  if (abs(fId - 2.0) < 0.5) { mapped = complexSin(z); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 3.0) < 0.5) { vec2 denTan = complexCos(z); if (dot(denTan, denTan) < 1.0e-18) return false; mapped = complexDiv(complexSin(z), denTan); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 4.0) < 0.5) { vec2 denSec = complexCos(z); if (dot(denSec, denSec) < 1.0e-18) return false; mapped = complexDiv(vec2(1.0, 0.0), denSec); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 5.0) < 0.5) { mapped = complexExpWithBase(z); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 6.0) < 0.5) { if (dot(z, z) < 1.0e-20) return false; mapped = complexLogWithBase(z); return isFiniteVec2Compat(mapped); }
-  if (abs(fId - 7.0) < 0.5) { if (dot(z, z) < 1.0e-18) return false; mapped = complexDiv(vec2(1.0, 0.0), z); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 8.0) < 0.5) { vec2 num = complexAdd(complexMul(mA, z), mB); vec2 den = complexAdd(complexMul(mC, z), mD); if (dot(den, den) < 1.0e-18) return false; mapped = complexDiv(num, den); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 9.0) < 0.5) { mapped = evalPolynomial(z, polyDeg, polyCoeffs); return isFiniteVec2Compat(mapped); }
-  if (abs(fId - 10.0) < 0.5) { if (z.y <= 1.0e-9) return false; float rootY = sqrt(max(z.y, 0.0)); if (!isFiniteFloatCompat(rootY) || rootY <= 1.0e-8) return false; mapped = vec2(z.x / rootY, rootY); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 11.0) < 0.5) { return evaluateZeta(z, zetaCont, zetaRefl, mapped); }
   if (abs(fId - 12.0) < 0.5) { mapped = complexSinh(z); return isFiniteVec2Compat(mapped); }
-  if (abs(fId - 13.0) < 0.5) { mapped = complexCosh(z); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 14.0) < 0.5) { mapped = complexTanh(z); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 15.0) < 0.5) { if (dot(z,z) < 1.0e-20) { mapped = vec2(0.0); return true; } vec2 lnZ = complexLnActive(z); mapped = complexExp(vec2(fracPower * lnZ.x, fracPower * lnZ.y)); return isFiniteVec2Compat(mapped); }
   if (abs(fId - 18.0) < 0.5) { mapped = complexArcsin(z); return isFiniteVec2Compat(mapped); }
@@ -138,11 +134,6 @@ vec2 complexArcsinh(vec2 w) {
   vec2 s = complexSqrt(complexAdd(wSq, vec2(1.0, 0.0)));
   return complexLn(complexAdd(w, s));
 }
-vec2 complexArccosh(vec2 w) {
-  vec2 wSq = complexMul(w, w);
-  vec2 s = complexSqrt(complexAdd(wSq, vec2(-1.0, 0.0)));
-  return complexLn(complexAdd(w, s));
-}
 vec2 complexArctanh(vec2 w) {
   vec2 one = vec2(1.0, 0.0);
   vec2 num = complexAdd(one, w);
@@ -153,7 +144,6 @@ vec2 complexArctanh(vec2 w) {
 bool evaluateInverseFunction(vec2 w, float functionId, vec2 mA, vec2 mB, vec2 mC, vec2 mD, int polyDeg, vec2 polyCoeffs[11], float fracPower, out vec2 z) {
   float fId = floor(functionId + 0.5);
   if (abs(fId - 1.0) < 0.5) { z = complexArccos(w); return isFiniteVec2Compat(z); }
-  if (abs(fId - 2.0) < 0.5) { z = complexArcsin(w); return isFiniteVec2Compat(z); }
   if (abs(fId - 3.0) < 0.5) { z = complexArctan(w); return isFiniteVec2Compat(z); }
   if (abs(fId - 4.0) < 0.5) { if (dot(w,w) < 1.0e-18) return false; z = complexArccos(complexDiv(vec2(1.0,0.0), w)); return isFiniteVec2Compat(z); }
   if (abs(fId - 5.0) < 0.5) { if (dot(w,w) < 1.0e-20) return false; z = complexLn(w); return isFiniteVec2Compat(z); }
@@ -162,16 +152,13 @@ bool evaluateInverseFunction(vec2 w, float functionId, vec2 mA, vec2 mB, vec2 mC
     z = complexExp(w);
     return isFiniteVec2Compat(z);
   }
-  if (abs(fId - 7.0) < 0.5) { if (dot(w,w) < 1.0e-18) return false; z = complexDiv(vec2(1.0,0.0), w); return isFiniteVec2Compat(z); }
   if (abs(fId - 8.0) < 0.5) { vec2 num = complexAdd(complexMul(mD, w), -mB); vec2 den = complexAdd(-complexMul(mC, w), mA); if (dot(den,den) < 1.0e-18) return false; z = complexDiv(num, den); return isFiniteVec2Compat(z); }
   if (abs(fId - 9.0) < 0.5) {
     if (polyDeg == 1) { vec2 den = polyCoeffs[1]; if (dot(den,den) < 1.0e-18) return false; z = complexDiv(w - polyCoeffs[0], den); return isFiniteVec2Compat(z); }
     if (polyDeg == 2) { vec2 a=polyCoeffs[2]; vec2 b=polyCoeffs[1]; vec2 c=polyCoeffs[0]-w; vec2 disc=complexMul(b,b)-4.0*complexMul(a,c); vec2 sd=complexSqrt(disc); vec2 den=2.0*a; if(dot(den,den)<1.0e-18) return false; z=complexDiv(-b+sd,den); return isFiniteVec2Compat(z); }
     return false;
   }
-  if (abs(fId - 10.0) < 0.5) { float wY = w.y; if (wY <= 1.0e-9) return false; z = vec2(w.x * w.y, w.y * w.y); return isFiniteVec2Compat(z); }
   if (abs(fId - 12.0) < 0.5) { z = complexArcsinh(w); return isFiniteVec2Compat(z); }
-  if (abs(fId - 13.0) < 0.5) { z = complexArccosh(w); return isFiniteVec2Compat(z); }
   if (abs(fId - 14.0) < 0.5) { z = complexArctanh(w); return isFiniteVec2Compat(z); }
   if (abs(fId - 15.0) < 0.5) { 
     if (abs(fracPower) < 1.0e-6) return false;
@@ -259,18 +246,14 @@ export function getWebGLBackendInfoShared(gl) {
 }
 
 const ALGEBRAIC_GLSL_MACROS = `#define EVAL_COS(V,O) O = complexCos(V); if (!isFiniteVec2Compat(O)) return false;
-#define EVAL_SIN(V,O) O = complexSin(V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_TAN(V,O) { vec2 den = complexCos(V); if (dot(den, den) < 1.0e-18) return false; O = complexDiv(complexSin(V), den); if (!isFiniteVec2Compat(O)) return false; }
 #define EVAL_SEC(V,O) { vec2 den = complexCos(V); if (dot(den, den) < 1.0e-18) return false; O = complexDiv(vec2(1.0, 0.0), den); if (!isFiniteVec2Compat(O)) return false; }
 #define EVAL_EXP(V,O) O = complexExpWithBase(V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_LN(V,O) if (dot(V, V) < 1.0e-20) return false; O = complexLogWithBase(V); if (!isFiniteVec2Compat(O)) return false;
-#define EVAL_RECIP(V,O) if (dot(V, V) < 1.0e-18) return false; O = complexDiv(vec2(1.0, 0.0), V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_MOBIUS(V,O) { vec2 num = complexAdd(complexMul(mA, V), mB); vec2 den = complexAdd(complexMul(mC, V), mD); if (dot(den, den) < 1.0e-18) return false; O = complexDiv(num, den); if (!isFiniteVec2Compat(O)) return false; }
 #define EVAL_POLY(V,O) O = evalPolynomial(V, polyDeg, polyCoeffs); if (!isFiniteVec2Compat(O)) return false;
-#define EVAL_POINCARE(V,O) { if (V.y <= 1.0e-9) return false; float rootY = sqrt(max(V.y, 0.0)); if (!isFiniteFloatCompat(rootY) || rootY <= 1.0e-8) return false; O = vec2(V.x / rootY, rootY); if (!isFiniteVec2Compat(O)) return false; }
 #define EVAL_ZETA(V,O) if (!evaluateZeta(V, zetaCont, zetaRefl, O)) return false;
 #define EVAL_SINH(V,O) O = complexSinh(V); if (!isFiniteVec2Compat(O)) return false;
-#define EVAL_COSH(V,O) O = complexCosh(V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_TANH(V,O) O = complexTanh(V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_ASIN(V,O) O = complexArcsin(V); if (!isFiniteVec2Compat(O)) return false;
 #define EVAL_ATAN(V,O) O = complexArctan(V); if (!isFiniteVec2Compat(O)) return false;
@@ -289,18 +272,14 @@ const ALGEBRAIC_GLSL_MACROS = `#define EVAL_COS(V,O) O = complexCos(V); if (!isF
 function generateAlgebraicDirectEvaluationGLSL(funcName, valVar, outVar) {
     switch (funcName) {
         case 'cos': return `        EVAL_COS(${valVar}, ${outVar})\n`;
-        case 'sin': return `        EVAL_SIN(${valVar}, ${outVar})\n`;
         case 'tan': return `        EVAL_TAN(${valVar}, ${outVar})\n`;
         case 'sec': return `        EVAL_SEC(${valVar}, ${outVar})\n`;
         case 'exp': return `        EVAL_EXP(${valVar}, ${outVar})\n`;
         case 'ln': return `        EVAL_LN(${valVar}, ${outVar})\n`;
-        case 'reciprocal': return `        EVAL_RECIP(${valVar}, ${outVar})\n`;
         case 'mobius': return `        EVAL_MOBIUS(${valVar}, ${outVar})\n`;
         case 'polynomial': return `        EVAL_POLY(${valVar}, ${outVar})\n`;
-        case 'poincare': return `        EVAL_POINCARE(${valVar}, ${outVar})\n`;
         case 'zeta': return `        EVAL_ZETA(${valVar}, ${outVar})\n`;
         case 'sinh': return `        EVAL_SINH(${valVar}, ${outVar})\n`;
-        case 'cosh': return `        EVAL_COSH(${valVar}, ${outVar})\n`;
         case 'tanh': return `        EVAL_TANH(${valVar}, ${outVar})\n`;
         case 'asin': return `        EVAL_ASIN(${valVar}, ${outVar})\n`;
         case 'atan': return `        EVAL_ATAN(${valVar}, ${outVar})\n`;
@@ -316,18 +295,14 @@ export function getWebGLFunctionIdShared(functionName, ignoreDynamic = false) {
     if (!ignoreDynamic && isDynamicAggregateGLSLActive(state)) return 17;
     switch (functionName) {
         case 'cos': return 1;
-        case 'sin': return 2;
         case 'tan': return 3;
         case 'sec': return 4;
         case 'exp': return 5;
         case 'ln': return 6;
-        case 'reciprocal': return 7;
         case 'mobius': return 8;
         case 'polynomial': return 9;
-        case 'poincare': return 10;
         case 'zeta': return 11;
         case 'sinh': return 12;
-        case 'cosh': return 13;
         case 'tanh': return 14;
         case 'power': return 15;
         case 'asin': return 18;

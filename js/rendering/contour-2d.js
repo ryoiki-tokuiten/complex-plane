@@ -1,6 +1,6 @@
 import { state, context, zPlaneParams } from '../store/state.js';
 import { getFinalMapStageIndex, resolveActiveMap } from '../math/active-map.js';
-import { buildRealPlotSurface } from './real-plots-renderer.js';
+import { buildRealPlotSurface, paletteLutFor } from './real-plots-renderer.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import { domainColorForValue } from './domain-coloring.js';
 

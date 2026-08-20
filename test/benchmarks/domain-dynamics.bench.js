@@ -42,9 +42,9 @@ function configureAlgebraicDynamics() {
         ],
         algebraicChainingTerms: [
             { coeff: { re: 0.7, im: -0.2 }, factors: [factor('polynomial')] },
-            { coeff: { re: 0.25, im: 0.1 }, factors: [factor('sin', { power: 2 })] },
+            { coeff: { re: 0.25, im: 0.1 }, factors: [factor('cos', { power: 2 })] },
             { coeff: { re: 0.08, im: -0.04 }, factors: [factor('c')] },
-            { coeff: { re: 0.05, im: 0 }, factors: [factor('cosh', { reciprocal: true })] }
+            { coeff: { re: 0.05, im: 0 }, factors: [factor('sinh', { reciprocal: true })] }
         ],
         chainingEnabled: true,
         chainingMode: 'recursion',
