@@ -387,21 +387,25 @@ export function getChainedTransformFunction(functionKey = state.currentFunction)
 const ENTIRE_FUNCTIONS = new Set(['exp', 'cos', 'polynomial']);
 
 export function updateTaylorSeriesCenterAndRadius() {
-    state.taylorSeriesCenter = state.taylorSeriesCustomCenterEnabled
+    const center = state.taylorSeriesCustomCenterEnabled
         ? { re: state.taylorSeriesCustomCenter.re, im: state.taylorSeriesCustomCenter.im }
         : { ...DEFAULT_TAYLOR_SERIES_CENTER };
+    if (state.taylorSeriesCenter.re !== center.re || state.taylorSeriesCenter.im !== center.im) {
+        state.taylorSeriesCenter = center;
+    }
     let nearestDistanceSq = Infinity;
     if (!Array.isArray(state.poles)) throw new Error('Taylor analysis requires a poles array.');
     for (const pole of state.poles) {
         if (!finiteComplex(pole)) continue;
-        const dx = pole.re - state.taylorSeriesCenter.re;
-        const dy = pole.im - state.taylorSeriesCenter.im;
+        const dx = pole.re - center.re;
+        const dy = pole.im - center.im;
         nearestDistanceSq = Math.min(nearestDistanceSq, dx * dx + dy * dy);
     }
-    state.taylorSeriesConvergenceRadius = Number.isFinite(nearestDistanceSq)
+    let radius = Number.isFinite(nearestDistanceSq)
         ? (nearestDistanceSq < 1e-12 ? 0 : Math.sqrt(nearestDistanceSq))
         : (ENTIRE_FUNCTIONS.has(state.currentFunction) ? Infinity : 1000);
-    if (state.currentFunction === 'ln' && state.taylorSeriesCenter.re === 0 && state.taylorSeriesCenter.im === 0) {
-        state.taylorSeriesConvergenceRadius = 0;
+    if (state.currentFunction === 'ln' && center.re === 0 && center.im === 0) {
+        radius = 0;
     }
+    if (state.taylorSeriesConvergenceRadius !== radius) state.taylorSeriesConvergenceRadius = radius;
 }

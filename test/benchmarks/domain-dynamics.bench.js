@@ -106,19 +106,13 @@ function configureDeepTrigChain(depth = 140, power = 1.0) {
         domainSaturation: 1,
         domainLightnessCycles: 0,
         algebraicChainingEnabled: true,
-        algebraicChainingZExpr: 'z',
+        algebraicChainingZExpr: 'sec(sec(tan(z)))',
         polynomialN: 1,
         polynomialCoeffs: [{ re: 0, im: 0 }, { re: 1, im: 0 }],
         algebraicChainingTerms: [
             {
                 coeff: { re: 1, im: 0 },
-                factors: [
-                    factor('tan', {
-                        power: 1,
-                        steps: ['sec', 'tan', 'tan', 'tan', 'tan'],
-                        innerPower: power
-                    })
-                ]
+                factors: [factor('polynomial', { power })]
             }
         ],
         chainingEnabled: true,
@@ -224,7 +218,7 @@ export async function runDomainDynamicsBenchmarks() {
     );
 
     await runBenchmark(
-        'deep composition tan(tan(tan(tan(sec(z))))) tile across depths and zooms',
+        'deep composition sec(sec(tan(z))) tile across depths and zooms',
         ({ profile }) => {
             const depths = [24, 40, 140, 201, 250, 300, 315, 500];
             const depth = depths[profile === 'deep' ? 7 : profile === 'standard' ? 2 : 0];
@@ -247,7 +241,7 @@ export async function runDomainDynamicsBenchmarks() {
     );
 
     await runBenchmark(
-        'deep non-integer power chain tan(tan(tan(tan(sec(z)^1.4)))) and sec(z)^e',
+        'deep non-integer power chains sec(sec(tan(z)))^1.4 and sec(z)^e',
         ({ profile }) => {
             const depths = [24, 40, 140, 201, 250, 300, 500];
             const depth = depths[profile === 'deep' ? 6 : profile === 'standard' ? 2 : 0];
@@ -274,7 +268,7 @@ export async function runDomainDynamicsBenchmarks() {
     );
 
     await runBenchmark(
-        'rapid convergence sec(z)^15 vs transcendental recursion across extreme zooms',
+        'rapid convergence sec(sec(tan(z)))^15 across extreme zooms',
         ({ profile }) => {
             const depths = [24, 140, 500];
             const depth = depths[profile === 'deep' ? 2 : profile === 'standard' ? 1 : 0];

@@ -151,8 +151,6 @@ const exported = [
     '_ce_create_domain_render_context', '_ce_destroy_domain_render_context', '_ce_render_domain_tile',
     '_ce_project_precise_pixels',
     '_ce_project_precise_pixels_to_canvas', '_ce_project_values_to_precise',
-    '_ce_create_precise_domain_render_context', '_ce_destroy_precise_domain_render_context',
-    '_ce_render_precise_domain_tile',
     '_ce_trace_streamlines', '_ce_build_vector_field', '_ce_build_tissot',
     '_ce_find_preimages', '_ce_find_polynomial_roots', '_ce_analyze_contour', '_ce_estimate_residue',
     '_ce_generate_contour_points', '_ce_classify_contour_singularities'

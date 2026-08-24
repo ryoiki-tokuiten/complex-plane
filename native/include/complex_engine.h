@@ -14,7 +14,6 @@ typedef struct {
 } ce_complex;
 
 typedef struct ce_domain_render_context ce_domain_render_context;
-typedef struct ce_precise_domain_render_context ce_precise_domain_render_context;
 
 typedef struct {
     uint32_t function_id;
@@ -224,17 +223,18 @@ int32_t ce_build_planar_polyline(const ce_map_config *config,
                                  uint32_t output_capacity);
 ce_domain_render_context *ce_create_domain_render_context(
                               const ce_map_config *config,
-                              double x_min, double x_max, double y_min, double y_max,
+                              const char *center_re, const char *center_im,
+                              const char *x_span, const char *y_span,
+                              uint32_t precision_bits,
+                              uint32_t frame_width, uint32_t frame_height,
+                              uint32_t orbit_mode,
                               const ce_complex *palette_rg, const double *palette_b,
                               uint32_t palette_count, double brightness, double contrast,
                               double saturation, double lightness_cycles);
 void ce_destroy_domain_render_context(ce_domain_render_context *context);
-int32_t ce_render_domain_tile(const ce_map_config *config,
-                              double x_min, double x_max, double y_min, double y_max,
-                              uint32_t frame_width, uint32_t frame_height,
+int32_t ce_render_domain_tile(ce_domain_render_context *context,
                               uint32_t tile_x, uint32_t tile_y,
                               uint32_t tile_width, uint32_t tile_height, uint32_t scale,
-                              uint32_t orbit_mode, const ce_domain_render_context *render_context,
                               uint32_t adaptive_quality,
                               uint8_t *rgba);
 
@@ -266,21 +266,6 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
                                      double output_zoom_power, uint32_t precision_bits,
                                      uint32_t output_width, uint32_t output_height,
                                      float *output_pixels, uint8_t *valid);
-ce_precise_domain_render_context *ce_create_precise_domain_render_context(
-                                      const ce_map_config *config,
-                                      const char *center_re, const char *center_im,
-                                      double zoom_power, uint32_t precision_bits,
-                                      uint32_t frame_width, uint32_t frame_height,
-                                      uint32_t orbit_mode, const ce_complex *palette_rg,
-                                      const double *palette_b, uint32_t palette_count,
-                                      double brightness, double contrast, double saturation,
-                                      double lightness_cycles, uint32_t max_repair_passes);
-void ce_destroy_precise_domain_render_context(ce_precise_domain_render_context *context);
-int32_t ce_render_precise_domain_tile(ce_precise_domain_render_context *context,
-                                      uint32_t tile_x, uint32_t tile_y,
-                                      uint32_t tile_width, uint32_t tile_height, uint32_t scale,
-                                      uint32_t adaptive_quality,
-                                      uint32_t *repair_count, uint8_t *rgba);
 int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, double amplitude,
                                   double time_window, uint32_t sample_count, uint32_t random_seed,
                                   double *times, double *values);

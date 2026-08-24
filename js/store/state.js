@@ -350,7 +350,6 @@ export const context = {
     redrawQueued: false,
     animationStates: {},
     domainColoringDirty: true,
-    domainColoringDirtyQueued: false,
 
     controls: {}
 };

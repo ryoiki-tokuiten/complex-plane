@@ -59,7 +59,7 @@ import {
 import { requestRedrawAll, requestUiRedraw } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
-import { renderPlanarDomainColoring } from './domain-coloring.js';
+import { matchesPlanarDomainViewport, renderPlanarDomainColoring } from './domain-coloring.js';
 import { drawRiemannSphereBase, drawSphereGridAndShape, drawSphereProbeAndNeighborhood } from './draw-sphere.js';
 import { updateWindingNumberDisplay } from '../analysis/cauchy.js';
 import {
@@ -575,16 +575,7 @@ function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
     if (state.domainColoringEnabled && domainCanvas) {
         withCanvasState(ctx, () => {
             fillCanvasBackground(ctx, planeParams);
-            const source = runtime.rendering.domainViewport;
-            const currentX = planeParams.currentVisXRange;
-            const currentY = planeParams.currentVisYRange;
-            const matchesViewport = source?.xRange && source?.yRange &&
-                Array.isArray(currentX) && Array.isArray(currentY) &&
-                Math.abs(source.xRange[0] - currentX[0]) < 1e-12 &&
-                Math.abs(source.xRange[1] - currentX[1]) < 1e-12 &&
-                Math.abs(source.yRange[0] - currentY[0]) < 1e-12 &&
-                Math.abs(source.yRange[1] - currentY[1]) < 1e-12;
-            if (matchesViewport) {
+            if (matchesPlanarDomainViewport(runtime.rendering.domainViewport, planeParams)) {
                 ctx.drawImage(domainCanvas, 0, 0);
             }
         });

@@ -51,3 +51,7 @@ Concise log of architectural constraints, post-mortem learnings, and established
 ### 9. 64-Bit UI Event Binding
 * **Decision**: The browser UI event layer (mouse coordinates, pan offsets) inherently operates on 64-bit JS Numbers.
 * **Rule**: Deep zoom engines rely on MPFR arbitrary precision, but the mouse delta inputs themselves become vanishingly small relative to the origin coordinate, requiring string-based `preciseViewport` coordination rather than direct 64-bit `origin.x` mutations at extreme zoom.
+
+### 10. Progressive Native Tile Visibility
+* **Decision**: Domain coloring exposes completed native tiles immediately for every render, including function, expression, chain-depth, pan, and zoom changes.
+* **Rule**: The worker-tile path is the only planar domain renderer. Never hide pan/zoom tiles behind an old-viewport check, a staging canvas, or a final-frame-only commit.

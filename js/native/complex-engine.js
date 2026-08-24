@@ -44,7 +44,7 @@ const wasm = instance.exports;
 wasmMemory = wasm.memory;
 wasm._initialize();
 
-if (wasm.ce_abi_version() !== 2) {
+if (wasm.ce_abi_version() !== 3) {
     throw new Error(`Unsupported native complex engine ABI ${wasm.ce_abi_version()}.`);
 }
 
@@ -1951,45 +1951,25 @@ export function createCompiledDomainTileRenderer(snapshot) {
     if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
         throw new Error('Native domain rendering requires finite style parameters.');
     }
-    const precise = typeof viewport.centerRe === 'string' && typeof viewport.centerIm === 'string' &&
-        Number.isFinite(viewport.zoomPower) && Number.isInteger(viewport.precisionBits);
-
-    let xMin, xMax, yMin, yMax;
-    let centerRePointer = 0;
-    let centerImPointer = 0;
-    let repairCountPointer = 0;
-    if (precise) {
-        centerRePointer = writeCString(viewport.centerRe, allocations);
-        centerImPointer = writeCString(viewport.centerIm, allocations);
-        repairCountPointer = alloc(4); allocations.push(repairCountPointer);
-    } else {
-        if (!Array.isArray(viewport.xRange) || !Array.isArray(viewport.yRange) ||
-            ![...viewport.xRange, ...viewport.yRange].every(Number.isFinite)) {
-            throw new Error('Native domain rendering requires finite viewport ranges.');
-        }
-        xMin = viewport.xRange[0];
-        xMax = viewport.xRange[1];
-        yMin = viewport.yRange[0];
-        yMax = viewport.yRange[1];
+    if (typeof viewport.centerRe !== 'string' || typeof viewport.centerIm !== 'string' ||
+        typeof viewport.xSpan !== 'string' || typeof viewport.ySpan !== 'string' ||
+        !Number.isInteger(viewport.precisionBits)) {
+        throw new Error('Native domain rendering requires one MPFR-centered viewport.');
     }
+    const centerRePointer = writeCString(viewport.centerRe, allocations);
+    const centerImPointer = writeCString(viewport.centerIm, allocations);
+    const xSpanPointer = writeCString(viewport.xSpan, allocations);
+    const ySpanPointer = writeCString(viewport.ySpan, allocations);
     let outputCapacity = 0;
     let outputPointer = 0;
-    const preciseRenderContextPointer = precise ? wasm.ce_create_precise_domain_render_context(
-        configPointer, centerRePointer, centerImPointer,
-        viewport.zoomPower, viewport.precisionBits,
+    const renderContextPointer = wasm.ce_create_domain_render_context(
+        configPointer, centerRePointer, centerImPointer, xSpanPointer, ySpanPointer,
+        viewport.precisionBits,
         viewport.width, viewport.height,
         orbitMode, paletteRgPointer, paletteBPointer, paletteCount,
-        style.brightness, style.contrast, style.saturation, style.lightnessCycles, 1
-    ) : 0;
-    if (precise && !preciseRenderContextPointer) {
-        throw new Error('Native precise domain render-context allocation failed.');
-    }
-    const renderContextPointer = precise ? 0 : wasm.ce_create_domain_render_context(
-        configPointer, xMin, xMax, yMin, yMax,
-        paletteRgPointer, paletteBPointer, paletteCount,
         style.brightness, style.contrast, style.saturation, style.lightnessCycles
     );
-    if (!precise && !renderContextPointer) {
+    if (!renderContextPointer) {
         throw new Error('Native domain render-context allocation failed.');
     }
 
@@ -1997,37 +1977,21 @@ export function createCompiledDomainTileRenderer(snapshot) {
         const outputLength = tile.width * tile.height * 4;
         if (outputLength > outputCapacity) {
             if (outputPointer) wasm.ce_free(outputPointer);
-            outputCapacity = Math.max(outputLength, 256 * 256 * 4);
+            outputCapacity = outputLength;
             outputPointer = alloc(outputCapacity);
         }
-        const geometry = [
-            viewport.width, viewport.height,
-            tile.x, tile.y, tile.width, tile.height, tile.scale
-        ];
-        const status = precise
-            ? wasm.ce_render_precise_domain_tile(
-                preciseRenderContextPointer,
-                tile.x, tile.y, tile.width, tile.height, tile.scale,
-                tile.adaptiveQuality ? 1 : 0, repairCountPointer, outputPointer
-            )
-            : wasm.ce_render_domain_tile(
-                configPointer, xMin, xMax, yMin, yMax, ...geometry,
-                orbitMode, renderContextPointer, tile.adaptiveQuality ? 1 : 0, outputPointer
-            );
+        const status = wasm.ce_render_domain_tile(
+            renderContextPointer,
+            tile.x, tile.y, tile.width, tile.height, tile.scale,
+            tile.adaptiveQuality ? 1 : 0, outputPointer
+        );
         if (status !== 0) throw new Error(`Native domain tile failed with status ${status}.`);
-        render.lastStats = Object.freeze({
-            precise,
-            perturbationRepairs: precise ? memoryView().getUint32(repairCountPointer, true) : 0
-        });
         const result = new Uint8ClampedArray(outputLength);
         result.set(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
         return result;
     };
-    render.lastStats = Object.freeze({ precise, perturbationRepairs: 0 });
-
     render.dispose = () => {
         if (outputPointer) wasm.ce_free(outputPointer);
-        if (preciseRenderContextPointer) wasm.ce_destroy_precise_domain_render_context(preciseRenderContextPointer);
         if (renderContextPointer) wasm.ce_destroy_domain_render_context(renderContextPointer);
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     };

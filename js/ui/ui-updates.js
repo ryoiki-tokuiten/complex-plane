@@ -1020,8 +1020,8 @@ function outputFormulaModel() {
         ? getChainingTitleHTML(isSinglePanelChain ? state.chainCount - 1 : 0, state.chainingMode)
         : `w = ${fND}`;
 
-    const chainLabel = isSinglePanelChain ? `Chain ${state.chainCount - 1}` : 'Chain 0';
-    const mappedChainLabel = isSinglePanelChain ? `mapped chain ${state.chainCount - 1}` : 'mapped chain 0';
+    const chainLabel = isSinglePanelChain ? `Iteration ${state.chainCount}` : 'Chain 0';
+    const mappedChainLabel = isSinglePanelChain ? `mapped iteration ${state.chainCount}` : 'mapped chain 0';
     const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
 
     return {

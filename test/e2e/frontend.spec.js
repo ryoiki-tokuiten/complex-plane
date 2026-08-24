@@ -303,11 +303,11 @@ test('raster fold view stays connected and chain depth settles safely', async ({
     });
     await chainSlider.dispatchEvent('change');
 
-    expect(maxColumnsDuringDrag).toBe(1);
+    expect(maxColumnsDuringDrag).toBe(25);
     await expect(chainSlider).toHaveValue('512');
     await expect(page.locator('[id^="w_plane_column"]')).toHaveCount(1);
     await page.waitForTimeout(400);
-    await expect(page.locator('#w-plane-title')).toContainText('Chain 511');
+    await expect(page.locator('#w-plane-title')).toContainText('Iteration 512');
     expect(errors).toEqual([]);
 });
 

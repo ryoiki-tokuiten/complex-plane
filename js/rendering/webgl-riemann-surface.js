@@ -179,7 +179,7 @@ const BRANCH_INDICES_CACHE_LIMIT = 96;
 const HUD_BRANCH_LABEL_CACHE = new Map();
 const HUD_COMPONENT_LABEL_CACHE = new Map();
 const SINGLE_BRANCH_LABEL_KEY = Object.freeze([]);
-const CHAIN_STAGE_LABELS = Array.from({ length: LIMITS.maxStage + 1 }, (_, stage) => `chain ${Math.max(0, stage - 1)}`);
+const CHAIN_STAGE_LABELS = Array.from({ length: LIMITS.maxStage + 1 }, (_, stage) => `iteration ${stage}`);
 
 const EMPTY_DYNAMIC_AGGREGATE_GLSL = `bool evaluateDynamicAggregate(
   vec2 s,
@@ -1865,7 +1865,7 @@ function updateHud(renderer, branchIndices, hasBranches, stage) {
     rememberBounded(HUD_BRANCH_LABEL_CACHE, branchKey, branchLabel, BRANCH_INDICES_CACHE_LIMIT);
   }
 
-  const stageLabel = state.chainingEnabled ? (CHAIN_STAGE_LABELS[stage] || `chain ${Math.max(0, stage - 1)}`) : 'output';
+  const stageLabel = state.chainingEnabled ? (CHAIN_STAGE_LABELS[stage] || `iteration ${stage}`) : 'output';
   const text = `${stageLabel} | ${componentLabel} | ${branchLabel} | GPU: ${backendLabel}`;
   if (renderer.hud.textContent !== text) renderer.hud.textContent = text;
 }

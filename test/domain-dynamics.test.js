@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { applyFractalPreset } from '../js/analysis/fractal-presets.js';
 import { runtime } from '../js/store/runtime.js';
 import { context, state } from '../js/store/state.js';
+import { eventBus } from '../js/store/events.js';
 import {
     getEffectiveBaseTransformFunction,
     getMappedTransformProfile
@@ -12,6 +13,7 @@ import { completeNativeMapOptions, evaluateDomainColoringMappedTransform } from 
 import {
     buildPlanarDomainDynamicsSnapshot,
     cancelPlanarDomainDynamics,
+    matchesPlanarDomainViewport,
     renderPlanarDomainDynamics,
     selectDomainDynamicsBackend
 } from '../js/rendering/domain-dynamics.js';
@@ -160,8 +162,11 @@ function colorDomainDynamicsPoint(snapshot, re, im) {
         viewport: {
             width: 1,
             height: 1,
-            xRange: [re - 0.5, re + 0.5],
-            yRange: [im - 0.5, im + 0.5]
+            centerRe: String(re),
+            centerIm: String(im),
+            xSpan: '1',
+            ySpan: '1',
+            precisionBits: 256
         }
     };
     const pixel = renderDomainDynamicsTile(pointSnapshot, {
@@ -170,7 +175,7 @@ function colorDomainDynamicsPoint(snapshot, re, im) {
     return [pixel[0], pixel[1], pixel[2]];
 }
 
-function makeFakeCanvasEnvironment(targetCtx) {
+function makeFakeCanvasEnvironment(targetCtx, { tileDelayMs = 0 } = {}) {
     const previousImageData = globalThis.ImageData;
     const previousWorker = globalThis.Worker;
 
@@ -208,13 +213,15 @@ function makeFakeCanvasEnvironment(targetCtx) {
                 return;
             }
             if (message.type === 'cancel') {
+                const renderer = this.renderers.get(message.jobId);
+                renderer?.dispose?.();
                 this.renderers.delete(message.jobId);
                 return;
             }
             if (message.type !== 'tile') return;
+            const renderer = this.renderers.get(message.jobId);
             setTimeout(() => {
                 try {
-                    const renderer = this.renderers.get(message.jobId);
                     if (!renderer) return;
                     const pixels = renderer(message.tile);
                     this.onmessage?.({ data: {
@@ -227,7 +234,7 @@ function makeFakeCanvasEnvironment(targetCtx) {
                         tile: message.tile, message: error.message
                     } });
                 }
-            }, 0);
+            }, tileDelayMs);
         }
 
         terminate() {
@@ -245,37 +252,16 @@ function makeFakeCanvasEnvironment(targetCtx) {
 }
 
 function makeTargetCtx() {
-    const ownerDocument = {
-        createElement(tagName) {
-            assert.equal(tagName, 'canvas');
-            const canvas = {
-                width: 0,
-                height: 0,
-                getContext(type) {
-                    assert.equal(type, '2d');
-                    return {
-                        puts: [],
-                        putImageData(image, x, y) {
-                            this.puts.push({ image, x, y });
-                        }
-                    };
-                }
-            };
-            return canvas;
-        }
-    };
-    const target = {
-        draws: [],
+    return {
+        puts: [],
         save() {},
         restore() {},
         setTransform() {},
         clearRect() {},
-        drawImage(canvas, x, y) {
-            this.draws.push({ canvas, x, y });
+        putImageData(image, x, y) {
+            this.puts.push({ image, x, y });
         }
     };
-    target.canvas = { ownerDocument };
-    return target;
 }
 
 function algebraicFactor(func, overrides = {}) {
@@ -343,8 +329,11 @@ function makeAlgebraicDynamicsSnapshot(overrides = {}) {
         viewport: {
             width: 4,
             height: 4,
-            xRange: [-2, 2],
-            yRange: [-2, 2]
+            centerRe: '0',
+            centerIm: '0',
+            xSpan: '4',
+            ySpan: '4',
+            precisionBits: 256
         },
         ...overrides
     };
@@ -670,13 +659,140 @@ test('large cos viewports stay colored and algebraic identity wrappers keep the 
     }
 });
 
+test('meromorphic poles stay on the sphere instead of invalidating the tile', () => {
+    const before = snapshotState();
+    const tile = { x: 0, y: 0, width: 1, height: 1, scale: 1 };
+
+    try {
+        for (const fixture of [
+            { functionKey: 'gamma', centerRe: 0, continuation: false },
+            { functionKey: 'zeta', centerRe: 1, continuation: true }
+        ]) {
+            configureDynamics({
+                currentFunction: fixture.functionKey,
+                chainingEnabled: false,
+                chainCount: 1,
+                zetaContinuationEnabled: fixture.continuation,
+                domainLightnessCycles: 1
+            });
+            const plane = {
+                width: 1,
+                height: 1,
+                currentVisXRange: [fixture.centerRe - 0.5, fixture.centerRe + 0.5],
+                currentVisYRange: [-0.5, 0.5]
+            };
+            const pixels = renderDomainDynamicsTile(buildPlanarDomainDynamicsSnapshot(state, plane), tile);
+            assert.equal(pixels[3], 255);
+            assert.ok(pixels[0] + pixels[1] + pixels[2] > 0);
+        }
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('zeta without continuation is undefined at and left of Re(z) = 1', () => {
+    const before = snapshotState();
+    const plane = {
+        width: 1,
+        height: 1,
+        currentVisXRange: [-0.5, 0.5],
+        currentVisYRange: [-0.5, 0.5]
+    };
+
+    try {
+        configureDynamics({
+            currentFunction: 'zeta',
+            chainingEnabled: false,
+            chainCount: 1,
+            zetaContinuationEnabled: false,
+            domainLightnessCycles: 1
+        });
+        const directSnapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
+        assert.equal(evaluateDomainDynamicsValue(directSnapshot, 0, 0), null);
+        assert.ok(evaluateDomainDynamicsValue(directSnapshot, 2, 0));
+        assert.deepEqual(
+            Array.from(renderDomainDynamicsTile(
+                directSnapshot,
+                { x: 0, y: 0, width: 1, height: 1, scale: 1 }
+            )),
+            [0, 0, 0, 255]
+        );
+        const boundaryPixels = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, {
+                width: 3,
+                height: 1,
+                currentVisXRange: [-3, 3],
+                currentVisYRange: [-0.5, 0.5]
+            }),
+            { x: 0, y: 0, width: 3, height: 1, scale: 1 }
+        );
+        assert.deepEqual(Array.from(boundaryPixels.subarray(0, 8)), [0, 0, 0, 255, 0, 0, 0, 255]);
+        assert.ok(boundaryPixels[8] + boundaryPixels[9] + boundaryPixels[10] > 0);
+
+        state.zetaContinuationEnabled = true;
+        const continued = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, plane),
+            { x: 0, y: 0, width: 1, height: 1, scale: 1 }
+        );
+        assert.ok(continued[0] + continued[1] + continued[2] > 0);
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('sphere deltas preserve a deep viewport around a Möbius pole', () => {
+    const before = snapshotState();
+    const plane = {
+        width: 3,
+        height: 3,
+        currentVisXRange: [-1, 1],
+        currentVisYRange: [-1, 1],
+        preciseViewport: {
+            centerRe: '0',
+            centerIm: '0',
+            zoomPower: 125,
+            precisionBits: 512,
+            width: 3,
+            height: 3
+        }
+    };
+
+    try {
+        configureDynamics({
+            currentFunction: 'mobius',
+            chainingEnabled: false,
+            chainCount: 1,
+            mobiusA: { re: 0, im: 0 },
+            mobiusB: { re: 1, im: 0 },
+            mobiusC: { re: 1, im: 0 },
+            mobiusD: { re: 0, im: 0 },
+            domainLightnessCycles: 1
+        });
+        const pixels = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, plane),
+            { x: 0, y: 0, width: 3, height: 3, scale: 1 }
+        );
+        const colors = new Set();
+        for (let index = 0; index < pixels.length; index += 4) {
+            assert.equal(pixels[index + 3], 255);
+            colors.add(`${pixels[index]},${pixels[index + 1]},${pixels[index + 2]}`);
+        }
+        assert.ok(colors.size >= 4);
+    } finally {
+        restoreState(before);
+    }
+});
+
 test('adaptive-quality rendering preserves the tile contract for sparse edges', () => {
     const snapshot = makeAlgebraicDynamicsSnapshot({
         viewport: {
             width: 64,
             height: 64,
-            xRange: [-2, 2],
-            yRange: [-2, 2]
+            centerRe: '0',
+            centerIm: '0',
+            xSpan: '4',
+            ySpan: '4',
+            precisionBits: 256
         }
     });
     const renderTile = createDomainDynamicsTileRenderer(snapshot);
@@ -690,6 +806,85 @@ test('adaptive-quality rendering preserves the tile contract for sparse edges', 
         assert.equal(refined[index], 255);
     }
     assert.deepEqual(Array.from(basePixels), Array.from(originalPixels));
+});
+
+test('domain tiles are byte-identical across independent render contexts', () => {
+    const before = snapshotState();
+
+    try {
+        configureDynamics({
+            currentFunction: 'cos',
+            chainingEnabled: false,
+            chainCount: 1,
+            domainLightnessCycles: 1
+        });
+        const plane = {
+            width: 64,
+            height: 48,
+            currentVisXRange: [-1500, 1500],
+            currentVisYRange: [-1125, 1125]
+        };
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
+        const tile = { x: 0, y: 0, width: 64, height: 48, scale: 1, adaptiveQuality: true };
+
+        assert.deepEqual(
+            renderDomainDynamicsTile(snapshot, tile),
+            renderDomainDynamicsTile(snapshot, tile)
+        );
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('domain color at a world point is independent of the reference center', () => {
+    const before = snapshotState();
+
+    try {
+        configureDynamics({
+            currentFunction: 'algebraic_chaining',
+            algebraicChainingEnabled: true,
+            algebraicChainingZExpr: 'z',
+            algebraicChainingTerms: [{
+                coeff: { re: 1, im: 0 },
+                factors: [algebraicFactor('tan', { chainedFunc: 'sec' })]
+            }],
+            chainingEnabled: true,
+            chainCount: 79,
+            domainLightnessCycles: 1
+        });
+        const pixelStep = 0.07;
+        const colors = [0, 1, 2].map(offset => {
+            const centerRe = offset * pixelStep;
+            const plane = {
+                width: 100,
+                height: 100,
+                currentVisXRange: [centerRe - 3.5, centerRe + 3.5],
+                currentVisYRange: [-3.5, 3.5],
+                preciseViewport: {
+                    centerRe: String(centerRe),
+                    centerIm: '0',
+                    zoomPower: 0,
+                    precisionBits: 256,
+                    width: 100,
+                    height: 100
+                }
+            };
+            const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
+            return renderDomainDynamicsTile(snapshot, {
+                x: 50 - offset,
+                y: 50,
+                width: 1,
+                height: 1,
+                scale: 1,
+                adaptiveQuality: false
+            });
+        });
+
+        assert.deepEqual(colors[1], colors[0]);
+        assert.deepEqual(colors[2], colors[0]);
+    } finally {
+        restoreState(before);
+    }
 });
 
 test('Mandelbrot refinement is identical across worker tile boundaries', () => {
@@ -799,6 +994,8 @@ test('async renderer reaches final scale one without another redraw trigger', as
     const before = snapshotState();
     const targetCtx = makeTargetCtx();
     const restoreGlobals = makeFakeCanvasEnvironment(targetCtx);
+    let redraws = 0;
+    const unsubscribe = eventBus.on('redraw:all', () => { redraws += 1; });
 
     try {
         cancelPlanarDomainDynamics();
@@ -806,14 +1003,17 @@ test('async renderer reaches final scale one without another redraw trigger', as
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
 
         assert.equal(renderPlanarDomainDynamics(targetCtx, PLANE, snapshot), true);
-        await waitFor(() => targetCtx.draws.some(draw => draw.canvas.width === PLANE.width && draw.canvas.height === PLANE.height) &&
+        assert.equal(matchesPlanarDomainViewport(runtime.rendering.domainViewport, PLANE), true);
+        await waitFor(() => targetCtx.puts.some(put => put.image.width === PLANE.width && put.image.height === PLANE.height) &&
             selectDomainDynamicsBackend().queue.length === 0);
-        assert.equal(targetCtx.draws.length, 1);
+        assert.equal(targetCtx.puts.length, 1);
+        assert.equal(redraws, 2);
         assert.equal(selectDomainDynamicsBackend().queue.length, 0);
         assert.equal(selectDomainDynamicsBackend().queueIndex, 0);
         assert.equal(runtime.rendering.processingDomainDynamics, false);
     } finally {
         cancelPlanarDomainDynamics();
+        unsubscribe();
         restoreGlobals();
         restoreState(before);
     }
@@ -845,6 +1045,23 @@ test('domain-coloring redraws reuse an active CPU job while dirty state is being
     }
 });
 
+test('function and algebraic-expression changes request a domain redraw', () => {
+    const before = snapshotState();
+    const events = [];
+    const unsubscribe = eventBus.on('redraw:domain', markDirty => events.push(markDirty));
+
+    try {
+        context.domainColoringDirty = false;
+        state.currentFunction = state.currentFunction === 'cos' ? 'tan' : 'cos';
+        state.algebraicChainingZExpr = 'z + 1';
+        assert.deepEqual(events, [true, true]);
+        assert.equal(context.domainColoringDirty, true);
+    } finally {
+        unsubscribe();
+        restoreState(before);
+    }
+});
+
 test('async renderer ignores canceled old final tiles after viewport changes', async () => {
     const before = snapshotState();
     const targetCtx = makeTargetCtx();
@@ -861,8 +1078,38 @@ test('async renderer ignores canceled old final tiles after viewport changes', a
         assert.equal(renderPlanarDomainDynamics(targetCtx, oldPlane, oldSnapshot), true);
         assert.equal(renderPlanarDomainDynamics(targetCtx, nextPlane, nextSnapshot), true);
 
-        await waitFor(() => targetCtx.draws.some(draw => draw.canvas.width === nextPlane.width && draw.canvas.height === nextPlane.height));
-        assert.equal(targetCtx.draws.some(draw => draw.canvas.width === oldPlane.width), false);
+        await waitFor(() => targetCtx.puts.some(put => put.image.width === nextPlane.width && put.image.height === nextPlane.height));
+        assert.equal(targetCtx.puts.some(put => put.image.width === oldPlane.width), false);
+    } finally {
+        cancelPlanarDomainDynamics();
+        restoreGlobals();
+        restoreState(before);
+    }
+});
+
+test('late canceled-worker messages cannot steal the active tile slot', async () => {
+    const before = snapshotState();
+    const targetCtx = makeTargetCtx();
+    const restoreGlobals = makeFakeCanvasEnvironment(targetCtx, { tileDelayMs: 10 });
+    const oldPlane = { ...PLANE, width: 7 };
+    const nextPlane = { ...PLANE, width: 11 };
+
+    try {
+        cancelPlanarDomainDynamics();
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
+        const oldSnapshot = buildPlanarDomainDynamicsSnapshot(state, oldPlane);
+        const nextSnapshot = buildPlanarDomainDynamicsSnapshot(state, nextPlane);
+
+        renderPlanarDomainDynamics(targetCtx, oldPlane, oldSnapshot);
+        await waitFor(() => selectDomainDynamicsBackend().workers.some(worker => worker.busy));
+        renderPlanarDomainDynamics(targetCtx, nextPlane, nextSnapshot);
+
+        await waitFor(() => targetCtx.puts.some(put => put.image.width === nextPlane.width));
+        const backend = selectDomainDynamicsBackend();
+        assert.equal(runtime.rendering.domainDynamicsStats.state, 'complete');
+        assert.equal(runtime.rendering.processingDomainDynamics, false);
+        assert.equal(backend.remainingTiles, 0);
+        assert.equal(backend.workers.every(worker => !worker.busy && worker.jobId === 0), true);
     } finally {
         cancelPlanarDomainDynamics();
         restoreGlobals();
@@ -1024,13 +1271,12 @@ test('deep domain snapshots render from exact centers and preserve digits', () =
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
         assert.equal(snapshot.viewport.centerRe, plane.preciseViewport.centerRe);
         assert.equal(Object.hasOwn(snapshot.viewport, 'xRange'), false);
+        assert.equal(snapshot.viewport.xSpan, '7e-125');
         const renderTile = createDomainDynamicsTileRenderer(snapshot);
         try {
             const pixels = renderTile({ x: 0, y: 0, width: plane.width, height: plane.height, scale: 1 });
             assert.equal(pixels.length, 64);
             assert.equal(pixels.every((value, index) => index % 4 !== 3 || value === 255), true);
-            assert.equal(renderTile.lastStats.precise, true);
-            assert.ok(Number.isInteger(renderTile.lastStats.perturbationRepairs));
         } finally {
             renderTile.dispose();
         }

@@ -1822,7 +1822,7 @@ function handleCanvasUp(ctx, event) {
     updatePointerSnapshot(ctx.pendingMove, event);
     const pos = canvasPosition(ctx, ctx.pendingMove);
     updateProbe(ctx, pos, canvasPositionInsideCanvas(ctx, pos));
-    requestUiRedraw();
+    requestDomainRedraw(true);
 }
 
 function handleCanvasLeave(ctx) {
@@ -2289,11 +2289,7 @@ function bindChainingControls() {
 
     bindSlider('chainCountSlider', 'chainCount', parseInteger, value => {
         if (controls.chainCountValueDisplay) controls.chainCountValueDisplay.textContent = value;
-    });
-
-    bindElementListener(controls.chainCountSlider, 'change', () => {
-        updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
-        requestUiRedraw();
+        updateChainingColumns(state.chainingEnabled ? value : 1);
     });
 
     bindElementListener(controls.enableChainingCb, 'change', event => {

@@ -16,7 +16,7 @@ static ce_complex ce_make(double re, double im) {
 
 void *ce_alloc(size_t size) { return malloc(size); }
 void ce_free(void *pointer) { free(pointer); }
-uint32_t ce_abi_version(void) { return 2; }
+uint32_t ce_abi_version(void) { return 3; }
 
 ce_complex ce_add(ce_complex a, ce_complex b) {
     return ce_make(a.re + b.re, a.im + b.im);
@@ -680,7 +680,10 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
         case CE_FN_MOBIUS: return ce_div(ce_add(ce_mul(config->mobius_a, z), config->mobius_b),
                                         ce_add(ce_mul(config->mobius_c, z), config->mobius_d));
         case CE_FN_ZETA:
-            if (!config->zeta_continuation) return ce_zeta_direct(z.re, z.im, 100);
+            if (!config->zeta_continuation) {
+                if (z.re <= 1.0) return ce_make(NAN, NAN);
+                return ce_zeta_direct(z.re, z.im, 100);
+            }
             if (z.re == 0.0 && z.im == 0.0) return ce_make(-0.5, 0.0);
             if (z.im == 0.0 && z.re < 0.0 && fmod(z.re, 2.0) == 0.0) return ce_make(0.0, 0.0);
             return ce_zeta_eta(z.re, z.im, 32);

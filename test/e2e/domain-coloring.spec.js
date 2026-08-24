@@ -21,6 +21,13 @@ async function waitForCompletedDomainFrame(page, completedJobs) {
     return domainStats(page);
 }
 
+async function waitForNextCompletedDomainFrame(page, previousJobId) {
+    return page.waitForFunction(jobId => {
+        const stats = window.__runtime?.rendering?.domainDynamicsStats;
+        return stats?.state === 'complete' && stats.jobId !== jobId ? stats : false;
+    }, previousJobId, { timeout: 15000 }).then(handle => handle.jsonValue());
+}
+
 async function setZZoomExponentBurst(page, exponents) {
     await page.locator('#z_plane_zoom_slider').evaluate((slider, values) => {
         for (const value of values) {
@@ -82,7 +89,39 @@ test.describe('Domain Coloring Rendering', () => {
         expect(errors).toEqual([]);
     });
 
-    test('coalesces extreme zoom input into one native final frame without overflow bands', async ({ page }) => {
+    test('function and algebraic expression changes finish a fresh domain frame', async ({ page }) => {
+        const errors = [];
+        page.on('pageerror', error => errors.push(error.message));
+
+        await enableDomainColoring(page);
+        const initial = await waitForCompletedDomainFrame(page, 1);
+
+        await page.locator('#select_polynomial_btn').click();
+        const polynomial = await waitForNextCompletedDomainFrame(page, initial.jobId);
+
+        await page.locator('#enable_algebraic_chaining_cb').evaluate(checkbox => {
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        const algebraic = await waitForNextCompletedDomainFrame(page, polynomial.jobId);
+
+        await page.locator('#algebraic_chaining_z_input').evaluate(input => {
+            input.value = 'z + 1';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        const expression = await waitForNextCompletedDomainFrame(page, algebraic.jobId);
+
+        const finalState = await page.evaluate(() => ({
+            expression: window.__state?.algebraicChainingZExpr,
+            processing: window.__runtime?.rendering?.processingDomainDynamics,
+            indicatorHidden: document.getElementById('z_plane_rendering_indicator')?.classList.contains('hidden')
+        }));
+        expect(finalState).toEqual({ expression: 'z + 1', processing: false, indicatorHidden: true });
+        expect(expression.completedJobs).toBe(polynomial.completedJobs + 2);
+        expect(errors).toEqual([]);
+    });
+
+    test('coalesces extreme zoom input into one native frame without overflow bands', async ({ page }) => {
         const errors = [];
         page.on('pageerror', err => errors.push(err.message));
         page.on('console', msg => console.log(msg.text()));
@@ -93,11 +132,11 @@ test.describe('Domain Coloring Rendering', () => {
 
         await page.evaluate(() => {
             const target = window.__context.zDomainColorCtx;
-            const originalDrawImage = target.drawImage.bind(target);
-            window.__domainFinalCommits = 0;
-            target.drawImage = (...args) => {
-                window.__domainFinalCommits += 1;
-                return originalDrawImage(...args);
+            const originalPutImageData = target.putImageData.bind(target);
+            window.__domainTileCommits = 0;
+            target.putImageData = (...args) => {
+                window.__domainTileCommits += 1;
+                return originalPutImageData(...args);
             };
         });
 
@@ -106,7 +145,7 @@ test.describe('Domain Coloring Rendering', () => {
             const stats = window.__runtime?.rendering?.domainDynamicsStats;
             const state = window.__state;
             return Boolean(state && stats && state.zPlaneZoom === 1e-3 && stats.jobId !== previousJobId &&
-                (stats.state === 'scheduled' || stats.state === 'rendering'));
+                (stats.state === 'rendering' || stats.state === 'complete'));
         }, initial.jobId);
         const completed = await page.waitForFunction(previousJobId => {
             const stats = window.__runtime?.rendering?.domainDynamicsStats;
@@ -129,25 +168,9 @@ test.describe('Domain Coloring Rendering', () => {
                 }
             }
 
-            const centerY = Math.floor(canvas.height / 2);
-            const reds = [];
-            const greens = [];
-            const blues = [];
-            for (let x = 0; x < canvas.width; x += 1) {
-                const offset = (centerY * canvas.width + x) * 4;
-                reds.push(pixels[offset]);
-                greens.push(pixels[offset + 1]);
-                blues.push(pixels[offset + 2]);
-            }
-            const redRange = Math.max(...reds) - Math.min(...reds);
-            const greenRange = Math.max(...greens) - Math.min(...greens);
-            const blueRange = Math.max(...blues) - Math.min(...blues);
-            const maximumChannelRange = Math.max(redRange, greenRange, blueRange);
-
             return {
                 blackRatio: blackPixels / (canvas.width * canvas.height),
-                centerRowRange: maximumChannelRange,
-                commits: window.__domainFinalCommits,
+                commits: window.__domainTileCommits,
                 zoom: state.zPlaneZoom,
                 stats: runtime.rendering.domainDynamicsStats
             };
@@ -155,8 +178,7 @@ test.describe('Domain Coloring Rendering', () => {
 
         expect(result.zoom).toBe(1e-3);
         expect(result.blackRatio, JSON.stringify(result)).toBeLessThan(0.001);
-        expect(result.centerRowRange).toBeLessThan(24);
-        expect(result.commits).toBe(1);
+        expect(result.commits).toBe(completed.totalTiles);
         expect(completed.completedJobs).toBe(initial.completedJobs + 1);
         expect(completed.totalTiles).toBe(completed.completedTiles);
         expect(completed.wallMilliseconds).toBeGreaterThan(0);

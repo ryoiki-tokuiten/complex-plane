@@ -16,45 +16,19 @@ import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
 
 const { controls } = context;
-const SURFACE_REDRAW_DELAY_MS = 90;
-const SURFACE_REDRAW_MAX_WAIT_MS = 240;
-let surfaceRedrawTimer = null;
 let surfaceRedrawFrame = null;
-let surfaceRedrawFirstRequestTime = 0;
 
 function runSurfaceRedraw() {
     surfaceRedrawFrame = null;
-    surfaceRedrawFirstRequestTime = 0;
-    if (state.riemannSurfaceEnabled && !state.realPlotsEnabled) {
-        drawWPlaneContent({ renderRiemannSurface: true });
-    }
     if (state.realPlotsEnabled && state.show2DContourPlot) {
         draw2DContourPlot(controls.contour2DCanvas);
     }
     if (state.realPlotsEnabled) drawRealPlot();
-    if (state.show2DContourPlot && !state.realPlotsEnabled && state.riemannSurfaceEnabled) {
-        draw2DContourPlot(controls.contour2DCanvas);
-    }
 }
 
 function requestSurfaceRedraw() {
-    if (!state.realPlotsEnabled && !state.riemannSurfaceEnabled) return;
-
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    if (!surfaceRedrawFirstRequestTime) surfaceRedrawFirstRequestTime = now;
-    if (surfaceRedrawTimer) clearTimeout(surfaceRedrawTimer);
-    if (surfaceRedrawFrame) {
-        cancelAnimationFrame(surfaceRedrawFrame);
-        surfaceRedrawFrame = null;
-    }
-
-    const delay = now - surfaceRedrawFirstRequestTime >= SURFACE_REDRAW_MAX_WAIT_MS
-        ? 0
-        : SURFACE_REDRAW_DELAY_MS;
-    surfaceRedrawTimer = setTimeout(() => {
-        surfaceRedrawTimer = null;
-        surfaceRedrawFrame = requestAnimationFrame(runSurfaceRedraw);
-    }, delay);
+    if (!state.realPlotsEnabled) return;
+    if (!surfaceRedrawFrame) surfaceRedrawFrame = requestAnimationFrame(runSurfaceRedraw);
 }
 
 function syncOptionalColumn(column, shouldHide, onHide) {
@@ -95,7 +69,10 @@ export function renderApplicationFrame(timestamp) {
 
     if (!state.realPlotsEnabled) {
         drawZPlaneContent(timestamp);
-        drawWPlaneContent({ renderRiemannSurface: !state.riemannSurfaceEnabled });
+        drawWPlaneContent();
+        if (state.show2DContourPlot && state.riemannSurfaceEnabled) {
+            draw2DContourPlot(controls.contour2DCanvas);
+        }
     }
     updateProbeInfo();
 

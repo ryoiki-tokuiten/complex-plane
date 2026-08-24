@@ -2,6 +2,7 @@ import { state, context, subscribeState } from '../store/state.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
     cancelPlanarDomainDynamics,
+    matchesPlanarDomainViewport,
     renderPlanarDomainDynamics
 } from './domain-dynamics.js';
 import { hslToRgb } from './canvas-primitives.js';
@@ -11,12 +12,14 @@ import {
     normalizeDomainColorLogMagnitude
 } from '../constants/domain-dynamics.js';
 import { requireFiniteNumber } from '../utils/numeric-contracts.js';
+import { eventBus } from '../store/events.js';
 
 const DOMAIN_LIGHTNESS_MIN = 0.34;
 const DOMAIN_LIGHTNESS_MAX = 0.72;
 
 subscribeState(() => {
     context.domainColoringDirty = true;
+    eventBus.emit('redraw:domain', true);
 }, [
     'currentFunction',
     'mapPresentation',
@@ -50,6 +53,7 @@ subscribeState(() => {
 
 subscribeState(({ value }) => {
     context.domainColoringDirty = true;
+    eventBus.emit('redraw:domain', true);
     if (!value) cancelPlanarDomainDynamics();
 }, 'domainColoringEnabled');
 
@@ -73,6 +77,8 @@ export function renderPlanarDomainColoring(tCtx, pP) {
     const dynamicsSnapshot = buildPlanarDomainDynamicsSnapshot(state, pP);
     renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot);
 }
+
+export { matchesPlanarDomainViewport };
 
 
 export function getPaletteColor(paletteId, h) {
