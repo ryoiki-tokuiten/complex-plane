@@ -532,8 +532,10 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
 }
 
 function complexParts(value, defaultRe, defaultIm) {
-    const re = Number(value?.re);
-    const im = Number(value?.im);
+    let re = value?.re;
+    let im = value?.im;
+    if (typeof re !== 'number') re = Number(re);
+    if (typeof im !== 'number') im = Number(im);
     if (Number.isFinite(re) && Number.isFinite(im)) return [re, im];
     if (defaultRe !== undefined && defaultIm !== undefined) return [defaultRe, defaultIm];
     throw new Error('Native complex input requires finite real and imaginary components.');
@@ -545,8 +547,16 @@ function alloc(size) {
     return pointer;
 }
 
+let cachedMemoryBuffer = null;
+let cachedMemoryView = null;
+
 function memoryView() {
-    return new DataView(wasm.memory.buffer);
+    const buffer = wasm.memory.buffer;
+    if (buffer !== cachedMemoryBuffer) {
+        cachedMemoryBuffer = buffer;
+        cachedMemoryView = new DataView(buffer);
+    }
+    return cachedMemoryView;
 }
 
 function requireBoolean(value, label) {
@@ -746,8 +756,33 @@ function writeMapConfig(pointer, options, allocations) {
 }
 
 function writePointBuffer(pointer, points) {
-    const view = memoryView();
-    points.forEach((point, index) => writeComplex(view, pointer + index * 16, point));
+    const target = new Float64Array(wasm.memory.buffer, pointer, points.length * 2);
+    for (let index = 0, at = 0; index < points.length; index += 1, at += 2) {
+        const point = points[index];
+        let re = point?.re;
+        let im = point?.im;
+        if (typeof re !== 'number') re = Number(re);
+        if (typeof im !== 'number') im = Number(im);
+        if (!Number.isFinite(re) || !Number.isFinite(im)) {
+            throw new Error('Native complex input requires finite real and imaginary components.');
+        }
+        target[at] = re;
+        target[at + 1] = im;
+    }
+}
+
+function copyComplexBuffer(pointer, count) {
+    if (!count) return new Float64Array();
+    return new Float64Array(new Float64Array(wasm.memory.buffer, pointer, count * 2));
+}
+
+function readComplexObjects(pointer, count) {
+    const source = new Float64Array(wasm.memory.buffer, pointer, count * 2);
+    const result = new Array(count);
+    for (let index = 0, at = 0; index < count; index += 1, at += 2) {
+        result[index] = { re: source[at], im: source[at + 1] };
+    }
+    return result;
 }
 
 export function evaluateNativeExpressionProgram(program, environments, mapOptions, settled = false) {
@@ -916,10 +951,7 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
         const count = view.getUint32(statsPointer, true);
         const attempts = view.getUint32(statsPointer + 4, true);
         const invalidCount = view.getUint32(statsPointer + 8, true);
-        const values = Array.from({ length: count }, (_, index) => ({
-            re: view.getFloat64(outputPointer + index * 16, true),
-            im: view.getFloat64(outputPointer + index * 16 + 8, true)
-        }));
+        const values = readComplexObjects(outputPointer, count);
         const attemptErrors = errorsPointer
             ? new Uint8Array(new Uint8Array(wasm.memory.buffer, errorsPointer, attempts))
             : new Uint8Array();
@@ -941,16 +973,9 @@ export function evaluateNativePoints(options, points) {
         writePointBuffer(inputPointer, points);
         const status = wasm.ce_evaluate_points(configPointer, inputPointer, points.length, outputPointer, validPointer);
         if (status !== 0) throw new Error(`Native point evaluation failed with status ${status}.`);
-        const view = memoryView();
         const valid = new Uint8Array(points.length);
         valid.set(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
-        const values = new Array(points.length);
-        for (let index = 0; index < points.length; index += 1) {
-            values[index] = {
-                re: view.getFloat64(outputPointer + index * 16, true),
-                im: view.getFloat64(outputPointer + index * 16 + 8, true)
-            };
-        }
+        const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
@@ -976,15 +1001,8 @@ export function evaluateNativeAlgebraic(options, points, parameters = points) {
             configPointer, inputPointer, parameterPointer, points.length, outputPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native algebraic evaluation failed with status ${status}.`);
-        const view = memoryView();
         const valid = new Uint8Array(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
-        const values = new Array(points.length);
-        for (let index = 0; index < points.length; index += 1) {
-            values[index] = {
-                re: view.getFloat64(outputPointer + index * 16, true),
-                im: view.getFloat64(outputPointer + index * 16 + 8, true)
-            };
-        }
+        const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
@@ -1017,12 +1035,8 @@ export function evaluateNativeSheets(options, points, sheets) {
             configPointer, inputPointer, sheetsPointer, points.length, outputPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native sheet evaluation failed with status ${status}.`);
-        const view = memoryView();
         const valid = new Uint8Array(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
-        const values = Array.from({ length: points.length }, (_, index) => ({
-            re: view.getFloat64(outputPointer + index * 16, true),
-            im: view.getFloat64(outputPointer + index * 16 + 8, true)
-        }));
+        const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
@@ -1148,11 +1162,7 @@ export function computeNativeTaylorCoefficients(map, center, radius, order) {
             configPointer, center.re, center.im, radiusValue, stepCount, boundedOrder, outputPointer
         );
         if (status !== 0) throw new Error(`Native Taylor coefficient job failed with status ${status}.`);
-        const view = memoryView();
-        return Array.from({ length: boundedOrder + 1 }, (_, index) => ({
-            re: view.getFloat64(outputPointer + index * 16, true),
-            im: view.getFloat64(outputPointer + index * 16 + 8, true)
-        }));
+        return readComplexObjects(outputPointer, boundedOrder + 1);
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }
@@ -1226,13 +1236,7 @@ function writeBranchCutPoints(points, allocations) {
 }
 
 function readComplexBuffer(pointer, count) {
-    const view = memoryView();
-    const result = new Float64Array(count * 2);
-    for (let index = 0; index < count; index += 1) {
-        result[index * 2] = view.getFloat64(pointer + index * 16, true);
-        result[index * 2 + 1] = view.getFloat64(pointer + index * 16 + 8, true);
-    }
-    return result;
+    return copyComplexBuffer(pointer, count);
 }
 
 const NATIVE_INPUT_SHAPES = Object.freeze({
@@ -1745,11 +1749,7 @@ export function findNativePreimages(options) {
             rootsPointer, capacity
         );
         if (count < 0) throw new Error(`Native preimage job failed with status ${count}.`);
-        const view = memoryView();
-        return Array.from({ length: count }, (_, index) => ({
-            re: view.getFloat64(rootsPointer + index * 16, true),
-            im: view.getFloat64(rootsPointer + index * 16 + 8, true)
-        }));
+        return readComplexObjects(rootsPointer, count);
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }
@@ -1772,11 +1772,7 @@ export function findNativePolynomialRoots(coefficients, options) {
             maxIterations, tolerance, rootsPointer
         );
         if (count < 0) throw new Error(`Native polynomial-root job failed with status ${count}.`);
-        const view = memoryView();
-        return Array.from({ length: count }, (_, index) => ({
-            re: view.getFloat64(rootsPointer + index * 16, true),
-            im: view.getFloat64(rootsPointer + index * 16 + 8, true)
-        }));
+        return readComplexObjects(rootsPointer, count);
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }
@@ -1853,11 +1849,7 @@ export function generateNativeContourPoints(type, params, stepCount) {
             typeId, centerX, centerY, paramA, paramB, count, outputPointer
         );
         if (total < 0) throw new Error(`Native contour generation failed with status ${total}.`);
-        const view = memoryView();
-        return Array.from({ length: total }, (_, index) => ({
-            re: view.getFloat64(outputPointer + index * 16, true),
-            im: view.getFloat64(outputPointer + index * 16 + 8, true)
-        }));
+        return readComplexObjects(outputPointer, total);
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }
