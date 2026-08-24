@@ -1,0 +1,407 @@
+<meta charset="utf-8">
+<title>Complex Function Analysis Atlas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+:root{
+  --paper:#E6DFBE; --paper-2:#DCD4AF; --ink:#17170F; --ink-2:#6E6B54; --rule:#B9B293; --ghost:#8E8A70;
+  --hi-bg:#17170F; --hi-fg:#E6DFBE; --face:#EFE9CC; --grid:#CFC8A3;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1E1D15; --paper-2:#26251B; --ink:#E6DFBE; --ink-2:#A8A388; --rule:#4A4838; --ghost:#6E6B54;
+    --hi-bg:#E6DFBE; --hi-fg:#1E1D15; --face:#2A2920; --grid:#33321F;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1E1D15; --paper-2:#26251B; --ink:#E6DFBE; --ink-2:#A8A388; --rule:#4A4838; --ghost:#6E6B54;
+  --hi-bg:#E6DFBE; --hi-fg:#1E1D15; --face:#2A2920; --grid:#33321F;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--mono);font-size:13px;line-height:1.55;overflow:hidden}
+#app{display:grid;grid-template-rows:52px 1fr 30px;height:100vh;min-height:600px}
+#top{display:flex;align-items:stretch;border-bottom:1.5px solid var(--ink);overflow:hidden}
+.stat{padding:6px 14px 4px;border-right:1.5px solid var(--ink);min-width:0;white-space:nowrap}
+.stat .k{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+.stat .v{font-size:15px;font-variant-numeric:tabular-nums}
+.stat.grow{flex:1;border-right:none;overflow:hidden}
+#controls{display:flex;gap:8px;align-items:center;padding:0 14px;border-left:1.5px solid var(--ink)}
+button.ctl{font:inherit;font-size:11px;letter-spacing:.06em;text-transform:uppercase;background:var(--paper);color:var(--ink);border:1.5px solid var(--ink);padding:5px 10px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);white-space:nowrap}
+button.ctl:hover{background:var(--face)}
+button.ctl:active{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--ink)}
+button.ctl:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+button.ctl.primary{background:var(--hi-bg);color:var(--hi-fg)}
+button.ctl.primary:hover{background:var(--hi-bg);opacity:.9}
+button.ctl:disabled{opacity:.4;cursor:default;box-shadow:none}
+#main{display:grid;grid-template-columns:232px 1fr 440px;min-height:0}
+#index{border-right:1.5px solid var(--ink);overflow-y:auto;padding:10px 8px 20px}
+#index h4{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin:12px 4px 6px;font-weight:500}
+#index h4:first-child{margin-top:2px}
+.ix{display:flex;align-items:flex-start;gap:8px;width:100%;text-align:left;font:inherit;font-size:11.5px;line-height:1.3;background:var(--paper);color:var(--ink);border:1.5px solid var(--ink);padding:7px 8px;margin:0 0 6px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);text-transform:uppercase;letter-spacing:.02em}
+.ix .code{color:var(--ink-2);min-width:16px;font-size:10px;padding-top:1px}
+.ix .nm{flex:1}
+.ix .n{color:var(--ink-2);font-size:10.5px;font-variant-numeric:tabular-nums}
+.ix.ghost{border-style:dashed;box-shadow:none;color:var(--ink-2)}
+.ix.later{border-color:var(--rule);box-shadow:none;color:var(--ink-2);opacity:.75}
+.ix.later .n{font-size:9px;letter-spacing:.06em}
+.ix.new{outline:1.5px dashed var(--ink);outline-offset:2px}
+.ix.on{background:var(--hi-bg);color:var(--hi-fg)}
+.ix.on .code,.ix.on .n{color:var(--hi-fg);opacity:.75}
+.ix:hover:not(.on){background:var(--face)}
+.ix:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+#canvasWrap{position:relative;min-width:0;background:var(--paper)}
+#svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+#svg.dragging{cursor:grabbing}
+#zoom{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:6px}
+#zoom button{width:30px;height:26px;font:inherit;font-size:14px;background:var(--paper);border:1.5px solid var(--ink);color:var(--ink);cursor:pointer;box-shadow:2px 2px 0 var(--ink)}
+#rail{position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:calc(100% - 70px)}
+#rail .ch{width:22px;height:22px;font:inherit;font-size:10px;background:var(--paper);border:1.5px solid var(--ink);color:var(--ink);cursor:pointer;padding:0;line-height:1}
+#rail .ch.done{background:var(--face)}
+#rail .ch.on{background:var(--hi-bg);color:var(--hi-fg)}
+#rail .ch.locked{border-style:dashed;color:var(--ink-2)}
+#rail .ch:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+#rail .title{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);margin-left:6px}
+#rail .title b{color:var(--ink);font-weight:500}
+#flowSel{position:absolute;left:12px;bottom:12px;display:none;gap:6px;flex-wrap:wrap;max-width:calc(100% - 24px)}
+#flowSel button{font:inherit;font-size:10px;letter-spacing:.08em;text-transform:uppercase;background:var(--paper);border:1.5px solid var(--ink);color:var(--ink);padding:3px 8px;cursor:pointer;box-shadow:2px 2px 0 var(--ink)}
+#flowSel button.on{background:var(--hi-bg);color:var(--hi-fg)}
+#tip{position:absolute;pointer-events:none;background:var(--hi-bg);color:var(--hi-fg);font-size:11px;padding:4px 8px;max-width:280px;line-height:1.35;display:none;z-index:5}
+#panel{border-left:1.5px solid var(--ink);display:flex;flex-direction:column;min-height:0}
+#tabs{display:flex;border-bottom:1.5px solid var(--ink)}
+#tabs button{flex:1;font:inherit;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;padding:9px 6px;background:var(--paper);color:var(--ink);border:none;border-right:1.5px solid var(--ink);cursor:pointer}
+#tabs button:last-child{border-right:none}
+#tabs button.on{background:var(--hi-bg);color:var(--hi-fg)}
+#tabs button:focus-visible{outline:2px solid var(--ink);outline-offset:-3px}
+#body{overflow-y:auto;padding:14px 18px 40px;flex:1}
+.eyebrow{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+h1.t{font-size:22px;font-weight:500;line-height:1.2;margin:2px 0 4px;text-wrap:balance}
+.lede{font-size:14.5px;line-height:1.5;margin:0 0 14px;max-width:56ch}
+.sub{color:var(--ink-2);font-size:11px;margin-bottom:14px}
+h3.sec{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);font-weight:500;margin:20px 0 6px;padding-bottom:4px;border-bottom:1.5px solid var(--ink)}
+#body p{margin:0 0 12px;max-width:62ch}
+#body ul{margin:0 0 12px;padding-left:18px;max-width:62ch}
+#body li{margin-bottom:6px}
+mark{background:var(--hi-bg);color:var(--hi-fg);padding:0 3px}
+.chip{display:inline-block;border:1.5px solid var(--ink);padding:1px 6px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin:0 6px 6px 0;background:var(--paper);color:var(--ink);font-family:inherit;cursor:pointer}
+.chip.ghost{border-style:dashed;color:var(--ink-2)}
+.chip.static{cursor:default}
+pre{background:var(--face);border:1.5px solid var(--rule);padding:10px 12px;font-size:11px;line-height:1.45;overflow-x:auto;margin:0 0 12px;white-space:pre}
+.step{display:grid;grid-template-columns:24px 1fr;gap:8px;margin:0 0 8px;font-size:12px}
+.step .no{color:var(--ink-2);font-variant-numeric:tabular-nums}
+.step.cur .no{color:var(--ink);font-weight:600}
+.step.cur .tx{background:var(--face);outline:1.5px solid var(--ink);padding:2px 6px}
+.actions{display:flex;gap:8px;margin:14px 0 0;flex-wrap:wrap}
+.pk{border:1.5px solid var(--ink);padding:10px 12px;margin:0 0 12px}
+.pk .lbl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2)}
+.pk .route{font-size:12px;margin:2px 0 8px}
+details{border-top:1.5px solid var(--rule);margin:8px 0 0;padding:6px 0 0}
+details summary{cursor:pointer;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);list-style:none;display:flex;gap:8px;align-items:center}
+details summary::before{content:'+';display:inline-block;width:12px;color:var(--ink)}
+details[open] summary::before{content:'−'}
+details summary::-webkit-details-marker{display:none}
+details > *:not(summary){margin-top:8px}
+#hint{border-top:1.5px solid var(--ink);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);display:flex;align-items:center;padding:0 14px;gap:14px;overflow:hidden;white-space:nowrap}
+.q{padding-left:0;list-style:none}
+.q li{position:relative;padding-left:18px}
+.q li::before{content:'?';position:absolute;left:0;top:0;color:var(--ink-2)}
+.q li.res::before{content:'✓'}
+.q li.to::before{content:'→'}
+.q li.res>span,.q li.to>span{color:var(--ink-2);text-decoration:line-through;text-decoration-color:var(--rule)}
+.q li.to>span{text-decoration:none}
+.q .ans{margin-top:2px;padding-left:10px;border-left:1.5px solid var(--ink)}
+@keyframes halo{0%{opacity:.9}50%{opacity:.25}100%{opacity:.9}}
+.halo{animation:halo 1.6s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.halo{animation:none}}
+@media (max-width:1100px){#main{grid-template-columns:200px 1fr 360px}}
+</style>
+
+<div id="app">
+  <div id="top">
+    <div id="stats" style="display:flex;min-width:0;flex:1"></div>
+    <div id="controls">
+      <button class="ctl" id="btnBack">◂ Back</button>
+      <button class="ctl primary" id="btnNext">Next ▸</button>
+      <button class="ctl" id="btnFlow">‖ Pause</button>
+      <button class="ctl" id="btnStep">Trace one step</button>
+      <button class="ctl" id="btnReset">Refit</button>
+    </div>
+  </div>
+  <div id="main">
+    <nav id="index" aria-label="Structures"></nav>
+    <div id="canvasWrap">
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="currentColor" stroke-width="1.1"/></pattern>
+          <pattern id="hatchLight" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width=".8" opacity=".55"/></pattern>
+        </defs>
+        <g id="world"></g>
+      </svg>
+      <div id="rail"></div>
+      <div id="flowSel"></div>
+      <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
+      <div id="tip"></div>
+    </div>
+    <aside id="panel">
+      <div id="tabs">
+        <button data-tab="what" class="on">What it does</button>
+        <button data-tab="how">How it's built</button>
+        <button data-tab="cond">Open questions</button>
+      </div>
+      <div id="body"></div>
+    </aside>
+  </div>
+  <div id="hint">
+    <span>enter / ] next chapter</span><span>[ back</span><span>hover to read</span><span>click to pin</span><span>→ go inside</span><span>← come out</span><span>click a dot to inspect its packet</span>
+  </div>
+</div>
+
+<script>
+const GROUPS = [{"id":"ui","title":"1. UI & Interaction Surface"},{"id":"state","title":"2. Reactive State & Runtime"},{"id":"math","title":"3. Math Engine & Compilation"},{"id":"analysis","title":"4. Analysis & Calculus Pipeline"},{"id":"render","title":"5. Multi-Tier Rendering Layer"},{"id":"sub","title":"6. Subsystems & Presets"}];
+const NODES = [{"id":"U","code":"U","name":"UI & Controls","short":"CONTROLS","group":"ui","gx":1,"gy":2,"w":2.5,"d":2.5,"h":44,"kind":"screen","one":"Hybrid Preact and legacy-DOM control surface for function selection, parameters, and display modes.","what":"The main user interface sidebar and top bar where you select mathematical functions ($w = \\cos(z)$, polynomials, Möbius transforms), drag parameter sliders ($a_0, b_0, r$), customize polynomial coefficients, and toggle visualization overlays.","how":"Built from Preact islands in `js/frontend/` plus legacy DOM handlers in `js/ui/event-listeners.js`. Both write the signal-backed store; `ui-sync-controller.js` synchronizes selected state back to DOM controls.","steps":[["Input Event","User interacts with a Preact control or a legacy DOM control."],["State Mutation","Updates a top-level signal-backed value or uses `mutateState` for nested data."],["UI Sync","State subscriptions update the relevant DOM controls and titles."],["Redraw Request","Routes a UI or domain invalidation through the redraw scheduler."],["UI Reflect","Reflects current mathematical expression in MathML / LaTeX display."]],"cond":[{"q":"How are polynomial coefficient inputs validated?","r":"Parsed to numeric floats with fallback to 0.0 + 0.0i on invalid input (2026-02-10)."},"Should we add a visual expression graph builder for chained transformations?"]},{"id":"VP","code":"VP","name":"Viewport & Nav","short":"VIEWPORT","group":"ui","gx":4.5,"gy":2,"w":2,"d":2,"h":36,"kind":"box","one":"Bidirectional coordinate transformation engine bridging screen pixels and complex plane coordinates.","what":"Translates mouse/touch gestures (panning, scrolling, pinch-to-zoom) on the canvas into complex plane windows $[x_{min}, x_{max}] \\times [y_{min}, y_{max}]$, maintaining strict aspect ratios and precision.","how":"Implemented in `js/navigation-plane.js` and `js/utils/canvas-utils.js`. Provides `mapCanvasToWorldCoords()` and `mapToCanvasCoords()` with high-precision sub-pixel scaling for both z-plane and w-plane.","steps":[["Pointer Event","Captures wheel or drag delta on Canvas context."],["Transform Calc","Recomputes `currentVisXRange` and `currentVisYRange`."],["Grid Refit","Calculates optimal tick spacing and axis offsets."],["Notify Scheduler","Routes a UI or domain redraw request through the centralized scheduler."]],"cond":[{"q":"How is aspect ratio preserved during canvas resize?","r":"Locks viewport height to width ratio based on canvas aspect ratio bounds (2026-01-18)."}]},{"id":"PR","code":"PR","name":"Hover Probe & Tooltip","short":"PROBE","group":"ui","gx":1,"gy":6,"w":2,"d":2,"h":32,"kind":"box","one":"Interactive cursor probe sampling local neighborhood, derivative $f'(z)$, and singularity proximity.","what":"A magnifying probe that tracks your cursor over the complex plane, displaying the exact input $z = x+iy$, mapped output $w = f(z)$, local derivative $f'(z)$, conformal magnification $|f'(z)|$, rotation angle $\\arg(f'(z))$, and nearby singularities.","how":"Managed in `js/ui/tooltip.js` and `js/main.js` (`setupCanvasTooltipEvents`). Queries `resolveActiveMap()` and `findNearestDynamicSample()` to format live mathematical tooltips.","steps":[["Cursor Move","Receives cursor position on z-plane or w-plane."],["World Map","Converts pixel coordinate to complex number $z = x+iy$."],["Neighborhood Eval","Evaluates $f(z)$, $f'(z)$, and checks proximity to poles/zeros."],["Render Overlay","Draws circular probe ring and formatted tooltip balloon."]],"cond":[{"q":"Is probe active during 3D Riemann sphere viewing?","r":"Yes, uses raycasting to project cursor onto sphere surface coordinates (2026-02-04)."}]},{"id":"ST","code":"ST","name":"Observable Store","short":"STORE","group":"state","gx":7.5,"gy":2,"w":2.5,"d":2.5,"h":36,"kind":"store","one":"Central reactive state tree containing mathematical parameters, active modes, and cache keys.","what":"The single source of runtime truth holding parameters ($a_0, b_0, circleR, mobiusA\\dots D$), selected function name, chaining mode, active display views (Fourier, Laplace, Split, Sphere), and analytical caches.","how":"Defined in `js/store/state.js` and wrapped by `createObservableStore()` using `@preact/signals`. Top-level keys are signal-backed; nested changes use explicit `mutateState`/`touch` notifications.","steps":[["State Read","Components read reactive signals directly."],["State Write","Top-level writes update signals; nested writes use `mutateState`."],["Redraw Invalidation","Rendering callers explicitly request UI or domain invalidation."],["Cache Invalidation","Rebuilds parameter signature keys."]],"cond":[{"q":"How are undo/redo states recorded?","to":"State history deep dive"}]},{"id":"EV","code":"EV","name":"Event Bus & Sync","short":"EVENT BUS","group":"state","gx":4.5,"gy":5.5,"w":2,"d":2,"h":30,"kind":"gate","one":"Decoupled pub/sub event router coordinating UI components and rendering controllers.","what":"Bridges legacy DOM event listeners, Preact signals, and animation loops without tight coupling, dispatching events when functions change, parameters shift, or viewports resize.","how":"Implemented in `js/store/events.js` (`eventBus`) and `js/frontend/controllers/ui-sync-controller.js`. The bus carries redraw signals such as `redraw:all` and `redraw:domain`; state subscriptions handle UI and cache synchronization.","steps":[["Event Emit","Controller emits typed event payload."],["Listener Dispatch","Invokes registered listener callbacks synchronously."],["State Reconciliation","Synchronizes DOM input elements with reactive state."],["Trigger Redraw","Notifies redraw scheduler of visual changes."]],"cond":[]},{"id":"RS","code":"RS","name":"Redraw Scheduler","short":"SCHEDULER","group":"state","gx":4.5,"gy":9,"w":2,"d":2,"h":34,"kind":"job","one":"RAF-based coalescing render scheduler that prevents duplicate frame requests.","what":"Batches multiple incoming UI or domain invalidations into a single `requestAnimationFrame` render pass and carries a domain-color dirty bit across queued frames.","how":"Implemented in `js/rendering/redraw-scheduler.js`. Configured with `renderApplicationFrame` and exposes `requestUiRedraw()`, `requestDomainRedraw()`, and the lower-level `requestRedrawAll()`.","steps":[["Redraw Request","State-changing modules call the centralized UI or domain request entry point."],["RAF Batching","Schedules single `requestAnimationFrame` callback if idle."],["Frame Exec","Executes `renderApplicationFrame(timestamp)`."],["Surface Delay","Schedules debounced 90ms deferred redraw for heavy 3D surfaces."]],"cond":[{"q":"What is the surface redraw debounce threshold?","r":"The application renderer configures a 90ms delay and a 240ms max-wait ceiling."}]},{"id":"EX","code":"EX","name":"Expression Compiler","short":"PARSER","group":"math","gx":11,"gy":1.5,"w":2.5,"d":2.5,"h":40,"kind":"cards","one":"Custom AST tokenizer and compiler generating JIT JavaScript, GLSL shader code, and native expression programs.","what":"Parses mathematical formula strings (e.g. `sin(z) + z^2 - 1/z`), tokenizing expressions into an Abstract Syntax Tree (AST) that compiles into JavaScript functions, WebGL GLSL shaders, MathML markup, or native expression programs.","how":"Located in `js/math/expression/` (`parser.js`, `evaluator.js`, `glsl.js`, `mathml.js`, `product-term.js`). Supports complex arithmetic operator precedence, transcendental functions, and product series.","steps":[["Tokenize","Lexes expression string into numeric, variable, and operator tokens."],["Parse AST","Constructs recursive AST node hierarchy."],["Type Check","Validates complex operations and branch constraints."],["Codegen","Emits optimized JavaScript evaluator or GLSL shader code string."]],"cond":[{"q":"Does the parser support arbitrary user variables?","r":"Supports z, c, time t, and indexed constants a0..an (2026-01-29)."}]},{"id":"CE","code":"CE","name":"Native WASM Engine","short":"WASM CORE","group":"math","gx":14.5,"gy":1.5,"w":3,"d":3,"h":64,"kind":"tall","one":"WebAssembly C core (ABI v2) computing complex arithmetic, transcendental functions, and series.","what":"The compiled C calculation engine for point evaluations, complex polynomials, Riemann Zeta analytic continuation, Bessel functions, gamma functions, and Durand-Kerner polynomial root-finding.","how":"Built from `native/src/` into `native/build/complex_engine.wasm` (ABI v2). Loaded via `js/native/complex-engine.js` with direct linear memory buffer access.","steps":[["Memory Alloc","Allocates input, output, and validity buffers in WASM linear memory."],["Configure Map","Populates C `MapConfig` struct with active function parameters."],["Native Exec","Calls the point-evaluation export (`ce_evaluate_points`)."],["Read Results","Copies output complex values and validity flags into JavaScript values."]],"cond":[{"q":"What happens when ABI version mismatches?","r":"Throws explicit fatal error if wasm.ce_abi_version() !== 2 (2026-01-15)."},"Can we enable WebAssembly SIMD-128 instructions in production builds?"]},{"id":"AM","code":"AM","name":"Active Map Engine","short":"ACTIVE MAP","group":"math","gx":11,"gy":5.5,"w":3,"d":3,"h":56,"kind":"tall","one":"Active mapping dispatcher resolving transformation pipelines, derivative orders, and algebraic chaining.","what":"The mathematical traffic controller. It takes the current function setting (single function, algebraic sum, chained composition $f(g(z))$, or derivative presentation $f'(z)$) and constructs the active evaluator pipeline.","how":"Implemented in `js/math/active-map.js` and `js/native/map-runtime.js`. Exposes `resolveActiveMap()`, returning cached evaluators for $f(z)$, first derivative $f'(z)$, and second derivative $f''(z)$.","steps":[["Resolve Stage","Identifies active function type, parameters, and derivative order."],["Signature Check","Compares source signature with cached evaluator."],["Instantiate","Constructs native or JIT evaluator wrapper."],["Return Dispatcher","Returns `{ evaluate, evaluateBatch, derivative, signature }`."]],"cond":[{"q":"How are chained stages composed?","r":"Evaluates sequentially: stage 0 output becomes stage 1 input up to chainCount - 1 (2026-02-01)."}]},{"id":"FD","code":"FD","name":"Feature Detection","short":"ROOTS & POLES","group":"analysis","gx":8,"gy":9.5,"w":2.2,"d":2.2,"h":34,"kind":"box","one":"Grid sampling algorithms locating zeros (roots), poles (singularities), and critical points ($f'(z)=0$).","what":"Scans the visible complex plane grid to locate mathematical features: roots where $f(z) = 0$, poles where $|f(z)| \\to \\infty$, branch cuts, and critical points where derivative $f'(z) = 0$, clustering duplicate detections into discrete points.","how":"Implemented in `js/analysis/feature-detection.js`. Uses native root-finding algorithms from `complex-engine.js` with adaptive grid search and viewport-based distance threshold clustering.","steps":[["Grid Sampling","Generates 2D sampling grid across visible viewport ranges."],["Gradient Check","Identifies local minima of $|f(z)|$ and $|f'(z)|$, and maxima of $|f(z)|$."],["Newton Refine","Applies Newton-Raphson iterations to converge on precise root coordinates."],["Cluster & Classify","Merges nearby points within tolerance and assigns multiplicity/order."]],"cond":[{"q":"How are duplicate poles merged across grid boundaries?","r":"Distance-factor clustering merges candidates within viewport-scaled epsilon (2026-01-30)."}]},{"id":"CA","code":"CA","name":"Cauchy & Contours","short":"CAUCHY RESIDUE","group":"analysis","gx":11,"gy":9.5,"w":2.2,"d":2.2,"h":34,"kind":"box","one":"Contour integration $\\oint_C f(z)dz$, Cauchy residue calculation, and winding number classification.","what":"Calculates path integrals $\\oint_C f(z) dz$ along user-drawn contours or standard geometric shapes (circles, ellipses), evaluating Cauchy's Integral Formula, computing residues at enclosed poles, and displaying the topological winding number.","how":"Built in `js/analysis/cauchy.js` and `js/analysis/contours.js`. Uses `analyzeNativeContour()` and `classifyNativeContourSingularities()` in WASM with `NUM_INTEGRAL_STEPS = 1024`.","steps":[["Contour Discretize","Samples 1,024 equidistant points along path $z(t)$."],["Numerical Integral","Computes $\\sum f(z_k) \\cdot \\Delta z_k$ via trapezoidal rule."],["Enclosed Poles","Tests enclosed singularities via Jordan winding number."],["Residue Theorem","Verifies $\\oint_C f(z) dz = 2\\pi i \\sum \\text{Res}(f, z_k)$ and displays result."]],"cond":[{"q":"How is contour self-intersection handled?","r":"Winding number is computed per topological region using ray casting (2026-02-08)."}]},{"id":"DY","code":"DY","name":"Dynamic Plotting","short":"DYNAMICS","group":"analysis","gx":8,"gy":13,"w":2.2,"d":2.2,"h":32,"kind":"box","one":"Numerical ODE trajectory integrator and dynamic particle solver on the complex plane.","what":"Simulates dynamical systems and differential equations on the complex plane, tracing particle orbits $z(t)$, phase portraits, and iterative recurrence sequences $z_{n+1} = g(z_n)$.","how":"Built in `js/analysis/dynamic-plotting.js` and rendered via `js/rendering/draw-dynamic-plotting.js`. Supports Runge-Kutta numerical integration and orbit color mapping.","steps":[["Seed Init","Spawns test particles across grid or user probe coordinates."],["ODE Step","Integrates differential step $z_{t+\\Delta t} = z_t + f(z_t) \\Delta t$."],["Trace Orbit","Accumulates trajectory polyline buffer."],["Render Path","Draws glow-trail paths on z-plane and w-plane."]],"cond":[]},{"id":"TF","code":"TF","name":"Integral Transforms","short":"TRANSFORMS","group":"analysis","gx":11,"gy":13,"w":2.2,"d":2.2,"h":34,"kind":"box","one":"Continuous/discrete Fourier transforms and Laplace transforms with s-plane ROC analysis.","what":"Analyzes frequency domain characteristics: Fourier transforms $F(\\omega) = \\int f(t) e^{-i\\omega t} dt$ and Laplace transforms $F(s) = \\int f(t) e^{-st} dt$, identifying poles, zeros, and Region of Convergence (ROC) on the complex s-plane.","how":"Implemented in `js/analysis/fourier-transform.js` and `js/analysis/laplace-transform.js`. Computes continuous winding integrals and generates 3D surface mesh data.","steps":[["Time Signal","Discretizes source time-domain signal $f(t)$."],["Complex Exponential","Multiplies by kernel $e^{-st} = e^{-(\\sigma + i\\omega)t}$."],["Integrate","Computes cumulative complex sum over interval $[0, T]$."],["ROC Classification","Determines convergence boundary $\\text{Re}(s) > \\sigma_0$."]],"cond":[{"q":"How are Laplace transform poles visualized in 3D?","r":"Rendered as high-peak singular columns in Three.js |F(s)| heightfield (2026-02-12)."}]},{"id":"VF","code":"VF","name":"Vector Fields & Streamlines","short":"STREAMLINES","group":"analysis","gx":14,"gy":9.5,"w":2.2,"d":2.2,"h":32,"kind":"box","one":"Complex potential flow analysis, Cauchy-Riemann velocity field mapping, and particle advection.","what":"Treats the complex function as a 2D fluid velocity potential, converting derivative values $f'(z) = u - iv$ into velocity vector fields $\\vec{V} = (u, -v)$ and animating thousands of flowing streamlines across the grid.","how":"Implemented in `js/analysis/streamline.js` and `js/rendering/draw-planar.js` (`drawStreamlinesOnZPlane`, `updateAndDrawParticles`). Uses fourth-order Runge-Kutta streamline tracing.","steps":[["Derivative Field","Samples complex derivative $f'(z)$ at regular grid nodes."],["Velocity Vector","Decomposes into flow components $v_x = \\text{Re}(f'), v_y = -\\text{Im}(f').$"],["Streamline Trace","Integrates forward and backward stream paths."],["Particle Advection","Animates dynamic tracer particles along flow vectors."]],"cond":[]},{"id":"TS","code":"TS","name":"Tissot & Conformal","short":"CONFORMAL","group":"analysis","gx":14,"gy":13,"w":2,"d":2,"h":28,"kind":"box","one":"Tissot indicatrices visualizing conformal angle preservation and local scaling/rotation distortion.","what":"Places tiny circles across the z-plane and maps them through $f(z)$ to the w-plane to demonstrate conformality: holomorphic maps preserve local orthogonality ($90^\\circ$ angles) and scale circles into scaled/rotated circles, degenerating only at critical points.","how":"Built in `js/analysis/tissot.js` and rendered by `drawConformalIndicatrices()` in `draw-planar.js`. Computes singular value decomposition (SVD) of the Jacobian matrix.","steps":[["Circle Placement","Deploys grid of infinitesimal test circles on z-plane."],["Jacobian Eval","Computes local Jacobian $\\begin{pmatrix} u_x & u_y \\\\ v_x & v_y \\end{pmatrix}$ via Cauchy-Riemann equations."],["Ellipse Map","Transforms circles to output ellipses on w-plane."],["Distortion Metrics","Calculates area expansion factor $|f'(z)|^2$ and rotation $\\arg(f'(z))$."]],"cond":[]},{"id":"BC","code":"BC","name":"Riemann Surfaces & Branching","short":"BRANCH CUTS","group":"analysis","gx":17,"gy":9.5,"w":2.2,"d":2.2,"h":34,"kind":"box","one":"Multi-sheet branch tracking, branch cut crossings, and Riemann surface mesh construction.","what":"Handles multi-valued complex functions like $\\log(z)$, $\\sqrt{z}$, or $z^{1/n}$ by constructing multi-sheeted Riemann surfaces, tracking winding count around branch points and connecting adjacent sheets seamlessly.","how":"Implemented in `js/analysis/riemann-surface.js` and `js/analysis/branch-continuation.js`. Builds multi-layer 3D surface meshes for WebGL and Three.js rendering.","steps":[["Branch Point Check","Locates branch points where multi-valued behavior originates."],["Sheet Indexing","Assigns winding index $k \\in \\{0, 1, \\dots, n-1\\}$ based on path integration."],["Mesh Generation","Constructs helical 3D surface geometry."],["Shader Pass","Renders intersecting sheets with transparency and color-coded layers."]],"cond":[{"q":"How many sheets are generated for fractional power n = 1/3?","r":"Constructs exactly 3 interlocking Riemann sheets with smooth phase boundary transitions (2026-02-14)."}]},{"id":"AR","code":"AR","name":"Application Renderer","short":"RENDER LOOP","group":"render","gx":7.5,"gy":6,"w":2.5,"d":2.5,"h":52,"kind":"tall","one":"Top-level frame coordinator orchestrating multi-pass rendering across planar, 3D, and transform views.","what":"The conductor of the visual pipeline. On each animation frame, it triggers feature detection, updates Cauchy analysis, draws the 2D z-plane and w-plane, synchronizes optional 3D columns, and redraws Riemann spheres.","how":"Implemented in `js/rendering/application-renderer.js` (`renderApplicationFrame`). Calls `drawZPlaneContent()`, `drawWPlaneContent()`, `drawLaplace3DSurface()`, and `drawRealPlot()`.","steps":[["Frame Start","Receives timestamp from requestAnimationFrame."],["Analysis Pass","Runs feature detection (zeros, poles, critical points, Cauchy)."],["Planar Pass","Draws 2D canvas layers for z-plane and w-plane."],["3D & Transform Pass","Renders active 3D Three.js surfaces and winding plots."]],"cond":[]},{"id":"P2","code":"P2","name":"2D Planar Canvas","short":"PLANAR 2D","group":"render","gx":18,"gy":1.5,"w":3,"d":3,"h":26,"kind":"slab","one":"High-DPI Canvas 2D renderer for input $z$-plane and output $w$-plane grids and shapes.","what":"Renders the primary side-by-side interactive planes: Cartesian, polar, and hyperbolic grids, input shapes (circles, lines, polygons), transformed curves $f(C)$, Taylor series approximations, and hover probe markers.","how":"Built in `js/rendering/draw-planar.js` and `js/rendering/canvas-primitives.js`. Uses supersampled 2D context drawing with subpixel path rendering.","steps":[["Clear & Axes","Clears canvas and draws axes, ticks, and grid lines."],["Input Shape","Draws input geometric paths on z-plane."],["Transform Map","Maps vertices through `activeMap.evaluate()` and draws deformed w-plane curves."],["Markers & Overlays","Overlays zeros, poles, critical markers, and probe crosshairs."]],"cond":[]},{"id":"DC","code":"DC","name":"Domain Dynamics","short":"DOMAIN COLOR","group":"render","gx":18,"gy":5.5,"w":3,"d":3,"h":26,"kind":"slab","one":"Complex color wheel renderer mapping phase $\\arg(w)$ to hue and magnitude $|w|$ to lightness.","what":"Generates continuous domain coloring where every point in the complex plane is assigned a distinct color: phase angle $\\theta = \\arg(f(z))$ determines the hue (rainbow cycle), while magnitude $|f(z)|$ determines brightness with contour rings.","how":"Implemented in `js/rendering/domain-coloring.js` with native tile rendering in `domain-dynamics-worker.js`. The worker returns RGBA pixel buffers; the main thread wraps each tile in `ImageData` and commits it to a staging canvas.","steps":[["Worker Dispatch","Sends viewport bounds, palette mode, and function config to web worker."],["Buffer Compute","Worker computes a tile RGBA pixel buffer off the main thread."],["Post Message","Transfers the tile `pixels.buffer` back to the main thread."],["Blit Canvas","Wraps the buffer in `ImageData`, stages the tile, and commits the final canvas."]],"cond":[]},{"id":"WG","code":"WG","name":"WebGL Image Warper","short":"WEBGL WARPER","group":"render","gx":18,"gy":13,"w":3,"d":3,"h":26,"kind":"slab","one":"GPU texture mesh deformation warping input images and video frames from $z$ to $w$.","what":"Maps arbitrary user images or webcam video feeds onto the z-plane and deforms the entire quadrilateral mesh through complex function $w = f(z)$ in real-time WebGL vertex and fragment shaders.","how":"Built in `js/rendering/draw-image-webgl.js` and `webgl-shared.js`. Creates a $64 \\times 64$ quadrilateral mesh with texture coordinates and evaluates transformations directly on the GPU.","steps":[["Texture Upload","Uploads image or video frame to WebGL texture unit."],["Mesh Gen","Builds subdivided grid geometry with normalized UVs."],["Vertex Transform","Evaluates mapping function in vertex shader or CPU batch buffer."],["Rasterize","Draws textured warped triangles with bilinear interpolation."]],"cond":[]},{"id":"T3","code":"T3","name":"Three.js 3D Engine","short":"THREE.JS 3D","group":"render","gx":21.5,"gy":5.5,"w":3,"d":3,"h":26,"kind":"slab","one":"3D WebGL scene rendering stereographic Riemann spheres, Laplace $|F(s)|$ heightfields, and folded surfaces.","what":"Renders rich 3D mathematical surfaces: the Riemann Sphere (compactification of $\\mathbb{C} \\cup \\{\\infty\\}$ via stereographic projection), 3D $|F(s)|$ Laplace transform terrain, and folded modular surfaces $|f(z)|$.","how":"Implemented in `js/rendering/three-riemann-renderer.js`, `laplace-3d-surface.js`, and `draw-sphere.js`. Employs Three.js scene graphs, orbit controls, custom shader materials, and dynamic mesh rebuilds.","steps":[["Scene Setup","Initializes Three.js perspective camera, ambient lighting, and orbit controls."],["Stereographic Map","Projects planar points $z = x+iy$ onto sphere $(\\xi, \\eta, \\zeta) = \\left(\\frac{2x}{|z|^2+1}, \\frac{2y}{|z|^2+1}, \\frac{|z|^2-1}{|z|^2+1}\\right)$."],["Mesh Heightfield","Generates 3D vertex elevations $z = \\ln(1 + |F(s)|)$."],["Render Pass","Draws shaded 3D mesh with interactive mouse rotation."]],"cond":[]},{"id":"3B","code":"3B","name":"Transform Winders","short":"3B1B WINDERS","group":"render","gx":21.5,"gy":9.5,"w":2.2,"d":2.2,"h":30,"kind":"box","one":"3Blue1Brown-style winding frequency animations and center-of-mass spectral visualizers.","what":"Visualizes the intuitive geometric meaning of Fourier and Laplace transforms: wraps a signal $f(t)$ around the origin at varying rotational frequencies $\\omega$, tracking the path and the dynamic center of mass (centroid) as $\\omega$ sweeps.","how":"Built in `js/rendering/draw-fourier-winding.js` and `draw-laplace-winding-3b1b.js`. Animates winding spirals, center-of-mass indicator dots, and frequency spectrum graphs.","steps":[["Signal Sample","Extracts time-domain signal $f(t)$ array."],["Winding Wrap","Calculates wrapped trajectory $g(t) = f(t) e^{-i 2\\pi \\omega t}$."],["Centroid Calc","Computes center of mass $\\bar{z} = \\frac{1}{T} \\int_0^T g(t) dt$."],["Draw Animation","Draws winding curve with trailing glow and centroid marker."]],"cond":[]},{"id":"MB","code":"MB","name":"Mandelbrot Perturbation","short":"PERTURBATION","group":"sub","gx":1,"gy":10.5,"w":2.5,"d":2.5,"h":32,"kind":"box","one":"Deep perturbation fractal engine with arbitrary-precision fixed-point math and WebGPU acceleration.","what":"A dedicated subsystem for extreme deep-zoom Mandelbrot fractals ($10^{-100}$ scale) using perturbation series expansion around reference points and arbitrary-precision fixed-point arithmetic (`fxp.mjs`), with WebGPU compute pipelines.","how":"Located in `bertbaron_mandelbrot/` (`fxp.mjs`, `mandelbrotPerturbation.mjs`, `mandelbrotWebGPU.mjs`). Employs multi-worker parallel tiling and WebGPU compute shaders.","steps":[["Reference Orbit","Calculates high-precision reference orbit $Z_n$ via arbitrary-precision float."],["Perturbation Delta","Computes pixel delta iterations $\\delta_{n+1} = 2 Z_n \\delta_n + \\delta_n^2 + \\Delta c$ in standard floats."],["Worker Tile Pool","Dispatches square tiles across multi-worker thread pool or WebGPU."],["Palette Blit","Maps iteration counts to custom cyclic palette."]],"cond":[{"q":"Is WebGPU automatically used when available?","r":"Detects navigator.gpu and falls back to Web Workers when unsupported (2026-01-25)."}]}];
+const FLOWS = [{"id":"planar_mapping","name":"1. Planar Transformation Flow (z to w)","hops":[["U","ST","parameter update",{"action":"setFunction","currentFunction":"cos","circleR":1.5},"yx"],["ST","EV","state mutation",{"key":"currentFunction","value":"cos"},"xy"],["EV","RS","schedule invalidation",{"kind":"domain","domainDirty":true},"yx"],["RS","AR","trigger frame",{"frameId":402,"plane":"both"},"xy"],["AR","AM","resolve evaluator",{"functionKey":"cos","derivativeOrder":0},"yx"],["AM","CE","native point evaluation",{"export":"ce_evaluate_points","pointCount":1024},"xy"],["CE","AM","values and validity",{"sampleZ":{"re":1,"im":0.5},"sampleW":{"re":0.81,"im":-0.46},"valid":true},"xy"],["AM","P2","draw transformed curves",{"meshSize":[15,15],"stage":0},"yx"],["P2","U","frame painted",{"canvas":"w-plane"},"yx"]]},{"id":"cauchy_analysis","name":"2. Cauchy Residue & Contour Flow","hops":[["U","VP","draw contour",{"type":"circle","center":{"re":0,"im":0},"radius":1.2},"yx"],["VP","CA","contour coordinates",{"stepCount":1024,"closed":true},"xy"],["CA","FD","query singularities",{"region":[-1.2,1.2,-1.2,1.2]},"xy"],["FD","CA","enclosed poles",{"poles":[{"re":0,"im":0,"order":1,"residue":{"re":1,"im":0}}]},"yx"],["CA","PR","integral result",{"integral":{"re":6.283,"im":0},"windingNumber":1},"yx"],["PR","AR","render probe overlay",{"overlay":"residue_balloon","active":true},"xy"]]},{"id":"domain_dynamics","name":"3. Web Worker Domain Coloring Flow","hops":[["ST","DC","snapshot inputs",{"palette":"arctic-frost","viewport":[512,512]},"xy"],["DC","AR","native worker tile",{"jobId":1,"tileSize":256,"pixelBuffer":"transferred"},"yx"],["AR","P2","commit staging canvas",{"targetCanvas":"zDomainColorCanvas"},"yx"]]},{"id":"spectral_laplace","name":"4. Spectral & Laplace 3D Flow","hops":[["U","TF","select transform",{"type":"laplace","signal":"damped_sine","decay":0.5,"freq":2},"yx"],["TF","3B","winding trajectory",{"frequencies":[0.5,1,2],"centroid":{"x":0.05,"y":-0.12}},"xy"],["TF","T3","3D s-plane heightfield",{"poles":[{"s":{"re":-0.5,"im":2}}],"roc":"Re(s) > -0.5"},"xy"],["T3","AR","composite 3D scene",{"container":"laplace_3d_container","cameraRot":[0.4,0.8]},"yx"]]}];
+const CH = [{"id":"core_map","title":"1. The Core Mapping (z to w)","reveal":["U","VP","AM","P2"],"lede":"Input complex numbers on the z-plane, evaluate $w = f(z)$, and render transformed grids on the w-plane.","story":"<p>Strip everything away and this is the core engine: you select a function or drag coordinates on the <b>z-plane</b>, the <mark>Active Map Engine</mark> calculates the mapping, and the <b>2D Planar Canvas</b> renders the deformed grid lines on the <b>w-plane</b>.</p>","flow":[["U","VP","pointer coordinates",{"x":1,"y":0.5}],["VP","AM","evaluate z",{"z":{"re":1,"im":0.5}}],["AM","P2","render w",{"w":{"re":0.81,"im":-0.46}}],["P2","U","display update",{"canvas":"w-plane"}]]},{"id":"reactive_state","title":"2. Reactive State & Frame Cycle","reveal":["ST","EV","RS","AR"],"lede":"Preact signals and a central event bus synchronize parameter mutations into batched RAF frame updates.","story":"<p>Parameter changes from sliders or expressions flow into the <mark>Observable Store</mark>. The <b>Redraw Scheduler</b> batches rapid updates into a single <code>requestAnimationFrame</code> render pass, driving the <b>Application Renderer</b>.</p>","flow":[["U","ST","slider delta",{"circleR":1.5}],["ST","EV","state mutation",{"key":"circleR","value":1.5}],["EV","RS","request redraw",{"dirty":true}],["RS","AR","render frame",{"frame":1}]]},{"id":"native_wasm","title":"3. The Native WASM Core","reveal":["EX","CE"],"lede":"Custom expressions parse to ASTs and evaluate through the WebAssembly C core.","story":"<p>Equations entered by the user are parsed into an AST by the <b>Expression Compiler</b> and evaluated through the <mark>Native WASM Engine</mark> (ABI v2). The bridge allocates linear-memory buffers, calls native exports, and copies results back into JavaScript values.</p>","flow":[["U","EX","parse formula",{"expr":"sin(z) + z^2"}],["EX","CE","compiled struct",{"terms":2}],["CE","AM","native point result",{"points":1024,"validityFlags":true}]]},{"id":"cauchy_features","title":"4. Roots, Poles & Cauchy Residues","reveal":["FD","CA","PR"],"lede":"Automated root-finding and contour integration reveal poles, critical points, residues, and winding numbers.","story":"<p>The <b>Feature Detection</b> module samples grids to locate zeros and singularities. The <b>Cauchy & Contours</b> engine calculates closed path integrals <mark>$\\oint_C f(z) dz = 2\\pi i \\sum \\text{Res}$</mark>, while the <b>Hover Probe</b> provides live neighborhood inspection.</p>","flow":[["AM","FD","scan viewport",{"xRange":[-3.5,3.5]}],["FD","CA","classified poles",{"count":2}],["CA","PR","path residue",{"winding":1,"res":1}],["PR","AR","probe balloon",{"active":true}]]},{"id":"flows_conformal","title":"5. Continuous Flows & Dynamics","reveal":["DY","VF","TS"],"lede":"Complex derivatives model fluid velocity fields, particle trajectories, and conformal distortions.","story":"<p>The engine interprets complex derivatives $f'(z)$ as fluid velocities $\\vec{V} = (u, -v)$, generating animated <mark>Streamlines</mark> across the z-plane, while <b>Tissot Indicatrices</b> demonstrate local conformal angle preservation and Jacobian scaling.</p>","flow":[["AM","VF","derivative field",{"f_prime":"cos(z)"}],["VF","DY","advect particles",{"count":200}],["DY","TS","conformal ellipses",{"svd":[1.2,1.2]}],["TS","P2","draw overlays",{"layer":"streamlines"}]]},{"id":"domain_gpu","title":"6. Domain Coloring & Texture Warping","reveal":["DC","WG"],"lede":"Native worker tiles and GPU texture meshes provide two separate dense-visualization paths.","story":"<p><b>Domain Dynamics</b> delegates pixel-level complex color calculations to <mark>dedicated Web Workers</mark>. Separately, the <b>WebGL Image Warper</b> deforms images and video feeds through a GPU mesh pipeline.</p>","flow":[["U","DC","domain-color request",{"palette":"arctic-frost"}],["DC","U","domain canvas update",{"targetCanvas":"zDomainColorCanvas"}],["U","WG","image or video input",{"source":"media element"}],["WG","U","warped canvas update",{"targetCanvas":"w-plane"}]]},{"id":"riemann_3d","title":"7. 3D Geometry & Riemann Sheets","reveal":["T3","BC"],"lede":"Multi-valued functions and stereographic projections expand into 3D Riemann spheres and multi-sheet surfaces.","story":"<p>Multi-valued functions (like $\\log z$ or $\\sqrt{z}$) are tracked across interlocking sheets via <b>Riemann Surfaces & Branching</b>. The <mark>Three.js 3D Engine</mark> renders interactive stereographic Riemann spheres and 3D terrain landscapes.</p>","flow":[["AM","BC","trace branch cuts",{"branches":2}],["BC","T3","build 3D mesh",{"vertices":4096}],["T3","AR","render 3D scene",{"rotX":0.35}]]},{"id":"spectral_winders","title":"8. Spectral Transforms & 3b1b Winders","reveal":["TF","3B"],"lede":"Fourier and Laplace transforms unroll into winding frequency animations and 3D s-plane convergence surfaces.","story":"<p><b>Integral Transforms</b> computes continuous Fourier and Laplace transforms, while <mark>Transform Winders</mark> animates 3Blue1Brown-style rotational winding frequency trajectories, tracking the moving center of mass.</p>","flow":[["U","TF","transform input",{"freq":2.5}],["TF","3B","winding spiral",{"omega":2.5}],["3B","T3","s-plane surface",{"roc":"Re(s) > 0"}],["T3","AR","render transform tab",{"view":"laplace-3d"}]]},{"id":"fractal_subs","title":"9. Deep Fractals & Perturbation","reveal":["MB"],"lede":"Dedicated deep-zoom perturbation algorithms and WebGPU compute explore infinite fractal boundaries.","story":"<p>The <b>Mandelbrot Perturbation</b> subsystem uses arbitrary-precision fixed-point math (<code>fxp.mjs</code>) and <mark>WebGPU compute pipelines</mark> to explore deep fractal depths ($10^{-100}$) without precision breakdown.</p>","flow":[["U","MB","deep zoom target",{"depth":"1e-45"}],["MB","WG","compute perturbation",{"gpu":true}],["WG","AR","present tile",{"tileId":12}]]},{"id":"whole_system","title":"10. The Whole System","reveal":[],"lede":"All 18 structures unified in one explorable interactive architecture diagram.","story":"<p>Choose which data flow runs using the picker at the bottom left. Hover any box for a quick summary; click to pin; double click or press <mark>→</mark> to go inside and inspect execution steps. Click any moving data packet to inspect its live JSON payload.</p>","flow":null}];
+const HOW_HTML = "<div class=\"eyebrow\">Complex Function Analysis · Architecture</div>\n<h1 class=\"t\">How it's built</h1>\n<div class=\"sub\">hybrid client-side mathematical visualization engine</div>\n\n<p>The system is built as a zero-backend, pure client-side web application leveraging WebAssembly, WebGL, Three.js, Canvas 2D, and Preact Signals.</p>\n\n<h3 class=\"sec\">Engine Architecture</h3>\n<ul>\n  <li><b>WASM C Core:</b> Compiled C library (<code>complex_engine.wasm</code>, ABI v2) providing native complex arithmetic, Durand-Kerner polynomial root-finding, and Riemann Zeta reflection continuations.</li>\n  <li><b>Multi-Context Rendering:</b> Canvas 2D for interactive grids and vector streamlines, WebGL for image deformation meshes, and Three.js for stereographic Riemann spheres and 3D Laplace $|F(s)|$ heightfields.</li>\n  <li><b>Reactive State Bridge:</b> Top-level Preact Signals wrapped in an observable store, with explicit nested mutations and a redraw scheduler for canvas invalidation.</li>\n  <li><b>Worker Thread Domain Coloring:</b> Dedicated workers render native phase-magnitude tiles and transfer RGBA buffers back for canvas staging.</li>\n</ul>\n\n<h3 class=\"sec\">Filesystem Layout</h3>\n<pre>complex-plane/\n  ├── js/\n  │   ├── main.js                  # Bootstrap & event wiring\n  │   ├── store/                   # State, signals, event bus\n  │   ├── math/                    # AST parser, GLSL generator, active map\n  │   ├── native/                  # WebAssembly bridge & memory manager\n  │   ├── analysis/                # Feature detection, Cauchy, transforms\n  │   ├── rendering/               # Multi-canvas renderers & schedulers\n  │   └── frontend/                # Preact reactive UI components\n  ├── native/src/                  # C source code for complex_engine.wasm\n  └── docs/                        # System Atlas & text twin</pre>";
+const DECISIONS_HTML = "<li><b>Compute Architecture.</b> Compile performance-critical math to <b>WebAssembly C core (ABI v2)</b> with linear memory buffers, falling back to JS AST compilation for dynamic user expressions.</li><li><b>Rendering Strategy.</b> Adopt a <b>hybrid multi-tier canvas pipeline</b>: Canvas 2D for lightweight responsive grids/overlays, WebGL texture meshes for image warping, and Three.js for 3D Riemann spheres and Laplace surfaces.</li><li><b>State Reactivity.</b> Manage application parameters through <b>Preact Signals (<code>@preact/signals</code>)</b> and a centralized event bus, decoupled from DOM elements via a bidirectional sync controller.</li><li><b>Frame Scheduling.</b> Implement a <b>coalescing RAF redraw scheduler</b> (<code>redraw-scheduler.js</code>) with dirty-flag caching to batch rapid updates.</li><li><b>Domain Coloring Offloading.</b> Offload heavy pixel-by-pixel complex argument/magnitude computations to <b>dedicated Web Worker threads</b> (<code>domain-dynamics-worker.js</code>) so pixel work runs outside the main UI thread.</li><li><b>Analytic Continuation.</b> Resolve multi-valued functions ($log z, z^{1/n}$) using <b>sheet-indexed Riemann surfaces</b> and branch ray tracking rather than arbitrary branch cuts.</li>";
+const STATS = [{"k":"Engine","v":"WASM (ABI v2) + WebGL + Three.js"},{"k":"UI Stack","v":"Preact + Signals + Vanilla JS"},{"k":"Arch","v":"Full Client-Side Zero Backend"}];
+const TITLE = "Complex Function Analysis";
+
+/* ---------------- CHAPTERS (progressive disclosure) ---------------- */
+/* ---------------- ISO ---------------- */
+const TW=72, TH=36;
+function P(gx,gy,z=0){ return [(gx-gy)*TW/2, (gx+gy)*TH/2 - z]; }
+function pts(a){ return a.map(p=>p.join(',')).join(' '); }
+const byId = Object.fromEntries(NODES.map(n=>[n.id,n]));
+const center = n => [n.gx+n.w/2, n.gy+n.d/2];
+const NS='http://www.w3.org/2000/svg';
+const el=(t,a={},...kids)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);kids.forEach(k=>e.appendChild(k));return e;};
+const qOpen=n=>(n.cond||[]).filter(c=>!c.r&&!c.to).length; const qHtml=list=>`<ul class="q">${list.map(c=>c.r?`<li class="res"><span>${c.q}</span><div class="ans">✓ ${c.r}</div></li>`:c.to?`<li class="to"><span>${c.q}</span><div class="ans">→ ${c.to}</div></li>`:`<li>${c.q}</li>`).join('')}</ul>`;
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ---------------- STATE ---------------- */
+const S = { ch:0, view:'world', inside:null, selected:null, hover:null, tab:'what', playing:true, tx:0, ty:0, k:1, packets:[], selPacket:null, hoverPacket:null, flowSel:(typeof FLOWS!=='undefined'&&FLOWS[0]?FLOWS[0].id:'planar_mapping'), maxCh:0 };
+const svg=document.getElementById('svg'), world=document.getElementById('world'), tip=document.getElementById('tip'), body=document.getElementById('body');
+let sceneNodes=[], sceneHops=[];
+const revealedIds=()=>{ if(S.ch>=CH.length-1) return NODES.map(n=>n.id); const s=new Set(); for(let i=0;i<=S.ch;i++) CH[i].reveal.forEach(id=>s.add(id)); return [...s]; };
+const isNew=id=>S.ch<CH.length-1 && CH[S.ch].reveal.includes(id);
+const revealChapterOf=id=>{ for(let i=0;i<CH.length-1;i++) if(CH[i].reveal.includes(id)) return i; return CH.length-1; };
+
+/* ---------------- SCENES ---------------- */
+function buildWorldScene(){
+  const ids=new Set(revealedIds()); sceneNodes=NODES.filter(n=>ids.has(n.id)); sceneHops=[];
+  const c=CH[S.ch];
+  if(c.flow){ c.flow.forEach((h,i)=>{ let bend=bendFor(h[0],h[1]); const rev=c.flow.findIndex(x=>x[0]===h[1]&&x[1]===h[0]); if(rev>-1&&rev<i) bend=bend==='xy'?'yx':'xy'; sceneHops.push({flow:'ch',idx:i,from:h[0],to:h[1],label:h[2],payload:h[3],bend}); }); }
+  else { FLOWS.forEach(f=>{ if(S.flowSel!=='both'&&f.id!==S.flowSel)return; f.hops.forEach((h,i)=>sceneHops.push({flow:f.id,idx:i,from:h[0],to:h[1],label:h[2],payload:h[3],bend:h[4]||'xy'})); }); }
+}
+function bendFor(a,b){
+  const allHops = (typeof FLOWS!=='undefined' ? FLOWS : []).flatMap(f=>f.hops||[]);
+  const t = allHops.find(h=>h[0]===a&&h[1]===b);
+  return t ? (t[4]||'xy') : 'yx';
+}
+function buildInsideScene(n){
+  const steps=n.steps||[]; sceneNodes=steps.map((s,i)=>({id:'s'+i,code:String(i+1),name:s[0],short:s[0],desc:s[1],gx:2+i*3.4,gy:2+i*0.6,w:2,d:2,h:34,inside:true}));
+  sceneHops=[]; for(let i=0;i<steps.length-1;i++) sceneHops.push({flow:'inside',idx:i,from:'s'+i,to:'s'+(i+1),label:steps[i][0]+' → '+steps[i+1][0],payload:{step:i+1,handsOff:steps[i+1][0]},bend:'xy'});
+}
+function hopPath(h){
+  const A=sceneNodes.find(n=>n.id===h.from), B=sceneNodes.find(n=>n.id===h.to); if(!A||!B) return null;
+  const [ax,ay]=center(A), [bx,by]=center(B); const mid = h.bend==='xy' ? [bx,ay] : [ax,by];
+  const g=[[ax,ay],mid,[bx,by]].filter((p,i,arr)=>i===0||p[0]!==arr[i-1][0]||p[1]!==arr[i-1][1]);
+  const scr=g.map(p=>P(p[0],p[1],0)); let len=0; const seg=[]; for(let i=1;i<scr.length;i++){const l=Math.hypot(scr[i][0]-scr[i-1][0],scr[i][1]-scr[i-1][1]);seg.push(l);len+=l;}
+  return {grid:g,scr,seg,len};
+}
+function pointAt(path,t){ let d=t*path.len; for(let i=0;i<path.seg.length;i++){ if(d<=path.seg[i]||i===path.seg.length-1){const u=path.seg[i]?Math.min(1,d/path.seg[i]):1;const a=path.scr[i],b=path.scr[i+1];return [a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u];} d-=path.seg[i]; } return path.scr[0]; }
+
+/* ---------------- RENDER ---------------- */
+function render(){
+  world.innerHTML='';
+  const gg=el('g',{opacity:.55}); const R=[-4,26];
+  for(let i=R[0];i<=R[1];i+=2){ const a=P(i,R[0]),b=P(i,R[1]);gg.appendChild(el('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:'var(--grid)','stroke-width':.6})); const c=P(R[0],i),d=P(R[1],i);gg.appendChild(el('line',{x1:c[0],y1:c[1],x2:d[0],y2:d[1],stroke:'var(--grid)','stroke-width':.6})); }
+  world.appendChild(gg);
+  if(S.view==='world'&&S.ch>=CH.length-1){
+    const plate=(x0,y0,x1,y1,dash)=>{const p=el('polygon',{points:pts([P(x0,y0),P(x1,y0),P(x1,y1),P(x0,y1)]),fill:'none',stroke:'var(--ink)','stroke-width':.9,opacity:.5});if(dash)p.setAttribute('stroke-dasharray','5 4');return p;};
+    world.appendChild(plate(0.5,1.5,17,10.5,false)); world.appendChild(plate(2,9,17.5,16.5,false)); world.appendChild(plate(-2,-2,24,17.5,true));
+  }
+  const hg=el('g'); world.appendChild(hg);
+  sceneHops.forEach(h=>{ h.path=hopPath(h); if(!h.path)return; const ghost=byId[h.from]?.ghost||byId[h.to]?.ghost;
+    const pl=el('polyline',{points:pts(h.path.scr),fill:'none',stroke:'var(--ink)','stroke-width':h.flow!=='turn'&&h.flow!=='ch'&&h.flow!=='inside'?1:1.4,opacity:(h.flow!=='turn'&&h.flow!=='ch'&&h.flow!=='inside')||ghost?.7:1});
+    if((h.flow!=='turn'&&h.flow!=='ch'&&h.flow!=='inside')||ghost)pl.setAttribute('stroke-dasharray','3 3'); hg.appendChild(pl);
+    h.path.scr.slice(1,-1).forEach(p=>hg.appendChild(el('polygon',{points:pts([[p[0],p[1]-3.5],[p[0]+3.5,p[1]],[p[0],p[1]+3.5],[p[0]-3.5,p[1]]]),fill:'var(--ink)'})));
+  });
+  const ng=el('g'); world.appendChild(ng);
+  [...sceneNodes].sort((a,b)=>(a.gx+a.gy+a.w+a.d)-(b.gx+b.gy+b.w+b.d)).forEach(n=>ng.appendChild(drawNode(n)));
+  const lg=el('g'); world.appendChild(lg); sceneNodes.forEach(n=>lg.appendChild(drawLabel(n)));
+  world.appendChild(el('g',{id:'pkts'})); drawPackets(); renderRail();
+}
+function drawLabel(n){
+  const g=el('g',{style:'pointer-events:none'});
+  const b=P(n.gx+n.w, n.gy+n.d, 0); const txt=(n.short||n.name).toUpperCase(); const w=txt.length*6.6+10; const y=b[1]+9;
+  const dim=n.ghost&&!n.inside;
+  g.appendChild(el('rect',{x:b[0]-w/2,y:y,width:w,height:14,fill:S.selected===n.id?'var(--hi-bg)':'var(--paper)',stroke:dim?'var(--ghost)':'var(--ink)','stroke-width':.9,'stroke-dasharray':dim?'3 2':'none'}));
+  const t=el('text',{x:b[0],y:y+10.5,'text-anchor':'middle','font-size':'9','font-family':'var(--mono)','letter-spacing':'.06em',fill:S.selected===n.id?'var(--hi-fg)':(dim?'var(--ink-2)':'var(--ink)'),'font-weight':'500'}); t.textContent=txt; g.appendChild(t);
+  return g;
+}
+function drawNode(n){
+  const g=el('g',{class:'node',style:'cursor:pointer','data-id':n.id});
+  const {gx,gy,w,d,h}=n; const sel=S.selected===n.id, hov=S.hover===n.id, fresh=!n.inside&&isNew(n.id);
+  const sw=sel?2:1.2, dash=n.ghost?'4 3':null, face=n.ghost?'none':'var(--face)';
+  const face3=(p,fill,hatch,extra={})=>{const poly=el('polygon',{points:pts(p),fill:fill,stroke:'var(--ink)','stroke-width':sw,'stroke-linejoin':'round',...extra});if(dash)poly.setAttribute('stroke-dasharray',dash);g.appendChild(poly);if(hatch&&!n.ghost){g.appendChild(el('polygon',{points:pts(p),fill:'url(#'+hatch+')',style:'color:var(--ink)',stroke:'none'}));}};
+  const box=(z0,z1,hatchTop)=>{ face3([P(gx,gy+d,z0),P(gx+w,gy+d,z0),P(gx+w,gy+d,z1),P(gx,gy+d,z1)],face,'hatch'); face3([P(gx+w,gy,z0),P(gx+w,gy+d,z0),P(gx+w,gy+d,z1),P(gx+w,gy,z1)],face,'hatch'); face3([P(gx,gy,z1),P(gx+w,gy,z1),P(gx+w,gy+d,z1),P(gx,gy+d,z1)],face,hatchTop||null); };
+  const kind=n.kind||'box';
+  if(kind==='store'){ const L=3, gap=3, lh=(h-gap*(L-1))/L; for(let i=0;i<L;i++){ const z0=i*(lh+gap); box(z0,z0+lh,null);} }
+  else if(kind==='cards'){ const L=5, lh=h/L; for(let i=0;i<L;i++) box(i*lh,(i+1)*lh,null); }
+  else if(kind==='slab'){ box(0,h,'hatchLight'); }
+  else if(kind==='screen'){ box(0,h,null); const inset=.3; if(!n.ghost){ const scr=[P(gx+inset,gy+inset,h),P(gx+w-inset,gy+inset,h),P(gx+w-inset,gy+d-inset,h),P(gx+inset,gy+d-inset,h)]; g.appendChild(el('polygon',{points:pts(scr),fill:'var(--paper)',stroke:'var(--ink)','stroke-width':.9})); for(let i=1;i<=3;i++){const a=P(gx+inset+.2,gy+inset+i*.4,h),b=P(gx+w-inset-.4-(i===3?.5:0),gy+inset+i*.4,h);g.appendChild(el('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:'var(--ink)','stroke-width':.8,opacity:.7}));} } }
+  else if(kind==='gate'){ box(0,h,null); if(!n.ghost){ const z0=h*.55,z1=h*.75; const band=[[P(gx,gy+d,z0),P(gx+w,gy+d,z0),P(gx+w,gy+d,z1),P(gx,gy+d,z1)],[P(gx+w,gy,z0),P(gx+w,gy+d,z0),P(gx+w,gy+d,z1),P(gx+w,gy,z1)]]; band.forEach(p=>g.appendChild(el('polygon',{points:pts(p),fill:'var(--ink)',opacity:.85,stroke:'none'}))); } }
+  else if(kind==='tall'){ box(0,h,null); if(!n.ghost){ // roof ridge line on top to read as "the brain"
+      const c=P(gx+w/2,gy+d/2,h); const a=P(gx,gy+d,h),b=P(gx+w,gy,h); g.appendChild(el('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:'var(--ink)','stroke-width':.8,opacity:.5})); } }
+  else if(kind==='job'){ box(0,h,'hatchLight'); }
+  else { box(0,h,null); }
+  const top=[P(gx,gy,h),P(gx+w,gy,h),P(gx+w,gy+d,h),P(gx,gy+d,h)];
+  if(sel||hov){ g.appendChild(el('polygon',{points:pts(top),fill:sel?'var(--ink)':'none',opacity:sel?.12:1,stroke:'var(--ink)','stroke-width':sel?2.5:1.8})); }
+  if(fresh&&!sel){ g.appendChild(el('polygon',{class:'halo',points:pts([P(gx-.35,gy-.35,0),P(gx+w+.35,gy-.35,0),P(gx+w+.35,gy+d+.35,0),P(gx-.35,gy+d+.35,0)]),fill:'none',stroke:'var(--ink)','stroke-width':1.4,'stroke-dasharray':'4 3'})); }
+  const c=P(gx+w/2,gy+d/2,h); const chipW=16;
+  g.appendChild(el('rect',{x:c[0]-chipW/2,y:c[1]-8,width:chipW,height:14,fill:sel?'var(--hi-bg)':'var(--paper)',stroke:'var(--ink)','stroke-width':1}));
+  const t=el('text',{x:c[0],y:c[1]+3,'text-anchor':'middle','font-size':'9','font-family':'var(--mono)',fill:sel?'var(--hi-fg)':'var(--ink)','font-weight':'600'}); t.textContent=n.code; g.appendChild(t);
+  g.addEventListener('mouseenter',e=>{S.hover=n.id;showTip(e,n);renderPanel();render();});
+  g.addEventListener('mousemove',e=>moveTip(e));
+  g.addEventListener('mouseleave',()=>{S.hover=null;hideTip();renderPanel();render();});
+  g.addEventListener('click',e=>{e.stopPropagation();select(n.id);});
+  g.addEventListener('dblclick',e=>{e.stopPropagation();if(!n.inside)goInside(n.id);});
+  return g;
+}
+
+/* ---------------- PACKETS ---------------- */
+function initPackets(){ S.packets=[]; const flows=[...new Set(sceneHops.map(h=>h.flow))]; flows.forEach(f=>S.packets.push({flow:f,hop:0,t:0,speed:.5,pause:0})); S.selPacket=null; }
+function hopsOf(flow){ return sceneHops.filter(h=>h.flow===flow); }
+function drawPackets(){
+  const pg=world.querySelector('#pkts'); if(!pg)return; pg.innerHTML='';
+  S.packets.forEach((p,i)=>{ const hs=hopsOf(p.flow); const h=hs[p.hop]; if(!h||!h.path)return; const [x,y]=pointAt(h.path,p.t);
+    const isSel=S.selPacket===i; const g=el('g',{class:'pkt',style:'cursor:pointer'});
+    if(isSel) g.appendChild(el('circle',{cx:x,cy:y,r:11,fill:'none',stroke:'var(--ink)','stroke-width':1.2,'stroke-dasharray':'2 2'}));
+    g.appendChild(el('circle',{cx:x,cy:y,r:5.5,fill:'var(--ink)',stroke:'var(--paper)','stroke-width':1.6}));
+    if(isSel||S.hoverPacket===i||S.ch<CH.length-1){ const lbl=el('text',{x:x+10,y:y-8,'font-size':'10','font-family':'var(--mono)',fill:'var(--ink)','font-weight':'500'}); lbl.textContent=h.label; g.appendChild(el('rect',{x:x+7,y:y-19,width:h.label.length*6.4+6,height:14,fill:'var(--paper)',stroke:'var(--ink)','stroke-width':.8})); g.appendChild(lbl); }
+    g.addEventListener('click',e=>{e.stopPropagation();S.selPacket=i;S.playing=false;syncFlowBtn();renderPanel();drawPackets();});
+    g.addEventListener('mouseenter',()=>{S.hoverPacket=i;drawPackets();});
+    g.addEventListener('mouseleave',()=>{S.hoverPacket=null;drawPackets();});
+    pg.appendChild(g);
+  });
+}
+let last=0;
+function tick(ts){ const dt=Math.min(.05,(ts-last)/1000||0); last=ts; tweenTick(); if(S.playing){ S.packets.forEach(p=>advance(p,dt)); drawPackets(); if(S.selPacket!=null) renderPanel(); } requestAnimationFrame(tick); }
+function advance(p,dt){ const hs=hopsOf(p.flow); if(!hs.length)return; if(p.pause>0){p.pause-=dt;return;} const h=hs[p.hop]; if(!h||!h.path){p.hop=(p.hop+1)%hs.length;return;} p.t+=dt*p.speed*(320/Math.max(120,h.path.len)); if(p.t>=1){p.t=0;p.hop=(p.hop+1)%hs.length;p.pause=(p.hop===0?1.2:.35);} }
+function stepOnce(){ S.playing=false; syncFlowBtn(); let i=S.selPacket??0; const p=S.packets[i]; if(!p)return; const hs=hopsOf(p.flow); p.hop=(p.hop+1)%hs.length; p.t=.5; p.pause=0; S.selPacket=i; drawPackets(); renderPanel(); }
+function syncFlowBtn(){ document.getElementById('btnFlow').textContent = S.playing?'‖ Pause':'▸ Play'; }
+requestAnimationFrame(tick);
+
+/* ---------------- PANEL ---------------- */
+function nodeChip(id){ const n=byId[id]; return `<button class="chip${n.ghost?' ghost':''}" onclick="select('${id}')">${esc(n.code)} · ${esc(n.name)}</button>`; }
+function renderPanel(){
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===S.tab));
+  if(S.selPacket!=null && S.packets[S.selPacket]){ const p=S.packets[S.selPacket]; const hs=hopsOf(p.flow); const h=hs[p.hop];
+    const A=sceneNodes.find(n=>n.id===h.from), B=sceneNodes.find(n=>n.id===h.to); const flowName=p.flow==='ch'?CH[S.ch].title:p.flow==='inside'?'inside '+(byId[S.inside]?.name||''):(FLOWS.find(f=>f.id===p.flow)||{}).name;
+    body.innerHTML=`<div class="eyebrow">Data packet · ${esc(flowName)} · hop ${p.hop+1} of ${hs.length}</div><h1 class="t">${esc(h.label)}</h1>
+    <div class="pk"><div class="lbl">Route</div><div class="route">${esc(A?.code||'')} ${esc(A?.name||'')} &nbsp;→&nbsp; ${esc(B?.code||'')} ${esc(B?.name||'')}</div><div class="lbl">Payload (representative)</div><pre>${esc(JSON.stringify(h.payload,null,2))}</pre></div>
+    <p>Payload shapes represent the real runtime contracts and state objects passed across modules.</p>
+    <div class="actions"><button class="ctl" onclick="stepOnce()">Trace one step</button><button class="ctl" onclick="S.selPacket=null;S.playing=true;syncFlowBtn();renderPanel();drawPackets()">Release & play</button>${B?`<button class="ctl" onclick="select('${esc(B.id)}')">Open ${esc(B.code)}</button>`:''}</div>`; return; }
+  const id=S.selected??S.hover; const n=id?sceneNodes.find(x=>x.id===id):null;
+  if(!n){ renderChapterPanel(); return; }
+  if(n.inside){ const parent=byId[S.inside]; const i=+n.id.slice(1);
+    body.innerHTML=`<div class="eyebrow">Inside ${esc(parent.code)} · ${esc(parent.name)} · step ${i+1} of ${parent.steps.length}</div><h1 class="t">${esc(n.name)}</h1><p class="lede">${esc(n.desc)}</p>
+    <h3 class="sec">All steps</h3>${parent.steps.map((s,j)=>`<div class="step ${j===i?'cur':''}"><div class="no">${j+1}</div><div class="tx"><b>${esc(s[0])}</b> — ${esc(s[1])}</div></div>`).join('')}
+    <div class="actions"><button class="ctl" onclick="comeOut()">← Come back out</button></div>`; return; }
+  const status = n.ghost?'<span class="chip ghost static">Not switched on</span>':`<span class="chip static">${n.group==='ui'?'UI & interaction':n.group==='state'?'state & runtime':n.group==='math'?'math & engine':n.group==='analysis'?'analysis pipeline':n.group==='render'?'rendering layer':'subsystem'}</span>`;
+  const pinned=S.selected===n.id;
+  let content='';
+  if(S.tab==='what') content=`<p class="lede">${n.one}</p><details${pinned?' open':''}><summary>Read more</summary><p>${n.what}</p></details>${n.steps?`<details><summary>Steps in execution</summary>${n.steps.map((s,j)=>`<div class="step"><div class="no">${j+1}</div><div class="tx"><b>${esc(s[0])}</b> — ${esc(s[1])}</div></div>`).join('')}</details>`:''}`;
+  else if(S.tab==='how') content=`<p class="lede">${n.one}</p><p>${n.how}</p>`;
+  else content=`<p class="lede">${n.one}</p>`+(n.cond&&n.cond.length?qHtml(n.cond):`<p>Nothing open here right now.</p>`);
+  body.innerHTML=`<div class="eyebrow">${esc(n.code)} · ${pinned?'pinned':'hovering'}${isNew(n.id)?' · new in this chapter':''}</div><h1 class="t">${esc(n.name)}</h1><div class="sub">${status}</div>${content}
+  ${pinned?`<div class="actions">${n.steps?`<button class="ctl" onclick="goInside('${n.id}')">→ Go inside</button>`:''}<button class="ctl" onclick="select(null)">Back to chapter</button></div>`:''}`;
+}
+function renderChapterPanel(){
+  const c=CH[S.ch]; const last=S.ch===CH.length-1;
+  if(S.tab==='how'){ body.innerHTML=HOW_HTML; return; }
+  if(S.tab==='cond'){ body.innerHTML=`<div class="eyebrow">${esc(TITLE)}</div><h1 class="t">Open questions</h1><div class="sub">${last?'everything unresolved, by structure':'for the structures revealed so far'}</div>`+NODES.filter(n=>revealedIds().includes(n.id)&&n.cond&&n.cond.length).map(n=>`<h3 class="sec">${n.code} · ${esc(n.name)}${n.ghost?' <span class="chip ghost static">later</span>':''}</h3>${qHtml(n.cond)}`).join(''); return; }
+  const chips = last ? '' : `<h3 class="sec">New in this chapter</h3><div>${c.reveal.map(nodeChip).join('')}</div>`;
+  const nav=`<div class="actions"><button class="ctl" onclick="prevCh()" ${S.ch===0?'disabled':''}>◂ Back</button><button class="ctl primary" onclick="nextCh()" ${last?'disabled':''}>${S.ch===CH.length-2?'Show the whole system ▸':'Next ▸'}</button></div>`;
+  body.innerHTML=`<div class="eyebrow">Chapter ${S.ch+1} of ${CH.length}</div><h1 class="t">${esc(c.title)}</h1><p class="lede">${c.lede}</p>${c.story}${chips}${nav}
+  ${last?`<h3 class="sec">Decisions locked</h3><ul>${DECISIONS_HTML}</ul>`:''}`;
+}
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>{S.tab=b.dataset.tab;S.selPacket=null;renderPanel();drawPackets();}));
+
+/* ---------------- STATS ---------------- */
+function renderStats(){ const el=document.getElementById('stats'); const open=NODES.reduce((a,n)=>a+qOpen(n),0), routed=NODES.reduce((a,n)=>a+(n.cond||[]).filter(c=>c.to).length,0), res=NODES.reduce((a,n)=>a+(n.cond||[]).filter(c=>c.r).length,0);
+  const dyn={chapter:`${S.ch+1} / ${CH.length}`, shown:`${revealedIds().length} / ${NODES.length}`, questions:`${open} open · ${routed} routed · ${res} resolved`};
+  const all=[...(STATS||[]), {k:'Chapter',v:dyn.chapter},{k:'Structures shown',v:dyn.shown},{k:'Open questions',v:dyn.questions,grow:true}];
+  el.innerHTML=all.map(s=>`<div class="stat${s.grow?' grow':''}"><div class="k">${s.k}</div><div class="v">${s.v}</div></div>`).join(''); }
+
+/* ---------------- INDEX + RAIL ---------------- */
+function renderIndex(){
+  const ix=document.getElementById('index'); ix.innerHTML=''; const rev=new Set(revealedIds());
+  GROUPS.forEach(g=>{ const h=document.createElement('h4'); h.textContent=g.title; ix.appendChild(h);
+    NODES.filter(n=>n.group===g.id).forEach(n=>{ const b=document.createElement('button'); const shown=rev.has(n.id);
+      b.className='ix'+(n.ghost&&shown?' ghost':'')+(!shown?' later':'')+(S.selected===n.id?' on':'')+(isNew(n.id)?' new':''); b.dataset.id=n.id;
+      b.innerHTML=`<span class="code">${n.code}</span><span class="nm">${esc(n.name)}</span><span class="n" title="${shown?'open questions':'revealed in chapter'}">${shown?qOpen(n):'ch '+(revealChapterOf(n.id)+1)}</span>`;
+      b.addEventListener('click',()=>{ if(!shown){ gotoCh(revealChapterOf(n.id)); select(n.id); return; } if(S.view!=='world')comeOut(); select(n.id); focusNode(n); });
+      b.addEventListener('mouseenter',()=>{ if(S.view==='world'&&shown){S.hover=n.id;renderPanel();render();} });
+      b.addEventListener('mouseleave',()=>{ if(S.view==='world'){S.hover=null;renderPanel();render();} });
+      ix.appendChild(b); }); });
+  renderStats();
+}
+function renderRail(){ const r=document.getElementById('rail'); if(S.view!=='world'){ r.innerHTML=`<span class="title">THE SYSTEM &nbsp;›&nbsp; <b>${esc(byId[S.inside]?.code||'')} ${esc(byId[S.inside]?.name||'')}</b> &nbsp;·&nbsp; steps in execution</span>`; document.getElementById('flowSel').style.display='none'; return; }
+  r.innerHTML=CH.map((c,i)=>`<button class="ch ${i===S.ch?'on':i<S.ch?'done':''} ${i>S.maxCh+1?'locked':''}" title="${esc(c.title)}" onclick="gotoCh(${i})">${i+1}</button>`).join('')+`<span class="title">chapter ${S.ch+1} · <b>${esc(CH[S.ch].title)}</b></span>`;
+  const fs=document.getElementById('flowSel'); fs.style.display = S.ch===CH.length-1?'flex':'none';
+  if(!fs.dataset.built){ fs.innerHTML=[...FLOWS.map(f=>`<button data-f="${f.id}">${f.name}</button>`),'<button data-f="both">All flows</button>'].join(''); fs.dataset.built='1'; fs.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{S.flowSel=b.dataset.f;buildWorldScene();initPackets();render();})); }
+  fs.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.f===S.flowSel));
+  document.getElementById('btnBack').disabled=S.ch===0; document.getElementById('btnNext').disabled=S.ch===CH.length-1;
+}
+
+/* ---------------- NAV ---------------- */
+function select(id){ S.selected=id; S.selPacket=null; renderIndex(); renderPanel(); render(); }
+function gotoCh(i){ i=Math.max(0,Math.min(CH.length-1,i)); if(S.view!=='world'){S.view='world';S.inside=null;} S.ch=i; S.maxCh=Math.max(S.maxCh,i); S.selected=null; S.hover=null; S.tab='what'; buildWorldScene(); initPackets(); S.playing=true; syncFlowBtn(); renderIndex(); render(); renderPanel(); fitView(true); }
+function nextCh(){ gotoCh(S.ch+1); } function prevCh(){ gotoCh(S.ch-1); }
+function goInside(id){ const n=byId[id]; if(!n||!n.steps)return; S.view='inside'; S.inside=id; S.selected='s0'; buildInsideScene(n); initPackets(); fitView(true); renderIndex(); render(); renderPanel(); }
+function comeOut(){ const was=S.inside; S.view='world'; S.inside=null; buildWorldScene(); initPackets(); S.selected=was; fitView(true); renderIndex(); render(); renderPanel(); }
+function orderList(){ return S.view==='world'?sceneNodes.map(n=>n.id):sceneNodes.map(n=>n.id); }
+document.addEventListener('keydown',e=>{ if(e.target.tagName==='INPUT')return; const L=orderList(); let i=L.indexOf(S.selected);
+  if(e.key==='ArrowDown'){e.preventDefault();select(L[Math.min(L.length-1,i+1)]);}
+  else if(e.key==='ArrowUp'){e.preventDefault();select(L[Math.max(0,i-1)]);}
+  else if(e.key==='ArrowRight'){e.preventDefault(); if(S.view==='world'&&S.selected)goInside(S.selected);}
+  else if(e.key==='ArrowLeft'){e.preventDefault(); if(S.view==='inside')comeOut(); else select(null);}
+  else if(e.key==='Enter'||e.key===']'){e.preventDefault(); if(S.view==='world')nextCh();}
+  else if(e.key==='['){e.preventDefault(); if(S.view==='world')prevCh();}
+  else if(e.key===' '){e.preventDefault();toggleFlow();}
+  else if(e.key==='Escape'){select(null);} });
+
+/* ---------------- VIEW / PAN / ZOOM ---------------- */
+let tween=null;
+function applyView(){ world.setAttribute('transform',`translate(${S.tx},${S.ty}) scale(${S.k})`); }
+function tweenTick(){ if(!tween)return; const now=performance.now(); let u=Math.min(1,(now-tween.t0)/tween.dur); u=1-Math.pow(1-u,3); S.tx=tween.a.tx+(tween.b.tx-tween.a.tx)*u; S.ty=tween.a.ty+(tween.b.ty-tween.a.ty)*u; S.k=tween.a.k+(tween.b.k-tween.a.k)*u; applyView(); if(u>=1)tween=null; }
+function setView(tx,ty,k,anim){ tween=null; if(anim&&!matchMedia('(prefers-reduced-motion: reduce)').matches){ tween={a:{tx:S.tx,ty:S.ty,k:S.k},b:{tx,ty,k},t0:performance.now(),dur:520}; } else { S.tx=tx;S.ty=ty;S.k=k;applyView(); } }
+function bbox(){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; sceneNodes.forEach(n=>{[P(n.gx,n.gy,n.h),P(n.gx+n.w,n.gy,n.h),P(n.gx+n.w,n.gy+n.d,-24),P(n.gx,n.gy+n.d,0),P(n.gx,n.gy,0)].forEach(p=>{x0=Math.min(x0,p[0]);y0=Math.min(y0,p[1]);x1=Math.max(x1,p[0]);y1=Math.max(y1,p[1]);});}); return {x0,y0,x1,y1}; }
+function fitView(anim){ const r=svg.getBoundingClientRect(); if(!sceneNodes.length)return; const b=bbox(); const pad=40; const k=Math.min((r.width-pad*2)/Math.max(1,b.x1-b.x0),(r.height-pad*2)/Math.max(1,b.y1-b.y0)); if(r.width<80||r.height<80||!isFinite(k)||k<=0)return; const kk=Math.max(.2,Math.min(k,1.5)); setView(r.width/2-((b.x0+b.x1)/2)*kk, r.height/2-((b.y0+b.y1)/2)*kk+8, kk, anim); }
+function focusNode(n){ const r=svg.getBoundingClientRect(); const c=P(n.gx+n.w/2,n.gy+n.d/2,n.h/2); setView(r.width/2-c[0]*S.k, r.height/2-c[1]*S.k, S.k, true); }
+function zoomAt(f,cx,cy){ tween=null; const nk=Math.max(.35,Math.min(3,S.k*f)); S.tx=cx-(cx-S.tx)*(nk/S.k); S.ty=cy-(cy-S.ty)*(nk/S.k); S.k=nk; applyView(); }
+svg.addEventListener('wheel',e=>{e.preventDefault(); const r=svg.getBoundingClientRect(); zoomAt(e.deltaY<0?1.1:0.9,e.clientX-r.left,e.clientY-r.top);},{passive:false});
+let drag=null; svg.addEventListener('pointerdown',e=>{ if(e.button!==0)return; tween=null; drag={x:e.clientX,y:e.clientY,tx:S.tx,ty:S.ty,moved:false}; svg.setPointerCapture(e.pointerId); });
+svg.addEventListener('pointermove',e=>{ if(!drag)return; const dx=e.clientX-drag.x,dy=e.clientY-drag.y; if(Math.hypot(dx,dy)>3){drag.moved=true;svg.classList.add('dragging');} S.tx=drag.tx+dx; S.ty=drag.ty+dy; applyView(); });
+svg.addEventListener('pointerup',e=>{ if(drag&&!drag.moved){ select(null); } drag=null; svg.classList.remove('dragging'); });
+document.getElementById('zin').onclick=()=>{const r=svg.getBoundingClientRect();zoomAt(1.2,r.width/2,r.height/2);};
+document.getElementById('zout').onclick=()=>{const r=svg.getBoundingClientRect();zoomAt(1/1.2,r.width/2,r.height/2);};
+window.addEventListener('resize',()=>fitView(false));
+
+/* ---------------- TIP ---------------- */
+function showTip(e,n){ tip.style.display='block'; tip.textContent=n.inside?n.desc:(n.ghost?'Later · ':'')+n.name+' — '+(n.one||'').replace(/<[^>]+>/g,''); moveTip(e); }
+function moveTip(e){ const r=svg.getBoundingClientRect(); let x=e.clientX-r.left+14,y=e.clientY-r.top+14; if(x+290>r.width)x-=300; if(y+60>r.height)y-=70; tip.style.left=x+'px'; tip.style.top=y+'px'; }
+function hideTip(){ tip.style.display='none'; }
+
+/* ---------------- CONTROLS ---------------- */
+function toggleFlow(){ S.playing=!S.playing; if(S.playing)S.selPacket=null; syncFlowBtn(); renderPanel(); drawPackets(); }
+document.getElementById('btnFlow').onclick=toggleFlow;
+document.getElementById('btnStep').onclick=stepOnce;
+document.getElementById('btnReset').onclick=()=>{ select(null); fitView(true); };
+document.getElementById('btnNext').onclick=nextCh; document.getElementById('btnBack').onclick=prevCh;
+
+/* ---------------- BOOT ---------------- */
+gotoCh(0);
+</script>

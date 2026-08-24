@@ -1,5 +1,5 @@
 import { state } from '../store/state.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
 import { syncLaplacePlayPauseButton } from '../ui/ui-updates.js';
 import { requireFiniteNumber } from '../utils/numeric-contracts.js';
 
@@ -51,7 +51,7 @@ export function startLaplaceAnimation() {
         }
         
         // Trigger redraw
-        requestRedrawAll();
+        requestUiRedraw();
         
         // Continue animation
         laplaceAnimationHandle = requestAnimationFrame(animateFrame);
@@ -90,7 +90,7 @@ export function resetLaplaceAnimation() {
     stopLaplaceAnimation();
     state.laplaceAnimationTime = 0;
     syncLaplacePlayPauseButton();
-    requestRedrawAll();
+    requestUiRedraw();
 }
 
 /**
@@ -100,5 +100,5 @@ export function showFullLaplaceSpiral() {
     stopLaplaceAnimation();
     state.laplaceAnimationTime = 1.0;
     syncLaplacePlayPauseButton();
-    requestRedrawAll();
+    requestUiRedraw();
 }

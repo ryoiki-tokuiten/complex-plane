@@ -10,8 +10,7 @@ import {
     STREAMLINE_COLOR_MIN_MAG, STREAMLINE_COLOR_MAX_MAG
 } from '../constants/colors.js';
 import {
-    TWO_PI, MIN_POINTS_ADAPTIVE, DEFAULT_POINTS_PER_LINE, ZETA_POLE,
-    ZETA_REFLECTION_POINT_RE, PROBE_CROSSHAIR_SIZE_FACTOR
+    TWO_PI, DEFAULT_POINTS_PER_LINE, PROBE_CROSSHAIR_SIZE_FACTOR
 } from '../constants/numerical.js';
 import { LINE_WIDTH_NORMAL, PARTICLE_RADIUS } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
@@ -47,7 +46,6 @@ import {
 } from '../native/complex-engine.js';
 
 const EPSILON = 1e-9;
-const DEGENERATE_SEGMENT_EPSILON = 1e-12;
 const STREAMLINE_COLOR_BUCKETS = 32;
 const STREAMLINE_STEP_BUDGET = 12000;
 const STREAMLINE_INTERACTION_STEP_BUDGET = 3500;
@@ -59,12 +57,6 @@ const CONSTANT_POINT_RADIUS = 7;
 const FOCI_RADIUS = 4;
 const PARTICLE_REFERENCE_FPS = 60;
 const PARTICLE_MAX_DELTA_SECONDS = 0.05;
-const ZETA_CURVE_MIN_SEGMENTS = 24;
-const ZETA_CURVE_MAX_SEGMENTS = 768;
-const ZETA_CURVE_MAX_DEPTH = 8;
-const ZETA_CURVE_TOLERANCE_SQ = 2.25;
-const ZETA_CURVE_MAX_SEGMENT_LENGTH_SQ = 24 * 24;
-
 const streamlineProgressState = {
     key: null,
     nextSeedOffset: 0,

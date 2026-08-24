@@ -16,7 +16,7 @@ import {
     ZOOM_OUT_FACTOR
 } from '../constants/numerical.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
 import { disposeThreeObject } from './three-utils.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
 import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
@@ -623,7 +623,7 @@ class RealPlots3DRenderer {
         // Use the same single viewport path as the z-plane slider. This keeps
         // the state value, coordinate bounds, and surface samples consistent.
         setupVisualParameters(true, false);
-        requestRedrawAll();
+        requestUiRedraw();
     }
 
     updateSurface(surfaceKey) {

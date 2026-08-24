@@ -24,13 +24,13 @@ const NAVIGATION_ROCKET_IMAGES = {
     '-y': null,
 };
 
-(function preloadRocketImages() {
+(() => {
     Object.entries(ROCKET_DATA_URIS).forEach(([key, dataUri]) => {
         const img = new Image();
         img.onload = () => { NAVIGATION_ROCKET_IMAGES[key] = img; };
         img.src = dataUri;
     });
-}());
+})();
 
 /**
  * Given a heading angle (radians, from Math.atan2), pick the best directional

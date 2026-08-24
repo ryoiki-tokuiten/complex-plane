@@ -2094,37 +2094,6 @@ export function renderNativeMapContour(options) {
     }
 }
 
-export function precisePixelCoordinate(viewport, pixelX, pixelY) {
-    const width = requireInteger(viewport?.width, 'Precise viewport width');
-    const height = requireInteger(viewport?.height, 'Precise viewport height');
-    const precisionBits = requireInteger(viewport?.precisionBits, 'Precise viewport precision');
-    const zoomPower = Number(viewport?.zoomPower);
-    if (width < 1 || height < 1 || precisionBits < 128 || precisionBits > 4096 ||
-        !Number.isFinite(zoomPower) || !Number.isFinite(pixelX) || !Number.isFinite(pixelY)) {
-        throw new Error('Precise pixel coordinates require finite pixel and zoom values.');
-    }
-    const allocations = [];
-    try {
-        const centerRePointer = writeCString(viewport.centerRe, allocations);
-        const centerImPointer = writeCString(viewport.centerIm, allocations);
-        const capacity = Math.max(2048, Math.ceil(precisionBits) * 2 + 512);
-        const realPointer = alloc(capacity); allocations.push(realPointer);
-        const imaginaryPointer = alloc(capacity); allocations.push(imaginaryPointer);
-        const status = wasm.ce_precise_pixel_coordinate(
-            centerRePointer, centerImPointer, zoomPower, precisionBits,
-            width, height, Number(pixelX), Number(pixelY),
-            realPointer, capacity, imaginaryPointer, capacity
-        );
-        if (status !== 0) throw new Error(`Native precise coordinate job failed with status ${status}.`);
-        return {
-            re: readCString(realPointer, capacity),
-            im: readCString(imaginaryPointer, capacity)
-        };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
 function preciseViewportArguments(viewport) {
     const width = requireInteger(viewport?.width, 'Precise viewport width');
     const height = requireInteger(viewport?.height, 'Precise viewport height');

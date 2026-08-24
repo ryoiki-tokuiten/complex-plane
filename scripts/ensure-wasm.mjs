@@ -149,7 +149,7 @@ const exported = [
     '_ce_build_riemann_sphere_targets', '_ce_interpolate_geometry',
     '_ce_build_riemann_sphere_positions', '_ce_build_riemann_probe', '_ce_build_fold_preimage_markers',
     '_ce_create_domain_render_context', '_ce_destroy_domain_render_context', '_ce_render_domain_tile',
-    '_ce_precise_pixel_coordinate', '_ce_project_precise_pixels',
+    '_ce_project_precise_pixels',
     '_ce_project_precise_pixels_to_canvas', '_ce_project_values_to_precise',
     '_ce_create_precise_domain_render_context', '_ce_destroy_precise_domain_render_context',
     '_ce_render_precise_domain_tile',

@@ -1,5 +1,4 @@
 import { state, zPlaneParams } from '../store/state.js';
-import { DEFAULT_POINTS_PER_LINE } from '../constants/numerical.js';
 import { LINE_WIDTH_NORMAL } from '../constants/rendering.js';
 import { createTaylorApproximationTransform } from '../native/map-runtime.js';
 import { generateCurrentInputShapePointSets } from './shape-generators.js';

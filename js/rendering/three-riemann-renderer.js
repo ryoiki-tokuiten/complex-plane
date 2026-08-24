@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state } from '../store/state.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
 import {
     buildNativeFoldPreimageMarkers,
     buildNativeRiemannProbe,
@@ -205,7 +205,7 @@ export class ThreeRiemannRenderer {
                     const u = intersects[0].point.x / this.scale;
                     const v = intersects[0].point.z / this.scale;
                     state.probeZ = { re: u, im: v };
-                    requestRedrawAll();
+                    requestUiRedraw();
                 }
             });
 
@@ -220,7 +220,7 @@ export class ThreeRiemannRenderer {
                     const u = intersects[0].point.x / this.scale;
                     const v = intersects[0].point.z / this.scale;
                     state.probeZ = { re: u, im: v };
-                    requestRedrawAll();
+                    requestUiRedraw();
                 }
             });
 

@@ -29,3 +29,14 @@ export function requestRedrawAll() {
         }
     });
 }
+
+// State-changing callers use these two entry points so dirty-bit ownership stays
+// in the scheduler instead of being repeated across UI event handlers.
+export function requestUiRedraw() {
+    requestRedrawAll();
+}
+
+export function requestDomainRedraw(markDomainDirty = true) {
+    if (markDomainDirty) context.domainColoringDirty = true;
+    requestRedrawAll();
+}

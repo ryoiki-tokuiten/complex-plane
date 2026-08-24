@@ -1,8 +1,8 @@
 /** @jsxImportSource preact */
 import { signal } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
-import { context, getStateSignal, state } from '../../store/state.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { getStateSignal, state } from '../../store/state.js';
+import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 import { persistThemePreferences } from '../../ui/theme-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
 
@@ -26,8 +26,7 @@ function GridColor({ index, stateKey }) {
                 <input type="color" id={`grid_color_${index}_input`} value={color} onInput={event => {
                     state[stateKey] = event.currentTarget.value;
                     persistThemePreferences();
-                    context.domainColoringDirty = true;
-                    requestRedrawAll();
+                    requestDomainRedraw();
                 }} />
             </div>
             <span class="circle-color-picker-label">Grid Line {index}</span>

@@ -1,5 +1,5 @@
 import { state, context, mutateState } from '../store/state.js';
-import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
+import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
 
 const { animationStates } = context;
 
@@ -68,8 +68,7 @@ export function toggleAnimation(sliderElement, stateUpdateFn, playButton, speedS
             } else {
                 stateUpdateFn(newNumericValue); 
             }
-            context.domainColoringDirty = true;
-            requestRedrawAll(); 
+            requestDomainRedraw();
             animState.frameId = requestAnimationFrame(animationLoop);
         }
         animationLoop();

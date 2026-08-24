@@ -1,7 +1,5 @@
 import { state } from '../store/state.js';
 import {
-  DOMAIN_DYNAMICS_EXPONENT_MAX,
-  DOMAIN_DYNAMICS_EXPONENT_MIN,
   DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE
 } from '../constants/domain-dynamics.js';
 import {

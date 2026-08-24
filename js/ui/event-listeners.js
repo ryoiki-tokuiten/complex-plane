@@ -7,14 +7,9 @@ import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canv
 import { requireVisibleViewport } from '../utils/viewport.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import {
-    anchorPreciseViewport,
-    leavePreciseViewport,
-    panPreciseViewport,
-    synchronizePreciseViewport,
-    zoomPreciseViewportAt,
-    shouldBePrecise
-} from '../native/precise-viewport.js';
-import { requestRedrawAll } from '../rendering/redraw-scheduler.js';
+    requestDomainRedraw as requestScheduledDomainRedraw,
+    requestUiRedraw as requestScheduledUiRedraw
+} from '../rendering/redraw-scheduler.js';
 import { updateFourierTransform } from '../analysis/fourier-transform.js';
 import { updateLaplaceTransform, updateLaplaceEvaluationPoint } from '../analysis/laplace-transform.js';
 import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
@@ -555,8 +550,8 @@ function flushPalettePanelRefresh() {
 }
 
 function scheduleRedraw(markDomainDirty = false, refreshPalettePanel = false) {
-    if (markDomainDirty) context.domainColoringDirty = true;
-    requestRedrawAll();
+    if (markDomainDirty) requestScheduledDomainRedraw();
+    else requestScheduledUiRedraw();
 
     if (refreshPalettePanel) {
         pendingPalettePanelRefresh = true;
@@ -1109,10 +1104,9 @@ function bindDerivativeControls() {
 
     bindElementListener(controls.enableDerivativeCb, 'change', event => {
         state.mapPresentation = event.target.checked ? 'derivative' : 'function';
-        context.domainColoringDirty = true;
         syncRiemannTransformationUI();
         updateChainingTitles();
-        requestUiRedraw();
+        requestDomainRedraw(true);
     });
 }
 
@@ -1838,14 +1832,15 @@ function handleCanvasLeave(ctx) {
     ctx.pendingMove.hasData = false;
     invalidateCanvasRect(ctx);
 
-    if (ctx.pan.isPanning) {
+    const domainDirty = ctx.pan.isPanning;
+    if (domainDirty) {
         ctx.pan.isPanning = false;
         ctx.canvas.style.cursor = 'crosshair';
-        context.domainColoringDirty = true;
     }
 
     updateProbe(ctx, null, false);
-    requestUiRedraw();
+    if (domainDirty) requestDomainRedraw(true);
+    else requestUiRedraw();
 }
 
 function zoomPlaneAt(ctx, pos, factor) {
@@ -1946,7 +1941,6 @@ function bindContourCanvasInteractions() {
         zPlaneParams.origin.x = -zPlaneParams.currentVisXRange[0] * zPlaneParams.scale.x;
         zPlaneParams.origin.y = zPlaneParams.currentVisYRange[1] * zPlaneParams.scale.y;
         requestDomainRedraw(true);
-        requestRedrawAll();
     }, PASSIVE_LISTENER_OPTIONS);
 
     bindElementListener(window, 'mouseup', () => {
@@ -1983,7 +1977,6 @@ function bindContourCanvasInteractions() {
         zPlaneParams.origin.x = -newX0 * zPlaneParams.scale.x;
         zPlaneParams.origin.y = newY1 * zPlaneParams.scale.y;
         requestDomainRedraw(true);
-        requestRedrawAll();
     }, ACTIVE_LISTENER_OPTIONS);
 }
 

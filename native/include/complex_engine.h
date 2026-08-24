@@ -238,12 +238,6 @@ int32_t ce_render_domain_tile(const ce_map_config *config,
                               uint32_t adaptive_quality,
                               uint8_t *rgba);
 
-int32_t ce_precise_pixel_coordinate(const char *center_re, const char *center_im,
-                                    double zoom_power, uint32_t precision_bits,
-                                    uint32_t frame_width, uint32_t frame_height,
-                                    double pixel_x, double pixel_y,
-                                    char *output_re, uint32_t output_re_capacity,
-                                    char *output_im, uint32_t output_im_capacity);
 int32_t ce_project_precise_pixels(const ce_map_config *config,
                                   const char *input_center_re, const char *input_center_im,
                                   double input_zoom_power, uint32_t precision_bits,

@@ -7,8 +7,6 @@ export const DOMAIN_COLOR_LOG_MAGNITUDE_MIN = Math.log(DOMAIN_COLOR_MAGNITUDE_MI
 export const DOMAIN_COLOR_LOG_MAGNITUDE_MAX = Math.log(DOMAIN_COLOR_MAGNITUDE_MAX);
 export const DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE = 1e30;
 export const DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH = 1024;
-export const DOMAIN_DYNAMICS_EXPONENT_MIN = -745;
-export const DOMAIN_DYNAMICS_EXPONENT_MAX = 709;
 
 function glslFloat(value) {
     const source = String(value);

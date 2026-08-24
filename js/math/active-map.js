@@ -58,6 +58,8 @@ function createNativeEvaluator(stage, derivativeOrder) {
 }
 
 export function resolveActiveMap(stageIndex = getFinalMapStageIndex()) {
+    // This dispatcher serves ordinary mapped geometry and analysis queries. The
+    // domain-coloring renderer has its own native tile pipeline.
     const stage = normalizeStageIndex(stageIndex);
     const presentation = state.mapPresentation;
     if (presentation !== MAP_PRESENTATION.function && presentation !== MAP_PRESENTATION.derivative) {

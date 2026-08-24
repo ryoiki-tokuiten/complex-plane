@@ -1,7 +1,4 @@
-import { precisePixelCoordinate } from './complex-engine.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
-
-export const PRECISE_ZOOM_THRESHOLD = 12;
 
 function precisionFor(zoomPower) {
     return Math.max(256, Math.min(4096, Math.ceil((Math.abs(zoomPower) + 30) * Math.LOG2E * Math.LN10)));
@@ -23,7 +20,7 @@ function updateSize(planeParams) {
     planeParams.preciseViewport.height = Math.max(1, Math.floor(planeParams.height));
 }
 
-export function shouldBePrecise(planeParams, zoom) {
+function shouldBePrecise(planeParams, zoom) {
     const center = planeCenter(planeParams);
     const maxCoord = Math.max(Math.abs(center.re), Math.abs(center.im), 1.0);
     const z = Number(zoom);
@@ -62,7 +59,7 @@ export function synchronizePreciseViewport(planeParams, zoom) {
     return true;
 }
 
-export function leavePreciseViewport(planeParams, zoomPower) {
+function leavePreciseViewport(planeParams, zoomPower) {
     const viewport = planeParams.preciseViewport;
     if (!viewport) return;
     const centerRe = Number(viewport.centerRe);
@@ -76,51 +73,6 @@ export function leavePreciseViewport(planeParams, zoomPower) {
     yRange[0] = centerIm - ySpan * 0.5;
     yRange[1] = centerIm + ySpan * 0.5;
     planeParams.preciseViewport = null;
-}
-
-export function panPreciseViewport(planeParams, deltaX, deltaY) {
-    const viewport = planeParams.preciseViewport;
-    if (!viewport) throw new Error('Precise pan requires an active precise viewport.');
-    const center = precisePixelCoordinate(
-        viewport,
-        viewport.width * 0.5 - deltaX - 0.5,
-        viewport.height * 0.5 - deltaY - 0.5
-    );
-    viewport.centerRe = center.re;
-    viewport.centerIm = center.im;
-}
-
-export function zoomPreciseViewportAt(planeParams, pixelX, pixelY, factor) {
-    const viewport = planeParams.preciseViewport;
-    if (!viewport) throw new Error('Precise zoom requires an active precise viewport.');
-    const anchor = precisePixelCoordinate(viewport, pixelX - 0.5, pixelY - 0.5);
-    const deltaPower = typeof factor === 'number' && factor > 0
-        ? Math.log10(factor)
-        : Math.sign(factor || 1) * Math.log10(1.1);
-    viewport.zoomPower = Math.max(PRECISE_ZOOM_THRESHOLD, viewport.zoomPower + deltaPower);
-    viewport.precisionBits = precisionFor(viewport.zoomPower);
-    const centeredOnAnchor = { ...viewport, centerRe: anchor.re, centerIm: anchor.im };
-    const center = precisePixelCoordinate(
-        centeredOnAnchor,
-        viewport.width - pixelX - 0.5,
-        viewport.height - pixelY - 0.5
-    );
-    viewport.centerRe = center.re;
-    viewport.centerIm = center.im;
-    return viewport.zoomPower;
-}
-
-export function anchorPreciseViewport(planeParams, anchorRe, anchorIm, pixelX, pixelY) {
-    const viewport = planeParams.preciseViewport;
-    if (!viewport) throw new Error('Precise anchoring requires an active precise viewport.');
-    const centeredOnAnchor = { ...viewport, centerRe: String(anchorRe), centerIm: String(anchorIm) };
-    const center = precisePixelCoordinate(
-        centeredOnAnchor,
-        viewport.width - pixelX - 0.5,
-        viewport.height - pixelY - 0.5
-    );
-    viewport.centerRe = center.re;
-    viewport.centerIm = center.im;
 }
 
 export function preciseViewportSnapshot(planeParams) {

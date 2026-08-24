@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef } from 'preact/hooks';
 import { context, getStateSignal, mutateState } from '../../store/state.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 import { toggleAnimation } from '../../ui/animation.js';
 
 const SPEEDS = ['0.01', '0.1', '0.5', '1', '2'];
@@ -19,8 +19,7 @@ function CoefficientControl({ index, part, value }) {
         mutateState('polynomialCoeffs', coefficients => {
             coefficients[index][part] = nextValue;
         }, `polynomialCoeffs.${index}.${part}`);
-        context.domainColoringDirty = true;
-        requestRedrawAll();
+        requestDomainRedraw();
     };
 
     return (

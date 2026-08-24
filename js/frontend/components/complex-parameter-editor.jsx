@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getStateSignal, mutateState } from '../../store/state.js';
 import { TAYLOR_CENTER_PRESET_GROUPS } from '../../constants/numerical.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 import { formatTaylorNumericValue } from '../../utils/dom-utils.js';
 
 const samePoint = (a, b) => Math.abs(a.re - b.re) < 1e-9 && Math.abs(a.im - b.im) < 1e-9;
@@ -21,7 +21,7 @@ export function ComplexParameterEditor({ stateKey, label }) {
 
     const setPoint = (re, im) => {
         mutateState(stateKey, value => Object.assign(value, { re, im }));
-        requestRedrawAll();
+        requestDomainRedraw();
     };
     const update = (part, text) => {
         part === 're' ? setReText(text) : setImText(text);

@@ -13,7 +13,11 @@ import {
     formatDynamicSampleTooltip
 } from './rendering/draw-dynamic-plotting.js';
 import { renderApplicationFrame } from './rendering/application-renderer.js';
-import { configureRedrawScheduler, requestRedrawAll } from './rendering/redraw-scheduler.js';
+import {
+    configureRedrawScheduler,
+    requestDomainRedraw,
+    requestUiRedraw
+} from './rendering/redraw-scheduler.js';
 import { mountFrontend } from './frontend/mount-frontend.jsx';
 import { startUiSynchronization } from './frontend/controllers/ui-sync-controller.js';
 
@@ -56,11 +60,10 @@ function setup() {
 
     setupEventListeners();
     startUiSynchronization();
-    context.domainColoringDirty = true;
     initializeSectionAnimations();
     initializeTooltips();
     setupCanvasTooltipEvents();
-    requestRedrawAll();
+    requestDomainRedraw();
 }
 
 function setupCanvasTooltipEvents() {
@@ -143,16 +146,14 @@ function setupCanvasTooltipEvents() {
     bindPlaneTooltip(controls.wPlaneCanvas, 'w', context.wPlaneParamsList?.[0]);
 }
 
-// Event bus subscriptions for asynchronous redraw events from raster-media
+// Event bus subscriptions for asynchronous redraw signals. The scheduler owns
+// the actual dirty-bit and RAF invalidation policy for every caller.
 eventBus.on('redraw:all', () => {
-    requestRedrawAll();
+    requestUiRedraw();
 });
 
 eventBus.on('redraw:domain', (markDirty) => {
-    if (markDirty !== false) {
-        context.domainColoringDirty = true;
-    }
-    requestRedrawAll();
+    requestDomainRedraw(markDirty !== false);
 });
 
 if (document.readyState === 'complete') {
@@ -176,6 +177,5 @@ function hidePreloader() {
 
 window.addEventListener('resize', () => {
     setupVisualParameters(false, false); 
-    context.domainColoringDirty = true;
-    requestRedrawAll();
+    requestDomainRedraw();
 });

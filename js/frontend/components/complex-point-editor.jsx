@@ -2,14 +2,14 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getStateSignal, mutateState } from '../../store/state.js';
 import { TAYLOR_CENTER_PRESET_GROUPS } from '../../constants/numerical.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { requestUiRedraw } from '../../rendering/redraw-scheduler.js';
 import { formatTaylorNumericValue } from '../../utils/dom-utils.js';
 
 const samePoint = (a, b) => Math.abs(a.re - b.re) < 1e-9 && Math.abs(a.im - b.im) < 1e-9;
 
 function setCenter(re, im) {
     mutateState('taylorSeriesCustomCenter', center => Object.assign(center, { re, im }));
-    requestRedrawAll();
+    requestUiRedraw();
 }
 
 export function ComplexPointEditor() {

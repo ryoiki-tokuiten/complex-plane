@@ -56,7 +56,7 @@ import {
     drawPlanarInputOverlays,
     drawZPlaneVectorField
 } from './draw-planar.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
+import { requestRedrawAll, requestUiRedraw } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
 import { renderPlanarDomainColoring } from './domain-coloring.js';
@@ -797,6 +797,10 @@ export function drawZPlaneContent(timestamp) {
         return;
     }
 
+    // The ordinary planar path below uses the active-map evaluator for shapes,
+    // overlays, and transformed geometry. Domain coloring is a separate pixel
+    // pipeline: it snapshots state and dispatches native RGBA tile work to
+    // workers rather than evaluating through this map object.
     const map = resolveActiveMap();
     if (state.riemannSphereViewEnabled && !state.splitViewEnabled) {
         if (!zCtx || !zPlaneParams) return;
@@ -1164,7 +1168,7 @@ function prepareThreeWRenderer() {
         state.preimageTarget = target;
         state.preimageRoots = findPreimages(target, nativeOptionsForActiveMap(map), { xRange, yRange });
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
-        requestRedrawAll();
+        requestUiRedraw();
     };
     return renderer;
 }

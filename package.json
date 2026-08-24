@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "benchmark": "node --expose-gc test/benchmarks/index.js",
     "benchmark:smoke": "BENCH_PROFILE=smoke node --expose-gc test/benchmarks/index.js",
-    "build:wasm": "node scripts/ensure-wasm.mjs --force"
+    "build:wasm": "node scripts/ensure-wasm.mjs --force",
+    "build:atlas": "node docs/atlas/build.mjs"
   },
   "repository": {
     "type": "git",

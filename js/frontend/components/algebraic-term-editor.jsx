@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import { getStateSignal, mutateState } from '../../store/state.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 import { syncParameterControlsPanelVisibility, updateTitlesAndGlobalUI } from '../../ui/ui-updates.js';
 
 const FUNCTION_OPTIONS = [
@@ -30,7 +30,7 @@ function redraw(commit = false) {
         updateTitlesAndGlobalUI();
         syncParameterControlsPanelVisibility();
     }
-    requestRedrawAll();
+    requestDomainRedraw();
 }
 
 function mutate(mutator, path, commit = false) {

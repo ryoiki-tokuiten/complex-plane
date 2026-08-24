@@ -13,7 +13,7 @@ import {
 } from './transformation-graph.js';
 import { draw2DContourPlot } from './contour-2d.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
 
 const { controls } = context;
 const SURFACE_REDRAW_DELAY_MS = 90;
@@ -64,7 +64,7 @@ function syncOptionalColumn(column, shouldHide, onHide) {
 
     const refreshPlanes = () => {
         setupVisualParameters(false, false);
-        requestRedrawAll();
+        requestUiRedraw();
     };
     requestAnimationFrame(() => {
         refreshPlanes();

@@ -1,11 +1,10 @@
 /** @jsxImportSource preact */
-import { context, getStateSignal, state } from '../../store/state.js';
+import { getStateSignal, state } from '../../store/state.js';
 import { domainPalettes, realPlotsPalettes, themes, applyTheme, persistThemePreferences } from '../../ui/theme-manager.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 
 function redraw() {
-    context.domainColoringDirty = true;
-    requestRedrawAll();
+    requestDomainRedraw();
 }
 
 export function ThemeOptions() {

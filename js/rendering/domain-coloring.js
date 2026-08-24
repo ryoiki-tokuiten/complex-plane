@@ -68,6 +68,8 @@ export function domainMagnitudeLightness(logMod, cycles) {
 export function renderPlanarDomainColoring(tCtx, pP) {
     const w = pP.width; const h = pP.height; if (w === 0 || h === 0) return;
 
+    // Domain coloring intentionally bypasses active-map evaluators. Its native
+    // worker pipeline renders viewport tiles directly into RGBA pixel buffers.
     const dynamicsSnapshot = buildPlanarDomainDynamicsSnapshot(state, pP);
     renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot);
 }

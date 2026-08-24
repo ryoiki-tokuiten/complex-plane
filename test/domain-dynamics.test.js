@@ -22,10 +22,8 @@ import {
 import {
     evaluateNativeAlgebraic,
     evaluateNativePoints,
-    precisePixelCoordinate,
     projectNativePrecisePixels
 } from '../js/native/complex-engine.js';
-import { panPreciseViewport } from '../js/native/precise-viewport.js';
 import {
     DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
     DOMAIN_COLOR_LOG_MAGNITUDE_MAX,
@@ -546,25 +544,6 @@ test('domain dynamics shared helpers cover boundary, overflow, and smoothing fix
     assert.equal(domainDynamicsSmoothIteration(3, 17, DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE, 0), 4);
 });
 
-test('precise viewport keeps neighboring pixels and center digits distinct at 10^125', () => {
-    const viewport = {
-        centerRe: '-0.743643887037151000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
-        centerIm: '0.131825904205330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
-        zoomPower: 125,
-        precisionBits: 512,
-        width: 800,
-        height: 600
-    };
-    const upperLeft = precisePixelCoordinate(viewport, 399, 299);
-    const upperRight = precisePixelCoordinate(viewport, 400, 299);
-    const lowerLeft = precisePixelCoordinate(viewport, 399, 300);
-
-    assert.notEqual(upperLeft.re, upperRight.re);
-    assert.notEqual(upperLeft.im, lowerLeft.im);
-    assert.match(upperLeft.re, /7\.43643887037151/);
-    assert.match(upperLeft.im, /1\.31825904205330/);
-});
-
 test('native precise planar projection keeps neighboring source pixels distinct at 10^125', () => {
     const viewport = {
         centerRe: '-0.743643887037151000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
@@ -1022,7 +1001,7 @@ test('worker zeta continuation chains match the main mapped transform in the cri
     }
 });
 
-test('deep domain snapshots render from exact centers and preserve digits while panning', () => {
+test('deep domain snapshots render from exact centers and preserve digits', () => {
     const before = snapshotState();
     const plane = {
         width: 4,
@@ -1056,10 +1035,6 @@ test('deep domain snapshots render from exact centers and preserve digits while 
             renderTile.dispose();
         }
 
-        const oldCenter = plane.preciseViewport.centerRe;
-        panPreciseViewport(plane, 1, 0);
-        assert.notEqual(plane.preciseViewport.centerRe, oldCenter);
-        assert.match(plane.preciseViewport.centerRe, /7\.43643887037151/);
     } finally {
         restoreState(before);
     }
