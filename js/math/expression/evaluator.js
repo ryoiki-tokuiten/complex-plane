@@ -4,24 +4,14 @@ import {
     evaluateNativeExpressionProgram,
     nativeMapOptions
 } from '../../native/complex-engine.js';
-import { collectExpressionDependencies, parseExpression } from './parser.js';
+import { collectExpressionDependencies, parseExpression, FUNCTION_ARITY } from './parser.js';
 
 const SOURCE_CACHE_LIMIT = 128;
 const CONSTANTS = new Set(['i', 'pi', 'e', 'true', 'false']);
 const SOURCE_CACHE = new Map();
 const AST_CACHE = new WeakMap();
 
-const ARITY = Object.freeze({
-    cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
-    exp: [1, 1], ln: [1, 1], log: [1, 1], gamma: [1, 1], loggamma: [1, 1],
-    bessel: [1, 2], sinh: [1, 1], tanh: [1, 1], sqrt: [1, 1],
-    zeta: [1, 1], abs: [1, 1], arg: [1, 1], re: [1, 1],
-    im: [1, 1], conj: [1, 1], complex: [1, 2], floor: [1, 1], ceil: [1, 1],
-    round: [1, 1], trunc: [1, 1], sign: [1, 1], min: [1, Infinity], max: [1, Infinity],
-    mod: [2, 2], gcd: [2, 2], factorial: [1, 1], isPrime: [1, 1], pow: [2, 2],
-    selected: [1, 1], selectedFunction: [1, 1], f: [1, 1], mobius: [1, 1],
-    polynomial: [1, 1], power: [1, 1]
-});
+const ARITY = FUNCTION_ARITY;
 
 export class ExpressionEvaluationError extends Error {
     constructor(message, node = null) {

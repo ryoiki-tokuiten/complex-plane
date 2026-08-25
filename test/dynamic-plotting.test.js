@@ -12,7 +12,7 @@ import { buildDynamicAggregateGLSL, compileCustomExpressionToGLSL } from '../js/
 import { transformFunctions } from '../js/native/map-runtime.js';
 import {
     dynamicExpressionHasBranches,
-    surfaceStageHasBranches
+    baseExpressionHasBranches
 } from '../js/analysis/riemann-surface.js';
 
 function configure(overrides) {
@@ -221,7 +221,7 @@ test('dynamic expression branch analysis informs Riemann-surface sheets', () => 
         term: { kind: 'expression', expression: 'd^(-s) + ln(s)' }
     });
     assert.equal(dynamicExpressionHasBranches(state), true);
-    assert.equal(surfaceStageHasBranches(state, 1), true);
+    assert.equal(baseExpressionHasBranches(state), true);
 
     state.dynamicPlotting.term.expression = '1/d^2';
     invalidateDynamicPlotting();

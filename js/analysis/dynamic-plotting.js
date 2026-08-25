@@ -17,6 +17,7 @@ import {
     synchronizeSequenceBindings
 } from './sequence-bindings.js';
 import { requireFiniteComplex, requireInteger } from '../utils/numeric-contracts.js';
+import { clonePlain } from '../utils/clone-utils.js';
 
 const RESULT_CACHE_LIMIT = 24;
 const transformIds = new WeakMap();
@@ -228,12 +229,6 @@ function cache() {
         };
     }
     return context.dynamicPlotting;
-}
-
-function clonePlain(value) {
-    if (Array.isArray(value)) return value.map(clonePlain);
-    if (!value || typeof value !== 'object') return value;
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clonePlain(item)]));
 }
 
 function stableStringify(value) {

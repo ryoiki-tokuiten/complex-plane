@@ -1,5 +1,5 @@
 import { MAX_POINTS_ADAPTIVE_DEFAULT } from '../constants/numerical.js';
-import { generateNativeDiscreteValues } from '../native/complex-engine.js';
+import { generateNativeDiscreteValues, EXPRESSION_ERROR_MESSAGES } from '../native/complex-engine.js';
 import {
     requireFiniteComplex,
     requireFiniteNumber,
@@ -8,18 +8,6 @@ import {
 
 export const MAX_DYNAMIC_SOURCE_COUNT = MAX_POINTS_ADAPTIVE_DEFAULT;
 const MAX_GENERATOR_ATTEMPTS = MAX_DYNAMIC_SOURCE_COUNT * 100;
-
-const EXPRESSION_ERROR_MESSAGES = Object.freeze({
-    1: 'Invalid native expression program',
-    2: 'Division by zero',
-    3: 'value must be real',
-    4: 'value must be an integer',
-    5: 'value must be a safe integer',
-    6: 'factorial argument must be non-negative',
-    7: 'factorial argument must not exceed 170',
-    8: 'mod divisor must not be zero',
-    9: 'Expression result is undefined or outside the supported numeric range'
-});
 
 function normalizeCount(value) {
     const count = requireInteger(value, 'Discrete-source count');

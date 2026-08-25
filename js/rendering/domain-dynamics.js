@@ -20,6 +20,7 @@ import {
     requireFiniteNumber,
     requireInteger
 } from '../utils/numeric-contracts.js';
+import { clonePlain } from '../utils/clone-utils.js';
 
 const TILE_SIZE = 64;
 const MAX_WORKERS = 16;
@@ -47,40 +48,6 @@ let nextJobId = 1;
 let activeSignature = null;
 let activeBackend = null;
 let activeJobId = 0;
-
-function cloneComplex(value) {
-    const complex = requireFiniteComplex(value, 'Domain dynamics parameter');
-    return { re: complex.re, im: complex.im };
-}
-
-function cloneComplexList(values) {
-    if (!Array.isArray(values)) throw new Error('Domain dynamics requires a complex-value array.');
-    return values.map(value => cloneComplex(value));
-}
-
-function clonePlainData(value) {
-    if (Array.isArray(value)) return value.map(clonePlainData);
-    if (!value || typeof value !== 'object') return value;
-
-    const clone = {};
-    for (const [key, nested] of Object.entries(value)) {
-        clone[key] = clonePlainData(nested);
-    }
-    return clone;
-}
-
-function cloneAlgebraicTerms(terms) {
-    if (!Array.isArray(terms)) throw new Error('Domain dynamics requires an algebraic term array.');
-    return terms.map((term, index) => {
-        if (!Array.isArray(term?.factors)) {
-            throw new Error(`Domain dynamics algebraic term ${index} requires a factor array.`);
-        }
-        return {
-            coeff: cloneComplex(term?.coeff),
-            factors: term.factors.map(clonePlainData)
-        };
-    });
-}
 
 function paletteStops(paletteId) {
     const stops = getDomainPaletteStops(paletteId);
@@ -174,7 +141,7 @@ function dynamicAggregateSnapshot(runtimeState) {
         throw new Error(`Unsupported dynamic invalid policy: ${config.reduction.invalidPolicy}.`);
     }
     const parameters = dynamicParameters(config);
-    const source = generateDiscreteSource(clonePlainData(config.source), { parameters });
+    const source = generateDiscreteSource(clonePlain(config.source), { parameters });
 
     const requestedVisibleCount = Number(config.playback?.visibleCount);
     if (!Number.isFinite(requestedVisibleCount)) {
@@ -197,23 +164,23 @@ function dynamicAggregateSnapshot(runtimeState) {
     });
     return compileNativeDynamicAggregate({
         pointExpression: config.pointExpression,
-        term: clonePlainData(config.term),
-        bindings: clonePlainData(bindings),
+        term: clonePlain(config.term),
+        bindings: clonePlain(bindings),
         reductionKind,
         invalidPolicy: config.reduction.invalidPolicy,
         parameters,
         sourceRecords: source.records.slice(0, visibleCount).map(record => ({
             ordinal: record.ordinal,
-            domainValue: cloneComplex(record.domainValue)
+            domainValue: clonePlain(record.domainValue)
         })),
-        bindingSeries: clonePlainData(bindingResult.series)
+        bindingSeries: clonePlain(bindingResult.series)
     });
 }
 
 function taylorSnapshot(runtimeState, functionKey) {
     if (!runtimeState?.taylorSeriesEnabled) return null;
 
-    const center = cloneComplex(runtimeState.taylorSeriesCenter);
+    const center = clonePlain(runtimeState.taylorSeriesCenter);
     const order = requireInteger(runtimeState.taylorSeriesOrder, 'Taylor order');
     if (order < 0) throw new Error('Taylor order must be non-negative.');
     const coefficients = computeTaylorSeriesCoefficients(functionKey, center, order);
@@ -229,7 +196,7 @@ function taylorSnapshot(runtimeState, functionKey) {
         center,
         order,
         radius,
-        coefficients: clonePlainData(coefficients)
+        coefficients: clonePlain(coefficients)
     };
 }
 
@@ -265,22 +232,22 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
     const snapshot = {
         derivativeOrder: mapPresentation === 'derivative' ? 1 : 0,
         functionKey,
-        expBase: cloneComplex(runtimeState.expBase),
-        logBase: cloneComplex(runtimeState.logBase),
-        besselOrder: cloneComplex(runtimeState.besselOrder),
+        expBase: clonePlain(runtimeState.expBase),
+        logBase: clonePlain(runtimeState.logBase),
+        besselOrder: clonePlain(runtimeState.besselOrder),
         chainingEnabled: runtimeState.chainingEnabled,
         chainMode: normalizeChainMode(runtimeState.chainingMode),
         chainCount: normalizeDomainDynamicsChainCount(runtimeState.chainCount),
         orbitColoringMode,
         algebraicChainingEnabled: runtimeState.algebraicChainingEnabled,
-        algebraicChainingTerms: cloneAlgebraicTerms(runtimeState.algebraicChainingTerms),
-        algebraicChainingZExpr: clonePlainData(runtimeState.algebraicChainingZExpr),
-        mobiusA: cloneComplex(runtimeState.mobiusA),
-        mobiusB: cloneComplex(runtimeState.mobiusB),
-        mobiusC: cloneComplex(runtimeState.mobiusC),
-        mobiusD: cloneComplex(runtimeState.mobiusD),
+        algebraicChainingTerms: clonePlain(runtimeState.algebraicChainingTerms),
+        algebraicChainingZExpr: clonePlain(runtimeState.algebraicChainingZExpr),
+        mobiusA: clonePlain(runtimeState.mobiusA),
+        mobiusB: clonePlain(runtimeState.mobiusB),
+        mobiusC: clonePlain(runtimeState.mobiusC),
+        mobiusD: clonePlain(runtimeState.mobiusD),
         polynomialN,
-        polynomialCoeffs: cloneComplexList(runtimeState.polynomialCoeffs),
+        polynomialCoeffs: clonePlain(runtimeState.polynomialCoeffs),
         fractionalPowerN,
         branchCutType: runtimeState.branchCutType,
         branchCutAngle,

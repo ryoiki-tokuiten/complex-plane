@@ -4,10 +4,10 @@ import { readFile } from 'node:fs/promises';
 
 import {
     algebraicExpressionHasBranches,
+    baseExpressionHasBranches,
     dynamicExpressionHasBranches,
     getBranchWindowLabel,
-    getVisibleBranchIndices,
-    surfaceStageHasBranches
+    getVisibleBranchIndices
 } from '../js/analysis/riemann-surface.js';
 import {
     buildRiemannSurfaceMathLibrary,
@@ -30,20 +30,20 @@ function makeState(overrides = {}) {
 
 test('single-valued functions collapse to the principal sheet', () => {
     const runtimeState = makeState({ currentFunction: 'cos' });
-    assert.equal(surfaceStageHasBranches(runtimeState, 1), false);
+    assert.equal(baseExpressionHasBranches(runtimeState), false);
     assert.deepEqual(getVisibleBranchIndices(9, 12, false), [0]);
 });
 
 test('logarithm and non-integer powers expose branch sheets', () => {
-    assert.equal(surfaceStageHasBranches(makeState({ currentFunction: 'ln' }), 1), true);
-    assert.equal(surfaceStageHasBranches(makeState({
+    assert.equal(baseExpressionHasBranches(makeState({ currentFunction: 'ln' })), true);
+    assert.equal(baseExpressionHasBranches(makeState({
         currentFunction: 'power',
         fractionalPowerN: 0.5
-    }), 1), true);
-    assert.equal(surfaceStageHasBranches(makeState({
+    })), true);
+    assert.equal(baseExpressionHasBranches(makeState({
         currentFunction: 'power',
         fractionalPowerN: 3
-    }), 1), false);
+    })), false);
 });
 
 test('algebraic chaining detects branch-bearing functions and modifiers', () => {
@@ -71,7 +71,7 @@ test('algebraic custom z expressions contribute branch metadata', () => {
         algebraicChainingZExpr: 'sqrt(z)',
         algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'cos' }] }]
     });
-    assert.equal(surfaceStageHasBranches(runtimeState), true);
+    assert.equal(baseExpressionHasBranches(runtimeState), true);
 });
 
 test('Taylor surfaces are single-valued polynomial approximations', () => {
@@ -79,15 +79,15 @@ test('Taylor surfaces are single-valued polynomial approximations', () => {
         currentFunction: 'ln',
         taylorSeriesEnabled: true
     });
-    assert.equal(surfaceStageHasBranches(runtimeState, 1), false);
+    assert.equal(baseExpressionHasBranches(runtimeState), false);
 });
 
 test('recursive chaining modes do not introduce sheets without a branch-bearing base map', () => {
     const recursionState = makeState({ chainingEnabled: true, chainingMode: 'recursion' });
-    assert.equal(surfaceStageHasBranches(recursionState, 4), false);
+    assert.equal(baseExpressionHasBranches(recursionState), false);
 
     const zeroSeedState = makeState({ chainingEnabled: true, chainingMode: 'zero_seed' });
-    assert.equal(surfaceStageHasBranches(zeroSeedState, 4), false);
+    assert.equal(baseExpressionHasBranches(zeroSeedState), false);
 });
 
 test('branch windows remain odd, bounded, and centered', () => {
@@ -109,7 +109,7 @@ test('dynamic aggregate expressions contribute branch metadata', () => {
         }
     });
     assert.equal(dynamicExpressionHasBranches(runtimeState), true);
-    assert.equal(surfaceStageHasBranches(runtimeState, 1), true);
+    assert.equal(baseExpressionHasBranches(runtimeState), true);
 });
 
 test('Riemann program signatures keep algebraic parameter edits uniform-backed', () => {

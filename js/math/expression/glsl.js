@@ -3,7 +3,7 @@ import {
     generateSequenceBindingSeries,
     synchronizeSequenceBindings
 } from '../../analysis/sequence-bindings.js';
-import { parseExpression } from './parser.js';
+import { parseExpression, FUNCTION_ARITY } from './parser.js';
 import { requireFiniteComplex, requireFiniteNumber, requireInteger } from '../../utils/numeric-contracts.js';
 
 const MAX_SHADER_CACHE_ENTRIES = 12;
@@ -37,18 +37,7 @@ function isSafeIdentifierName(name) {
     }
     return true;
 }
-const GPU_ARITY = Object.freeze({
-    cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
-    exp: [1, 1], ln: [1, 1], log: [1, 1],
-    gamma: [1, 1], loggamma: [1, 1], bessel: [1, 2],
-    sinh: [1, 1], tanh: [1, 1],
-    sqrt: [1, 1],
-    abs: [1, 1], arg: [1, 1], re: [1, 1], im: [1, 1], conj: [1, 1],
-    complex: [1, 2], floor: [1, 1], ceil: [1, 1], round: [1, 1],
-    trunc: [1, 1], sign: [1, 1], min: [1, Infinity], max: [1, Infinity],
-    mod: [2, 2], gcd: [2, 2], factorial: [1, 1], isPrime: [1, 1],
-    pow: [2, 2], selected: [1, 1], selectedFunction: [1, 1], f: [1, 1]
-});
+const GPU_ARITY = FUNCTION_ARITY;
 
 function cacheMapResult(cache, limit, key, result) {
     cache.set(key, result);
@@ -394,36 +383,51 @@ function compileCallExpression(node, args, context) {
 }
 
 
-function compileBooleanDirect(node, context) {
-    if (node.type === 'unary' && node.op === '!') return `(!${compileBooleanDirect(node.argument, context)})`;
+function compileBoolean(node, context, cseState = null) {
+    if (node.type === 'unary' && node.op === '!') return `(!${compileBoolean(node.argument, context, cseState)})`;
     if (node.type === 'binary') {
-        if (node.op === '&&' || node.op === '||') return `(${compileBooleanDirect(node.left, context)} ${node.op} ${compileBooleanDirect(node.right, context)})`;
-        const left = compileNodeDirect(node.left, context);
-        const right = compileNodeDirect(node.right, context);
+        if (node.op === '&&' || node.op === '||') {
+            return `(${compileBoolean(node.left, context, cseState)} ${node.op} ${compileBoolean(node.right, context, cseState)})`;
+        }
+        const left = compileAstNode(node.left, context, cseState, true);
+        const right = compileAstNode(node.right, context, cseState, true);
         if (node.op === '==') return `(distance(${left}, ${right}) < 1.0e-6)`;
         if (node.op === '!=') return `(distance(${left}, ${right}) >= 1.0e-6)`;
-        if (node.op === '<' || node.op === '<=' || node.op === '>' || node.op === '>=') return `(dynamicReal(${left}) ${node.op} dynamicReal(${right}))`;
+        if (node.op === '<' || node.op === '<=' || node.op === '>' || node.op === '>=') {
+            return `(dynamicReal(${left}) ${node.op} dynamicReal(${right}))`;
+        }
     }
     if (node.type === 'call' && node.name === 'isPrime') throw new Error('isPrime() is evaluated by the exact CPU backend');
-    return `dynamicTruthy(${compileNodeDirect(node, context)})`;
+    return `dynamicTruthy(${compileAstNode(node, context, cseState, true)})`;
 }
 
-function compileNodeDirect(node, context) {
+function compileAstNode(node, context, cseState = null, allowMaterialize = false) {
     assertExpressionNode(node);
+    if (cseState && shouldMaterializeInState(node, cseState, allowMaterialize)) {
+        const hash = cseState.analysis.meta.get(node).hash;
+        const existing = cseState.names.get(hash);
+        if (existing) return existing;
+        const expression = compileAstNode(node, context, cseState, false);
+        const name = `${cseState.prefix}Tmp_${cseState.index++}`;
+        cseState.names.set(hash, name);
+        cseState.statements.push('    vec2 ', name, ' = ', expression, ';\n');
+        return name;
+    }
+
     switch (node.type) {
         case 'literal': return vec2(node.value);
         case 'variable': return variableExpression(node, context);
-        case 'group': return `(${compileNodeDirect(node.expression, context)})`;
+        case 'group': return `(${compileAstNode(node.expression, context, cseState, true)})`;
         case 'unary':
-            if (node.op === '+') return compileNodeDirect(node.argument, context);
-            if (node.op === '-') return `(-${compileNodeDirect(node.argument, context)})`;
-            if (node.op === '!') return `dynamicBool(${compileBooleanDirect(node, context)})`;
+            if (node.op === '+') return compileAstNode(node.argument, context, cseState, true);
+            if (node.op === '-') return `(-${compileAstNode(node.argument, context, cseState, true)})`;
+            if (node.op === '!') return `dynamicBool(${compileBoolean(node, context, cseState)})`;
             throw new Error(`Unary operator "${node.op}" is not supported by the GPU expression compiler`);
-        case 'postfix': return `vec2(dynamicFactorial(dynamicReal(${compileNodeDirect(node.argument, context)})), 0.0)`;
+        case 'postfix': return `vec2(dynamicFactorial(dynamicReal(${compileAstNode(node.argument, context, cseState, true)})), 0.0)`;
         case 'binary': {
-            if (isBooleanBinaryOperator(node.op)) return `dynamicBool(${compileBooleanDirect(node, context)})`;
-            const left = compileNodeDirect(node.left, context);
-            const right = compileNodeDirect(node.right, context);
+            if (isBooleanBinaryOperator(node.op)) return `dynamicBool(${compileBoolean(node, context, cseState)})`;
+            const left = compileAstNode(node.left, context, cseState, true);
+            const right = compileAstNode(node.right, context, cseState, true);
             if (node.op === '+') return `(${left} + ${right})`;
             if (node.op === '-') return `(${left} - ${right})`;
             if (node.op === '*') return `complexMul(${left}, ${right})`;
@@ -431,90 +435,27 @@ function compileNodeDirect(node, context) {
             if (node.op === '^') return compilePowExpression(left, right, node.right, context);
             throw new Error(`Operator "${node.op}" is not supported by the GPU expression compiler`);
         }
-        case 'conditional': return `(${compileBooleanDirect(node.test, context)} ? ${compileNodeDirect(node.consequent, context)} : ${compileNodeDirect(node.alternate, context)})`;
-        case 'call': return compileCallExpression(node, (node.args || []).map(argument => compileNodeDirect(argument, context)), context);
-        default: throw new Error(`Expression node "${node.type}" is not supported by the GPU expression compiler`);
+        case 'conditional':
+            return `(${compileBoolean(node.test, context, cseState)} ? ${compileAstNode(node.consequent, context, cseState, true)} : ${compileAstNode(node.alternate, context, cseState, true)})`;
+        case 'call':
+            return compileCallExpression(
+                node,
+                (node.args || []).map(argument => compileAstNode(argument, context, cseState, true)),
+                context
+            );
+        default:
+            throw new Error(`Expression node "${node.type}" is not supported by the GPU expression compiler`);
     }
 }
 
-
 function compileNode(node, context) {
-    return compileNodeDirect(node, context);
+    return compileAstNode(node, context, null, false);
 }
 
 function shouldMaterializeInState(node, state, allowMaterialize) {
     if (!allowMaterialize) return false;
     const hash = state.analysis.meta.get(node).hash;
     return shouldMaterialize(node, hash, state.analysis);
-}
-
-function compileBooleanCSE(node, state) {
-    if (node.type === 'unary' && node.op === '!') {
-        return `(!${compileBooleanCSE(node.argument, state)})`;
-    }
-    if (node.type === 'binary') {
-        if (node.op === '&&' || node.op === '||') {
-            return `(${compileBooleanCSE(node.left, state)} ${node.op} ${compileBooleanCSE(node.right, state)})`;
-        }
-        const left = compileCSEExpressionNode(node.left, state, true);
-        const right = compileCSEExpressionNode(node.right, state, true);
-        if (node.op === '==') return `(distance(${left}, ${right}) < 1.0e-6)`;
-        if (node.op === '!=') return `(distance(${left}, ${right}) >= 1.0e-6)`;
-        if (node.op === '<' || node.op === '<=' || node.op === '>' || node.op === '>=') {
-            return `(dynamicReal(${left}) ${node.op} dynamicReal(${right}))`;
-        }
-    }
-    if (node.type === 'call' && node.name === 'isPrime') {
-        throw new Error('isPrime() is evaluated by the exact CPU backend');
-    }
-    return `dynamicTruthy(${compileCSEExpressionNode(node, state, true)})`;
-}
-
-function compileCSEExpressionNode(node, state, allowMaterialize) {
-    assertExpressionNode(node);
-    const hash = state.analysis.meta.get(node).hash;
-    if (shouldMaterializeInState(node, state, allowMaterialize)) {
-        const existing = state.names.get(hash);
-        if (existing) return existing;
-        const expression = compileCSEExpressionNode(node, state, false);
-        const name = `${state.prefix}Tmp_${state.index++}`;
-        state.names.set(hash, name);
-        state.statements.push('    vec2 ', name, ' = ', expression, ';\n');
-        return name;
-    }
-
-    switch (node.type) {
-        case 'literal': return vec2(node.value);
-        case 'variable': return variableExpression(node, state.context);
-        case 'group': return `(${compileCSEExpressionNode(node.expression, state, true)})`;
-        case 'unary':
-            if (node.op === '+') return compileCSEExpressionNode(node.argument, state, true);
-            if (node.op === '-') return `(-${compileCSEExpressionNode(node.argument, state, true)})`;
-            if (node.op === '!') return `dynamicBool(${compileBooleanCSE(node, state)})`;
-            throw new Error(`Unary operator "${node.op}" is not supported by the GPU expression compiler`);
-        case 'postfix': return `vec2(dynamicFactorial(dynamicReal(${compileCSEExpressionNode(node.argument, state, true)})), 0.0)`;
-        case 'binary': {
-            if (isBooleanBinaryOperator(node.op)) return `dynamicBool(${compileBooleanCSE(node, state)})`;
-            const left = compileCSEExpressionNode(node.left, state, true);
-            const right = compileCSEExpressionNode(node.right, state, true);
-            if (node.op === '+') return `(${left} + ${right})`;
-            if (node.op === '-') return `(${left} - ${right})`;
-            if (node.op === '*') return `complexMul(${left}, ${right})`;
-            if (node.op === '/') return `complexDiv(${left}, ${right})`;
-            if (node.op === '^') return compilePowExpression(left, right, node.right, state.context);
-            throw new Error(`Operator "${node.op}" is not supported by the GPU expression compiler`);
-        }
-        case 'conditional':
-            return `(${compileBooleanCSE(node.test, state)} ? ${compileCSEExpressionNode(node.consequent, state, true)} : ${compileCSEExpressionNode(node.alternate, state, true)})`;
-        case 'call':
-            return compileCallExpression(
-                node,
-                (node.args || []).map(argument => compileCSEExpressionNode(argument, state, true)),
-                state.context
-            );
-        default:
-            throw new Error(`Expression node "${node.type}" is not supported by the GPU expression compiler`);
-    }
 }
 
 function compileExpressionWithCSE(ast, context, prefix) {
@@ -527,7 +468,7 @@ function compileExpressionWithCSE(ast, context, prefix) {
         index: 0,
         prefix
     };
-    const expression = compileCSEExpressionNode(ast, state, true);
+    const expression = compileAstNode(ast, context, state, true);
     return {
         statements: state.statements.join(''),
         expression,

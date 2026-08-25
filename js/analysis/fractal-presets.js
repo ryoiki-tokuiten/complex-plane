@@ -1,3 +1,5 @@
+import { clonePlain } from '../utils/clone-utils.js';
+
 const NONE_FACTOR_FLAGS = Object.freeze({
     chainedFunc: 'none',
     power: 1.0,
@@ -16,17 +18,6 @@ function factor(func, options = null) {
 
 function term(coeff, factors) {
     return { coeff, factors };
-}
-
-function cloneComplexList(values) {
-    return values.map(value => complex(value.re, value.im));
-}
-
-function cloneTerms(terms) {
-    return terms.map(item => ({
-        coeff: complex(item.coeff.re, item.coeff.im),
-        factors: item.factors.map(entry => ({ ...entry }))
-    }));
 }
 
 export const FRACTAL_PRESETS = Object.freeze({
@@ -88,8 +79,8 @@ export function applyFractalPreset(runtimeState, key) {
         currentInputShape: preset.currentInputShape,
         domainPalette: preset.domainPalette,
         polynomialN: preset.polynomialN,
-        polynomialCoeffs: cloneComplexList(preset.polynomialCoeffs),
-        algebraicChainingTerms: cloneTerms(preset.algebraicChainingTerms)
+        polynomialCoeffs: clonePlain(preset.polynomialCoeffs),
+        algebraicChainingTerms: clonePlain(preset.algebraicChainingTerms)
     });
 
     return preset;

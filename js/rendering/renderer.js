@@ -29,7 +29,7 @@ import {
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
 import { getLaplaceFrameData } from '../analysis/laplace-transform.js';
 import { ThreeManifoldsRenderer } from './3d-manifolds-renderer.js';
-import { buildNativeGridFold } from '../native/complex-engine.js';
+import { buildNativeGridFold, findNativePreimages } from '../native/complex-engine.js';
 import {
     generateCurrentInputShapePointSets,
     buildInputShapeGeometryConfig,
@@ -38,7 +38,7 @@ import {
 import { drawGraphSelectionOverlay, filterGraphFullGridPointSets } from './transformation-graph.js';
 import { hideRiemannSurface, renderRiemannSurface } from './webgl-riemann-surface.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
-import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
+import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import {
     drawZerosAndPolesMarkers,
@@ -70,8 +70,7 @@ import {
     getDynamicManifoldSceneData
 } from './draw-dynamic-plotting.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices } from '../analysis/tissot.js';
-import { findPreimages } from '../analysis/preimage.js';
-import { surfaceStageHasBranches } from '../analysis/riemann-surface.js';
+import { baseExpressionHasBranches } from '../analysis/riemann-surface.js';
 
 function drawPreimageMarkers(ctx, planeParams, points, target = false) {
     if (!Array.isArray(points) || points.length === 0) return;
@@ -214,10 +213,6 @@ function createLayerCache() {
         renderJob: null,
         nextPointSet: 0
     };
-}
-
-function isFiniteComplex(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
 }
 
 function isPanning(panState) {
@@ -855,7 +850,7 @@ export function drawZPlaneContent(timestamp) {
             shouldUseZPlanarInputLayerCache(),
             cacheCtx => drawPlanarInputShape(cacheCtx, zPlaneParams)
         );
-        if (state.radialDiscreteStepsEnabled || surfaceStageHasBranches(state)) {
+        if (state.radialDiscreteStepsEnabled || baseExpressionHasBranches(state)) {
             drawPlanarInputOverlays(zCtx, zPlaneParams);
         }
     }
@@ -1100,7 +1095,14 @@ function prepareThreeWRenderer() {
         const xRange = zPlaneParams.currentVisXRange;
         const yRange = zPlaneParams.currentVisYRange;
         state.preimageTarget = target;
-        state.preimageRoots = findPreimages(target, nativeOptionsForActiveMap(map), { xRange, yRange });
+        state.preimageRoots = findNativePreimages({
+            density: 18,
+            maxIterations: 28,
+            map: nativeOptionsForActiveMap(map),
+            target,
+            xRange,
+            yRange
+        });
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
         requestUiRedraw();
     };

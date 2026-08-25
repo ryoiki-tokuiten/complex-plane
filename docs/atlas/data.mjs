@@ -63,8 +63,7 @@ export const META = {
   │   │   ├── 3d-manifolds-renderer.js # Generalized 3D Manifolds engine
   │   │   ├── manifold-registry.js     # 10 Differential manifold topologies
   │   │   ├── real-plots-renderer.js   # Shared Real Plots and Laplace Three.js heightfield renderer
-  │   │   ├── draw-laplace-winding-3b1b.js # Laplace winding, including the Fourier slice
-  │   │   └── draw-laplace-panels.js # Time-domain and discrete spectrum panels
+  │   │   └── draw-laplace-panels.js # Laplace 3-panel, time-domain, winding, and spectrum panels
   │   ├── frontend/                # Preact reactive UI components
   │   └── ui/                      # DOM controllers, event listeners, tooltips
   ├── native/                      # C source code for complex_engine.wasm
@@ -389,7 +388,7 @@ export const NODES = [
     kind: 'box',
     one: 'Contour integration $\\oint_C f(z)dz$, Cauchy residue calculation, and winding number classification.',
     what: 'Calculates path integrals $\\oint_C f(z) dz$ along user-drawn contours or standard geometric shapes (circles, ellipses), evaluating Cauchy\'s Integral Formula, computing residues at enclosed poles, and displaying the topological winding number.',
-    how: 'Built in `js/analysis/cauchy.js` and `js/analysis/contours.js`. Uses `analyzeNativeContour()` and `classifyNativeContourSingularities()` in WASM with `NUM_INTEGRAL_STEPS = 1024`.',
+    how: 'Built in `js/analysis/cauchy.js`. Uses `analyzeNativeContour()` and `classifyNativeContourSingularities()` in WASM with `NUM_INTEGRAL_STEPS = 1024`.',
     steps: [
       ['Contour Discretize', 'Samples 1,024 equidistant points along path $z(t)$.'],
       ['Numerical Integral', 'Computes $\\sum f(z_k) \\cdot \\Delta z_k$ via trapezoidal rule.'],
@@ -508,7 +507,7 @@ export const NODES = [
     kind: 'box',
     one: 'Multi-sheet branch tracking, branch cut crossings, and Riemann surface mesh construction.',
     what: 'Handles multi-valued complex functions like $\\log(z)$, $\\sqrt{z}$, or $z^{1/n}$ by constructing multi-sheeted Riemann surfaces, tracking winding count around branch points and connecting adjacent sheets seamlessly.',
-    how: 'Implemented in `js/analysis/riemann-surface.js` and `js/analysis/branch-continuation.js`. Builds multi-layer 3D surface meshes for WebGL and Three.js rendering.',
+    how: 'Implemented in `js/analysis/riemann-surface.js`. Builds multi-layer 3D surface meshes for WebGL and Three.js rendering.',
     steps: [
       ['Branch Point Check', 'Locates branch points where multi-valued behavior originates.'],
       ['Sheet Indexing', 'Assigns winding index $k \\in \\{0, 1, \\dots, n-1\\}$ based on path integration.'],
@@ -650,7 +649,7 @@ export const NODES = [
     kind: 'box',
     one: '3Blue1Brown-style winding frequency animations and center-of-mass spectral visualizers.',
     what: 'Visualizes the intuitive geometric meaning of Fourier and Laplace transforms: wraps a signal $f(t)$ around the origin at varying rotational frequencies $\\omega$, tracking the path and the dynamic center of mass (centroid) as $\\omega$ sweeps.',
-    how: 'Built in `js/rendering/draw-laplace-winding-3b1b.js` and `draw-laplace-panels.js`. The unified hub animates winding spirals, center-of-mass indicators, and the discrete spectrum; σ = 0 is the Fourier slice.',
+    how: 'Built in `js/rendering/draw-laplace-panels.js`. The unified hub animates winding spirals, center-of-mass indicators, and the discrete spectrum; σ = 0 is the Fourier slice.',
     steps: [
       ['Signal Sample', 'Extracts time-domain signal $f(t)$ array.'],
       ['Winding Wrap', 'Calculates wrapped trajectory $g(t) = f(t) e^{-i 2\\pi \\omega t}$.'],

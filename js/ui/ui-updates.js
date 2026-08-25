@@ -12,7 +12,7 @@ import { syncNavigationControls } from '../navigation-plane.js';
 import {
     getBranchWindowLabel,
     getVisibleBranchIndices,
-    surfaceStageHasBranches
+    baseExpressionHasBranches
 } from '../analysis/riemann-surface.js';
 import { domainPalettes } from './theme-manager.js';
 import { startManifoldTransformationAnimation, stopManifoldTransformationAnimation, syncManifoldTransformationPlayPauseButton, initThreeJSRenderers, buildThreeJSMeshes, syncManifoldSliders, disposeThreeJSRenderers } from '../rendering/manifold-transformation-animation.js';
@@ -22,7 +22,7 @@ import { createFormulaFragment } from './dom-components.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import { isFullGridPerspectiveSupported, isGraphViewSupported } from '../rendering/transformation-graph.js';
 import { getManifold } from '../rendering/manifold-registry.js';
-import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
+import { requireFiniteComplex, requireFiniteNumber, finiteComplex } from '../utils/numeric-contracts.js';
 
 const { controls = {} } = context;
 
@@ -284,10 +284,6 @@ function escapeFormulaText(value) {
         .replaceAll('>', '&gt;');
 }
 
-function finiteComplex(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
-}
-
 function isPanning(panState) {
     return Boolean(panState?.isPanning);
 }
@@ -460,7 +456,7 @@ function syncComplexParameterControls() {
     setHidden('logBaseSpecificControls', !hasLog);
     setHidden('besselOrderSpecificControls', !activeFunctions.has('bessel'));
     syncFunctionEquationCard();
-    const hasBranches = surfaceStageHasBranches(state);
+    const hasBranches = baseExpressionHasBranches(state);
     setHidden('branchToolsControls', !hasBranches);
     setHidden('branchCutAngleGroup', !hasBranches || state.branchCutType !== 'ray');
     setText('branchCutAngleValueDisplay', Math.abs(state.branchCutAngle - Math.PI) < 1e-6 ? 'π' : `${(state.branchCutAngle / Math.PI).toFixed(2)}π`);
@@ -1176,7 +1172,7 @@ function syncRiemannSurfaceControls() {
     setHidden('riemannSurfaceContoursDetails', !state.contoursEnabled);
 
     if (control('riemannSurfaceStatus')) {
-        const hasBranches = surfaceStageHasBranches(state, 1);
+        const hasBranches = baseExpressionHasBranches(state);
         const indices = getVisibleBranchIndices(
             state.riemannSurfaceSheets,
             state.riemannSurfaceBranchCenter,

@@ -118,7 +118,7 @@ const GENERIC_EXPRESSION_OPS = Object.freeze({
 
 const NATIVE_EXPRESSION_CONSTANTS = new Set(['i', 'pi', 'e', 'true', 'false']);
 
-const EXPRESSION_ERROR_MESSAGES = Object.freeze({
+export const EXPRESSION_ERROR_MESSAGES = Object.freeze({
     1: 'Invalid native expression program',
     2: 'Division by zero',
     3: 'value must be real',

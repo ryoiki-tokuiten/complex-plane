@@ -16,3 +16,15 @@ export function requireFiniteComplex(value, label) {
     }
     return value;
 }
+
+export function isFiniteNumber(value) {
+    return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function isFiniteComplex(value) {
+    return typeof value?.re === 'number' && Number.isFinite(value.re) &&
+           typeof value?.im === 'number' && Number.isFinite(value.im);
+}
+
+export const finiteComplex = isFiniteComplex;
+

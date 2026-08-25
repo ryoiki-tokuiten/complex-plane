@@ -4,7 +4,6 @@ import { eventBus } from './store/events.js';
 import { setupDOMReferences, setupVisualParameters } from './utils/dom-utils.js';
 import { initializePolynomialCoeffs } from './ui/polynomial-ui.js';
 import { setupEventListeners, setActiveFunctionButton, initializeStateFromControls, getCachedCanvasEventPosition } from './ui/event-listeners.js';
-import { initializeSectionAnimations } from './ui/section-animations.js';
 import { initializeTooltips, showDynamicTooltip, hideDynamicTooltip } from './ui/tooltip.js';
 import { mapCanvasToWorldCoords } from './utils/canvas-utils.js';
 import { initializeDynamicPlottingEngine } from './analysis/dynamic-plotting.js';
@@ -60,7 +59,6 @@ function setup() {
 
     setupEventListeners();
     startUiSynchronization();
-    initializeSectionAnimations();
     initializeTooltips();
     setupCanvasTooltipEvents();
     requestDomainRedraw();

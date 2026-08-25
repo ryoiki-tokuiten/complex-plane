@@ -19,7 +19,7 @@ import { REAL_SURFACE_FRAME } from '../constants/surface-rendering.js';
 import { paletteLutFor } from '../constants/surface-palettes.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
-import { disposeThreeObject } from './three-utils.js';
+import { disposeThreeObject, createCanvasTextSprite } from './three-utils.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
 import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
@@ -59,28 +59,13 @@ function clearGroup(group) {
 }
 
 function makeAxisLabel(text, color, scale = [1.35, 0.5, 1]) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 384;
-    canvas.height = 144;
-    const context = canvas.getContext('2d');
-    context.font = '700 58px "STIX Two Math", "Cambria Math", serif';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.shadowColor = 'rgba(0, 0, 0, 0.55)';
-    context.shadowBlur = 14;
-    context.fillStyle = color;
-    context.fillText(text, 192, 72);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        depthWrite: false
-    }));
-    sprite.scale.set(...scale);
-    return sprite;
+    return createCanvasTextSprite(THREE, text, {
+        color,
+        scale,
+        fontSize: 58,
+        shadowColor: 'rgba(0, 0, 0, 0.55)',
+        shadowBlur: 14
+    });
 }
 
 function formatCoord(value) {

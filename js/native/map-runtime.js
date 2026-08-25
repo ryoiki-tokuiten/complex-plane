@@ -7,7 +7,7 @@ import {
     evaluateNativePoints,
     nativeMapOptions
 } from './complex-engine.js';
-import { requireFiniteComplex } from '../utils/numeric-contracts.js';
+import { requireFiniteComplex, finiteComplex } from '../utils/numeric-contracts.js';
 
 const INVALID = Object.freeze({ re: NaN, im: NaN });
 const CONSTANT_STENCIL = Object.freeze([
@@ -41,10 +41,6 @@ function asPoint(re, im) {
     return re && typeof re === 'object'
         ? { re: Number(re.re), im: Number(re.im) }
         : { re: Number(re), im: Number(im) };
-}
-
-function finiteComplex(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
 }
 
 function evaluateMap(options, point) {

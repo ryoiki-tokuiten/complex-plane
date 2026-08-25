@@ -5,7 +5,7 @@ import {
     isDynamicAggregateActive
 } from '../analysis/dynamic-plotting.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
-import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
+import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
 
 const COLORS = Object.freeze({
     input: '#78a6c8',
@@ -17,10 +17,6 @@ const COLORS = Object.freeze({
     label: 'rgba(245, 247, 255, 0.9)',
     labelBackground: 'rgba(8, 10, 18, 0.78)'
 });
-
-function finitePoint(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
-}
 
 function displayConfig() {
     const display = state.dynamicPlotting?.display;
@@ -34,7 +30,7 @@ function pointRadius() {
 }
 
 function drawMarker(ctx, planeParams, value, options = {}) {
-    if (!finitePoint(value)) return;
+    if (!isFiniteComplex(value)) return;
     const canvasPoint = mapToCanvasCoords(value.re, value.im, planeParams);
     const radius = options.radius ?? pointRadius();
     const color = options.color || COLORS.term;
@@ -111,7 +107,7 @@ function drawPath(ctx, planeParams, points, options = {}) {
     let open = false;
     ctx.beginPath();
     for (const value of points) {
-        if (!finitePoint(value)) {
+        if (!isFiniteComplex(value)) {
             if (open) ctx.stroke();
             ctx.beginPath();
             open = false;
@@ -131,7 +127,7 @@ function drawPath(ctx, planeParams, points, options = {}) {
 }
 
 function drawArrow(ctx, planeParams, from, to, color = COLORS.vector) {
-    if (!finitePoint(from) || !finitePoint(to)) return;
+    if (!isFiniteComplex(from) || !isFiniteComplex(to)) return;
     const start = mapToCanvasCoords(from.re, from.im, planeParams);
     const end = mapToCanvasCoords(to.re, to.im, planeParams);
     const dx = end.x - start.x;
@@ -177,7 +173,7 @@ function sampleLabel(sample) {
 }
 
 function drawInvalid(ctx, planeParams, sample, value) {
-    if (!displayConfig().showInvalid || !finitePoint(value)) return;
+    if (!displayConfig().showInvalid || !isFiniteComplex(value)) return;
     const point = mapToCanvasCoords(value.re, value.im, planeParams);
     const radius = pointRadius() + 1;
 
@@ -212,14 +208,14 @@ function drawReduction(ctx, planeParams, samples, reduction) {
         let previous = { re: 0, im: 0 };
         for (const sample of samples) {
             const current = partialValue(sample);
-            if (finitePoint(current)) {
+            if (isFiniteComplex(current)) {
                 drawArrow(ctx, planeParams, previous, current);
                 previous = current;
             }
         }
     }
 
-    const final = [...partials].reverse().find(finitePoint);
+    const final = [...partials].reverse().find(isFiniteComplex);
     if (final) {
         drawMarker(ctx, planeParams, final, {
             color: COLORS.final,
@@ -292,7 +288,7 @@ function drawAggregateStage(ctx, planeParams, transform, stageIndex) {
 
     const s = result.aggregateParameter;
     const stageValue = typeof transform === 'function' ? transform(s.re, s.im) : result.reduction.finalValue;
-    if (finitePoint(stageValue)) {
+    if (isFiniteComplex(stageValue)) {
         drawMarker(ctx, planeParams, stageValue, {
             color: COLORS.final,
             radius: pointRadius() + 1.2,
@@ -332,24 +328,24 @@ export function getDynamicManifoldSceneData(options = {}) {
 
     if (aggregateActive) {
         if (stageIndex === 0 && displayConfig().showTermPoints) {
-            points.push(...result.visibleSamples.map(sample => sample.termValue).filter(finitePoint));
+            points.push(...result.visibleSamples.map(sample => sample.termValue).filter(isFiniteComplex));
         }
         if (stageIndex === 0 && displayConfig().showPartialPath) {
-            path = result.visibleSamples.map(partialValue).filter(finitePoint);
+            path = result.visibleSamples.map(partialValue).filter(isFiniteComplex);
         }
 
         const s = result.aggregateParameter;
         const stageValue = typeof transform === 'function'
             ? transform(s.re, s.im)
             : result.reduction.finalValue;
-        finalPoint = finitePoint(stageValue) ? stageValue : null;
+        finalPoint = isFiniteComplex(stageValue) ? stageValue : null;
     } else {
         if (displayConfig().showTermPoints) {
-            points.push(...result.visibleSamples.map(sample => sample.termValue).filter(finitePoint));
+            points.push(...result.visibleSamples.map(sample => sample.termValue).filter(isFiniteComplex));
         }
         if (displayConfig().showPartialPath && result.reduction.kind !== 'none') {
-            path = result.visibleSamples.map(partialValue).filter(finitePoint);
-            finalPoint = [...path].reverse().find(finitePoint) || null;
+            path = result.visibleSamples.map(partialValue).filter(isFiniteComplex);
+            finalPoint = [...path].reverse().find(isFiniteComplex) || null;
         }
     }
 
@@ -364,7 +360,7 @@ export function getDynamicManifoldSceneData(options = {}) {
 export const getDynamicSphereSceneData = getDynamicManifoldSceneData;
 
 export function findNearestDynamicSample(worldPoint, plane = 'z', options = {}) {
-    if (!state.dynamicPlotting?.enabled || !finitePoint(worldPoint)) return null;
+    if (!state.dynamicPlotting?.enabled || !isFiniteComplex(worldPoint)) return null;
 
     const result = getDynamicPlotResult({
         transform: plane === 'w' && !isDynamicAggregateActive() ? options.transform : undefined,
@@ -391,7 +387,7 @@ export function findNearestDynamicSample(worldPoint, plane = 'z', options = {}) 
             : [sample.termValue, partialValue(sample)];
 
         for (const value of candidates) {
-            if (!finitePoint(value)) continue;
+            if (!isFiniteComplex(value)) continue;
             const dx = value.re - worldPoint.re;
             const dy = value.im - worldPoint.im;
             const distanceSq = dx * dx + dy * dy;

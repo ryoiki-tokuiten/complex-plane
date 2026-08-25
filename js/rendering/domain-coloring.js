@@ -5,7 +5,6 @@ import {
     matchesPlanarDomainViewport,
     renderPlanarDomainDynamics
 } from './domain-dynamics.js';
-import { hslToRgb } from './canvas-primitives.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import {
     DOMAIN_COLOR_LOG_MAGNITUDE_MIN,
@@ -82,11 +81,6 @@ export { matchesPlanarDomainViewport };
 
 
 export function getPaletteColor(paletteId, h) {
-    if (paletteId === 'classic') {
-        const rgb = hslToRgb(h, 1.0, 0.5);
-        return [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255];
-    }
-
     const stops = getDomainPaletteStops(paletteId);
     const n = stops.length;
     const val = h * (n - 1);

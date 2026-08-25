@@ -1,10 +1,10 @@
 import { state, context } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { buildMappedTransformProfileKey } from '../native/map-runtime.js';
-import { getContourPoints, isPointInsideContour } from './contours.js';
 import {
     analyzeNativeContour,
     classifyNativeContourSingularities,
+    generateNativeContourPoints,
     nativeMapOptions
 } from '../native/complex-engine.js';
 import {
@@ -23,6 +23,21 @@ const cauchyDisplayCache = {
     hidden: null
 };
 let cauchyAnalysisCache = null;
+
+export function isPointInsideContour(point, contourType, params) {
+    if (!point || !params) throw new Error('Contour classification requires a point and parameters.');
+    let polygonContours = [];
+    if (contourType === 'contours') {
+        if (!Array.isArray(params.contours)) throw new Error('Contour collections require a contours array.');
+        polygonContours = params.contours;
+    } else if (contourType === 'contour') {
+        if (!Array.isArray(params.points)) throw new Error('Polygon contours require a points array.');
+        polygonContours = [params.points];
+    }
+    const results = classifyNativeContourSingularities(contourType, params, polygonContours, 0, [point]);
+    if (!results[0]) throw new Error('Native contour classification returned no result.');
+    return results[0].inside;
+}
 
 function complexListKey(values) {
     return Array.isArray(values)
@@ -82,6 +97,47 @@ function publishCauchyResult(key, { text = null, html = null, hidden = false } =
     cauchyDisplayCache.hidden = hidden;
 }
 
+export function resolveCauchyContour(state, { planeParams = null, curvePoints = NUM_INTEGRAL_STEPS } = {}) {
+    const shape = state.currentInputShape;
+    if (shape === 'circle') {
+        if (state.circleR <= 0) return { valid: false, error: 'invalid-circle-radius', message: 'Cauchy mode: Circle radius must be positive.' };
+        const params = { cx: state.a0, cy: state.b0, r: state.circleR };
+        return {
+            type: 'circle',
+            params,
+            pointSets: curvePoints ? [generateNativeContourPoints('circle', { type: 'circle', ...params }, curvePoints)] : null,
+            valid: true
+        };
+    }
+    if (shape === 'ellipse') {
+        if (state.ellipseA <= 0 || state.ellipseB <= 0) return { valid: false, error: 'invalid-ellipse-axes', message: 'Cauchy mode: Ellipse axes must be positive.' };
+        const params = { cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
+        return {
+            type: 'ellipse',
+            params,
+            pointSets: curvePoints ? [generateNativeContourPoints('ellipse', { type: 'ellipse', ...params }, curvePoints)] : null,
+            valid: true
+        };
+    }
+    if (shape === 'arbitrary') {
+        if (!state.arbitraryShapeClosed) return { valid: false, error: 'open-arbitrary-shape', message: 'Cauchy mode: Close the arbitrary shape before integrating.' };
+        const contours = generateInputShapePointSets(buildInputShapeGeometryConfig(planeParams, {
+            currentInputShape: 'arbitrary',
+            ...(curvePoints ? { curvePoints } : {})
+        })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
+        if (!contours.length || contours.some(points => points.some(point => !Number.isFinite(point?.re) || !Number.isFinite(point?.im)))) {
+            return { valid: false, error: 'invalid-arbitrary-shape', message: 'Cauchy mode: Draw or enter finite closed shapes C.' };
+        }
+        return {
+            type: 'contours',
+            params: { contours },
+            pointSets: contours,
+            valid: true
+        };
+    }
+    return { valid: false, error: 'unsupported-shape', message: 'Cauchy mode: Select Circle, Ellipse, or Arbitrary Shape.' };
+}
+
 export function performCauchyAnalysis() {
     if (!controls.cauchy_integral_results_info) return;
     const isZPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
@@ -103,49 +159,18 @@ export function performCauchyAnalysis() {
         return;
     }
 
-    const map = nativeMapOptions(state);
-
-
-    let contourC_points = null;
-    let contourCPointSets = null;
-    let contourParams = {};
-
-    if (state.currentInputShape === 'circle') {
-        if (state.circleR <= 0) {
-            publish(`${analysisKey}|invalid-circle-radius`, { text: 'Cauchy mode: Circle radius must be positive.' });
-            return;
-        }
-        contourParams = { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR };
-        contourC_points = getContourPoints('circle', contourParams, NUM_INTEGRAL_STEPS);
-        contourCPointSets = [contourC_points];
-    } else if (state.currentInputShape === 'ellipse') {
-        if (state.ellipseA <= 0 || state.ellipseB <= 0) {
-            publish(`${analysisKey}|invalid-ellipse-axes`, { text: 'Cauchy mode: Ellipse axes must be positive.' });
-            return;
-        }
-        contourParams = { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
-        contourC_points = getContourPoints('ellipse', contourParams, NUM_INTEGRAL_STEPS);
-        contourCPointSets = [contourC_points];
-    } else if (state.currentInputShape === 'arbitrary') {
-        if (!state.arbitraryShapeClosed) {
-            publish(`${analysisKey}|open-arbitrary-shape`, { text: 'Cauchy mode: Close the arbitrary shape before integrating.' });
-            return;
-        }
-        contourCPointSets = generateInputShapePointSets(buildInputShapeGeometryConfig(null, {
-            currentInputShape: 'arbitrary',
-            curvePoints: NUM_INTEGRAL_STEPS
-        })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
-        contourC_points = contourCPointSets[0] || [];
-        contourParams = { type: 'contours', contours: contourCPointSets };
-        if (!contourCPointSets.length || contourCPointSets.some(points =>
-            points.some(point => !Number.isFinite(point?.re) || !Number.isFinite(point?.im)))) {
-            publish(`${analysisKey}|invalid-arbitrary-shape`, { text: 'Cauchy mode: Draw or enter finite closed shapes C.' });
-            return;
-        }
-    } else {
-        publish(`${analysisKey}|unsupported-shape`, { text: 'Cauchy mode: Select Circle, Ellipse, or Arbitrary Shape.' });
+    const resolved = resolveCauchyContour(state, { curvePoints: NUM_INTEGRAL_STEPS });
+    if (!resolved.valid) {
+        publish(`${analysisKey}|${resolved.error}`, { text: resolved.message });
         return;
     }
+
+    const map = nativeMapOptions(state);
+    const contourCPointSets = resolved.pointSets;
+    const contourC_points = contourCPointSets[0] || [];
+    const contourParams = resolved.type === 'contours'
+        ? { type: 'contours', contours: resolved.pointSets }
+        : { type: resolved.type, ...resolved.params };
 
     if (!contourC_points || contourC_points.length === 0) {
         publish(`${analysisKey}|empty-contour`, { text: 'Error generating contour points for C.' });
@@ -252,37 +277,18 @@ export function performCauchyAnalysis() {
 export function updateWindingNumberDisplay() {
     controls.wPlaneAnalysisInfo.replaceChildren();
     let contourC_points = null;
-    let contourParams = {};
-    const N_winding_num_pts = 150; 
-    let canCalculateWinding = false;
+    const N_winding_num_pts = 150;
     const wIsPlanar = !state.manifold3dViewEnabled;
 
-    if (wIsPlanar && state.cauchyIntegralModeEnabled && (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse' || state.currentInputShape === 'arbitrary')) {
-        canCalculateWinding = true;
-        if (state.currentInputShape === 'circle') {
-            contourParams = { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR };
-            if (state.circleR <= 0) canCalculateWinding = false;
-        } else if (state.currentInputShape === 'ellipse') {
-            contourParams = { type: 'ellipse', cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
-            if (state.ellipseA <= 0 || state.ellipseB <= 0) canCalculateWinding = false;
-        } else {
-            const contours = generateInputShapePointSets(buildInputShapeGeometryConfig(null, {
-                currentInputShape: 'arbitrary', curvePoints: N_winding_num_pts
-            })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
-            contourParams = { type: 'contours', contours };
-            contourC_points = contours.flatMap((points, index) => index ? [null, ...points] : points);
-            if (!state.arbitraryShapeClosed || !contours.length || contours.some(points =>
-                points.some(point => !Number.isFinite(point?.re) || !Number.isFinite(point?.im)))) {
-                canCalculateWinding = false;
-            }
+    if (wIsPlanar && (state.cauchyIntegralModeEnabled || (state.currentFunction === 'polynomial' && state.currentInputShape === 'circle'))) {
+        const resolved = resolveCauchyContour(state, { curvePoints: N_winding_num_pts });
+        if (resolved.valid) {
+            contourC_points = resolved.type === 'contours'
+                ? resolved.pointSets.flatMap((points, index) => index ? [null, ...points] : points)
+                : resolved.pointSets[0];
         }
-    } else if (wIsPlanar && !state.cauchyIntegralModeEnabled && state.currentFunction === 'polynomial' && state.currentInputShape === 'circle') {
-        canCalculateWinding = true;
-        contourParams = { type: 'circle', cx: state.a0, cy: state.b0, r: state.circleR };
-        if (state.circleR <= 0) canCalculateWinding = false;
     }
-    
-    if (canCalculateWinding && !contourC_points) {contourC_points = getContourPoints(contourParams.type, contourParams, N_winding_num_pts);}
+
     if (contourC_points && contourC_points.length > 1) {
         const analysis = analyzeNativeContour(nativeMapOptions(state), contourC_points);
         const pathHasNaN = !!(analysis.status & 1);

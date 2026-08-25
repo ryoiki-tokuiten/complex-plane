@@ -255,7 +255,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **What it does.** Calculates path integrals $\oint_C f(z) dz$ along user-drawn contours or standard geometric shapes (circles, ellipses), evaluating Cauchy's Integral Formula, computing residues at enclosed poles, and displaying the topological winding number.
 
-**How it's built.** Built in `js/analysis/cauchy.js` and `js/analysis/contours.js`. Uses `analyzeNativeContour()` and `classifyNativeContourSingularities()` in WASM with `NUM_INTEGRAL_STEPS = 1024`.
+**How it's built.** Built in `js/analysis/cauchy.js`. Uses `analyzeNativeContour()` and `classifyNativeContourSingularities()` in WASM with `NUM_INTEGRAL_STEPS = 1024`.
 
 **Steps in execution.**
 
@@ -338,7 +338,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **What it does.** Handles multi-valued complex functions like $\log(z)$, $\sqrt{z}$, or $z^{1/n}$ by constructing multi-sheeted Riemann surfaces, tracking winding count around branch points and connecting adjacent sheets seamlessly.
 
-**How it's built.** Implemented in `js/analysis/riemann-surface.js` and `js/analysis/branch-continuation.js`. Builds multi-layer 3D surface meshes for WebGL and Three.js rendering.
+**How it's built.** Implemented in `js/analysis/riemann-surface.js`. Builds multi-layer 3D surface meshes for WebGL and Three.js rendering.
 
 **Steps in execution.**
 
@@ -434,7 +434,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **What it does.** Visualizes the intuitive geometric meaning of Fourier and Laplace transforms: wraps a signal $f(t)$ around the origin at varying rotational frequencies $\omega$, tracking the path and the dynamic center of mass (centroid) as $\omega$ sweeps.
 
-**How it's built.** Built in `js/rendering/draw-laplace-winding-3b1b.js` and `draw-laplace-panels.js`. The unified hub animates winding spirals, center-of-mass indicators, and the discrete spectrum; σ = 0 is the Fourier slice.
+**How it's built.** Built in `js/rendering/draw-laplace-panels.js`. The unified hub animates winding spirals, center-of-mass indicators, and the discrete spectrum; σ = 0 is the Fourier slice.
 
 **Steps in execution.**
 
@@ -573,8 +573,7 @@ complex-plane/
   │   │   ├── 3d-manifolds-renderer.js # Generalized 3D Manifolds engine
   │   │   ├── manifold-registry.js     # 10 Differential manifold topologies
   │   │   ├── real-plots-renderer.js   # Shared Real Plots and Laplace Three.js heightfield renderer
-  │   │   ├── draw-laplace-winding-3b1b.js # Laplace winding, including the Fourier slice
-  │   │   └── draw-laplace-panels.js # Time-domain and discrete spectrum panels
+  │   │   └── draw-laplace-panels.js # Laplace 3-panel, time-domain, winding, and spectrum panels
   │   ├── frontend/                # Preact reactive UI components
   │   └── ui/                      # DOM controllers, event listeners, tooltips
   ├── native/                      # C source code for complex_engine.wasm

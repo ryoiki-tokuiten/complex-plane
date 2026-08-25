@@ -1,20 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { continuationSheetForPath, evaluateOnSheet } from '../js/analysis/branch-continuation.js';
-import { findPreimages } from '../js/analysis/preimage.js';
-import { isPointInsideContour } from '../js/analysis/contours.js';
+import {
+    continuationNativeSheet,
+    evaluateNativeSheets,
+    findNativePreimages,
+    nativeMapOptions
+} from '../js/native/complex-engine.js';
+import { isPointInsideContour } from '../js/analysis/cauchy.js';
 import { completeNativeMapOptions, completeRuntimeState } from './helpers/native-map.js';
+
+function evaluateOnSheet(functionKey, point, sheet, runtimeState) {
+    const map = nativeMapOptions(runtimeState, {
+        functionKey,
+        chainingEnabled: runtimeState.chainingEnabled,
+        chainCount: runtimeState.chainingEnabled ? runtimeState.chainCount : 1
+    });
+    const result = evaluateNativeSheets(map, [point], [sheet]);
+    return result.valid[0] ? result.values[0] : { re: NaN, im: NaN };
+}
 
 test('continuation counts oriented crossings of ray and drawn branch cuts', () => {
     const path = [{ re: -1, im: -1 }, { re: -1, im: 1 }];
-    assert.equal(Math.abs(continuationSheetForPath(path, 'ray', Math.PI, [])), 1);
-    assert.equal(Math.abs(continuationSheetForPath(path, 'draw', Math.PI, [{ re: -2, im: 0 }, { re: 0, im: 0 }])), 1);
+    assert.equal(Math.abs(continuationNativeSheet(path, 'ray', Math.PI, [])), 1);
+    assert.equal(Math.abs(continuationNativeSheet(path, 'draw', Math.PI, [{ re: -2, im: 0 }, { re: 0, im: 0 }])), 1);
 });
 
 test('drawn-cut crossings are stable at polyline vertices', () => {
     const cut = [{ re: -1, im: -1 }, { re: 0, im: 0 }, { re: 1, im: -1 }];
-    const crossing = continuationSheetForPath(
+    const crossing = continuationNativeSheet(
         [{ re: 0, im: -1 }, { re: 0, im: 1 }], 'draw', Math.PI, cut
     );
     assert.equal(Math.abs(crossing), 1);
@@ -76,11 +90,16 @@ test('continued algebraic custom expressions use the active sheet', () => {
 });
 
 test('preimage explorer finds and deduplicates both square roots', () => {
-    const roots = findPreimages({ re: 1, im: 0 }, completeNativeMapOptions({
-        functionKey: 'polynomial', chainingEnabled: false, polynomialN: 2,
-        polynomialCoeffs: [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }]
-    }), {
-        xRange: [-2, 2], yRange: [-2, 2]
+    const roots = findNativePreimages({
+        target: { re: 1, im: 0 },
+        map: completeNativeMapOptions({
+            functionKey: 'polynomial', chainingEnabled: false, polynomialN: 2,
+            polynomialCoeffs: [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }]
+        }),
+        xRange: [-2, 2],
+        yRange: [-2, 2],
+        density: 18,
+        maxIterations: 28
     });
     assert.equal(roots.length, 2);
     assert.ok(roots.some(root => Math.hypot(root.re - 1, root.im) < 1e-5));

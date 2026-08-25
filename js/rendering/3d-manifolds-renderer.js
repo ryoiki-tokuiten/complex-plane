@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state, subscribeState } from '../store/state.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
 import { disposeThreeObject } from './three-utils.js';
-import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
+import { requireFiniteComplex, requireFiniteNumber, isFiniteComplex } from '../utils/numeric-contracts.js';
 import { getManifold, DEFAULT_MANIFOLD_ID } from './manifold-registry.js';
 import { buildNativeFoldPreimageMarkers } from '../native/complex-engine.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
@@ -1178,8 +1178,4 @@ export class ThreeManifoldsRenderer {
             this.controls = null;
         }
     }
-}
-
-function isFiniteComplex(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
 }

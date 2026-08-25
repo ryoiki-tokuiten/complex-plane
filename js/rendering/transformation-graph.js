@@ -8,9 +8,9 @@ import {
     buildInputShapeGeometryConfig,
     generateInputShapePointSets
 } from './shape-generators.js';
-import { disposeThreeObject } from './three-utils.js';
+import { disposeThreeObject, createCanvasTextSprite } from './three-utils.js';
 import { buildLaplaceWinding } from '../analysis/laplace-transform.js';
-import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
+import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -61,14 +61,6 @@ const EPSILON = 1e-10;
 let activeGraphRenderer = null;
 let graphDataCache = null;
 let fullGridDataCache = null;
-
-function isFiniteComplex(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
-}
-
-function finitePoint(point) {
-    return point && Number.isFinite(point.re) && Number.isFinite(point.im);
-}
 
 function pointSetPoints(pointSet, label = 'Transformation-graph point set') {
     if (!Array.isArray(pointSet?.points)) throw new Error(`${label} requires a points array.`);
@@ -166,7 +158,7 @@ function pointSetDistanceSq(point, pointSet) {
     for (let index = 1; index < points.length; index += 1) {
         const start = points[index - 1];
         const end = points[index];
-        if (!finitePoint(start) || !finitePoint(end)) continue;
+        if (!isFiniteComplex(start) || !isFiniteComplex(end)) continue;
         best = Math.min(best, pointSegmentDistanceSq(point, start, end));
     }
 
@@ -238,7 +230,7 @@ export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = 
 
     const world = mapCanvasToWorldCoords(canvasX, canvasY, planeParams);
     const probe = { re: world.x, im: world.y };
-    if (!finitePoint(probe)) return false;
+    if (!isFiniteComplex(probe)) return false;
 
     const pointSets = getGraphPointSets(planeParams);
     const lockedIndex = selectedLineIndex(pointSets, false);
@@ -295,7 +287,7 @@ export function drawGraphSelectionOverlay(ctx, planeParams = zPlaneParams) {
     const drawPath = () => {
         let started = false;
         points.forEach(point => {
-            if (!finitePoint(point)) {
+            if (!isFiniteComplex(point)) {
                 started = false;
                 return;
             }
@@ -335,7 +327,7 @@ function cumulativeDistances(points) {
     for (let index = 1; index < points.length; index += 1) {
         const previous = points[index - 1];
         const current = points[index];
-        const distance = finitePoint(previous) && finitePoint(current)
+        const distance = isFiniteComplex(previous) && isFiniteComplex(current)
             ? Math.hypot(current.re - previous.re, current.im - previous.im)
             : 0;
         total += distance;
@@ -346,7 +338,7 @@ function cumulativeDistances(points) {
 }
 
 function resamplePolyline(points, count = SAMPLE_COUNT) {
-    const safePoints = points.filter(finitePoint);
+    const safePoints = points.filter(isFiniteComplex);
     if (safePoints.length === 0) return [];
     if (safePoints.length === 1 || count <= 1) return [safePoints[0]];
 
@@ -403,8 +395,8 @@ function normalizedComponentScale(samples, component) {
 
 function pointSetLabel(pointSet) {
     const points = pointSetPoints(pointSet);
-    const first = points.find(finitePoint);
-    const last = [...points].reverse().find(finitePoint);
+    const first = points.find(isFiniteComplex);
+    const last = [...points].reverse().find(isFiniteComplex);
     const role = String(pointSet?.role || '');
     if (!first) return role;
     if (role.includes('horizontal')) return `Im(z) = ${formatNumber(first.im)}`;
@@ -431,7 +423,7 @@ function evaluateSample(input, t, map) {
 }
 
 function polylineParameterAtPoint(points, target) {
-    const safePoints = points.filter(finitePoint);
+    const safePoints = points.filter(isFiniteComplex);
     if (safePoints.length < 2) return 0;
     const { distances, total } = cumulativeDistances(safePoints);
     if (total <= EPSILON) return 0;
@@ -480,8 +472,8 @@ function gridIntersectionPoint(leftSet, rightSet) {
     const vertical = leftRole.includes('vertical') ? leftSet
         : rightRole.includes('vertical') ? rightSet : null;
     if (horizontal && vertical) {
-        const horizontalPoint = horizontal.points.find(finitePoint);
-        const verticalPoint = vertical.points.find(finitePoint);
+        const horizontalPoint = horizontal.points.find(isFiniteComplex);
+        const verticalPoint = vertical.points.find(isFiniteComplex);
         if (horizontalPoint && verticalPoint) {
             return { re: verticalPoint.re, im: horizontalPoint.im };
         }
@@ -492,9 +484,9 @@ function gridIntersectionPoint(leftSet, rightSet) {
     const ray = leftRole.includes('angular') ? leftSet
         : rightRole.includes('angular') ? rightSet : null;
     if (!circle || !ray) return null;
-    const circlePoint = circle.points.find(finitePoint);
+    const circlePoint = circle.points.find(isFiniteComplex);
     const direction = [...ray.points].reverse().find(point =>
-        finitePoint(point) && Math.hypot(point.re, point.im) > EPSILON
+        isFiniteComplex(point) && Math.hypot(point.re, point.im) > EPSILON
     );
     if (!circlePoint || !direction) return null;
     const radius = Math.hypot(circlePoint.re, circlePoint.im);
@@ -545,14 +537,14 @@ export function filterGraphFullGridPointSets(pointSets) {
 }
 
 function gridFamilySortValue(pointSet) {
-    const first = pointSetPoints(pointSet).find(finitePoint);
+    const first = pointSetPoints(pointSet).find(isFiniteComplex);
     if (!first) return 0;
     const role = String(pointSet.role || '');
     if (role.includes('horizontal')) return first.im;
     if (role.includes('vertical')) return first.re;
     if (role.includes('radial')) return Math.hypot(first.re, first.im);
     if (role.includes('angular')) {
-        const direction = [...pointSet.points].reverse().find(finitePoint) || first;
+        const direction = [...pointSet.points].reverse().find(isFiniteComplex) || first;
         const angle = Math.atan2(direction.im, direction.re);
         return angle < 0 ? angle + Math.PI * 2 : angle;
     }
@@ -1068,45 +1060,15 @@ function addPlane(group, width, height, position, rotation, color, opacity) {
     return mesh;
 }
 
-function makeTextSprite(text, {
-    color = 'rgba(236, 241, 255, 0.95)',
-    fontSize = 46,
-    height = 0.28,
-    weight = 600,
-    maxWidth = 768
-} = {}) {
-    const padding = 32;
-    const font = `${weight} ${fontSize}px "Inter", "Outfit", sans-serif`;
-    const measureCanvas = document.createElement('canvas');
-    const measureCtx = measureCanvas.getContext('2d');
-    measureCtx.font = font;
-    const measured = measureCtx.measureText(text);
-    const width = Math.min(maxWidth, Math.max(192, Math.ceil(measured.width + padding * 2)));
-    const canvasHeight = Math.ceil(fontSize + padding * 2);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = canvasHeight;
-    const context = canvas.getContext('2d');
-    context.font = font;
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillStyle = color;
-    context.shadowColor = 'rgba(0, 0, 0, 0.68)';
-    context.shadowBlur = 10;
-    context.fillText(text, width / 2, canvasHeight / 2, width - padding);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    const material = new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        depthWrite: false
+function makeTextSprite(text, options = {}) {
+    return createCanvasTextSprite(THREE, text, {
+        fontSize: 46,
+        height: 0.28,
+        weight: 600,
+        fontFamily: '"Inter", "Outfit", sans-serif',
+        shadowBlur: 10,
+        ...options
     });
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(height * (width / canvasHeight), height, 1);
-    return sprite;
 }
 
 function addLabel(group, text, position, options = {}) {
@@ -1172,7 +1134,7 @@ function graphPointsForSamples(samples, scales, mode, zOffset = 0) {
 function curveIsClosed(curve) {
     const first = curve?.samples?.[0]?.input;
     const last = curve?.samples?.at(-1)?.input;
-    return finitePoint(first) && finitePoint(last)
+    return isFiniteComplex(first) && isFiniteComplex(last)
         && Math.hypot(first.re - last.re, first.im - last.im) <= EPSILON;
 }
 
@@ -1194,7 +1156,7 @@ function orderedConnectedSamples(samples, curve) {
     const ordered = samples.slice();
     const first = ordered[0]?.input;
     const last = ordered.at(-1)?.input;
-    if (finitePoint(first) && finitePoint(last)
+    if (isFiniteComplex(first) && isFiniteComplex(last)
         && Math.hypot(first.re - last.re, first.im - last.im) <= EPSILON) {
         ordered.pop();
     }
@@ -1272,7 +1234,7 @@ function graphFourierSignal(samples, component, scale) {
     let source = samples;
     const firstInput = source[0]?.input;
     const lastInput = source.at(-1)?.input;
-    if (finitePoint(firstInput) && finitePoint(lastInput)
+    if (isFiniteComplex(firstInput) && isFiniteComplex(lastInput)
         && Math.hypot(firstInput.re - lastInput.re, firstInput.im - lastInput.im) <= EPSILON) {
         source = source.slice(0, -1);
     }

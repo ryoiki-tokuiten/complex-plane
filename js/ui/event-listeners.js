@@ -5,6 +5,7 @@ import { setupVisualParameters, updateChainingColumns, updateChainingTitles } fr
 import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
+import { clonePlain } from '../utils/clone-utils.js';
 import {
     requestDomainRedraw as requestScheduledDomainRedraw,
     requestUiRedraw as requestScheduledUiRedraw
@@ -16,9 +17,17 @@ import {
 } from '../analysis/laplace-transform.js';
 import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
 import {
-    DOMAIN_COLOR_LOG_MAGNITUDE_MAX,
-    DOMAIN_COLOR_LOG_MAGNITUDE_MIN
-} from '../constants/domain-dynamics.js';
+    updateDomainPaletteCirclePanel,
+    updateSurfacePaletteCirclePanel,
+    drawDomainPaletteCircle,
+    drawSurfacePaletteCircle
+} from '../rendering/draw-palette-preview.js';
+export {
+    updateDomainPaletteCirclePanel,
+    updateSurfacePaletteCirclePanel,
+    drawDomainPaletteCircle,
+    drawSurfacePaletteCircle
+};
 import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
@@ -57,8 +66,12 @@ import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../renderi
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
-import { findPreimages } from '../analysis/preimage.js';
-import { continuationSheetForPath, evaluateOnSheet } from '../analysis/branch-continuation.js';
+import {
+    continuationNativeSheet,
+    evaluateNativeSheets,
+    findNativePreimages,
+    nativeMapOptions
+} from '../native/complex-engine.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
 
 const { controls = {} } = context;
@@ -689,16 +702,8 @@ function syncInputShapeControlFromState() {
     if (controls.inputShapeSelector) controls.inputShapeSelector.value = state.currentInputShape;
 }
 
-function cloneRestoreValue(value) {
-    if (Array.isArray(value)) return value.map(cloneRestoreValue);
-    if (value && typeof value === 'object') {
-        return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneRestoreValue(entry)]));
-    }
-    return value;
-}
-
 function captureFractalState() {
-    return Object.fromEntries(FRACTAL_RESTORE_KEYS.map(key => [key, cloneRestoreValue(state[key])]));
+    return Object.fromEntries(FRACTAL_RESTORE_KEYS.map(key => [key, clonePlain(state[key])]));
 }
 
 function restoreFractalState(nextFunction) {
@@ -708,7 +713,7 @@ function restoreFractalState(nextFunction) {
     fractalRestoreSnapshot = null;
     FRACTAL_RESTORE_KEYS.forEach(key => {
         if (key !== 'currentFunction' && key !== 'currentFunctionPreset') {
-            state[key] = cloneRestoreValue(snapshot[key]);
+            state[key] = clonePlain(snapshot[key]);
         }
     });
     state.currentFunction = nextFunction;
@@ -1061,17 +1066,6 @@ function bindDomainColoringControls() {
         requestDomainRedraw(true);
     });
 
-    [
-        ['grid_color_1_input', 'grid_color_1_picker_wrapper', 'gridColor1'],
-        ['grid_color_2_input', 'grid_color_2_picker_wrapper', 'gridColor2']
-    ].forEach(([inputId, wrapperId, stateKey]) => {
-        bindElementListener($(inputId), 'input', event => {
-            state[stateKey] = event.target.value;
-            setStyles($(wrapperId), { backgroundColor: state[stateKey] });
-            persistThemePreferences();
-            requestUiRedraw();
-        });
-    });
 
     ['domainBrightness', 'domainContrast', 'domainSaturation', 'domainLightnessCycles']
         .forEach(key => bindSlider(`${key}Slider`, key, parseFloat, () => requestDomainRedraw(true)));
@@ -1590,6 +1584,16 @@ function startPan(ctx, pos) {
     requestUiRedraw();
 }
 
+function evaluateSheetPoint(functionKey, point, sheet) {
+    const map = nativeMapOptions(state, {
+        functionKey,
+        chainingEnabled: state.chainingEnabled,
+        chainCount: state.chainingEnabled ? state.chainCount : 1
+    });
+    const result = evaluateNativeSheets(map, [point], [sheet]);
+    return result.valid[0] ? result.values[0] : { re: NaN, im: NaN };
+}
+
 function handleCanvasMoveNow(ctx, pointer) {
     const pos = canvasPosition(ctx, pointer);
 
@@ -1604,9 +1608,9 @@ function handleCanvasMoveNow(ctx, pointer) {
             state[key] = nextPoints;
             ctx.hasDragged = true;
             if (key === 'continuationPath') {
-                const delta = continuationSheetForPath(nextPoints.slice(-2), state.branchCutType, state.branchCutAngle, state.branchCutPoints);
+                const delta = continuationNativeSheet(nextPoints.slice(-2), state.branchCutType, state.branchCutAngle, state.branchCutPoints);
                 const sheet = state.continuationSheet + delta;
-                const value = evaluateOnSheet(state.currentFunction, nextPoints[nextPoints.length - 1], sheet, state);
+                const value = evaluateSheetPoint(state.currentFunction, nextPoints[nextPoints.length - 1], sheet);
                 state.continuationSheet = sheet;
                 state.continuationValue = value;
                 state.continuationValues = [...state.continuationValues, value];
@@ -1675,7 +1679,7 @@ function handleCanvasDown(ctx, event) {
         state[key] = [{ re: world.x, im: world.y }];
         if (mode === 'path') {
             state.continuationSheet = 0;
-            state.continuationValue = evaluateOnSheet(state.currentFunction, state[key][0], 0, state);
+            state.continuationValue = evaluateSheetPoint(state.currentFunction, state[key][0], 0);
             state.continuationValues = [state.continuationValue];
         }
         ctx.drawingBranch = mode;
@@ -1967,11 +1971,14 @@ function onCanvasClick(event) {
         const xRange = zPlaneParams.currentVisXRange;
         const yRange = zPlaneParams.currentVisYRange;
         state.preimageTarget = { re: target.x, im: target.y };
-        state.preimageRoots = findPreimages(
-            state.preimageTarget,
-            nativeOptionsForActiveMap(map),
-            { xRange, yRange }
-        );
+        state.preimageRoots = findNativePreimages({
+            density: 18,
+            maxIterations: 28,
+            map: nativeOptionsForActiveMap(map),
+            target: state.preimageTarget,
+            xRange,
+            yRange
+        });
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
         requestUiRedraw();
         return;
@@ -2038,29 +2045,49 @@ function restoreFullscreenOrigin(element, restoreSize = false) {
     fullscreenOrigins.delete(element);
 }
 
-function toggleFullscreenPanel({ container, column, stateKey, closeButton, onResize }) {
+function toggleFullscreenContainer({
+    container,
+    card,
+    entering,
+    onClose,
+    backgroundColor = '#000',
+    restoreSize = false,
+    onResize = null
+}) {
     const shell = controls.fullscreenContainer;
     if (!container || !shell) return;
 
-    state[stateKey] = !state[stateKey];
-
-    if (state[stateKey]) {
+    if (entering) {
         rememberFullscreenOrigin(container);
-        setStyles(shell, fullscreenStyles('#000'));
-        attachCloseButton(shell, () => closeButton.click());
+        setStyles(shell, fullscreenStyles(backgroundColor));
+        attachCloseButton(shell, onClose);
         setStyles(container, { width: '100%', height: '100%' });
         shell.appendChild(container);
         document.body.appendChild(shell);
         shell.classList.remove('hidden');
-        if (column) column.classList.add('hidden-visually');
+        if (card) card.classList.add('hidden-visually');
     } else {
-        restoreFullscreenOrigin(container);
+        restoreFullscreenOrigin(container, restoreSize);
         setStyles(container, { width: '100%', height: '100%' });
         resetFullscreenShell(shell);
-        if (column) column.classList.remove('hidden-visually');
+        if (card) card.classList.remove('hidden-visually');
     }
 
-    laterFrame(onResize, state[stateKey] ? 150 : 100);
+    if (typeof onResize === 'function') {
+        laterFrame(onResize, entering ? 150 : 100);
+    }
+}
+
+function toggleFullscreenPanel({ container, column, stateKey, closeButton, onResize }) {
+    if (!container || !controls.fullscreenContainer) return;
+    state[stateKey] = !state[stateKey];
+    toggleFullscreenContainer({
+        container,
+        card: column,
+        entering: state[stateKey],
+        onClose: () => closeButton.click(),
+        onResize
+    });
 }
 
 function bindFullscreenControls() {
@@ -2309,9 +2336,7 @@ function isPlaneFullscreen(isZ) {
 
 function handleFullScreenToggle(planeType, index = 0) {
     const target = fullscreenTarget(planeType, index);
-    const shell = controls.fullscreenContainer;
-
-    if (!target.element || !shell) {
+    if (!target.element) {
         console.error('Fullscreen target element not found for plane:', planeType, 'index:', index);
         return;
     }
@@ -2319,25 +2344,18 @@ function handleFullScreenToggle(planeType, index = 0) {
     setPlaneFullscreen(target.isZ, !isPlaneFullscreen(target.isZ), index);
     const entering = isPlaneFullscreen(target.isZ);
 
-    if (entering) {
-        rememberFullscreenOrigin(target.element);
-        setStyles(shell, fullscreenStyles('var(--color-background-dark)'));
-        attachCloseButton(shell, () => handleFullScreenToggle(planeType, index));
-        shell.appendChild(target.element);
-        document.body.appendChild(shell);
-        shell.classList.remove('hidden');
-        if (target.card) target.card.classList.add('hidden-visually');
-        setStyles(target.element, { width: '100%', height: '100%' });
+    toggleFullscreenContainer({
+        container: target.element,
+        card: target.card,
+        entering,
+        onClose: () => handleFullScreenToggle(planeType, index),
+        backgroundColor: 'var(--color-background-dark)',
+        restoreSize: true
+    });
 
-        if (target.isThree && target.canvas) target.canvas.classList.add('hidden');
-    } else {
-        restoreFullscreenOrigin(target.element, true);
-        resetFullscreenShell(shell);
-        if (target.card) target.card.classList.remove('hidden-visually');
-        if (target.isThree && target.canvas) target.canvas.classList.remove('hidden');
-
+    if (target.isThree && target.canvas) {
+        target.canvas.classList.toggle('hidden', entering);
     }
-
     setupVisualParameters(false, false);
 
     if (target.isThree) {
@@ -2402,177 +2420,6 @@ function bindAlgebraicChainingControls() {
     });
 }
 
-function drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner) {
-    const rootStyle = getComputedStyle(document.documentElement);
-    const borderColor = rootStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)';
-    const textColor = rootStyle.getPropertyValue('--text-color') || '#FAFAFA';
-
-    ctx.save();
-
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    ctx.beginPath();
-    ctx.moveTo(cx - rOuter, cy);
-    ctx.lineTo(cx + rOuter, cy);
-    ctx.moveTo(cx, cy - rOuter);
-    ctx.lineTo(cx, cy + rOuter);
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter, 0, 2 * Math.PI);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, rInner, 0, 2 * Math.PI);
-    ctx.stroke();
-
-    ctx.fillStyle = textColor;
-    ctx.font = '500 13px Outfit, Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('0', cx + rOuter + 16, cy);
-    ctx.fillText('π/2', cx, cy - rOuter - 16);
-    ctx.fillText('π', cx - rOuter - 16, cy);
-    ctx.fillText('3π/2', cx, cy + rOuter + 16);
-
-    ctx.restore();
-}
-
-export function drawDomainPaletteCircle(canvas, paletteId) {
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const cx = w / 2;
-    const cy = h / 2;
-    const rOuter = 130;
-    const rInner = 95;
-
-    const imgData = ctx.createImageData(w, h);
-    const data = imgData.data;
-
-    // Use current state settings for preview
-    const tempState = {
-        domainPalette: paletteId,
-        domainBrightness: state.domainBrightness,
-        domainContrast: state.domainContrast,
-        domainSaturation: state.domainSaturation,
-        domainLightnessCycles: state.domainLightnessCycles
-    };
-
-    for (let y = 0; y < h; y++) {
-        const dy = -(y - cy);
-        for (let x = 0; x < w; x++) {
-            const dx = x - cx;
-            const r = Math.hypot(dx, dy);
-
-            const idx = (y * w + x) * 4;
-
-            if (r > rOuter + 1.5 || r < rInner - 1.5) {
-                continue;
-            }
-
-            // Antialiasing for outer boundary
-            let alpha = 255;
-            if (r > rOuter - 1.5) {
-                alpha = Math.max(0, Math.min(255, Math.round((rOuter + 1.5 - r) * 85)));
-            } else if (r < rInner + 1.5) {
-                alpha = Math.min(alpha, Math.max(0, Math.min(255, Math.round((r - (rInner - 1.5)) * 85))));
-            }
-
-            const phase = Math.atan2(dy, dx);
-
-            // Just map phase to color with a fixed standard modulus of 1.0 (no magnitude cycles/shading)
-            const rgb = domainColorForValue(Math.cos(phase), Math.sin(phase), {
-                ...tempState,
-                domainLightnessCycles: 0 // Keep ring clean
-            });
-
-            data[idx] = rgb[0];
-            data[idx + 1] = rgb[1];
-            data[idx + 2] = rgb[2];
-            data[idx + 3] = alpha;
-        }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-
-    drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner);
-}
-
-export function drawAmplitudeStrip(canvas, paletteId) {
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const imgData = ctx.createImageData(w, h);
-    const data = imgData.data;
-
-    const tempState = {
-        domainPalette: paletteId,
-        domainBrightness: state.domainBrightness,
-        domainContrast: state.domainContrast,
-        domainSaturation: state.domainSaturation,
-        domainLightnessCycles: state.domainLightnessCycles
-    };
-
-    // Horizontal axis is magnitude at a representative phase, so the strip stays
-    // palette-aware without adding a second phase dimension.
-    const phase = Math.PI;
-    const phaseRe = Math.cos(phase);
-    const phaseIm = Math.sin(phase);
-    for (let x = 0; x < w; x++) {
-        const normalized = x / Math.max(1, w - 1);
-        const logMod = DOMAIN_COLOR_LOG_MAGNITUDE_MIN + normalized *
-            (DOMAIN_COLOR_LOG_MAGNITUDE_MAX - DOMAIN_COLOR_LOG_MAGNITUDE_MIN);
-        const modVal = Math.exp(logMod);
-        const rgb = domainColorForValue(
-            modVal * phaseRe,
-            modVal * phaseIm,
-            tempState
-        );
-
-        for (let y = 0; y < h; y++) {
-            const idx = (y * w + x) * 4;
-            data[idx] = rgb[0];
-            data[idx + 1] = rgb[1];
-            data[idx + 2] = rgb[2];
-            data[idx + 3] = 255;
-        }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-
-    // Draw border
-    ctx.save();
-    const rootStyle = getComputedStyle(document.documentElement);
-    const borderColor = rootStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)';
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(0, 0, w, h);
-    ctx.restore();
-}
-
-export function updateDomainPaletteCirclePanel() {
-    const activePalette = domainPalettes.find(p => p.id === state.domainPalette) || domainPalettes[0];
-    const title = $('domain_palette_circle_title');
-    if (title) title.textContent = activePalette.name;
-
-    const canvas = $('domain_palette_circle_canvas');
-    drawDomainPaletteCircle(canvas, state.domainPalette);
-
-    const stripCanvas = $('amplitude_strip_canvas');
-    drawAmplitudeStrip(stripCanvas, state.domainPalette);
-}
-
 function bindDomainPaletteCirclePanelListeners() {
     bindPalettePanel(
         'view_palette_circle_btn',
@@ -2580,80 +2427,6 @@ function bindDomainPaletteCirclePanelListeners() {
         'domain_palette_circle_panel',
         updateDomainPaletteCirclePanel
     );
-}
-
-export function drawSurfacePaletteCircle(canvas, paletteId) {
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const cx = w / 2;
-    const cy = h / 2;
-    const rOuter = 130;
-    const rInner = 95;
-
-    const palette = surfacePalettes.find(p => p.id === paletteId) || surfacePalettes.find(p => p.id === 'viridis');
-    if (!palette) return;
-
-    // CSS gradient colors string parsing
-    const colors = palette.colors.split(',').map(c => c.trim());
-
-    // Conic gradient: createConicGradient(angle, x, y).
-    // angle 0 is straight UP (12 o'clock). 
-    // In our 3D math, phase -PI is at 9 o'clock.
-    // To match 9 o'clock, we use angle = -Math.PI/2
-    const grad = ctx.createConicGradient(-Math.PI / 2, cx, cy);
-
-    colors.forEach((color, i) => {
-        const ratio = i / (colors.length - 1);
-        grad.addColorStop(ratio, color);
-    });
-
-    // Draw donut
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
-    ctx.arc(cx, cy, rInner, Math.PI * 2, 0, true);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner);
-}
-
-export function drawSurfaceAmplitudeStrip(canvas, paletteId) {
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const palette = surfacePalettes.find(p => p.id === paletteId) || surfacePalettes.find(p => p.id === 'viridis');
-    if (!palette) return;
-
-    const colors = palette.colors.split(',').map(c => c.trim());
-    const grad = ctx.createLinearGradient(0, 0, w, 0);
-
-    colors.forEach((color, i) => {
-        const ratio = i / (colors.length - 1);
-        grad.addColorStop(ratio, color);
-    });
-
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
-}
-
-export function updateSurfacePaletteCirclePanel() {
-    const activePalette = surfacePalettes.find(p => p.id === state.surfacePalette) || surfacePalettes.find(p => p.id === 'viridis');
-    const title = $('real_plots_palette_circle_title');
-    if (title && activePalette) title.textContent = activePalette.name;
-
-    const canvas = $('real_plots_palette_circle_canvas');
-    drawSurfacePaletteCircle(canvas, state.surfacePalette);
-
-    const stripCanvas = $('real_plots_amplitude_strip_canvas');
-    drawSurfaceAmplitudeStrip(stripCanvas, state.surfacePalette);
 }
 
 function bindSurfacePaletteCirclePanelListeners() {

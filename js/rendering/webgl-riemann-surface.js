@@ -18,7 +18,7 @@ import {
   getBranchWindowLabel,
   getSurfaceComponentLabel,
   getVisibleBranchIndices,
-  surfaceStageHasBranches
+  baseExpressionHasBranches
 } from '../analysis/riemann-surface.js';
 import { orbitColoringModeId } from '../constants/rendering.js';
 import {
@@ -1982,7 +1982,7 @@ function drawRenderer(renderer, options = renderer.lastOptions, signature = getR
   bindGridAttribute(renderer);
   setCommonUniforms(renderer, options);
 
-  const hasBranches = surfaceStageHasBranches(state, options.stage);
+  const hasBranches = baseExpressionHasBranches(state);
   const branchIndices = getCachedBranchIndices(
     state.riemannSurfaceSheets,
     state.riemannSurfaceBranchCenter,

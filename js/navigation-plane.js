@@ -7,7 +7,7 @@ import { updatePlaneViewportRanges } from './utils/canvas-utils.js';
 import { drawImageWithWebGL } from './rendering/draw-image-webgl.js';
 import { drawPlanarTransformedLine, drawComplexLineSetOnPlane } from './rendering/draw-planar.js';
 import { setupVisualParameters } from './utils/dom-utils.js';
-import { requireFiniteNumber } from './utils/numeric-contracts.js';
+import { requireFiniteNumber, isFiniteComplex } from './utils/numeric-contracts.js';
 
 const { controls } = context;
 
@@ -52,12 +52,6 @@ function getRocketImageForHeading(heading) {
     } else {
         return NAVIGATION_ROCKET_IMAGES['-y'];
     }
-}
-
-function isFiniteComplexPoint(point) {
-    return point &&
-        Number.isFinite(point.re) &&
-        Number.isFinite(point.im);
 }
 
 function isNavigationFormTarget(target) {
@@ -228,7 +222,7 @@ function updateNavigationVehicle(now) {
 }
 
 function centerPlaneOnNavigationPoint(planeParams, point, panState) {
-    if (!isFiniteComplexPoint(point) || (panState && panState.isPanning)) return false;
+    if (!isFiniteComplex(point) || (panState && panState.isPanning)) return false;
 
     const nextOriginX = planeParams.width / 2 - point.re * planeParams.scale.x;
     const nextOriginY = planeParams.height / 2 + point.im * planeParams.scale.y;

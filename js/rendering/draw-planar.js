@@ -15,7 +15,7 @@ import {
 import { LINE_WIDTH_NORMAL, PARTICLE_RADIUS } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
-import { requireFiniteNumber } from '../utils/numeric-contracts.js';
+import { requireFiniteNumber, isFiniteNumber, isFiniteComplex } from '../utils/numeric-contracts.js';
 import {
     getMappedTransformProfile, nativeOptionsForActiveMap
 } from '../native/map-runtime.js';
@@ -32,7 +32,7 @@ import {
 } from './shape-generators.js';
 import { hslToRgb } from './canvas-primitives.js';
 import { filterGraphFullGridPointSets } from './transformation-graph.js';
-import { surfaceStageHasBranches } from '../analysis/riemann-surface.js';
+import { baseExpressionHasBranches } from '../analysis/riemann-surface.js';
 import {
     buildNativePlanarLine,
     buildNativePlanarLines,
@@ -327,7 +327,7 @@ function buildAdaptiveTransformedPolyline(planeParams, mappedTransform, points, 
         toleranceSq: tuning.toleranceSq,
         maxSegmentSq: tuning.maxSegmentSq,
         maxDepth: tuning.maxDepth,
-        hasBranchCuts: surfaceStageHasBranches(appState),
+        hasBranchCuts: baseExpressionHasBranches(appState),
         branchCutType: appState.branchCutType,
         branchCutAngle: appState.branchCutAngle,
         branchCutPoints: appState.branchCutPoints
@@ -351,10 +351,6 @@ function buildPath2DFromTransformedPolyline(PathCtor, polyline) {
         }
     }
     return path;
-}
-
-function isFiniteNumber(value) {
-    return typeof value === 'number' && Number.isFinite(value);
 }
 
 function clamp(value, min, max) {
@@ -569,7 +565,7 @@ function buildTransformGridGeometry(mappedTransform, start, end, sampleCount, pl
         renderLimit,
         jumpThresholdSq,
         toleranceSq,
-        hasBranchCuts: surfaceStageHasBranches(appState),
+        hasBranchCuts: baseExpressionHasBranches(appState),
         branchCutType: appState.branchCutType,
         branchCutAngle: appState.branchCutAngle,
         branchCutPoints: appState.branchCutPoints
@@ -638,7 +634,7 @@ function prepareNativeLinearGeometries(planeParams, mappedTransform, pointSets, 
         renderLimit,
         jumpThresholdSq,
         toleranceSq: tuning.toleranceSq,
-        hasBranchCuts: surfaceStageHasBranches(appState),
+        hasBranchCuts: baseExpressionHasBranches(appState),
         branchCutType: appState.branchCutType,
         branchCutAngle: appState.branchCutAngle,
         branchCutPoints: appState.branchCutPoints
@@ -907,13 +903,7 @@ function getArrowColorFromComponents(re, im, brightness) {
     return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 }
 
-export function isRenderableComplexPoint(point) {
-    return !!(
-        point &&
-        isFiniteNumber(point.re) &&
-        isFiniteNumber(point.im)
-    );
-}
+export const isRenderableComplexPoint = isFiniteComplex;
 
 export function drawComplexLineSetOnPlane(ctx, planeParams, points) {
     if (Array.isArray(points)) strokeComplexArrayOnPlane(ctx, planeParams, points);

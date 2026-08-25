@@ -101,10 +101,6 @@ export function baseExpressionHasBranches(runtimeState) {
     return isMultivaluedFunction(runtimeState.currentFunction, runtimeState);
 }
 
-export function surfaceStageHasBranches(runtimeState) {
-    const baseHasBranches = baseExpressionHasBranches(runtimeState);
-    return baseHasBranches;
-}
 
 export function getVisibleBranchIndices(sheetCount, branchCenter = 0, hasBranches = true) {
     if (!hasBranches) return [0];
