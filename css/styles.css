@@ -867,6 +867,7 @@ main {
 
 #canvases_section .plane-column,
 #laplace_3d_column,
+#laplace_spectrum_column,
 #real_plots_column,
 #graph_column {
     display: flex;
@@ -969,6 +970,7 @@ main {
 /* Styling for the direct container of each canvas. */
 #canvases_section .plane-column>div:not(.canvas-header-line):not(.collapsed-placeholder-content),
 #laplace_3d_column>div:not(.canvas-header-line):not(.collapsed-placeholder-content),
+#laplace_spectrum_column>div:not(.canvas-header-line):not(.collapsed-placeholder-content),
 #real_plots_column>div:not(.canvas-header-line):not(.collapsed-placeholder-content),
 #graph_column>div:not(.canvas-header-line):not(.collapsed-placeholder-content) {
     flex-grow: 1;
@@ -1283,29 +1285,11 @@ input[type="range"]:focus::-moz-range-thumb {
     transform: translateY(0);
 }
 
-/* Three-column layout for Laplace mode */
-.two-column-layout:has(#laplace_3d_column:not(.hidden)) > div {
-    flex: 0 0 calc(33.333% - 1rem);
-    min-width: 300px;
-}
-
 /* Single-column full-width layout for Real Plots mode */
 .two-column-layout:has(#real_plots_column:not(.hidden)) > div:not(.hidden) {
     flex: 1 1 100% !important;
     width: 100% !important;
     max-width: 100% !important;
-}
-
-/* Three-column layout for the transformation graph beside z/w */
-.two-column-layout:has(#graph_column:not(.hidden)):not(:has(#real_plots_column:not(.hidden))):not(:has(#laplace_3d_column:not(.hidden))) > div:not(.hidden) {
-    flex: 0 0 calc(33.333% - 1rem);
-    min-width: 320px;
-}
-
-/* Four-column layout when Graph and Laplace 3D are both visible */
-.two-column-layout:has(#graph_column:not(.hidden)):has(#laplace_3d_column:not(.hidden)) > div:not(.hidden) {
-    flex: 0 0 calc(25% - 1.125rem);
-    min-width: 300px;
 }
 
 .graph-trace-toggle {
@@ -4299,18 +4283,20 @@ body.vertical-layout #canvases_section::-webkit-scrollbar-thumb {
 body.vertical-layout #canvases_section .two-column-layout {
     flex-direction: column;
     overflow-x: hidden !important;
-    overflow-y: visible !important;
+    overflow-y: auto !important;
     gap: 1.5rem;
-    min-height: 100%;
+    min-height: 0 !important;
+    height: 100%;
+    max-height: 100%;
     padding-bottom: 0 !important;
 }
 
 body.vertical-layout #canvases_section .two-column-layout > div,
 body.vertical-layout #canvases_section .two-column-layout > .plane-column,
 body.vertical-layout #canvases_section .two-column-layout:has(#laplace_3d_column:not(.hidden)) > div {
-    flex: 1 1 0% !important;
+    flex: 0 0 calc(50% - 0.75rem) !important;
     min-height: 350px !important;
-    height: auto !important;
+    height: calc(50% - 0.75rem) !important;
     width: 100% !important;
     min-width: 0 !important;
     max-width: none !important;
@@ -4355,7 +4341,6 @@ body.vertical-layout #expand_w_btn > i {
 }
 
 /* Force specific horizontal multi-column grids in sidebars to stack vertically */
-body.vertical-layout #fourier_specific_controls,
 body.vertical-layout #laplace_specific_controls {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
@@ -4744,8 +4729,14 @@ body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column
     width: 100%;
     gap: 16px;
 }
-.transform-control-grid.is-three-column { grid-template-columns: repeat(3, 1fr); }
 .transform-control-grid.is-four-column { grid-template-columns: repeat(4, 1fr); }
+#laplace_spectrum_column canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border-radius: 6px;
+}
 
 .accent-blue { accent-color: #6c9aff; }
 .accent-teal { accent-color: #5fb4cc; }

@@ -2159,7 +2159,7 @@ export function projectNativeValuesToPrecise(options, points) {
     }
 }
 
-const FOURIER_SIGNAL_TYPES = Object.freeze({
+const TRANSFORM_SIGNAL_TYPES = Object.freeze({
     sine: 0,
     cosine: 1,
     square: 2,
@@ -2177,26 +2177,26 @@ const FOURIER_SIGNAL_TYPES = Object.freeze({
     noise: 14
 });
 
-export function generateNativeFourierSignal(funcType, frequency, amplitude, timeWindow, sampleCount, randomSeed) {
-    const samples = requireInteger(sampleCount, 'Fourier sample count');
-    if (samples < 1) throw new Error('Fourier sample count must be positive.');
-    const signalType = FOURIER_SIGNAL_TYPES[funcType];
-    if (signalType === undefined) throw new Error(`Unsupported Fourier signal type: ${funcType}.`);
-    const frequencyValue = requireFiniteNumber(frequency, 'Fourier frequency');
-    const amplitudeValue = requireFiniteNumber(amplitude, 'Fourier amplitude');
-    const window = requireFiniteNumber(timeWindow, 'Fourier time window');
-    if (window <= 0) throw new Error('Fourier time window must be positive.');
-    const seed = requireInteger(randomSeed, 'Fourier random seed');
-    if (seed < 0 || seed > 0xffffffff) throw new Error('Fourier random seed must be an unsigned 32-bit integer.');
+export function generateNativeTransformSignal(funcType, frequency, amplitude, timeWindow, sampleCount, randomSeed) {
+    const samples = requireInteger(sampleCount, 'Transform sample count');
+    if (samples < 1) throw new Error('Transform sample count must be positive.');
+    const signalType = TRANSFORM_SIGNAL_TYPES[funcType];
+    if (signalType === undefined) throw new Error(`Unsupported transform signal type: ${funcType}.`);
+    const frequencyValue = requireFiniteNumber(frequency, 'Transform frequency');
+    const amplitudeValue = requireFiniteNumber(amplitude, 'Transform amplitude');
+    const window = requireFiniteNumber(timeWindow, 'Transform time window');
+    if (window <= 0) throw new Error('Transform time window must be positive.');
+    const seed = requireInteger(randomSeed, 'Transform random seed');
+    if (seed < 0 || seed > 0xffffffff) throw new Error('Transform random seed must be an unsigned 32-bit integer.');
     const allocations = [];
     try {
         const timesPointer = alloc(samples * 8); allocations.push(timesPointer);
         const valuesPointer = alloc(samples * 8); allocations.push(valuesPointer);
-        const status = wasm.ce_generate_fourier_signal(
+        const status = wasm.ce_generate_transform_signal(
             signalType, frequencyValue, amplitudeValue, window, samples, seed,
             timesPointer, valuesPointer
         );
-        if (status !== 0) throw new Error(`Native Fourier signal generation failed with status ${status}.`);
+        if (status !== 0) throw new Error(`Native transform signal generation failed with status ${status}.`);
         const timesBuf = new Float64Array(wasm.memory.buffer, timesPointer, samples);
         const valuesBuf = new Float64Array(wasm.memory.buffer, valuesPointer, samples);
         return Array.from({ length: samples }, (_, index) => ({
@@ -2208,7 +2208,7 @@ export function generateNativeFourierSignal(funcType, frequency, amplitude, time
     }
 }
 
-export function computeNativeFourierSpectrum(values) {
+export function computeNativeSpectrum(values) {
     if (!Array.isArray(values) || !values.length) return [];
     const count = values.length;
     const allocations = [];
@@ -2222,13 +2222,13 @@ export function computeNativeFourierSpectrum(values) {
 
         const valBuf = new Float64Array(wasm.memory.buffer, valuesPointer, count);
         for (let i = 0; i < count; i++) {
-            valBuf[i] = requireFiniteNumber(values[i], `Fourier sample ${i}`);
+            valBuf[i] = requireFiniteNumber(values[i], `Transform sample ${i}`);
         }
 
-        const status = wasm.ce_compute_fourier_spectrum(
+        const status = wasm.ce_compute_spectrum(
             valuesPointer, count, freqPointer, realPointer, imagPointer, magPointer, phasePointer
         );
-        if (status !== 0) throw new Error(`Native Fourier spectrum failed with status ${status}.`);
+        if (status !== 0) throw new Error(`Native spectrum computation failed with status ${status}.`);
 
         const freqBuf = new Float64Array(wasm.memory.buffer, freqPointer, count);
         const realBuf = new Float64Array(wasm.memory.buffer, realPointer, count);
@@ -2244,68 +2244,6 @@ export function computeNativeFourierSpectrum(values) {
             magnitude: magBuf[index],
             phase: phaseBuf[index]
         }));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function buildNativeFourierWinding(signal, frequency, progress = 1, timeWindow = 1) {
-    if (!Array.isArray(signal) || !signal.length) {
-        return {
-            points: [],
-            centerOfMass: { re: 0, im: 0 },
-            referenceRadius: 1,
-            vectorStep: 1
-        };
-    }
-    const count = signal.length;
-    const frequencyValue = requireFiniteNumber(frequency, 'Fourier winding frequency');
-    const progressValue = requireFiniteNumber(progress, 'Fourier winding progress');
-    if (progressValue < 0 || progressValue > 1) throw new Error('Fourier winding progress must be between zero and one.');
-    const windowValue = requireFiniteNumber(timeWindow, 'Fourier winding time window');
-    if (windowValue <= 0) throw new Error('Fourier winding time window must be positive.');
-    const allocations = [];
-    try {
-        const timesPointer = alloc(count * 8); allocations.push(timesPointer);
-        const valuesPointer = alloc(count * 8); allocations.push(valuesPointer);
-        const woundPointer = alloc(count * 16); allocations.push(woundPointer);
-        const centerPointer = alloc(16); allocations.push(centerPointer);
-        const maxAmpPointer = alloc(8); allocations.push(maxAmpPointer);
-
-        const timeBuf = new Float64Array(wasm.memory.buffer, timesPointer, count);
-        const valBuf = new Float64Array(wasm.memory.buffer, valuesPointer, count);
-        signal.forEach((sample, index) => {
-            timeBuf[index] = requireFiniteNumber(sample?.t, `Fourier sample ${index} time`);
-            valBuf[index] = requireFiniteNumber(sample?.value, `Fourier sample ${index} value`);
-        });
-
-        const visible = wasm.ce_build_fourier_winding(
-            timesPointer, valuesPointer, count, frequencyValue,
-            progressValue, windowValue,
-            woundPointer, centerPointer, maxAmpPointer
-        );
-        if (visible < 0) throw new Error(`Native Fourier winding failed with status ${visible}.`);
-
-        const view = memoryView();
-        const maxAmplitude = view.getFloat64(maxAmpPointer, true);
-        const centerOfMass = {
-            re: view.getFloat64(centerPointer, true),
-            im: view.getFloat64(centerPointer + 8, true)
-        };
-
-        const points = Array.from({ length: visible }, (_, index) => ({
-            t: timeBuf[index],
-            value: valBuf[index],
-            re: view.getFloat64(woundPointer + index * 16, true),
-            im: view.getFloat64(woundPointer + index * 16 + 8, true)
-        }));
-
-        return {
-            points,
-            centerOfMass,
-            referenceRadius: Math.max(Number.EPSILON, maxAmplitude * 1.1),
-            vectorStep: Math.max(1, Math.floor(points.length / 50))
-        };
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
     }
@@ -2444,29 +2382,6 @@ export function buildNativeLaplaceAnalysis(options) {
     }
 }
 
-export function evaluateNativeLaplace(options, sigma, omega) {
-    const sigmaValue = requireFiniteNumber(sigma, 'Laplace sigma');
-    const omegaValue = requireFiniteNumber(omega, 'Laplace omega');
-    const frequency = requireFiniteNumber(options.frequency, 'Laplace frequency');
-    const damping = requireFiniteNumber(options.damping, 'Laplace damping');
-    const amplitude = requireFiniteNumber(options.amplitude, 'Laplace amplitude');
-    const allocations = [];
-    try {
-        const outputPointer = alloc(16); allocations.push(outputPointer);
-        const status = wasm.ce_evaluate_laplace(
-            laplaceFunctionId(options.functionKey), sigmaValue, omegaValue,
-            frequency, damping, amplitude, outputPointer
-        );
-        if (status !== 0) throw new Error(`Native Laplace evaluation failed with status ${status}.`);
-        const view = memoryView();
-        const real = view.getFloat64(outputPointer, true);
-        const imag = view.getFloat64(outputPointer + 8, true);
-        return { real, imag, magnitude: Math.hypot(real, imag), phase: Math.atan2(imag, real) };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
 export function buildNativeLaplaceSurface(specification, options) {
     const sigmaSteps = requireInteger(specification.sigmaSteps, 'Laplace sigma steps');
     const omegaSteps = requireInteger(specification.omegaSteps, 'Laplace omega steps');
@@ -2494,20 +2409,22 @@ export function buildNativeLaplaceSurface(specification, options) {
     try {
         const positionsPointer = alloc(vertexCount * 12); allocations.push(positionsPointer);
         const normalsPointer = alloc(vertexCount * 12); allocations.push(normalsPointer);
-        const colorsPointer = alloc(vertexCount * 12); allocations.push(colorsPointer);
+        const magnitudesPointer = alloc(vertexCount * 4); allocations.push(magnitudesPointer);
+        const phasesPointer = alloc(vertexCount * 4); allocations.push(phasesPointer);
         const indicesPointer = alloc(indexCapacity * 4); allocations.push(indicesPointer);
         const indexCount = wasm.ce_build_laplace_surface(
             laplaceFunctionId(specification.functionKey), frequency,
             damping, amplitude,
             sigmaMin, sigmaMax, omegaMin, omegaMax,
             sigmaSteps, omegaSteps, mode, clipHeight,
-            positionsPointer, normalsPointer, colorsPointer, indicesPointer
+            positionsPointer, normalsPointer, magnitudesPointer, phasesPointer, indicesPointer
         );
         if (indexCount < 0) throw new Error(`Native Laplace surface failed with status ${indexCount}.`);
         return {
             positions: new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, vertexCount * 3)),
             normals: new Float32Array(new Float32Array(wasm.memory.buffer, normalsPointer, vertexCount * 3)),
-            colors: new Float32Array(new Float32Array(wasm.memory.buffer, colorsPointer, vertexCount * 3)),
+            magnitudeValues: new Float32Array(new Float32Array(wasm.memory.buffer, magnitudesPointer, vertexCount)),
+            phaseValues: new Float32Array(new Float32Array(wasm.memory.buffer, phasesPointer, vertexCount)),
             indices: new Uint32Array(new Uint32Array(wasm.memory.buffer, indicesPointer, indexCount)),
             minSigma: sigmaMin,
             maxSigma: sigmaMax,
@@ -3073,32 +2990,42 @@ export function buildNativeRealSurface(options) {
 }
 
 export function renderNativeRealContour(options) {
+    const grid = options.scalarGrid;
+    const gridEnabled = Boolean(grid);
     const width = requireInteger(options.width, 'Native real-contour width');
     const height = requireInteger(options.height, 'Native real-contour height');
     if (width < 1 || height < 1 || width * height > 0x3fffffff) {
         throw new Error('Native real-contour rendering requires positive integer dimensions.');
     }
-    if (!Array.isArray(options.xRange) || !Array.isArray(options.yRange) ||
-        options.xRange.length !== 2 || options.yRange.length !== 2) {
-        throw new Error('Native real-contour rendering requires x and y ranges.');
+    const values = grid?.values;
+    const colors = grid?.colors;
+    const sourceWidth = gridEnabled ? requireInteger(grid.sourceWidth, 'Native real-contour source width') : 0;
+    const sourceHeight = gridEnabled ? requireInteger(grid.sourceHeight, 'Native real-contour source height') : 0;
+    if (gridEnabled && (!(values instanceof Float32Array) || !(colors instanceof Float32Array) ||
+        sourceWidth < 2 || sourceHeight < 2 || values.length !== sourceWidth * sourceHeight ||
+        colors.length !== values.length * 3)) {
+        throw new Error('Native real-contour scalar grid dimensions are inconsistent.');
     }
-    const xMin = requireFiniteNumber(options.xRange[0], 'Native real-contour x minimum');
-    const xMax = requireFiniteNumber(options.xRange[1], 'Native real-contour x maximum');
-    const yMin = requireFiniteNumber(options.yRange[0], 'Native real-contour y minimum');
-    const yMax = requireFiniteNumber(options.yRange[1], 'Native real-contour y maximum');
-    if (xMin >= xMax || yMin >= yMax) {
-        throw new Error('Native real-contour ranges must increase.');
-    }
-    const inputUPreset = requireInteger(options.inputUPreset, 'Native real-contour u input preset');
-    const inputVPreset = requireInteger(options.inputVPreset, 'Native real-contour v input preset');
-    const component = requireInteger(options.component, 'Native real-contour component');
-    if (inputUPreset < 0 || inputUPreset > 9 || inputVPreset < 0 || inputVPreset > 9 ||
-        component < 0 || component > 2) {
-        throw new Error('Native real-contour presets or component are invalid.');
-    }
-    if ((inputUPreset === 0) !== Boolean(options.inputUProgram?.instructions?.length) ||
-        (inputVPreset === 0) !== Boolean(options.inputVProgram?.instructions?.length)) {
-        throw new Error('Generic native real-contour inputs require exactly one expression program.');
+    let xMin = 0; let xMax = 1; let yMin = 0; let yMax = 1;
+    let inputUPreset = 3; let inputVPreset = 3; let component = 0;
+    if (!gridEnabled) {
+        if (!Array.isArray(options.xRange) || !Array.isArray(options.yRange) ||
+            options.xRange.length !== 2 || options.yRange.length !== 2) {
+            throw new Error('Native real-contour rendering requires x and y ranges.');
+        }
+        xMin = requireFiniteNumber(options.xRange[0], 'Native real-contour x minimum');
+        xMax = requireFiniteNumber(options.xRange[1], 'Native real-contour x maximum');
+        yMin = requireFiniteNumber(options.yRange[0], 'Native real-contour y minimum');
+        yMax = requireFiniteNumber(options.yRange[1], 'Native real-contour y maximum');
+        inputUPreset = requireInteger(options.inputUPreset, 'Native real-contour u input preset');
+        inputVPreset = requireInteger(options.inputVPreset, 'Native real-contour v input preset');
+        component = requireInteger(options.component, 'Native real-contour component');
+        if (xMin >= xMax || yMin >= yMax || inputUPreset < 0 || inputUPreset > 9 ||
+            inputVPreset < 0 || inputVPreset > 9 || component < 0 || component > 2 ||
+            (inputUPreset === 0) !== Boolean(options.inputUProgram?.instructions?.length) ||
+            (inputVPreset === 0) !== Boolean(options.inputVProgram?.instructions?.length)) {
+            throw new Error('Native real-contour inputs are invalid.');
+        }
     }
     if (typeof options.contoursEnabled !== 'boolean') {
         throw new Error('Native real-contour rendering requires an explicit contoursEnabled flag.');
@@ -3108,20 +3035,34 @@ export function renderNativeRealContour(options) {
     if (contourInterval <= 0 || contourThickness <= 0) {
         throw new Error('Native real-contour interval and thickness must be positive.');
     }
-    const palette = options.palette;
-    if (!(palette instanceof Float32Array) || palette.length < 6 || palette.length % 3 ||
-        !palette.every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
+    const palette = gridEnabled ? null : options.palette;
+    if (!gridEnabled && (!(palette instanceof Float32Array) || palette.length < 6 || palette.length % 3 ||
+        !palette.every(value => Number.isFinite(value) && value >= 0 && value <= 1))) {
         throw new Error('Native real-contour rendering requires a normalized RGB Float32 palette.');
     }
 
     const allocations = [];
     try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
-        writeMapConfig(configPointer, options.mapOptions, allocations);
-        const inputUPointer = writeInstructionBuffer(options.inputUProgram, allocations);
-        const inputVPointer = writeInstructionBuffer(options.inputVProgram, allocations);
-        const palettePointer = alloc(palette.byteLength); allocations.push(palettePointer);
-        new Float32Array(wasm.memory.buffer, palettePointer, palette.length).set(palette);
+        const configPointer = gridEnabled ? 0 : alloc(MAP_CONFIG_SIZE);
+        if (configPointer) {
+            allocations.push(configPointer);
+            writeMapConfig(configPointer, options.mapOptions, allocations);
+        }
+        const inputUPointer = gridEnabled ? 0 : writeInstructionBuffer(options.inputUProgram, allocations);
+        const inputVPointer = gridEnabled ? 0 : writeInstructionBuffer(options.inputVProgram, allocations);
+        const palettePointer = gridEnabled ? 0 : alloc(palette.byteLength);
+        if (palettePointer) {
+            allocations.push(palettePointer);
+            new Float32Array(wasm.memory.buffer, palettePointer, palette.length).set(palette);
+        }
+        const valuesPointer = gridEnabled ? alloc(values.byteLength) : 0;
+        const colorsPointer = gridEnabled ? alloc(colors.byteLength) : 0;
+        if (valuesPointer) allocations.push(valuesPointer);
+        if (colorsPointer) allocations.push(colorsPointer);
+        if (gridEnabled) {
+            new Float32Array(wasm.memory.buffer, valuesPointer, values.length).set(values);
+            new Float32Array(wasm.memory.buffer, colorsPointer, colors.length).set(colors);
+        }
         const outputLength = width * height * 4;
         const outputPointer = alloc(outputLength); allocations.push(outputPointer);
         const status = wasm.ce_render_real_contour(
@@ -3129,7 +3070,8 @@ export function renderNativeRealContour(options) {
             inputUPreset, inputUPointer, options.inputUProgram?.instructions?.length ?? 0,
             inputVPreset, inputVPointer, options.inputVProgram?.instructions?.length ?? 0,
             component, options.contoursEnabled ? 1 : 0, contourInterval, contourThickness,
-            palettePointer, palette.length / 3, outputPointer
+            palettePointer, gridEnabled ? 0 : palette.length / 3,
+            valuesPointer, colorsPointer, sourceWidth, sourceHeight, outputPointer
         );
         if (status !== 0) throw new Error(`Native real-contour rendering failed with status ${status}.`);
         return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));

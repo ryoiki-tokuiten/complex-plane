@@ -4,8 +4,20 @@ import { updateTaylorSeriesCenterAndRadius } from '../native/map-runtime.js';
 import { performCauchyAnalysis } from '../analysis/cauchy.js';
 import { drawZPlaneContent, drawWPlaneContent } from './renderer.js';
 import { updateProbeInfo } from '../ui/ui-updates.js';
-import { drawLaplace3DSurface } from './laplace-3d-surface.js';
-import { drawRealPlot } from './real-plots-renderer.js';
+import { drawLaplaceSpectrum } from './draw-laplace-panels.js';
+import {
+    applySurfaceCoordinateZoom,
+    drawRealPlot,
+    drawScalarSurface
+} from './real-plots-renderer.js';
+import {
+    buildLaplaceSurfaceGeometry,
+    buildLaplaceSurfaceOverlays,
+    laplaceSurfaceFrame,
+    laplaceSurfaceGeometryKey,
+    laplaceSurfaceOverlayKey,
+    scaleLaplaceSurfaceViewport
+} from '../analysis/laplace-transform.js';
 import {
     disposeTransformationGraphRenderer,
     drawTransformationGraph,
@@ -18,16 +30,52 @@ import { requestUiRedraw } from './redraw-scheduler.js';
 const { controls } = context;
 let surfaceRedrawFrame = null;
 
+function zoomLaplaceSurfaceCoordinates(event) {
+    const surface = state.laplaceSurface;
+    if (!surface) return;
+    applySurfaceCoordinateZoom(event, surface.viewportZoom ?? 1, (nextZoom, oldZoom) => {
+        scaleLaplaceSurfaceViewport(oldZoom / nextZoom, nextZoom);
+        requestUiRedraw();
+    });
+}
+
+function drawLaplaceSurface() {
+    const surface = state.laplaceSurface;
+    if (!surface) return;
+    const mode = state.laplaceVizMode || 'magnitude';
+    const options = {
+        mode,
+        clipHeight: state.laplaceClipHeight,
+        palette: state.surfacePalette,
+        showPolesZeros: state.laplaceShowPolesZeros === true,
+        showFourierLine: state.laplaceShowFourierLine === true,
+        showROC: state.laplaceShowROC === true
+    };
+    drawScalarSurface('laplace_3d_container', {
+        geometryKey: laplaceSurfaceGeometryKey(surface, options),
+        buildGeometry: () => buildLaplaceSurfaceGeometry(surface, options),
+        frameKey: [surface.revision, mode, ...surface.sigmaRange, ...surface.omegaRange].join('|'),
+        frame: laplaceSurfaceFrame(surface, mode),
+        overlaysKey: laplaceSurfaceOverlayKey(surface, options),
+        overlays: buildLaplaceSurfaceOverlays(surface, options),
+        contours: {
+            enabled: state.contoursEnabled,
+            interval: state.contourInterval,
+            thickness: state.contourThickness
+        }
+    }, { coordinateWheelZoom: zoomLaplaceSurfaceCoordinates });
+}
+
 function runSurfaceRedraw() {
     surfaceRedrawFrame = null;
-    if (state.realPlotsEnabled && state.show2DContourPlot) {
+    if (state.show2DContourPlot && (state.realPlotsEnabled || state.laplaceModeEnabled)) {
         draw2DContourPlot(controls.contour2DCanvas);
     }
     if (state.realPlotsEnabled) drawRealPlot();
 }
 
 function requestSurfaceRedraw() {
-    if (!state.realPlotsEnabled) return;
+    if (!state.realPlotsEnabled && !(state.laplaceModeEnabled && state.show2DContourPlot)) return;
     if (!surfaceRedrawFrame) surfaceRedrawFrame = requestAnimationFrame(runSurfaceRedraw);
 }
 
@@ -48,7 +96,6 @@ function syncOptionalColumn(column, shouldHide, onHide) {
 
 export function renderApplicationFrame(timestamp) {
     const graphActive = state.graphViewEnabled
-        && !state.fourierModeEnabled
         && !state.laplaceModeEnabled;
     const zIsPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
     if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar) {
@@ -76,8 +123,18 @@ export function renderApplicationFrame(timestamp) {
     }
     updateProbeInfo();
 
-    syncOptionalColumn(controls.laplace3DColumn, !state.laplaceModeEnabled);
-    if (state.laplaceModeEnabled) drawLaplace3DSurface('laplace_3d_container');
+    syncOptionalColumn(
+        controls.laplace3DColumn,
+        !state.laplaceModeEnabled || state.laplaceHide3DSurface
+    );
+    syncOptionalColumn(
+        controls.laplaceSpectrumColumn,
+        !state.laplaceModeEnabled || !state.laplaceShowSpectrum
+    );
+    if (state.laplaceModeEnabled) {
+        if (!state.laplaceHide3DSurface) drawLaplaceSurface();
+        drawLaplaceSpectrum(controls.laplaceSpectrumCanvas, state.laplaceSpectrum);
+    }
 
     syncOptionalColumn(controls.realPlotsColumn, !state.realPlotsEnabled);
     requestSurfaceRedraw();

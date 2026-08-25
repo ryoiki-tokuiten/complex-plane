@@ -98,14 +98,6 @@ static ce_complex ce_laplace_closed(uint32_t function_id, double sigma, double o
     return result;
 }
 
-int32_t ce_evaluate_laplace(uint32_t function_id, double sigma, double omega,
-                            double frequency, double damping, double amplitude,
-                            ce_complex *output) {
-    if (!output || function_id > CE_LAPLACE_OVERDAMPED) return -1;
-    *output = ce_laplace_closed(function_id, sigma, omega, frequency, damping, amplitude);
-    return 0;
-}
-
 static double ce_laplace_signal(uint32_t function_id, double t, double dt,
                                 double omega, double damping, double amplitude) {
     switch (function_id) {
@@ -193,39 +185,18 @@ int32_t ce_generate_laplace_analysis(uint32_t function_id, double frequency,
     return 0;
 }
 
-static double ce_hue(double p, double q, double t) {
-    if (t < 0.0) t += 1.0;
-    if (t > 1.0) t -= 1.0;
-    if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
-    if (t < 0.5) return q;
-    if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
-    return p;
-}
-
-static void ce_hsl(double hue, double saturation, double lightness, float *color) {
-    hue -= floor(hue);
-    if (saturation == 0.0) {
-        color[0] = color[1] = color[2] = (float)lightness;
-        return;
-    }
-    const double q = lightness <= 0.5 ? lightness * (1.0 + saturation)
-                                      : lightness + saturation - lightness * saturation;
-    const double p = 2.0 * lightness - q;
-    color[0] = (float)ce_hue(p, q, hue + 1.0 / 3.0);
-    color[1] = (float)ce_hue(p, q, hue);
-    color[2] = (float)ce_hue(p, q, hue - 1.0 / 3.0);
-}
-
 int32_t ce_build_laplace_surface(uint32_t function_id, double frequency,
                                  double damping, double amplitude,
                                  double sigma_min, double sigma_max,
                                  double omega_min, double omega_max,
                                  uint32_t sigma_steps, uint32_t omega_steps,
                                  uint32_t mode, double clip_height,
-                                 float *positions, float *normals, float *colors,
+                                 float *positions, float *normals,
+                                 float *magnitudes, float *phases,
                                  uint32_t *indices) {
     if (function_id > CE_LAPLACE_OVERDAMPED || !sigma_steps || !omega_steps ||
-        !(clip_height > 0.0) || !positions || !normals || !colors || !indices) return -1;
+        !(clip_height > 0.0) || mode > 2u || !positions || !normals ||
+        !magnitudes || !phases || !indices) return -1;
     const uint32_t columns = sigma_steps + 1u;
     const uint32_t rows = omega_steps + 1u;
     const double sigma_step = (sigma_max - sigma_min) / sigma_steps;
@@ -243,6 +214,8 @@ int32_t ce_build_laplace_surface(uint32_t function_id, double frequency,
             const double magnitude = fmin(fmax(0.0, hypot(value.re, value.im)), clip_height);
             const double magnitude_ratio = log1p(magnitude) / log_clip;
             const double phase = atan2(value.im, value.re);
+            magnitudes[index] = (float)magnitude;
+            phases[index] = (float)phase;
             positions[offset] = (float)(((sigma - (sigma_min + sigma_max) * 0.5) /
                                          (sigma_max - sigma_min)) * CE_LAPLACE_WIDTH);
             positions[offset + 1u] = (float)(mode == 1u
@@ -250,13 +223,6 @@ int32_t ce_build_laplace_surface(uint32_t function_id, double frequency,
                 : magnitude_ratio * CE_LAPLACE_HEIGHT);
             positions[offset + 2u] = (float)(((omega_s - (omega_min + omega_max) * 0.5) /
                                               (omega_max - omega_min)) * CE_LAPLACE_DEPTH);
-            if (mode == 1u || mode == 2u) {
-                ce_hsl(phase / (2.0 * CE_PI) + 1.0, 0.82,
-                       mode == 2u ? 0.32 + magnitude_ratio * 0.33 : 0.53, colors + offset);
-            } else {
-                ce_hsl(0.66 - magnitude_ratio * 0.72, 0.82,
-                       0.28 + magnitude_ratio * 0.34, colors + offset);
-            }
         }
     }
 

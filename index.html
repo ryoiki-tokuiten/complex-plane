@@ -32,12 +32,8 @@
                 <div id="function-controls-panel" class="controls-panel">
                     <div class="control-group">
                         <div class="function-button-grid">
-                            <button id="select_fourier_btn"
-                                data-tooltip="Fourier Transform: Visualize time domain and frequency domain">Fourier
-                                Transform</button>
                             <button id="select_laplace_btn"
-                                data-tooltip="Laplace Transform: Visualize s-plane, poles/zeros, and 3D surface">Laplace
-                                Transform</button>
+                                data-tooltip="Open the Laplace transform hub">Laplace</button>
                             <button id="select_cos_btn" data-tooltip="Select w = cos(z) function">w = cos(z)</button>
                             <button id="select_tan_btn" data-tooltip="Select w = tan(z) function">w = tan(z)</button>
                             <button id="select_sec_btn" data-tooltip="Select w = sec(z) function">w = sec(z)</button>
@@ -69,157 +65,6 @@
                 </div>
 
                 <div id="parameter-controls-panel" class="controls-panel">
-                    <div id="fourier_specific_controls" class="hidden transform-control-grid is-three-column"
-                       >
-
-                        <!-- Signal Configuration Section -->
-                        <div class="control-section fourier-signal">
-                            <div class="section-header">
-                                <div class="section-header-icon"></div>
-                                <span id="fourier_signal_section_title">Signal Configuration</span>
-                            </div>
-
-                            <div class="control-group control-group-compact">
-                                <label id="fourier_function_label" for="fourier_function_selector" class="slider-label">Waveform Type</label>
-                                <select id="fourier_function_selector" name="fourier_function_selector"
-                                    class="control-select fourier-select"
-                                    data-tooltip="Select the time domain signal type">
-                                    <optgroup label="Basic Waves">
-                                        <option value="sine">Sine Wave</option>
-                                        <option value="cosine">Cosine Wave</option>
-                                        <option value="square">Square Wave</option>
-                                        <option value="sawtooth">Sawtooth Wave</option>
-                                        <option value="triangle">Triangle Wave</option>
-                                    </optgroup>
-                                    <optgroup label="Modulated Signals">
-                                        <option value="am">AM Signal (Amplitude Modulation)</option>
-                                        <option value="fm">FM Signal (Frequency Modulation)</option>
-                                        <option value="chirp">Chirp (Frequency Sweep)</option>
-                                    </optgroup>
-                                    <optgroup label="Transient Signals">
-                                        <option value="damped_sine">Damped Sine Wave</option>
-                                        <option value="exponential">Exponential Decay</option>
-                                        <option value="gaussian">Gaussian Pulse</option>
-                                        <option value="pulse">Rectangular Pulse</option>
-                                    </optgroup>
-                                    <optgroup label="Complex Waveforms">
-                                        <option value="harmonics">Harmonic Series</option>
-                                        <option value="beat">Beat Frequency</option>
-                                        <option value="noise">White Noise</option>
-                                    </optgroup>
-                                    <option id="fourier_current_graph_option" value="current_graph" hidden>Current Graph (Re + Im)</option>
-                                </select>
-                            </div>
-
-                            <div class="control-group control-group-tight">
-                                <label for="fourier_frequency_slider" class="slider-label">
-                                    <span id="fourier_frequency_label">Frequency:</span>
-                                    <output id="fourier_frequency_value_display" class="slider-value">1.0</output> Hz
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="fourier_frequency_slider" name="fourier_frequency_slider"
-                                        min="0.1" max="10" step="0.1" value="1.0" data-tooltip="Frequency of the signal"
-                                        class="accent-blue">
-                                </div>
-                            </div>
-
-                            <div class="control-group control-group-flush">
-                                <label for="fourier_amplitude_slider" class="slider-label">
-                                    Amplitude:
-                                    <output id="fourier_amplitude_value_display" class="slider-value">1.0</output>
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="fourier_amplitude_slider" name="fourier_amplitude_slider"
-                                        min="0.1" max="5" step="0.1" value="1.0" data-tooltip="Signal amplitude"
-                                        class="accent-blue">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Sampling Parameters Section -->
-                        <div class="control-section fourier-sampling">
-                            <div class="section-header">
-                                <div class="section-header-icon"></div>
-                                Sampling Parameters
-                            </div>
-
-                            <div class="control-group control-group-tight">
-                                <label for="fourier_time_window_slider" class="slider-label">
-                                    Time Window:
-                                    <output id="fourier_time_window_value_display" class="slider-value">4.0</output> s
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="fourier_time_window_slider"
-                                        name="fourier_time_window_slider" min="1" max="10" step="0.5" value="4.0"
-                                        data-tooltip="Duration of signal to analyze" class="accent-teal">
-                                </div>
-                            </div>
-
-                            <div class="control-group control-group-flush">
-                                <label for="fourier_samples_slider" class="slider-label">
-                                    Samples:
-                                    <output id="fourier_samples_value_display" class="slider-value">128</output>
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="fourier_samples_slider" name="fourier_samples_slider"
-                                        min="32" max="512" step="32" value="128"
-                                        data-tooltip="Number of sample points (higher = more accurate)"
-                                        class="accent-teal">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Winding Analysis Section -->
-                        <div class="control-section fourier-winding">
-                            <div class="section-header">
-                                <div class="section-header-icon"></div>
-                                Winding Analysis
-                            </div>
-
-                            <div id="fourier_winding_note"
-                                class="winding-note">
-                                <div class="winding-note-copy">
-                                    Watch the <strong>golden center of mass</strong>
-                                    jump when winding frequency matches signal frequency!
-                                </div>
-                            </div>
-
-                            <div class="control-group control-group-compact">
-                                <label for="fourier_winding_frequency_slider" class="slider-label micro-text"
-                                   >
-                                    Winding Freq:
-                                    <output id="fourier_winding_frequency_value_display" class="slider-value small-output"
-                                       >1.0</output> Hz
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="fourier_winding_frequency_slider"
-                                        name="fourier_winding_frequency_slider" min="0.1" max="10" step="0.1"
-                                        value="1.0"
-                                        data-tooltip="Test frequency - when this matches signal frequency, magic happens!"
-                                        class="accent-gold winding-slider">
-                                </div>
-                                <div
-                                    class="winding-scale">
-                                    <span>0.1</span>
-                                    <span>10</span>
-                                </div>
-                            </div>
-
-                            <div class="control-group control-group-flush">
-                                <label for="fourier_winding_time_slider" class="slider-label">
-                                    Progress:
-                                    <output id="fourier_winding_time_value_display" class="slider-value">100</output>%
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="fourier_winding_time_slider"
-                                        name="fourier_winding_time_slider" min="0" max="1" step="0.01" value="1.0"
-                                        data-tooltip="Control how much of the signal to show"
-                                        class="accent-orange">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Laplace Transform Controls -->
                     <div id="laplace_specific_controls" class="hidden transform-control-grid is-four-column"
                        >
@@ -228,37 +73,47 @@
                         <div class="control-section laplace-signal">
                             <div class="section-header">
                                 <div class="section-header-icon"></div>
-                                Signal Configuration
+                                <span id="laplace_signal_section_title">Signal Configuration</span>
                             </div>
 
                             <div class="control-group control-group-compact">
-                                <label for="laplace_function_selector" class="slider-label">Waveform Type</label>
+                                <label id="laplace_function_label" for="laplace_function_selector" class="slider-label">Waveform Type</label>
                                 <select id="laplace_function_selector" class="control-select laplace-select"
-                                    data-tooltip="Select the time domain signal type">
-                                    <optgroup label="Basic Signals">
-                                        <option value="step">Unit Step u(t)</option>
-                                        <option value="exponential" selected>Exponential e^(-at)</option>
+                                    data-tooltip="Select the signal used by the unified Laplace transform">
+                                    <optgroup label="Fourier-ready Waveforms">
                                         <option value="sine">Sine Wave</option>
                                         <option value="cosine">Cosine Wave</option>
-                                        <option value="damped_sine">Damped Sine</option>
+                                        <option value="square">Square Wave</option>
+                                        <option value="sawtooth">Sawtooth Wave</option>
+                                        <option value="triangle">Triangle Wave</option>
+                                        <option value="am">AM Signal</option>
+                                        <option value="fm">FM Signal</option>
+                                        <option value="chirp">Chirp</option>
+                                        <option value="gaussian">Gaussian Pulse</option>
+                                        <option value="pulse">Rectangular Pulse</option>
+                                        <option value="harmonics">Harmonic Series</option>
+                                        <option value="beat">Beat Frequency</option>
+                                        <option value="noise">White Noise</option>
                                     </optgroup>
-                                    <optgroup label="Advanced">
+                                    <optgroup label="Analytical Laplace Signals">
+                                        <option value="step">Unit Step u(t)</option>
+                                        <option value="exponential" selected>Exponential e^(-at)</option>
+                                        <option value="damped_sine">Damped Sine</option>
                                         <option value="ramp">Ramp t·u(t)</option>
                                         <option value="impulse">Impulse δ(t)</option>
                                         <option value="damped_cosine">Damped Cosine</option>
                                         <option value="exponential_sine">e^(at)·sin(ωt)</option>
-                                    </optgroup>
-                                    <optgroup label="System Responses">
                                         <option value="underdamped">Underdamped System</option>
                                         <option value="critically_damped">Critically Damped</option>
                                         <option value="overdamped">Overdamped System</option>
                                     </optgroup>
+                                    <option id="laplace_current_graph_option" value="current_graph" hidden>Current Graph (σ = 0 slice)</option>
                                 </select>
                             </div>
 
-                            <div class="control-group control-group-tight">
+                            <div id="laplace_frequency_control" class="control-group control-group-tight">
                                 <label for="laplace_frequency_slider" class="slider-label">
-                                    Frequency:
+                                    <span id="laplace_frequency_label">Frequency:</span>
                                     <output id="laplace_frequency_value_display" class="slider-value">2.0</output> Hz
                                 </label>
                                 <div class="slider-container">
@@ -269,7 +124,7 @@
 
                             <div class="control-group control-group-flush">
                                 <label for="laplace_damping_slider" class="slider-label">
-                                    Damping σ:
+                                    Signal Damping:
                                     <output id="laplace_damping_value_display" class="slider-value">0.5</output>
                                 </label>
                                 <div class="slider-container">
@@ -278,13 +133,51 @@
                                         class="accent-pink">
                                 </div>
                             </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_amplitude_slider" class="slider-label">
+                                    Amplitude:
+                                    <output id="laplace_amplitude_value_display" class="slider-value">1.0</output>
+                                </label>
+                                <div class="slider-container">
+                                    <input type="range" id="laplace_amplitude_slider" min="0.1" max="5" step="0.1"
+                                        value="1.0" data-tooltip="Signal amplitude" class="accent-pink">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="control-section laplace-sampling">
+                            <div class="section-header">
+                                <div class="section-header-icon"></div>
+                                Sampling Parameters
+                            </div>
+                            <div class="control-group control-group-tight">
+                                <label for="laplace_time_window_slider" class="slider-label">
+                                    Time Window:
+                                    <output id="laplace_time_window_value_display" class="slider-value">4.0</output> s
+                                </label>
+                                <div class="slider-container">
+                                    <input type="range" id="laplace_time_window_slider" min="1" max="10" step="0.5"
+                                        value="4.0" data-tooltip="Duration of the signal to integrate" class="accent-teal">
+                                </div>
+                            </div>
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_samples_slider" class="slider-label">
+                                    Samples:
+                                    <output id="laplace_samples_value_display" class="slider-value">128</output>
+                                </label>
+                                <div class="slider-container">
+                                    <input type="range" id="laplace_samples_slider" min="32" max="512" step="32"
+                                        value="128" data-tooltip="Number of samples used by every transform view" class="accent-teal">
+                                </div>
+                            </div>
                         </div>
 
                         <!-- s-Plane Exploration Section -->
                         <div class="control-section laplace-splane">
                             <div class="section-header">
                                 <div class="section-header-icon"></div>
-                                s-Plane Exploration
+                                S-Plane
                             </div>
 
                             <div class="control-group control-group-tight">
@@ -312,18 +205,41 @@
                                 </div>
                             </div>
 
+                            <div class="control-group control-group-tight">
+                                <button id="laplace_fourier_slice_btn" type="button" class="laplace-full-spiral"
+                                    data-tooltip="Set the Laplace damping coordinate to zero">Fourier Slice (σ = 0)</button>
+                            </div>
+
                             <div class="control-group control-group-flush">
                                 <label for="laplace_show_roc_cb" class="slider-label"
                                     data-tooltip="Show/hide Region of Convergence boundary and shading on the s-plane">
-                                    <input type="checkbox" id="laplace_show_roc_cb" checked>
+                                    <input type="checkbox" id="laplace_show_roc_cb">
                                     <span class="custom-checkbox-visual"></span>
                                     Show ROC (Region of Convergence)
+                                </label>
+                            </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_hide_integral_evaluation_cb" class="slider-label"
+                                    data-tooltip="Hide the tip-to-tail integral evaluation from the winding canvas">
+                                    <input type="checkbox" id="laplace_hide_integral_evaluation_cb" checked>
+                                    <span class="custom-checkbox-visual"></span>
+                                    Hide the Integral Evaluation
+                                </label>
+                            </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_show_spectrum_cb" class="slider-label"
+                                    data-tooltip="Show or hide the discrete spectrum canvas">
+                                    <input type="checkbox" id="laplace_show_spectrum_cb" checked>
+                                    <span class="custom-checkbox-visual"></span>
+                                    Show Discrete Spectrum
                                 </label>
                             </div>
                         </div>
 
                         <!-- 3D Visualization Options Section -->
-                        <div class="control-section laplace-3d">
+                        <div id="laplace_3d_controls_section" class="control-section laplace-3d">
                             <div class="section-header">
                                 <div class="section-header-icon"></div>
                                 3D Visualization
@@ -336,6 +252,17 @@
                                     <option value="phase">Phase ∠F(s)</option>
                                     <option value="combined">Combined (Mag+Phase)</option>
                                 </select>
+                            </div>
+
+                            <div class="control-stack">
+                                <div class="palette-controls-header">
+                                    <span class="palette-label-row">
+                                        <span>Surface Palette:</span>
+                                        <span id="active_laplace_surface_palette_name"
+                                            class="active-palette-label">Viridis Scientific</span>
+                                    </span>
+                                </div>
+                                <div class="domain-palette-circles" id="laplace_surface_palette_circles"></div>
                             </div>
 
                             <div class="control-group control-group-tight">
@@ -360,10 +287,62 @@
                                     Show Poles & Zeros
                                 </label>
                             </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_show_fourier_line_cb" class="slider-label"
+                                    data-tooltip="Highlight the imaginary axis s = jω, where Fourier lives">
+                                    <input type="checkbox" id="laplace_show_fourier_line_cb" checked>
+                                    <span class="custom-checkbox-visual"></span>
+                                    Highlight Fourier Slice
+                                </label>
+                            </div>
+
+                            <div class="control-group spaced-control">
+                                <label for="laplace_contours_cb"
+                                    data-tooltip="Overlay level contours on the shared 3D surface renderer">
+                                    <input type="checkbox" id="laplace_contours_cb">
+                                    <span class="custom-checkbox-visual"></span>
+                                    Contour Lines
+                                </label>
+                            </div>
+                            <div id="laplace_contours_details" class="contour-controls-panel hidden">
+                                <div class="control-group contour-slider-field">
+                                    <div class="contour-slider-label">
+                                        <label for="laplace_contour_interval_slider">Contour Interval:</label>
+                                        <output id="laplace_contour_interval_value_display">0.50</output>
+                                    </div>
+                                    <input type="range" id="laplace_contour_interval_slider" min="0.05" max="3.00"
+                                        step="0.05" value="0.50">
+                                </div>
+                                <div class="control-group contour-slider-field">
+                                    <div class="contour-slider-label">
+                                        <label for="laplace_contour_thickness_slider">Contour Thickness:</label>
+                                        <output id="laplace_contour_thickness_value_display">1.5</output>
+                                    </div>
+                                    <input type="range" id="laplace_contour_thickness_slider" min="0.5" max="5.0"
+                                        step="0.1" value="1.5">
+                                </div>
+                                <div class="contour-action-row">
+                                    <button id="laplace_show_2d_contour_btn" class="contour-2d-toggle-btn"
+                                        type="button">
+                                        <i data-lucide="image"></i>
+                                        <span>Show 2D Contour Plot</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="control-group spaced-control">
+                                <label for="laplace_hide_3d_surface_cb" class="slider-label"
+                                    data-tooltip="Hide the Laplace 3D surface canvas">
+                                    <input type="checkbox" id="laplace_hide_3d_surface_cb">
+                                    <span class="custom-checkbox-visual"></span>
+                                    Don't show 3D Surface
+                                </label>
+                            </div>
                         </div>
 
                         <!-- Animation Controls Section -->
-                        <div class="control-section laplace-animation">
+                        <div id="laplace_animation_section" class="control-section laplace-animation">
                             <div class="section-header">
                                 <div class="section-header-icon"></div>
                                 Integral Animation
@@ -2618,6 +2597,15 @@
                         </div>
                         <div id="cauchy_integral_results_info" class="cauchy-info-overlay hidden analysis-copy"
                            ></div>
+                    </div>
+                </div>
+                <div id="laplace_spectrum_column" class="hidden auxiliary-surface-column">
+                    <div class="canvas-header-line">
+                        <h2 class="section-title">Discrete Spectrum</h2>
+                    </div>
+                    <div class="flex-relative-host">
+                        <canvas id="laplace_spectrum_canvas" width="420" height="320"
+                            aria-label="Discrete Fourier spectrum magnitude"></canvas>
                     </div>
                 </div>
                 <div id="graph_column" class="hidden">

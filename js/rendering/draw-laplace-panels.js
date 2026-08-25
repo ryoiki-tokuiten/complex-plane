@@ -149,11 +149,69 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams, frameData) {
 /**
  * Draw MIDDLE PANEL: Premium 3b1b-quality winding visualization
  */
-export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameData) {
-    drawLaplaceWindingPremium(ctx, signal, planeParams, frameData);
+export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameData, options) {
+    drawLaplaceWindingPremium(ctx, signal, planeParams, frameData, options);
 
     // Draw poles and zeros overlay on top
     drawPolesAndZerosOverlay(ctx, planeParams);
+}
+
+export function drawLaplaceSpectrum(canvas, spectrum) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = Math.max(1, Math.floor(canvas.clientWidth || canvas.width || 420));
+    const height = Math.max(1, Math.floor(canvas.clientHeight || canvas.height || 320));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
+    ctx.fillRect(0, 0, width, height);
+
+    if (!Array.isArray(spectrum) || spectrum.length === 0) {
+        ctx.fillStyle = 'rgba(200, 220, 255, 0.7)';
+        ctx.font = '12px "SF Pro Text", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Spectrum appears after a signal is generated', width / 2, height / 2);
+        return;
+    }
+
+    const visible = spectrum.slice(0, Math.max(1, Math.floor(spectrum.length / 2)));
+    const maximum = Math.max(Number.EPSILON, ...visible.map(point => point.magnitude || 0));
+    const padding = { top: 18, right: 10, bottom: 22, left: 28 };
+    const plotWidth = Math.max(1, width - padding.left - padding.right);
+    const plotHeight = Math.max(1, height - padding.top - padding.bottom);
+    const barWidth = plotWidth / visible.length;
+
+    ctx.strokeStyle = 'rgba(180, 220, 240, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, height - padding.bottom);
+    ctx.lineTo(width - padding.right, height - padding.bottom);
+    ctx.stroke();
+
+    visible.forEach((point, index) => {
+        const magnitude = Math.max(0, point.magnitude || 0);
+        const barHeight = (magnitude / maximum) * plotHeight;
+        const x = padding.left + index * barWidth;
+        const y = height - padding.bottom - barHeight;
+        const gradient = ctx.createLinearGradient(x, y, x, height - padding.bottom);
+        gradient.addColorStop(0, 'rgba(255, 220, 120, 0.95)');
+        gradient.addColorStop(1, 'rgba(160, 120, 255, 0.35)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x + 0.5, y, Math.max(1, barWidth - 1), barHeight);
+    });
+
+    ctx.fillStyle = 'rgba(200, 220, 255, 0.75)';
+    ctx.font = '10px "SF Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('DFT magnitude', padding.left, 12);
+    ctx.textAlign = 'center';
+    ctx.fillText('frequency bin k', width / 2, height - 5);
+    ctx.textAlign = 'right';
+    ctx.fillText(maximum.toFixed(2), padding.left - 4, padding.top + 4);
 }
 
 /**

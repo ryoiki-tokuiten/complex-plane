@@ -4,14 +4,16 @@ import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
-import { requireVisibleViewport } from '../utils/viewport.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import {
     requestDomainRedraw as requestScheduledDomainRedraw,
     requestUiRedraw as requestScheduledUiRedraw
 } from '../rendering/redraw-scheduler.js';
-import { updateFourierTransform } from '../analysis/fourier-transform.js';
-import { updateLaplaceTransform, updateLaplaceEvaluationPoint } from '../analysis/laplace-transform.js';
+import {
+    setLaplaceSurfaceViewport,
+    updateLaplaceEvaluationPoint,
+    updateLaplaceTransform
+} from '../analysis/laplace-transform.js';
 import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
 import {
     DOMAIN_COLOR_LOG_MAGNITUDE_MAX,
@@ -31,9 +33,9 @@ import { toggleRiemannTransformationAnimationZ, toggleRiemannTransformationAnima
 import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
 import { toggleAnimation } from './animation.js';
 import { initializePolynomialCoeffs } from './polynomial-ui.js';
-import { updateLaplace3DSurface, resizeLaplace3DSurface } from '../rendering/laplace-3d-surface.js';
+import { resizeScalarSurface } from '../rendering/real-plots-renderer.js';
 import { getRiemannSurfaceCanvas, resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
-import { applyTheme, domainPalettes, realPlotsPalettes, loadThemePreferences, persistThemePreferences } from './theme-manager.js';
+import { applyTheme, domainPalettes, surfacePalettes, loadThemePreferences, persistThemePreferences } from './theme-manager.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
 import {
     initializeDynamicPlottingUI,
@@ -149,14 +151,11 @@ const BASIC_SLIDER_BINDINGS = [
     ['videoSizeSlider', 'videoSize'],
     ['videoOpacitySlider', 'videoOpacity'],
     ['laplaceAnimationSpeedSlider', 'laplaceAnimationSpeed'],
-    ['fourierFrequencySlider', 'fourierFrequency'],
-    ['fourierAmplitudeSlider', 'fourierAmplitude'],
-    ['fourierTimeWindowSlider', 'fourierTimeWindow'],
-    ['fourierSamplesSlider', 'fourierSamples', parseInteger],
-    ['fourierWindingFrequencySlider', 'fourierWindingFrequency'],
-    ['fourierWindingTimeSlider', 'fourierWindingTime'],
     ['laplaceFrequencySlider', 'laplaceFrequency'],
     ['laplaceDampingSlider', 'laplaceDamping'],
+    ['laplaceAmplitudeSlider', 'laplaceAmplitude'],
+    ['laplaceTimeWindowSlider', 'laplaceTimeWindow'],
+    ['laplaceSamplesSlider', 'laplaceSamples', parseInteger],
     ['laplaceSigmaSlider', 'laplaceSigma'],
     ['laplaceOmegaSlider', 'laplaceOmega'],
     ['laplaceClipHeightSlider', 'laplaceClipHeight'],
@@ -185,6 +184,9 @@ const BASIC_CHECKBOX_BINDINGS = [
     ['laplaceShowRocCb', 'laplaceShowROC'],
     ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
     ['laplaceShowFourierLineCb', 'laplaceShowFourierLine'],
+    ['laplaceHideIntegralEvaluationCb', 'laplaceHideIntegralEvaluation'],
+    ['laplaceHide3DSurfaceCb', 'laplaceHide3DSurface'],
+    ['laplaceShowSpectrumCb', 'laplaceShowSpectrum'],
     ['laplaceAnimationLoopCb', 'laplaceAnimationLoop'],
     ['enableParticleAnimationCb', 'particleAnimationEnabled'],
     ['enableDomainColoringCb', 'domainColoringEnabled'],
@@ -196,7 +198,6 @@ const BASIC_CHECKBOX_BINDINGS = [
 const BASIC_SELECTOR_BINDINGS = [
     ['inputShapeSelector', 'currentInputShape'],
     ['vectorFieldFunctionSelector', 'vectorFieldFunction'],
-    ['fourierFunctionSelector', 'fourierFunction'],
     ['laplaceFunctionSelector', 'laplaceFunction'],
     ['laplaceVizModeSelector', 'laplaceVizMode'],
     ['riemannSurfaceComponentSelector', 'riemannSurfaceComponent']
@@ -210,9 +211,9 @@ const SPECIAL_SLIDERS = new Set([
     'videoFpsSlider', 'videoSizeSlider', 'videoOpacitySlider',
     'zPlaneZoomSlider', 'wPlaneZoomSlider', 'taylorSeriesOrderSlider',
     'radialDiscreteStepsCountSlider', 'laplaceAnimationSpeedSlider',
-    'fourierFrequencySlider', 'fourierAmplitudeSlider', 'fourierTimeWindowSlider',
-    'fourierSamplesSlider', 'fourierWindingFrequencySlider', 'fourierWindingTimeSlider',
-    'laplaceFrequencySlider', 'laplaceDampingSlider', 'laplaceSigmaSlider',
+    'laplaceFrequencySlider', 'laplaceDampingSlider', 'laplaceAmplitudeSlider',
+    'laplaceTimeWindowSlider', 'laplaceSamplesSlider',
+    'laplaceSigmaSlider',
     'laplaceOmegaSlider', 'laplaceClipHeightSlider'
 ]);
 
@@ -221,14 +222,15 @@ const SPECIAL_CHECKBOXES = new Set([
     'enableRadialDiscreteStepsCb', 'enableRiemannSphereCb', 'enableRiemannSurfaceCb',
     'enableThreeSphereCb', 'enableTaylorSeriesCb', 'enableTaylorSeriesCustomCenterCb',
     'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
-    'laplaceShowFourierLineCb', 'laplaceAnimationLoopCb', 'enableParticleAnimationCb',
+    'laplaceShowFourierLineCb', 'laplaceHideIntegralEvaluationCb', 'laplaceHide3DSurfaceCb',
+    'laplaceShowSpectrumCb', 'laplaceContoursCb',
+    'laplaceAnimationLoopCb', 'enableParticleAnimationCb',
     'enableDomainColoringCb', 'enableCauchyIntegralModeCb'
 ]);
 
 const SPECIAL_SELECTORS = new Set([
     'inputShapeSelector',
     'vectorFieldFunctionSelector',
-    'fourierFunctionSelector',
     'laplaceFunctionSelector',
     'laplaceVizModeSelector'
 ]);
@@ -260,7 +262,6 @@ const BINDERS = [
     bindTaylorControls,
     bindRadialAndZetaControls,
     bindParticleControls,
-    bindFourierControls,
     bindLaplaceControls,
     bindCollapseControls,
     bindChainingControls,
@@ -271,7 +272,7 @@ const BINDERS = [
     bindFullscreenControls,
     bindThemeControls,
     bindDomainPaletteCirclePanelListeners,
-    bindRealPlotsPaletteCirclePanelListeners,
+    bindSurfacePaletteCirclePanelListeners,
     bindGraphControls,
     bindRealPlotsControls,
     bindContourControls,
@@ -732,7 +733,7 @@ function restoreFractalState(nextFunction) {
 }
 
 function activateFractalPreset(key) {
-    const leavingTransform = state.fourierModeEnabled || state.laplaceModeEnabled;
+    const leavingTransform = state.laplaceModeEnabled;
     if (state.laplaceModeEnabled) stopLaplaceAnimation();
 
     if (!fractalRestoreSnapshot) fractalRestoreSnapshot = captureFractalState();
@@ -813,13 +814,11 @@ function restoreNormalViewports() {
 }
 
 function fitTransformViewports() {
-    const signal = state.fourierModeEnabled
-        ? state.fourierTimeDomainSignal
-        : state.laplaceTimeDomainSignal;
+    const signal = state.laplaceTimeDomainSignal;
     if (!signal?.length) return;
 
     setupVisualParameters(false, false);
-    const timeWindow = Math.max(1, signal.at(-1)?.t || state.fourierTimeWindow || 5);
+    const timeWindow = Math.max(1, signal.at(-1)?.t || state.laplaceTimeWindow || 5);
     const amplitude = Math.max(1, ...signal.map(point => Math.abs(point.value)));
     const timePadding = Math.max(0.25, timeWindow * 0.06);
     const amplitudePadding = Math.max(0.35, amplitude * 0.24);
@@ -831,20 +830,18 @@ function fitTransformViewports() {
     );
 
     let windingRadius = amplitude * 1.35;
-    if (state.laplaceModeEnabled) {
-        const dt = signal.length > 1 ? signal[1].t - signal[0].t : 0.01;
-        let sumRe = 0;
-        let sumIm = 0;
-        signal.forEach(point => {
-            const weight = Math.exp(-(state.laplaceSigma || 0) * point.t);
-            const angle = -(state.laplaceOmega || 1) * point.t;
-            const re = point.value * weight * Math.cos(angle);
-            const im = point.value * weight * Math.sin(angle);
-            sumRe += re * dt;
-            sumIm += im * dt;
-            windingRadius = Math.max(windingRadius, Math.hypot(re, im), Math.hypot(sumRe, sumIm));
-        });
-    }
+    const dt = signal.length > 1 ? signal[1].t - signal[0].t : 0.01;
+    let sumRe = 0;
+    let sumIm = 0;
+    signal.forEach(point => {
+        const weight = Math.exp(-(state.laplaceSigma || 0) * point.t);
+        const angle = -(state.laplaceOmega || 1) * point.t;
+        const re = point.value * weight * Math.cos(angle);
+        const im = point.value * weight * Math.sin(angle);
+        sumRe += re * dt;
+        sumIm += im * dt;
+        windingRadius = Math.max(windingRadius, Math.hypot(re, im), Math.hypot(sumRe, sumIm));
+    });
     windingRadius = Math.max(1, windingRadius * 1.35);
     setPlaneViewport(wPlaneParams, [-windingRadius, windingRadius], [-windingRadius, windingRadius]);
 
@@ -861,10 +858,9 @@ function activateFunctionMode(key) {
     const restoringFractalState = Boolean(fractalRestoreSnapshot);
     if (restoringFractalState) restoreFractalState(key);
 
-    const enteringFourier = key === 'fourier';
     const enteringLaplace = key === 'laplace';
-    const enteringTransform = enteringFourier || enteringLaplace;
-    const leavingTransform = (state.fourierModeEnabled || state.laplaceModeEnabled) && !enteringTransform;
+    const enteringTransform = enteringLaplace;
+    const leavingTransform = state.laplaceModeEnabled && !enteringTransform;
 
     if (state.laplaceModeEnabled && !enteringLaplace) stopLaplaceAnimation();
     if (enteringTransform && state.currentInputShape === 'video') pauseUploadedVideoPlayback();
@@ -885,11 +881,9 @@ function activateFunctionMode(key) {
     state.currentFunction = key;
     state.currentFunctionPreset = null;
     if (!restoringFractalState) resetOrbitColoringMode();
-    state.fourierModeEnabled = enteringFourier;
     state.laplaceModeEnabled = enteringLaplace;
 
     if (enteringTransform && state.navigationModeEnabled) setNavigationModeEnabled(false);
-    if (enteringFourier) updateFourierTransform();
 
     if (enteringLaplace) {
         updateLaplaceTransform();
@@ -1481,48 +1475,38 @@ function bindParticleControls() {
     bindSlider('particleMaxLifetimeSlider', 'particleMaxLifetime', parseInteger);
 }
 
-function bindFourierControls() {
-    bindSelector('fourierFunctionSelector', 'fourierFunction', () => {
-        updateFourierTransform();
-        requestUiRedraw();
-    });
-
-    [
-        ['fourierFrequency', parseFloat],
-        ['fourierAmplitude', parseFloat],
-        ['fourierTimeWindow', parseFloat],
-        ['fourierSamples', parseInteger]
-    ].forEach(([key, parser]) => bindSlider(`${key}Slider`, key, parser, () => {
-        updateFourierTransform();
-        requestUiRedraw();
-    }));
-
-    bindSlider('fourierWindingFrequencySlider', 'fourierWindingFrequency');
-    bindSlider('fourierWindingTimeSlider', 'fourierWindingTime');
-}
-
 function bindLaplaceControls() {
     bindSelector('laplaceFunctionSelector', 'laplaceFunction', () => {
         updateLaplaceTransform();
         requestUiRedraw();
     });
 
-    ['laplaceFrequency', 'laplaceDamping'].forEach(key => bindSlider(`${key}Slider`, key, parseFloat, () => {
-        updateLaplaceTransform();
-        requestUiRedraw();
-    }));
+    ['laplaceFrequency', 'laplaceDamping', 'laplaceAmplitude', 'laplaceTimeWindow', 'laplaceSamples'].forEach(key => bindSlider(
+        `${key}Slider`,
+        key,
+        key === 'laplaceSamples' ? parseInteger : parseFloat,
+        () => {
+            if (state.laplaceModeEnabled) updateLaplaceTransform();
+            requestUiRedraw();
+        }
+    ));
 
     ['laplaceSigma', 'laplaceOmega'].forEach(key => bindSlider(`${key}Slider`, key, parseFloat, () => {
-        updateLaplaceEvaluationPoint();
+        if (state.laplaceModeEnabled) updateLaplaceEvaluationPoint();
         requestUiRedraw();
     }));
 
+    bindControlListener('laplaceFourierSliceBtn', 'click', () => {
+        state.laplaceSigma = 0;
+        if (controls.laplaceSigmaSlider) controls.laplaceSigmaSlider.value = '0';
+        if (state.laplaceModeEnabled) updateLaplaceEvaluationPoint();
+        requestUiRedraw();
+    });
+
     bindSelector('laplaceVizModeSelector', 'laplaceVizMode', () => {
-        updateLaplace3DSurface();
         requestUiRedraw();
     });
     bindSlider('laplaceClipHeightSlider', 'laplaceClipHeight', parseFloat, () => {
-        updateLaplace3DSurface();
         requestUiRedraw();
     });
 
@@ -1530,6 +1514,9 @@ function bindLaplaceControls() {
         ['laplaceShowRocCb', 'laplaceShowROC'],
         ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
         ['laplaceShowFourierLineCb', 'laplaceShowFourierLine'],
+        ['laplaceHideIntegralEvaluationCb', 'laplaceHideIntegralEvaluation'],
+        ['laplaceHide3DSurfaceCb', 'laplaceHide3DSurface'],
+        ['laplaceShowSpectrumCb', 'laplaceShowSpectrum'],
         ['laplaceAnimationLoopCb', 'laplaceAnimationLoop']
     ].forEach(([controlKey, stateKey]) => bindCheckbox(controlKey, stateKey));
 
@@ -1909,6 +1896,31 @@ function bindContourCanvasInteractions() {
     const contourCanvas = document.getElementById('contour_2d_canvas');
     if (!contourCanvas) return;
 
+    const viewport = () => state.laplaceModeEnabled
+        ? {
+            xRange: state.laplaceSurface.sigmaRange,
+            yRange: state.laplaceSurface.omegaRange,
+            zoom: state.laplaceSurface.viewportZoom ?? 1
+        }
+        : {
+            xRange: zPlaneParams.currentVisXRange,
+            yRange: zPlaneParams.currentVisYRange,
+            zoom: state.zPlaneZoom
+    };
+    const updateViewport = (xRange, yRange, zoom) => {
+        if (state.laplaceModeEnabled) {
+            setLaplaceSurfaceViewport(xRange, yRange, zoom);
+            return;
+        }
+        zPlaneParams.currentVisXRange = xRange;
+        zPlaneParams.currentVisYRange = yRange;
+        state.zPlaneZoom = zoom;
+        zPlaneParams.scale.x = zPlaneParams.width / (xRange[1] - xRange[0]);
+        zPlaneParams.scale.y = zPlaneParams.height / (yRange[1] - yRange[0]);
+        zPlaneParams.origin.x = -xRange[0] * zPlaneParams.scale.x;
+        zPlaneParams.origin.y = yRange[1] * zPlaneParams.scale.y;
+    };
+
     let isPanning = false;
     let startX = 0;
     let startY = 0;
@@ -1917,12 +1929,12 @@ function bindContourCanvasInteractions() {
 
     contourCanvas.addEventListener('mousedown', event => {
         if (event.button !== 0) return;
-        requireVisibleViewport(zPlaneParams, 'Contour viewport');
+        const current = viewport();
         isPanning = true;
         startX = event.clientX;
         startY = event.clientY;
-        startXRange = [...zPlaneParams.currentVisXRange];
-        startYRange = [...zPlaneParams.currentVisYRange];
+        startXRange = [...current.xRange];
+        startYRange = [...current.yRange];
     }, PASSIVE_LISTENER_OPTIONS);
 
     bindElementListener(window, 'mousemove', event => {
@@ -1936,10 +1948,12 @@ function bindContourCanvasInteractions() {
         const ySpan = startYRange[1] - startYRange[0];
         const shiftX = -dx * (xSpan / width);
         const shiftY = dy * (ySpan / height);
-        zPlaneParams.currentVisXRange = [startXRange[0] + shiftX, startXRange[1] + shiftX];
-        zPlaneParams.currentVisYRange = [startYRange[0] + shiftY, startYRange[1] + shiftY];
-        zPlaneParams.origin.x = -zPlaneParams.currentVisXRange[0] * zPlaneParams.scale.x;
-        zPlaneParams.origin.y = zPlaneParams.currentVisYRange[1] * zPlaneParams.scale.y;
+        const current = viewport();
+        updateViewport(
+            [startXRange[0] + shiftX, startXRange[1] + shiftX],
+            [startYRange[0] + shiftY, startYRange[1] + shiftY],
+            current.zoom
+        );
         requestDomainRedraw(true);
     }, PASSIVE_LISTENER_OPTIONS);
 
@@ -1949,33 +1963,27 @@ function bindContourCanvasInteractions() {
 
     contourCanvas.addEventListener('wheel', event => {
         event.preventDefault();
-        requireVisibleViewport(zPlaneParams, 'Contour viewport');
+        const current = viewport();
         const rect = contourCanvas.getBoundingClientRect();
         const width = Math.max(1, rect.width);
         const height = Math.max(1, rect.height);
         const px = clamp(event.clientX - rect.left, 0, width);
         const py = clamp(event.clientY - rect.top, 0, height);
-        const xRange = zPlaneParams.currentVisXRange;
-        const yRange = zPlaneParams.currentVisYRange;
+        const xRange = current.xRange;
+        const yRange = current.yRange;
         const xSpan = xRange[1] - xRange[0];
         const ySpan = yRange[1] - yRange[0];
         const u = xRange[0] + (px / width) * xSpan;
         const v = yRange[1] - (py / height) * ySpan;
         const requestedFactor = event.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
-        const oldZoom = requireFiniteNumber(state.zPlaneZoom, 'Contour zoom');
+        const oldZoom = requireFiniteNumber(current.zoom, 'Contour zoom');
         const nextZoom = clamp(oldZoom * requestedFactor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
         const appliedFactor = nextZoom / oldZoom;
         const newXSpan = xSpan / appliedFactor;
         const newYSpan = ySpan / appliedFactor;
         const newX0 = u - (px / width) * newXSpan;
         const newY1 = v + (py / height) * newYSpan;
-        zPlaneParams.currentVisXRange = [newX0, newX0 + newXSpan];
-        zPlaneParams.currentVisYRange = [newY1 - newYSpan, newY1];
-        state.zPlaneZoom = nextZoom;
-        zPlaneParams.scale.x = zPlaneParams.width / newXSpan;
-        zPlaneParams.scale.y = zPlaneParams.height / newYSpan;
-        zPlaneParams.origin.x = -newX0 * zPlaneParams.scale.x;
-        zPlaneParams.origin.y = newY1 * zPlaneParams.scale.y;
+        updateViewport([newX0, newX0 + newXSpan], [newY1 - newYSpan, newY1], nextZoom);
         requestDomainRedraw(true);
     }, ACTIVE_LISTENER_OPTIONS);
 }
@@ -2174,7 +2182,7 @@ function toggleLaplace3DFullscreen() {
         column: controls.laplace3DColumn,
         stateKey: 'isLaplace3DFullScreen',
         closeButton: controls.toggleFullscreenLaplace3DBtn,
-        onResize: () => resizeLaplace3DSurface(container)
+        onResize: () => resizeScalarSurface(container)
     });
 }
 
@@ -2259,7 +2267,7 @@ export function setupEventListeners() {
 
     subscribeState(() => syncLaplacePlayPauseButton(), 'laplaceAnimationPlaying');
     subscribeState(() => updateDomainPaletteCirclePanel(), 'domainPalette');
-    subscribeState(() => updateRealPlotsPaletteCirclePanel(), 'realPlotsPalette');
+    subscribeState(() => updateSurfacePaletteCirclePanel(), 'surfacePalette');
     BINDERS.forEach(fn => fn());
 
     syncTopControlsCollapseState();
@@ -2720,7 +2728,7 @@ function bindDomainPaletteCirclePanelListeners() {
     );
 }
 
-export function drawRealPlotsPaletteCircle(canvas, paletteId) {
+export function drawSurfacePaletteCircle(canvas, paletteId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
@@ -2732,7 +2740,7 @@ export function drawRealPlotsPaletteCircle(canvas, paletteId) {
     const rOuter = 130;
     const rInner = 95;
 
-    const palette = realPlotsPalettes.find(p => p.id === paletteId) || realPlotsPalettes.find(p => p.id === 'viridis');
+    const palette = surfacePalettes.find(p => p.id === paletteId) || surfacePalettes.find(p => p.id === 'viridis');
     if (!palette) return;
 
     // CSS gradient colors string parsing
@@ -2760,14 +2768,14 @@ export function drawRealPlotsPaletteCircle(canvas, paletteId) {
     drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner);
 }
 
-export function drawRealPlotsAmplitudeStrip(canvas, paletteId) {
+export function drawSurfaceAmplitudeStrip(canvas, paletteId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    const palette = realPlotsPalettes.find(p => p.id === paletteId) || realPlotsPalettes.find(p => p.id === 'viridis');
+    const palette = surfacePalettes.find(p => p.id === paletteId) || surfacePalettes.find(p => p.id === 'viridis');
     if (!palette) return;
 
     const colors = palette.colors.split(',').map(c => c.trim());
@@ -2782,24 +2790,24 @@ export function drawRealPlotsAmplitudeStrip(canvas, paletteId) {
     ctx.fillRect(0, 0, w, h);
 }
 
-export function updateRealPlotsPaletteCirclePanel() {
-    const activePalette = realPlotsPalettes.find(p => p.id === state.realPlotsPalette) || realPlotsPalettes.find(p => p.id === 'viridis');
+export function updateSurfacePaletteCirclePanel() {
+    const activePalette = surfacePalettes.find(p => p.id === state.surfacePalette) || surfacePalettes.find(p => p.id === 'viridis');
     const title = $('real_plots_palette_circle_title');
     if (title && activePalette) title.textContent = activePalette.name;
 
     const canvas = $('real_plots_palette_circle_canvas');
-    drawRealPlotsPaletteCircle(canvas, state.realPlotsPalette);
+    drawSurfacePaletteCircle(canvas, state.surfacePalette);
 
     const stripCanvas = $('real_plots_amplitude_strip_canvas');
-    drawRealPlotsAmplitudeStrip(stripCanvas, state.realPlotsPalette);
+    drawSurfaceAmplitudeStrip(stripCanvas, state.surfacePalette);
 }
 
-function bindRealPlotsPaletteCirclePanelListeners() {
+function bindSurfacePaletteCirclePanelListeners() {
     bindPalettePanel(
         'view_real_plots_palette_circle_btn',
         'close_real_plots_palette_circle_btn',
         'real_plots_palette_circle_panel',
-        updateRealPlotsPaletteCirclePanel
+        updateSurfacePaletteCirclePanel
     );
 }
 
@@ -2820,7 +2828,7 @@ function bindGraphControls() {
     checked('enableGraphLayerLockCb', state.graphLayerLockEnabled);
 
     bindCheckbox('enableGraphViewCb', 'graphViewEnabled', (_event, enabled) => {
-        if (state.fourierModeEnabled || state.laplaceModeEnabled || !enabled) {
+        if (state.laplaceModeEnabled || !enabled) {
             disableGraphView();
         } else {
             disableRealPlots();
@@ -2834,7 +2842,7 @@ function bindGraphControls() {
 
     bindCheckbox('viewFullGridPerspectiveBtn', 'graphFullGridEnabled', (_event, enabled) => {
         if (!state.graphViewEnabled || !isFullGridPerspectiveSupported(state.currentInputShape)
-            || state.fourierModeEnabled || state.laplaceModeEnabled) {
+            || state.laplaceModeEnabled) {
             state.graphFullGridEnabled = false;
             checked('viewFullGridPerspectiveBtn', false);
             return;
@@ -2872,7 +2880,7 @@ function bindGraphControls() {
         requestUiRedraw();
     });
     bindCheckbox('enableGraphFourierCb', 'graphFourierEnabled', (_event, enabled) => {
-        if (!state.graphViewEnabled || state.fourierModeEnabled || state.laplaceModeEnabled) {
+        if (!state.graphViewEnabled || state.laplaceModeEnabled) {
             state.graphFourierEnabled = false;
             checked('enableGraphFourierCb', false);
         } else {
@@ -3024,7 +3032,7 @@ function toggleContour2DFullscreen() {
 }
 
 function bindContourControls() {
-    ['riemannSurface', 'realPlots'].forEach(prefix => {
+    ['riemannSurface', 'realPlots', 'laplace'].forEach(prefix => {
         bindCheckbox(`${prefix}ContoursCb`, 'contoursEnabled', requestUiRedraw);
         bindSlider(`${prefix}ContourIntervalSlider`, 'contourInterval', parseFloat, requestUiRedraw);
         bindSlider(`${prefix}ContourThicknessSlider`, 'contourThickness', parseFloat, requestUiRedraw);

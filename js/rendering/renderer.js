@@ -25,7 +25,6 @@ import {
     getRasterOpacityForShape,
     isRasterInputShape
 } from '../utils/raster-media.js';
-import { drawWindingVisualization, drawTimeDomainSignal } from './draw-fourier-winding.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
 import { getLaplaceFrameData } from '../analysis/laplace-transform.js';
 import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
@@ -776,10 +775,6 @@ function drawCriticalMarkers(ctx, planeParams, points, color) {
 export function drawZPlaneContent(timestamp) {
     syncZRenderContext();
 
-    if (state.fourierModeEnabled) {
-        if (zCtx && zPlaneParams) drawTimeDomainSignal(zCtx, state.fourierTimeDomainSignal, zPlaneParams);
-        return;
-    }
     if (state.laplaceModeEnabled) {
         if (zCtx && zPlaneParams) {
             const signal = state.laplaceTimeDomainSignal;
@@ -972,11 +967,15 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
         if (isSpecialMode) {
             hideRiemannSurface(wCanvas);
             setWPresentation('canvas');
-            if (state.fourierModeEnabled) {
-                drawWindingVisualization(wCtx, state.fourierTimeDomainSignal, wPlaneParams);
-            } else if (state.laplaceModeEnabled) {
+            if (state.laplaceModeEnabled) {
                 const signal = state.laplaceTimeDomainSignal;
-                drawLaplaceWindingVisualization(wCtx, signal, wPlaneParams, getLaplaceFrameData(signal));
+                drawLaplaceWindingVisualization(
+                    wCtx,
+                    signal,
+                    wPlaneParams,
+                    getLaplaceFrameData(signal),
+                    { showIntegralEvaluation: !state.laplaceHideIntegralEvaluation }
+                );
             }
             return;
         }
@@ -1414,7 +1413,7 @@ export function drawWPlaneContent(options = {}) {
             || wCanvasList.length === 0) {
             throw new Error('W-plane rendering requires initialized canvas, context, and viewport lists.');
         }
-        if (state.fourierModeEnabled || state.laplaceModeEnabled) {
+        if (state.laplaceModeEnabled) {
             renderSingleWPlane(0, null, true, options);
             return;
         }

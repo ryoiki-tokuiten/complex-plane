@@ -78,7 +78,6 @@ export function applyFractalPreset(runtimeState, key) {
     Object.assign(runtimeState, {
         currentFunction: 'algebraic_chaining',
         currentFunctionPreset: key,
-        fourierModeEnabled: false,
         laplaceModeEnabled: false,
         algebraicChainingEnabled: true,
         chainingEnabled: true,

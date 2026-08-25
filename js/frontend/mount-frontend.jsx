@@ -15,9 +15,9 @@ import {
 } from './components/dynamic-generated-controls.jsx';
 import {
     ActiveDomainPaletteName,
-    ActiveRealPlotsPaletteName,
+    ActiveSurfacePaletteName,
     DomainPaletteOptions,
-    RealPlotsPaletteOptions
+    SurfacePaletteOptions
 } from './components/theme-and-palette-options.jsx';
 
 const ISLANDS = [
@@ -29,9 +29,11 @@ const ISLANDS = [
     ['algebraic_terms_list', AlgebraicTermEditor],
     ['frontend_modal_root', ThemeModal],
     ['domain_palette_circles', DomainPaletteOptions],
-    ['real_plots_palette_circles', RealPlotsPaletteOptions],
+    ['real_plots_palette_circles', SurfacePaletteOptions],
+    ['laplace_surface_palette_circles', SurfacePaletteOptions],
     ['active_domain_palette_name', ActiveDomainPaletteName],
-    ['active_real_plots_palette_name', ActiveRealPlotsPaletteName],
+    ['active_real_plots_palette_name', ActiveSurfacePaletteName],
+    ['active_laplace_surface_palette_name', ActiveSurfacePaletteName],
     ['dynamic_example_count', DynamicExampleCount],
     ['dynamic_example_gallery', DynamicExampleGallery],
     ['dynamic_term_factors', DynamicTermFactors],

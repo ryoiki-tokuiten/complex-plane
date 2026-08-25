@@ -159,20 +159,15 @@ const RIEMANN_VIEW_VALUE_BINDINGS = Object.freeze([
     { display: 'riemannSurfaceHeightClipValueDisplay', key: 'riemannSurfaceHeightClip', digits: 1 }
 ]);
 
-const FOURIER_VALUE_BINDINGS = Object.freeze([
-    { display: 'fourierFrequencyValueDisplay', key: 'fourierFrequency', digits: 1 },
-    { display: 'fourierAmplitudeValueDisplay', key: 'fourierAmplitude', digits: 1 },
-    { display: 'fourierTimeWindowValueDisplay', key: 'fourierTimeWindow', digits: 1 },
-    { display: 'fourierSamplesValueDisplay', key: 'fourierSamples' },
-    { display: 'fourierWindingFrequencyValueDisplay', key: 'fourierWindingFrequency', digits: 1 },
-    { display: 'fourierWindingTimeValueDisplay', get: () => Math.round(state.fourierWindingTime * 100) }
-]);
-
 const LAPLACE_VALUE_BINDINGS = Object.freeze([
     { display: 'laplaceFrequencyValueDisplay', key: 'laplaceFrequency', digits: 1 },
     { display: 'laplaceDampingValueDisplay', key: 'laplaceDamping', digits: 1 },
+    { display: 'laplaceAmplitudeValueDisplay', key: 'laplaceAmplitude', digits: 1 },
+    { display: 'laplaceTimeWindowValueDisplay', key: 'laplaceTimeWindow', digits: 1 },
+    { display: 'laplaceSamplesValueDisplay', key: 'laplaceSamples' },
     { display: 'laplaceSigmaValueDisplay', key: 'laplaceSigma', digits: 1 },
     { display: 'laplaceOmegaValueDisplay', key: 'laplaceOmega', digits: 1 },
+    { display: 'laplaceAnimationTimeValueDisplay', get: () => Math.round(state.laplaceAnimationTime * 100) },
     { display: 'laplaceClipHeightValueDisplay', key: 'laplaceClipHeight', digits: 0 }
 ]);
 
@@ -426,7 +421,7 @@ function syncFractionalPowerDisplays() {
 }
 
 function syncComplexParameterControls() {
-    if (state.fourierModeEnabled || state.laplaceModeEnabled) {
+    if (state.laplaceModeEnabled) {
         return;
     }
 
@@ -525,7 +520,7 @@ function syncComplexParameterControls() {
 }
 
 function syncNormalModeDisplays() {
-    if (state.fourierModeEnabled || state.laplaceModeEnabled) {
+    if (state.laplaceModeEnabled) {
         return;
     }
 
@@ -559,32 +554,44 @@ function syncVectorFlowControls() {
 }
 
 export function syncTransformControlPanels() {
-    const standaloneTransform = state.fourierModeEnabled || state.laplaceModeEnabled;
-    setHidden('coreApplicationControls', standaloneTransform);
-    setHidden('visualizationOptionsPanel', standaloneTransform);
-    setHidden('fourierSpecificControls', !(state.fourierModeEnabled || state.graphFourierEnabled));
-    setHidden('laplaceSpecificControls', !state.laplaceModeEnabled);
+    const transformHubActive = state.laplaceModeEnabled || state.graphFourierEnabled;
+    setHidden('coreApplicationControls', state.laplaceModeEnabled);
+    setHidden('visualizationOptionsPanel', transformHubActive);
+    setHidden('laplaceSpecificControls', !transformHubActive);
+    setHidden('inputShapeSelector', state.laplaceModeEnabled);
 }
 
 function syncRiemannAndTransformDisplays() {
     syncTransformControlPanels();
-    const graphSource = state.graphFourierEnabled && !state.fourierModeEnabled;
-    const sourceSelector = control('fourierFunctionSelector');
-    const graphOption = control('fourierCurrentGraphOption');
+    const graphSource = state.graphFourierEnabled && !state.laplaceModeEnabled;
+    const sourceSelector = control('laplaceFunctionSelector');
+    const graphOption = control('laplaceCurrentGraphOption');
     if (graphOption) graphOption.hidden = !graphSource;
     if (sourceSelector) {
         sourceSelector.disabled = graphSource;
-        sourceSelector.value = graphSource ? 'current_graph' : state.fourierFunction;
+        sourceSelector.value = graphSource ? 'current_graph' : state.laplaceFunction;
         sourceSelector.dataset.tooltip = graphSource
-            ? 'The current graph supplies both Fourier signals'
-            : 'Select the time domain signal type';
+            ? 'The current graph supplies the signal for the σ = 0 Laplace slice'
+            : 'Select the time-domain signal type';
     }
-    setText('fourierSignalSectionTitle', graphSource ? 'Graph Signal' : 'Signal Configuration');
-    setText('fourierFunctionLabel', graphSource ? 'Source' : 'Waveform Type');
-    setText('fourierFrequencyLabel', graphSource ? 'Traversal Rate:' : 'Frequency:');
-    setHidden('fourierWindingNote', graphSource);
+    setText('laplaceSignalSectionTitle', graphSource ? 'Graph Signal' : 'Signal Configuration');
+    setText('laplaceFunctionLabel', graphSource ? 'Source' : 'Waveform Type');
+    setText('laplaceFrequencyLabel', 'Frequency:');
+    setHidden('laplaceWindingNote', graphSource);
+    // Keep the 3D controls available while its canvas is hidden so the user can
+    // turn the surface back on. Graph Fourier mode hides the whole section.
+    setHidden('laplace3DControlsSection', graphSource);
+    setHidden('laplaceAnimationSection', graphSource);
+    setChecked('laplaceHideIntegralEvaluationCb', state.laplaceHideIntegralEvaluation);
+    setChecked('laplaceHide3DSurfaceCb', state.laplaceHide3DSurface);
+    setChecked('laplaceShowSpectrumCb', state.laplaceShowSpectrum);
+    setChecked('laplaceContoursCb', state.contoursEnabled);
+    setValue('laplaceContourIntervalSlider', state.contourInterval);
+    setText('laplaceContourIntervalValueDisplay', Number(state.contourInterval).toFixed(2));
+    setValue('laplaceContourThicknessSlider', state.contourThickness);
+    setText('laplaceContourThicknessValueDisplay', Number(state.contourThickness).toFixed(1));
+    setHidden('laplaceContoursDetails', !state.contoursEnabled);
     syncValueBindings(RIEMANN_VIEW_VALUE_BINDINGS);
-    syncValueBindings(FOURIER_VALUE_BINDINGS);
     syncValueBindings(LAPLACE_VALUE_BINDINGS);
 }
 
@@ -753,7 +760,6 @@ export function updateProbeInfo() {
         const probeCanRender = state.probeActive
             && zIsPlanar
             && !state.navigationModeEnabled
-            && !state.fourierModeEnabled
             && !state.laplaceModeEnabled
             && !isPanning(runtime.interaction.panZ)
             && !isPanning(runtime.interaction.panW)
@@ -1170,19 +1176,12 @@ function syncPrimaryPlaneTitles() {
 }
 
 function syncTransformModeTitles() {
-    if (state.fourierModeEnabled) {
-        setHtml('zPlaneTitle', 'Time Domain (Signal)');
-        setHtml('wPlaneTitle', 'Frequency Domain (Fourier Transform)');
-        setDisabled('inputShapeSelector', true);
-        return true;
-    }
-
     if (!state.laplaceModeEnabled) {
         return false;
     }
 
     setHtml('zPlaneTitle', 'Time Domain (Signal)');
-    setHtml('wPlaneTitle', 'Complex Frequency Domain (Winding)');
+    setHtml('wPlaneTitle', 'Complex Frequency Domain (Laplace winding; Fourier at σ = 0)');
     setDisabled('inputShapeSelector', true);
 
     const laplace3DTitles = {
@@ -1285,7 +1284,7 @@ function syncFunctionEquationCard() {
     const container = document.getElementById('function_equation_container');
     if (!container) return;
 
-    if (state.algebraicChainingEnabled || state.fourierModeActive || state.laplaceModeActive) {
+    if (state.algebraicChainingEnabled || state.laplaceModeEnabled) {
         container.classList.add('hidden');
         container.replaceChildren();
         return;
@@ -1466,8 +1465,9 @@ function syncFunctionEquationCard() {
 }
 
 function syncVisualizationOptionControls() {
-    setHidden('visualizationOptionsPanel', false);
-    setDisabled('inputShapeSelector', false);
+    const transformHubActive = state.laplaceModeEnabled || state.graphFourierEnabled;
+    setHidden('visualizationOptionsPanel', transformHubActive);
+    setDisabled('inputShapeSelector', state.laplaceModeEnabled);
     syncRiemannSurfaceControls();
     syncDomainColoringControls();
     setHidden('radialDiscreteStepsOptionsDiv', !state.radialDiscreteStepsEnabled);
@@ -1644,13 +1644,17 @@ export function updateCustomFormulaPreview(inputEl, displayEl, options = {}) {
 }
 
 export function sync2DContourUI() {
-    const is3D = state.realPlotsEnabled || state.riemannSurfaceEnabled;
-    if (!is3D) state.show2DContourPlot = false;
-    const showContour = state.show2DContourPlot && is3D;
+    const hasSurface = state.realPlotsEnabled || state.riemannSurfaceEnabled || state.laplaceModeEnabled;
+    if (!hasSurface) state.show2DContourPlot = false;
+    const showContour = state.show2DContourPlot && hasSurface;
 
     // Toggle button active states and labels
     const active = state.show2DContourPlot;
-    [control('riemannSurfaceShow2DContourBtn'), control('realPlotsShow2DContourBtn')].forEach(btn => {
+    [
+        control('riemannSurfaceShow2DContourBtn'),
+        control('realPlotsShow2DContourBtn'),
+        control('laplaceShow2DContourBtn')
+    ].forEach(btn => {
         if (btn) {
             btn.classList.toggle('contour-btn-active', active);
             btn.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -1697,6 +1701,8 @@ export function sync2DContourUI() {
         if (wCard) {
             wCard.classList.remove('hidden');
         }
+    } else if (state.laplaceModeEnabled) {
+        control('realPlotsColumn')?.classList.add('hidden');
     } else {
         // Neither 3D plot is active: hide the 2D contour plot column
         if (contourCol) {

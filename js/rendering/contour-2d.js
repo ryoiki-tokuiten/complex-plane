@@ -1,5 +1,6 @@
 import { state, context, zPlaneParams } from '../store/state.js';
 import { renderRealPlotContour } from './real-plots-renderer.js';
+import { buildLaplaceSurfaceGeometry } from '../analysis/laplace-transform.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import { renderNativeMapContour } from '../native/complex-engine.js';
@@ -45,9 +46,9 @@ function getContourThickness() {
     return thickness;
 }
 
-function makePlaneParams(width, height) {
-    const xRange = readRange(zPlaneParams.currentVisXRange, '2D contour x-axis');
-    const yRange = readRange(zPlaneParams.currentVisYRange, '2D contour y-axis');
+function makePlaneParams(width, height, requestedXRange, requestedYRange) {
+    const xRange = readRange(requestedXRange ?? zPlaneParams.currentVisXRange, '2D contour x-axis');
+    const yRange = readRange(requestedYRange ?? zPlaneParams.currentVisYRange, '2D contour y-axis');
     const xSpan = xRange[1] - xRange[0];
     const ySpan = yRange[1] - yRange[0];
 
@@ -105,8 +106,33 @@ function renderRiemannHeightField(ctx, width, height) {
     putNativePixels(ctx, width, height, pixels);
 }
 
-function drawPlaneOverlay(ctx, cssWidth, cssHeight, dpr, labels) {
-    const params = makePlaneParams(cssWidth, cssHeight);
+function renderLaplaceHeightField(ctx, width, height) {
+    const surface = state.laplaceSurface;
+    if (!surface) throw new Error('Laplace contour rendering requires surface data.');
+    const geometry = buildLaplaceSurfaceGeometry(surface, {
+        mode: state.laplaceVizMode,
+        clipHeight: state.laplaceClipHeight,
+        palette: state.surfacePalette
+    });
+    const columns = surface.sigmaSteps + 1;
+    const rows = surface.omegaSteps + 1;
+    putNativePixels(ctx, width, height, renderRealPlotContour({
+        scalarGrid: {
+            values: geometry.contourValues,
+            colors: geometry.colors,
+            sourceWidth: columns,
+            sourceHeight: rows
+        },
+        width,
+        height,
+        contoursEnabled: state.contoursEnabled,
+        contourInterval: getContourInterval(),
+        contourThickness: getContourThickness()
+    }));
+}
+
+function drawPlaneOverlay(ctx, cssWidth, cssHeight, dpr, labels, xRange, yRange) {
+    const params = makePlaneParams(cssWidth, cssHeight, xRange, yRange);
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -137,6 +163,13 @@ export function draw2DContourPlot(canvas) {
 
     ctx.clearRect(0, 0, width, height);
 
+    if (state.laplaceModeEnabled) {
+        const surface = state.laplaceSurface;
+        renderLaplaceHeightField(ctx, width, height);
+        drawPlaneOverlay(ctx, cssWidth, cssHeight, dpr, { x: 'σ', y: 'jω' }, surface.sigmaRange, surface.omegaRange);
+        return;
+    }
+
     if (state.riemannSurfaceEnabled) {
         renderRiemannHeightField(ctx, width, height);
         drawPlaneOverlay(ctx, cssWidth, cssHeight, dpr, { x: 'Re(z)', y: 'Im(z)' });
@@ -144,7 +177,7 @@ export function draw2DContourPlot(canvas) {
     }
 
     if (!state.realPlotsEnabled) {
-        throw new Error('2D contour rendering requires an active Riemann or real-plot mode.');
+        throw new Error('2D contour rendering requires an active Laplace, Riemann, or real-plot mode.');
     }
     const pixels = renderRealPlotContour({
         width,

@@ -9,7 +9,7 @@ import {
     generateInputShapePointSets
 } from './shape-generators.js';
 import { disposeThreeObject } from './three-utils.js';
-import { buildFourierWinding } from '../analysis/fourier-transform.js';
+import { buildLaplaceWinding } from '../analysis/laplace-transform.js';
 import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
@@ -124,7 +124,6 @@ export function isFullGridPerspectiveSupported(shape = state.currentInputShape) 
 
 function graphModeActive() {
     return state.graphViewEnabled
-        && !state.fourierModeEnabled
         && !state.laplaceModeEnabled;
 }
 
@@ -758,12 +757,12 @@ function makeGraphDisplayKey(inputKey) {
         inputKey,
         `trace:${state.graphTraceEnabled ? 1 : 0}`,
         `fourier:${state.graphFourierEnabled ? 1 : 0}`,
-        state.fourierFrequency,
-        state.fourierAmplitude,
-        state.fourierTimeWindow,
-        state.fourierSamples,
-        state.fourierWindingFrequency,
-        state.fourierWindingTime
+        state.laplaceFrequency,
+        state.laplaceAmplitude,
+        state.laplaceTimeWindow,
+        state.laplaceSamples,
+        state.laplaceOmega,
+        state.laplaceAnimationTime
     ].join('|');
 }
 
@@ -1254,14 +1253,22 @@ function ringPoints(center, radius, plane) {
 }
 
 function windingPointToVector(point, center, plane) {
-    const re = point.re * FOURIER_RING_RADIUS;
-    const im = point.im * FOURIER_RING_RADIUS;
+    const re = (point.real ?? point.re ?? 0) * FOURIER_RING_RADIUS;
+    const im = (point.imag ?? point.im ?? 0) * FOURIER_RING_RADIUS;
     if (plane === 're') return new THREE.Vector3(center.x + re, center.y + im, center.z);
     return new THREE.Vector3(center.x + re, center.y, center.z + im);
 }
 
+function windingReferenceRadius(winding) {
+    return Math.max(0.18, winding.maxRadius || 0);
+}
+
+function windingVectorStep(winding) {
+    return Math.max(1, Math.floor(winding.points.length / 50));
+}
+
 function graphFourierSignal(samples, component, scale) {
-    const requested = clamp(requireInteger(state.fourierSamples, 'Graph Fourier sample count'), 32, 512);
+    const requested = clamp(requireInteger(state.laplaceSamples, 'Graph transform sample count'), 32, 512);
     let source = samples;
     const firstInput = source[0]?.input;
     const lastInput = source.at(-1)?.input;
@@ -1271,11 +1278,11 @@ function graphFourierSignal(samples, component, scale) {
     }
     source = selectEvenly(source, requested);
     const timeWindow = Math.max(EPSILON,
-        requireFiniteNumber(state.fourierTimeWindow, 'Graph Fourier time window'));
+        requireFiniteNumber(state.laplaceTimeWindow, 'Graph transform time window'));
     const amplitudeScale = clamp(
-        requireFiniteNumber(state.fourierAmplitude, 'Graph Fourier amplitude'), 0.1, 5);
+        requireFiniteNumber(state.laplaceAmplitude, 'Graph transform amplitude'), 0.1, 5);
     const traversalFrequency = clamp(
-        requireFiniteNumber(state.fourierFrequency, 'Graph Fourier frequency'), 0.1, 10);
+        requireFiniteNumber(state.laplaceFrequency, 'Graph transform frequency'), 0.1, 10);
     const signal = [];
     for (let index = 0; index < requested; index += 1) {
         const normalizedTime = requested <= 1 ? 0 : index / (requested - 1);
@@ -1299,20 +1306,20 @@ function graphFourierSignal(samples, component, scale) {
 
 function graphFourierWinding(samples, component, scale) {
     const signal = graphFourierSignal(samples, component, scale);
-    return buildFourierWinding(signal, {
-        windingFrequency: requireFiniteNumber(state.fourierWindingFrequency, 'Graph winding frequency'),
-        progress: requireFiniteNumber(state.fourierWindingTime, 'Graph winding progress'),
-        timeWindow: Math.max(EPSILON,
-            requireFiniteNumber(state.fourierTimeWindow, 'Graph Fourier time window'))
+    if (signal.length < 2) return buildLaplaceWinding([]);
+    return buildLaplaceWinding(signal, {
+        sigma: 0,
+        omega: requireFiniteNumber(state.laplaceOmega, 'Graph winding omega'),
+        progress: requireFiniteNumber(state.laplaceAnimationTime, 'Graph winding progress')
     });
 }
 
 function graphFourierProgress(data) {
-    const progress = clamp(requireFiniteNumber(state.fourierWindingTime, 'Graph winding progress'), 0, 1);
+    const progress = clamp(requireFiniteNumber(state.laplaceAnimationTime, 'Graph winding progress'), 0, 1);
     const traversalFrequency = clamp(
-        requireFiniteNumber(state.fourierFrequency, 'Graph Fourier frequency'), 0.1, 10);
+        requireFiniteNumber(state.laplaceFrequency, 'Graph transform frequency'), 0.1, 10);
     const timeWindow = Math.max(EPSILON,
-        requireFiniteNumber(state.fourierTimeWindow, 'Graph Fourier time window'));
+        requireFiniteNumber(state.laplaceTimeWindow, 'Graph transform time window'));
     const traversed = progress * timeWindow * traversalFrequency;
     const phase = traversed - Math.floor(traversed);
     const cursorProgress = progress === 1 && Math.abs(phase) <= EPSILON ? 1 : phase;
@@ -1428,12 +1435,12 @@ class TransformationGraphRenderer {
         const fourierKey = state.graphFourierEnabled
             ? [
                 geometryKey,
-                state.fourierFrequency,
-                state.fourierAmplitude,
-                state.fourierTimeWindow,
-                state.fourierSamples,
-                state.fourierWindingFrequency,
-                state.fourierWindingTime
+                state.laplaceFrequency,
+                state.laplaceAmplitude,
+                state.laplaceTimeWindow,
+                state.laplaceSamples,
+                state.laplaceOmega,
+                state.laplaceAnimationTime
             ].join('|')
             : `${geometryKey}|fourier:off`;
 
@@ -1977,8 +1984,8 @@ class TransformationGraphRenderer {
             const imWinding = graphFourierWinding(curve.samples, 'im', imScale);
             const maximumRadius = Math.max(
                 0.18,
-                reWinding.referenceRadius * FOURIER_RING_RADIUS,
-                imWinding.referenceRadius * FOURIER_RING_RADIUS
+                windingReferenceRadius(reWinding) * FOURIER_RING_RADIUS,
+                windingReferenceRadius(imWinding) * FOURIER_RING_RADIUS
             );
             const center = new THREE.Vector3(-INPUT_AXIS_HALF - maximumRadius - 0.34, 0, laneZ);
             origins.push(center);
@@ -1991,7 +1998,7 @@ class TransformationGraphRenderer {
                 { winding: reWinding, plane: 're' },
                 { winding: imWinding, plane: 'im' }
             ].forEach(({ winding, plane }) => {
-                const radius = Math.max(0.18, winding.referenceRadius * FOURIER_RING_RADIUS);
+                const radius = windingReferenceRadius(winding) * FOURIER_RING_RADIUS;
                 appendPolylineSegments(rings, ringPoints(center, radius, plane));
                 const points = winding.points.map(point => windingPointToVector(point, center, plane));
                 let gradientColors = gradientColorsByPointCount.get(points.length);
@@ -2011,7 +2018,7 @@ class TransformationGraphRenderer {
                     windingPath.push([points[index - 1], points[index]]);
                     windingColors.push(gradientColors[index - 1]);
                 }
-                for (let index = 0; index < points.length; index += winding.vectorStep) {
+                for (let index = 0; index < points.length; index += windingVectorStep(winding)) {
                     spokes.push([center, points[index]]);
                 }
                 const pointStep = Math.max(1, Math.floor(points.length / 90));
@@ -2019,11 +2026,11 @@ class TransformationGraphRenderer {
                     if (index % pointStep === 0) samplePoints.push(point);
                 });
 
-                const centerOfMass = windingPointToVector(winding.centerOfMass, center, plane);
-                centerOfMassPoints.push(centerOfMass);
-                if (center.distanceToSquared(centerOfMass) > EPSILON) {
-                    centerOfMassVectors.push([center, centerOfMass]);
-                    arrowHeads.push(...lineArrowHeadSegments(center, centerOfMass, plane));
+                const integral = windingPointToVector(winding.integral, center, plane);
+                centerOfMassPoints.push(integral);
+                if (center.distanceToSquared(integral) > EPSILON) {
+                    centerOfMassVectors.push([center, integral]);
+                    arrowHeads.push(...lineArrowHeadSegments(center, integral, plane));
                 }
             });
 
@@ -2066,8 +2073,8 @@ class TransformationGraphRenderer {
         const imWinding = graphFourierWinding(data.samples, 'im', data.fourierImScale);
         const maximumRadius = Math.max(
             0.18,
-            reWinding.referenceRadius * FOURIER_RING_RADIUS,
-            imWinding.referenceRadius * FOURIER_RING_RADIUS
+            windingReferenceRadius(reWinding) * FOURIER_RING_RADIUS,
+            windingReferenceRadius(imWinding) * FOURIER_RING_RADIUS
         );
         const center = new THREE.Vector3(-INPUT_AXIS_HALF - maximumRadius - 0.34, 0, 0);
 
@@ -2098,7 +2105,7 @@ class TransformationGraphRenderer {
     }
 
     addFourierWindingPlane(group, winding, { center, plane, label }) {
-        const radius = Math.max(0.18, winding.referenceRadius * FOURIER_RING_RADIUS);
+        const radius = windingReferenceRadius(winding) * FOURIER_RING_RADIUS;
         const ring = ringPoints(center, radius, plane);
         addSegmentedTube(group, ring, {
             color: 0x96b4ff,
@@ -2127,7 +2134,7 @@ class TransformationGraphRenderer {
         }
 
         const spokes = [];
-        for (let index = 0; index < points.length; index += winding.vectorStep) {
+        for (let index = 0; index < points.length; index += windingVectorStep(winding)) {
             spokes.push([center, points[index]]);
         }
         addLineSegments(group, spokes, { color: 0x64b4ff, opacity: 0.24 });
@@ -2137,9 +2144,9 @@ class TransformationGraphRenderer {
         addPointCloud(group, visiblePoints, { color: 0xff64c8, size: 7, opacity: 0.14 });
         addPointCloud(group, visiblePoints, { color: 0xffa6df, size: 3.2, opacity: 0.94 });
 
-        const centerOfMass = windingPointToVector(winding.centerOfMass, center, plane);
-        if (center.distanceToSquared(centerOfMass) > EPSILON) {
-            addSoftLine(group, center, centerOfMass, {
+        const integral = windingPointToVector(winding.integral, center, plane);
+        if (center.distanceToSquared(integral) > EPSILON) {
+            addSoftLine(group, center, integral, {
                 color: 0xffdc32,
                 radius: 0.018,
                 glowRadius: 0.048,
@@ -2149,10 +2156,10 @@ class TransformationGraphRenderer {
                 emissiveIntensity: 0.5,
                 roughness: 0.3
             });
-            addArrowHead(group, center, centerOfMass);
+            addArrowHead(group, center, integral);
         }
-        addGlowMarker(group, centerOfMass, 0xffdc32, 0.13, 0.2);
-        addMarker(group, centerOfMass, 0xffdc32, 0.055);
+        addGlowMarker(group, integral, 0xffdc32, 0.13, 0.2);
+        addMarker(group, integral, 0xffdc32, 0.055);
 
         const labelPosition = plane === 're'
             ? new THREE.Vector3(center.x, center.y + radius + 0.2, center.z)

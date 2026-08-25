@@ -7,7 +7,7 @@ import { drawAxes, drawGrid, drawTipToTailVectors, drawSpiral } from './canvas-p
  * Draw unified full-canvas Laplace winding visualization
  * Shows f(t)·e^(-st) spiral AND tip-to-tail integral geometry in one view
  */
-export function drawLaplaceWindingPremium(ctx, signal, planeParams, windingData) {
+export function drawLaplaceWindingPremium(ctx, signal, planeParams, windingData, options = {}) {
     if (!Array.isArray(signal) || signal.length < 2 || !Array.isArray(windingData?.points)) {
         throw new Error('Laplace winding rendering requires complete native frame data.');
     }
@@ -25,12 +25,14 @@ export function drawLaplaceWindingPremium(ctx, signal, planeParams, windingData)
     drawGrid(ctx, planeParams);
     drawAxes(ctx, planeParams, 'Re', 'Im');
     drawSpiral(ctx, windingData, planeParams);
-    drawTipToTailVectors(ctx, windingData, planeParams, {
-        style: 'enhanced',
-        numVectors: 12,
-        animTime: 1,
-        showLabels: (planeParams.scale.x + planeParams.scale.y) / 2 > 800
-    });
+    if (options.showIntegralEvaluation !== false) {
+        drawTipToTailVectors(ctx, windingData, planeParams, {
+            style: 'enhanced',
+            numVectors: 12,
+            animTime: 1,
+            showLabels: (planeParams.scale.x + planeParams.scale.y) / 2 > 800
+        });
+    }
 
     ctx.restore();
 }

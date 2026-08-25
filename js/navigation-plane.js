@@ -85,7 +85,7 @@ export function initializeNavigationStateFromControls() {
 }
 
 export function syncNavigationControls() {
-    const inSpecialMode = state.fourierModeEnabled || state.laplaceModeEnabled;
+    const inSpecialMode = state.laplaceModeEnabled;
     if (controls.navigationParams) {
         controls.navigationParams.classList.toggle('hidden', inSpecialMode);
     }
@@ -107,7 +107,7 @@ export function syncNavigationControls() {
 }
 
 export function setNavigationModeEnabled(enabled) {
-    if (enabled && (state.fourierModeEnabled || state.laplaceModeEnabled)) {
+    if (enabled && state.laplaceModeEnabled) {
         enabled = false;
     }
 

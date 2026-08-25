@@ -5,7 +5,7 @@
 
 #define CE_TWO_PI 6.283185307179586476925286766559
 
-int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, double amplitude,
+int32_t ce_generate_transform_signal(uint32_t signal_type, double frequency, double amplitude,
                                   double time_window, uint32_t sample_count, uint32_t random_seed,
                                   double *times, double *values) {
     if (!times || !values || !sample_count || signal_type > 14u ||
@@ -111,7 +111,7 @@ int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, doubl
     return 0;
 }
 
-int32_t ce_compute_fourier_spectrum(const double *values, uint32_t count,
+int32_t ce_compute_spectrum(const double *values, uint32_t count,
                                    double *frequencies, double *reals, double *imags,
                                    double *magnitudes, double *phases) {
     if (!values || !count || !frequencies || !reals || !imags || !magnitudes || !phases) return -1;
@@ -165,45 +165,6 @@ int32_t ce_compute_fourier_spectrum(const double *values, uint32_t count,
     }
     free(data);
     return 0;
-}
-
-int32_t ce_build_fourier_winding(const double *times, const double *values,
-                                 uint32_t count, double frequency, double progress,
-                                 double time_window, ce_complex *wound,
-                                 ce_complex *center, double *max_amplitude) {
-    if (!times || !values || !wound || !center || !max_amplitude || !count ||
-        !isfinite(frequency) || !isfinite(progress) || progress < 0.0 || progress > 1.0 ||
-        !isfinite(time_window) || time_window <= 0.0) return -1;
-    const double cutoff = progress * time_window;
-
-    double max_amp = 0.0;
-    uint32_t visible = 0;
-    for (uint32_t i = 0; i < count; ++i) {
-        const double t = times[i];
-        const double val = values[i];
-        if (!isfinite(t) || !isfinite(val) || (i > 0u && t <= times[i - 1u])) return -2;
-        const double abs_val = fabs(val);
-        if (abs_val > max_amp) max_amp = abs_val;
-        if (t <= cutoff || visible == 0) {
-            visible = i + 1u;
-        }
-    }
-    double sum_re = 0.0, sum_im = 0.0;
-    for (uint32_t i = 0; i < visible; ++i) {
-        const double t = times[i];
-        const double val = values[i];
-        const double angle = -CE_TWO_PI * frequency * t;
-        const double cosine = cos(angle);
-        const double sine = sin(angle);
-        wound[i].re = val * cosine;
-        wound[i].im = val * sine;
-        sum_re += wound[i].re;
-        sum_im += wound[i].im;
-    }
-    center->re = sum_re / (double)visible;
-    center->im = sum_im / (double)visible;
-    *max_amplitude = max_amp;
-    return (int32_t)visible;
 }
 
 int32_t ce_build_laplace_winding(const double *times, const double *values,

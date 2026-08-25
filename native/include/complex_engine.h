@@ -266,16 +266,12 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
                                      double output_zoom_power, uint32_t precision_bits,
                                      uint32_t output_width, uint32_t output_height,
                                      float *output_pixels, uint8_t *valid);
-int32_t ce_generate_fourier_signal(uint32_t signal_type, double frequency, double amplitude,
+int32_t ce_generate_transform_signal(uint32_t signal_type, double frequency, double amplitude,
                                   double time_window, uint32_t sample_count, uint32_t random_seed,
                                   double *times, double *values);
-int32_t ce_compute_fourier_spectrum(const double *values, uint32_t count,
+int32_t ce_compute_spectrum(const double *values, uint32_t count,
                                    double *frequencies, double *reals, double *imags,
                                    double *magnitudes, double *phases);
-int32_t ce_build_fourier_winding(const double *times, const double *values,
-                                 uint32_t count, double frequency, double progress,
-                                 double time_window, ce_complex *wound,
-                                 ce_complex *center, double *max_amplitude);
 int32_t ce_build_laplace_winding(const double *times, const double *values,
                                  uint32_t count, double sigma, double omega,
                                  double progress, ce_complex *wound,
@@ -289,16 +285,14 @@ int32_t ce_generate_laplace_analysis(uint32_t function_id, double frequency,
                                      ce_complex *poles, uint32_t *pole_orders,
                                      ce_complex *zeros, uint32_t *pole_count,
                                      uint32_t *zero_count, double *roc_boundary);
-int32_t ce_evaluate_laplace(uint32_t function_id, double sigma, double omega,
-                            double frequency, double damping, double amplitude,
-                            ce_complex *output);
 int32_t ce_build_laplace_surface(uint32_t function_id, double frequency,
                                  double damping, double amplitude,
                                  double sigma_min, double sigma_max,
                                  double omega_min, double omega_max,
                                  uint32_t sigma_steps, uint32_t omega_steps,
                                  uint32_t mode, double clip_height,
-                                 float *positions, float *normals, float *colors,
+                                 float *positions, float *normals,
+                                 float *magnitudes, float *phases,
                                  uint32_t *indices);
 
 int32_t ce_build_real_surface(const ce_map_config *config,
@@ -338,6 +332,8 @@ int32_t ce_render_real_contour(const ce_map_config *config,
                                uint32_t component, uint32_t contours_enabled,
                                double contour_interval, double contour_thickness,
                                const float *palette, uint32_t palette_count,
+                               const float *source_values, const float *source_colors,
+                               uint32_t source_width, uint32_t source_height,
                                uint8_t *rgba);
 int32_t ce_build_image_mesh(const ce_map_config *config,
                             double source_center_re, double source_center_im,

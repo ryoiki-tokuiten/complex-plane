@@ -5,8 +5,8 @@ import { updateTitlesAndGlobalUI } from '../../ui/ui-updates.js';
 // the DOM completely off hot drawing paths while every user-facing setting remains
 // automatically covered when the state schema grows.
 const NON_UI_STATE_KEYS = new Set([
-    'criticalPoints', 'criticalValues', 'dynamicPlotting', 'fourierDFTResult',
-    'fourierTimeDomainSignal', 'fullscreenWIndex', 'graphSelectedLineIndex',
+    'criticalPoints', 'criticalValues', 'dynamicPlotting', 'laplaceSpectrum',
+    'fullscreenWIndex', 'graphSelectedLineIndex',
     'graphSelectedShape', 'graphSelectionRevision', 'imageContentVersion',
     'isContour2DFullScreen', 'isGraphFullScreen', 'isLaplace3DFullScreen',
     'isRealPlotsFullScreen',

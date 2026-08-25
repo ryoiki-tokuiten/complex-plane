@@ -7,7 +7,7 @@ import { requireFiniteNumber } from '../utils/numeric-contracts.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
 
 /**
- * Shared canvas primitives used across planar, Fourier, and Laplace renderers.
+ * Shared canvas primitives used across planar and transform renderers.
  */
 
 export function getCanvasPlaneRanges(params) {

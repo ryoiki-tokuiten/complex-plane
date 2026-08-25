@@ -318,6 +318,64 @@ static void ce_apply_contours(const double *values, uint32_t width, uint32_t hei
     }
 }
 
+static int32_t ce_render_real_grid_contour(const float *source_values, const float *source_colors,
+                                           uint32_t source_width, uint32_t source_height,
+                                           uint32_t width, uint32_t height,
+                                           uint32_t contours_enabled, double contour_interval,
+                                           double contour_thickness, uint8_t *rgba) {
+    if (!source_values || !source_colors || source_width < 2u || source_height < 2u ||
+        !width || !height || contours_enabled > 1u || !rgba ||
+        (contours_enabled && (!(contour_interval > 0.0) || !(contour_thickness > 0.0)))) return -1;
+    if ((size_t)width > SIZE_MAX / height) return -1;
+    const size_t pixel_count = (size_t)width * height;
+    if (pixel_count > SIZE_MAX / sizeof(double) || pixel_count > SIZE_MAX / 4u) return -1;
+    double *values = malloc(pixel_count * sizeof(double));
+    if (!values) return -2;
+
+    for (uint32_t row = 0; row < height; ++row) {
+        const double source_y = (1.0 - (height > 1u ? (double)row / (height - 1u) : 0.0)) *
+                                (source_height - 1u);
+        const uint32_t y0 = (uint32_t)source_y;
+        const uint32_t y1 = y0 + 1u < source_height ? y0 + 1u : y0;
+        const double ty = source_y - y0;
+        for (uint32_t column = 0; column < width; ++column) {
+            const double source_x = (width > 1u ? (double)column / (width - 1u) : 0.0) *
+                                    (source_width - 1u);
+            const uint32_t x0 = (uint32_t)source_x;
+            const uint32_t x1 = x0 + 1u < source_width ? x0 + 1u : x0;
+            const double tx = source_x - x0;
+            const size_t corners[4] = {
+                (size_t)y0 * source_width + x0, (size_t)y0 * source_width + x1,
+                (size_t)y1 * source_width + x0, (size_t)y1 * source_width + x1
+            };
+            const double weights[4] = {(1.0 - tx) * (1.0 - ty), tx * (1.0 - ty),
+                                       (1.0 - tx) * ty, tx * ty};
+            const size_t index = (size_t)row * width + column;
+            values[index] = 0.0;
+            for (uint32_t corner = 0; corner < 4u; ++corner) {
+                values[index] += source_values[corners[corner]] * weights[corner];
+            }
+            const size_t output = index * 4u;
+            for (uint32_t channel = 0; channel < 3u; ++channel) {
+                double color = 0.0;
+                for (uint32_t corner = 0; corner < 4u; ++corner) {
+                    color += source_colors[corners[corner] * 3u + channel] * weights[corner];
+                }
+                rgba[output + channel] = (uint8_t)lrint(fmax(0.0, fmin(1.0, color)) * 255.0);
+            }
+            rgba[output + 3u] = 255u;
+        }
+    }
+    if (contours_enabled) {
+        static const uint8_t light_ink[3] = {246u, 249u, 255u};
+        static const uint8_t dark_ink[3] = {8u, 10u, 18u};
+        ce_apply_contours(values, width, height, contour_interval, contour_thickness,
+                          light_ink, dark_ink, rgba);
+    }
+    free(values);
+    return 0;
+}
+
 int32_t ce_render_map_contour(const ce_map_config *config,
                               double x_min, double x_max, double y_min, double y_max,
                               uint32_t width, uint32_t height, uint32_t component,
@@ -389,14 +447,24 @@ int32_t ce_render_real_contour(const ce_map_config *config,
                                uint32_t component, uint32_t contours_enabled,
                                double contour_interval, double contour_thickness,
                                const float *palette, uint32_t palette_count,
+                               const float *source_values, const float *source_colors,
+                               uint32_t source_width, uint32_t source_height,
                                uint8_t *rgba) {
-    if (!config || !width || !height || !isfinite(x_min) || !isfinite(x_max) ||
+    const uint32_t grid_enabled = source_values || source_colors;
+    if ((!config && !grid_enabled) || !width || !height ||
+        (grid_enabled && (!source_values || !source_colors || source_width < 2u || source_height < 2u)) ||
+        (!grid_enabled && (!isfinite(x_min) || !isfinite(x_max) ||
         !isfinite(y_min) || !isfinite(y_max) || !(x_max > x_min) || !(y_max > y_min) ||
         !ce_surface_input_contract(input_u_preset, input_u_program, input_u_count) ||
         !ce_surface_input_contract(input_v_preset, input_v_program, input_v_count) ||
-        component > 2u || contours_enabled > 1u || !palette || palette_count < 2u || !rgba ||
+        !palette || palette_count < 2u)) || component > 2u || contours_enabled > 1u || !rgba ||
         (contours_enabled && (!isfinite(contour_interval) || !(contour_interval > 0.0) ||
                               !isfinite(contour_thickness) || !(contour_thickness > 0.0)))) return -1;
+    if (grid_enabled) {
+        return ce_render_real_grid_contour(source_values, source_colors, source_width, source_height,
+                                            width, height, contours_enabled, contour_interval,
+                                            contour_thickness, rgba);
+    }
     if (palette_count > UINT32_MAX / 3u) return -1;
     for (uint32_t index = 0; index < palette_count * 3u; ++index) {
         if (!isfinite(palette[index]) || palette[index] < 0.0f || palette[index] > 1.0f) return -1;

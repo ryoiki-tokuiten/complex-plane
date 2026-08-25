@@ -14,7 +14,7 @@ const STATE_KEYS = [
     'graphFullGridEnabled', 'graphGridFamily', 'graphFourierEnabled',
     'graphFocusBoxEnabled', 'graphLayerLockEnabled',
     'graphSelectedShape', 'graphSelectedLineIndex', 'graphSelectionRevision',
-    'fourierModeEnabled', 'laplaceModeEnabled'
+    'laplaceModeEnabled'
 ];
 
 test('full-grid perspective selects the expected Cartesian and polar families', () => {
@@ -31,7 +31,6 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
             graphGridFamily: 'primary',
             graphFocusBoxEnabled: true,
             graphFourierEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false
         });
 
@@ -121,7 +120,6 @@ test('locked layers connect the selected grid shape to the opposite family at ex
             graphGridFamily: 'primary',
             graphSelectedShape: '',
             graphFourierEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false
         });
 
@@ -171,19 +169,18 @@ test('locked layers connect the selected grid shape to the opposite family at ex
     }
 });
 
-test('standalone Fourier mode never produces transformation-graph data', () => {
+test('standalone transform-hub mode never produces transformation-graph data', () => {
     const previous = Object.fromEntries(STATE_KEYS.map(key => [key, state[key]]));
 
     try {
         Object.assign(state, {
-            currentFunction: 'fourier',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             graphViewEnabled: true,
             graphFullGridEnabled: false,
             graphLayerLockEnabled: false,
             graphFourierEnabled: false,
-            fourierModeEnabled: true,
-            laplaceModeEnabled: false
+            laplaceModeEnabled: true
         });
 
         assert.equal(buildTransformationGraphData(zPlaneParams), null);
@@ -207,7 +204,6 @@ test('full-grid samples follow the live z-plane zoom while preserving the select
             graphLayerLockEnabled: false,
             graphGridFamily: 'primary',
             graphFourierEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false
         });
         zPlaneParams.currentVisXRange = [-4, 4];

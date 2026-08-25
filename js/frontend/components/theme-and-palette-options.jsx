@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import { getStateSignal, state } from '../../store/state.js';
-import { domainPalettes, realPlotsPalettes, themes, applyTheme, persistThemePreferences } from '../../ui/theme-manager.js';
+import { domainPalettes, surfacePalettes, themes, applyTheme, persistThemePreferences } from '../../ui/theme-manager.js';
 import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 
 function redraw() {
@@ -49,8 +49,8 @@ export const DomainPaletteOptions = () => (
     <PaletteOptions palettes={domainPalettes} stateKey="domainPalette" />
 );
 
-export const RealPlotsPaletteOptions = () => (
-    <PaletteOptions palettes={realPlotsPalettes} stateKey="realPlotsPalette" gradient />
+export const SurfacePaletteOptions = () => (
+    <PaletteOptions palettes={surfacePalettes} stateKey="surfacePalette" gradient />
 );
 
 export function ActiveDomainPaletteName() {
@@ -58,7 +58,7 @@ export function ActiveDomainPaletteName() {
     return domainPalettes.find(palette => palette.id === id)?.name || domainPalettes[0].name;
 }
 
-export function ActiveRealPlotsPaletteName() {
-    const id = getStateSignal('realPlotsPalette').value;
-    return realPlotsPalettes.find(palette => palette.id === id)?.name || realPlotsPalettes[0].name;
+export function ActiveSurfacePaletteName() {
+    const id = getStateSignal('surfacePalette').value;
+    return surfacePalettes.find(palette => palette.id === id)?.name || surfacePalettes[0].name;
 }

@@ -46,7 +46,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 5. **5. Continuous Flows & Dynamics** — Complex derivatives model fluid velocity fields, particle trajectories, and conformal distortions. _(adds DY, VF, TS)_
 6. **6. Domain Coloring & Texture Warping** — Native worker tiles and GPU texture meshes provide two separate dense-visualization paths. _(adds DC, WG)_
 7. **7. 3D Geometry & Riemann Sheets** — Multi-valued functions and stereographic projections expand into 3D Riemann spheres and multi-sheet surfaces. _(adds T3, BC)_
-8. **8. Spectral Transforms & 3b1b Winders** — Fourier and Laplace transforms unroll into winding frequency animations and 3D s-plane convergence surfaces. _(adds TF, 3B)_
+8. **8. Spectral Transforms & 3b1b Winders** — The Laplace transform hub unrolls into winding frequency animations, an exact Fourier slice at σ = 0, and 3D s-plane convergence surfaces. _(adds TF, 3B)_
 9. **9. Deep Fractals & Perturbation** — Dedicated deep-zoom perturbation algorithms and WebGPU compute explore infinite fractal boundaries. _(adds MB)_
 10. **10. The Whole System** — All 18 structures unified in one explorable interactive architecture diagram.
 
@@ -119,7 +119,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **In one line.** Central reactive state tree containing mathematical parameters, active modes, and cache keys.
 
-**What it does.** The single source of runtime truth holding parameters ($a_0, b_0, circleR, mobiusA\dots D$), selected function name, chaining mode, active display views (Fourier, Laplace, Split, Sphere), and analytical caches.
+**What it does.** The single source of runtime truth holding parameters ($a_0, b_0, circleR, mobiusA\dots D$), selected function name, chaining mode, active display views (the Laplace hub, Split, Sphere), and analytical caches.
 
 **How it's built.** Defined in `js/store/state.js` and wrapped by `createObservableStore()` using `@preact/signals`. Top-level keys are signal-backed; nested changes use explicit `mutateState`/`touch` notifications.
 
@@ -289,7 +289,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **What it does.** Analyzes frequency domain characteristics: Fourier transforms $F(\omega) = \int f(t) e^{-i\omega t} dt$ and Laplace transforms $F(s) = \int f(t) e^{-st} dt$, identifying poles, zeros, and Region of Convergence (ROC) on the complex s-plane.
 
-**How it's built.** Implemented in `js/analysis/fourier-transform.js` and `js/analysis/laplace-transform.js`. Computes continuous winding integrals and generates 3D surface mesh data.
+**How it's built.** Implemented in `js/analysis/laplace-transform.js`. One sampled winding kernel handles Laplace evaluation and the exact Fourier slice at σ = 0, while the same hub generates discrete spectrum data and 3D surface inputs.
 
 **Steps in execution.**
 
@@ -419,7 +419,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **What it does.** Renders rich 3D mathematical surfaces: the Riemann Sphere (compactification of $\mathbb{C} \cup \{\infty\}$ via stereographic projection), 3D $|F(s)|$ Laplace transform terrain, and folded modular surfaces $|f(z)|$.
 
-**How it's built.** Implemented in `js/rendering/three-riemann-renderer.js`, `laplace-3d-surface.js`, and `draw-sphere.js`. Employs Three.js scene graphs, orbit controls, custom shader materials, and dynamic mesh rebuilds.
+**How it's built.** Implemented in `js/rendering/three-riemann-renderer.js`, `real-plots-renderer.js`, and `draw-sphere.js`. Laplace feeds scalar heightfield data directly into the generalized Real Plots renderer, sharing its orbit controls, palette shading, contours, and mesh uploads.
 
 **Steps in execution.**
 
@@ -434,7 +434,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **What it does.** Visualizes the intuitive geometric meaning of Fourier and Laplace transforms: wraps a signal $f(t)$ around the origin at varying rotational frequencies $\omega$, tracking the path and the dynamic center of mass (centroid) as $\omega$ sweeps.
 
-**How it's built.** Built in `js/rendering/draw-fourier-winding.js` and `draw-laplace-winding-3b1b.js`. Animates winding spirals, center-of-mass indicator dots, and frequency spectrum graphs.
+**How it's built.** Built in `js/rendering/draw-laplace-winding-3b1b.js` and `draw-laplace-panels.js`. The unified hub animates winding spirals, center-of-mass indicators, and the discrete spectrum; σ = 0 is the Fourier slice.
 
 **Steps in execution.**
 
@@ -560,8 +560,7 @@ complex-plane/
   │   │   ├── feature-detection.js # Roots, poles, critical points finder
   │   │   ├── cauchy.js            # Contour integration & residue theorem
   │   │   ├── dynamic-plotting.js  # ODE particle trajectory integration
-  │   │   ├── fourier-transform.js # Spectral analysis & winding
-  │   │   ├── laplace-transform.js # Laplace s-plane ROC & 3D poles
+  │   │   ├── laplace-transform.js # Laplace transform analysis and Fourier slice data
   │   │   ├── streamline.js        # Complex potential velocity fields
   │   │   ├── tissot.js            # Conformal indicatrix distortion
   │   │   └── riemann-surface.js   # Branch cut continuation & sheet tracing
@@ -573,8 +572,9 @@ complex-plane/
   │   │   ├── domain-coloring.js   # Phase/magnitude color wheel
   │   │   ├── draw-image-webgl.js  # GPU texture mesh warper
   │   │   ├── three-riemann-renderer.js # 3D Riemann sphere engine
-  │   │   ├── laplace-3d-surface.js # 3D |F(s)| landscape
-  │   │   └── draw-fourier-winding.js # 3b1b winding animation
+  │   │   ├── real-plots-renderer.js # Shared Real Plots and Laplace Three.js heightfield renderer
+  │   │   ├── draw-laplace-winding-3b1b.js # Laplace winding, including the Fourier slice
+  │   │   └── draw-laplace-panels.js # Time-domain and discrete spectrum panels
   │   ├── frontend/                # Preact reactive UI components
   │   └── ui/                      # DOM controllers, event listeners, tooltips
   ├── native/                      # C source code for complex_engine.wasm

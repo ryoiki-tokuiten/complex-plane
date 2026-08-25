@@ -18,7 +18,7 @@ const STATE_KEYS = [
     'taylorSeriesEnabled', 'taylorSeriesCenter', 'taylorSeriesOrder',
     'taylorSeriesConvergenceRadius', 'taylorSeriesColorAxisX', 'taylorSeriesColorAxisY',
     'chainingEnabled', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
-    'algebraicChainingTerms', 'cauchyIntegralModeEnabled', 'fourierModeEnabled',
+    'algebraicChainingTerms', 'cauchyIntegralModeEnabled',
     'laplaceModeEnabled', 'conformalGridEnabled', 'dynamicPlotting',
     'a0', 'b0', 'circleR'
 ];
@@ -120,7 +120,6 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             taylorSeriesEnabled: false,
             chainingEnabled: false,
             cauchyIntegralModeEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false,
             conformalGridEnabled: false,
             dynamicPlotting: { enabled: false },

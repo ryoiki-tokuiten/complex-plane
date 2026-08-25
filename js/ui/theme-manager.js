@@ -1,5 +1,6 @@
 import { state } from '../store/state.js';
 import { domainPalettes } from '../constants/domain-palettes.js';
+import { SURFACE_PALETTES } from '../constants/surface-palettes.js';
 
 export { domainPalettes };
 
@@ -68,36 +69,4 @@ export function applyTheme(themeId, { preserveGridColors = false } = {}) {
     }
 }
 
-// 3D Real Plots Palettes mapped for linear/conic gradient
-export const realPlotsPalettes = [
-    {
-        id: "sunset",
-        name: "Sunset Glow",
-        colors: "#1a0b36, #880e4f, #ff5722, #ffeb3b"
-    },
-    {
-        id: "ocean",
-        name: "Ocean Breeze",
-        colors: "#004d40, #00acc1, #80cbc4"
-    },
-    {
-        id: "cyberpunk",
-        name: "Cyberpunk Glow",
-        colors: "#4a148c, #d81b60, #00e5ff"
-    },
-    {
-        id: "copper",
-        name: "Classic Copper",
-        colors: "#3e2723, #d84315, #ffe0b2"
-    },
-    {
-        id: "forest",
-        name: "Forest Mist",
-        colors: "#0e3a14, #2e7d32, #a5d6a7, #fff9c4"
-    },
-    {
-        id: "viridis",
-        name: "Viridis Scientific",
-        colors: "#440154, #3b528b, #21908d, #5dc963, #fde725"
-    }
-];
+export const surfacePalettes = SURFACE_PALETTES;

@@ -50,8 +50,7 @@ export const META = {
   │   │   ├── feature-detection.js # Roots, poles, critical points finder
   │   │   ├── cauchy.js            # Contour integration & residue theorem
   │   │   ├── dynamic-plotting.js  # ODE particle trajectory integration
-  │   │   ├── fourier-transform.js # Spectral analysis & winding
-  │   │   ├── laplace-transform.js # Laplace s-plane ROC & 3D poles
+  │   │   ├── laplace-transform.js # Laplace transform analysis and Fourier slice data
   │   │   ├── streamline.js        # Complex potential velocity fields
   │   │   ├── tissot.js            # Conformal indicatrix distortion
   │   │   └── riemann-surface.js   # Branch cut continuation & sheet tracing
@@ -63,8 +62,9 @@ export const META = {
   │   │   ├── domain-coloring.js   # Phase/magnitude color wheel
   │   │   ├── draw-image-webgl.js  # GPU texture mesh warper
   │   │   ├── three-riemann-renderer.js # 3D Riemann sphere engine
-  │   │   ├── laplace-3d-surface.js # 3D |F(s)| landscape
-  │   │   └── draw-fourier-winding.js # 3b1b winding animation
+  │   │   ├── real-plots-renderer.js # Shared Real Plots and Laplace Three.js heightfield renderer
+  │   │   ├── draw-laplace-winding-3b1b.js # Laplace winding, including the Fourier slice
+  │   │   └── draw-laplace-panels.js # Time-domain and discrete spectrum panels
   │   ├── frontend/                # Preact reactive UI components
   │   └── ui/                      # DOM controllers, event listeners, tooltips
   ├── native/                      # C source code for complex_engine.wasm
@@ -210,7 +210,7 @@ export const NODES = [
     h: 36,
     kind: 'store',
     one: 'Central reactive state tree containing mathematical parameters, active modes, and cache keys.',
-    what: 'The single source of runtime truth holding parameters ($a_0, b_0, circleR, mobiusA\\dots D$), selected function name, chaining mode, active display views (Fourier, Laplace, Split, Sphere), and analytical caches.',
+    what: 'The single source of runtime truth holding parameters ($a_0, b_0, circleR, mobiusA\\dots D$), selected function name, chaining mode, active display views (the Laplace hub, Split, Sphere), and analytical caches.',
     how: 'Defined in `js/store/state.js` and wrapped by `createObservableStore()` using `@preact/signals`. Top-level keys are signal-backed; nested changes use explicit `mutateState`/`touch` notifications.',
     steps: [
       ['State Read', 'Components read reactive signals directly.'],
@@ -437,7 +437,7 @@ export const NODES = [
     kind: 'box',
     one: 'Continuous/discrete Fourier transforms and Laplace transforms with s-plane ROC analysis.',
     what: 'Analyzes frequency domain characteristics: Fourier transforms $F(\\omega) = \\int f(t) e^{-i\\omega t} dt$ and Laplace transforms $F(s) = \\int f(t) e^{-st} dt$, identifying poles, zeros, and Region of Convergence (ROC) on the complex s-plane.',
-    how: 'Implemented in `js/analysis/fourier-transform.js` and `js/analysis/laplace-transform.js`. Computes continuous winding integrals and generates 3D surface mesh data.',
+    how: 'Implemented in `js/analysis/laplace-transform.js`. One sampled winding kernel handles Laplace evaluation and the exact Fourier slice at σ = 0, while the same hub generates discrete spectrum data and 3D surface inputs.',
     steps: [
       ['Time Signal', 'Discretizes source time-domain signal $f(t)$.'],
       ['Complex Exponential', 'Multiplies by kernel $e^{-st} = e^{-(\\sigma + i\\omega)t}$.'],
@@ -627,7 +627,7 @@ export const NODES = [
     kind: 'slab',
     one: '3D WebGL scene rendering stereographic Riemann spheres, Laplace $|F(s)|$ heightfields, and folded surfaces.',
     what: 'Renders rich 3D mathematical surfaces: the Riemann Sphere (compactification of $\\mathbb{C} \\cup \\{\\infty\\}$ via stereographic projection), 3D $|F(s)|$ Laplace transform terrain, and folded modular surfaces $|f(z)|$.',
-    how: 'Implemented in `js/rendering/three-riemann-renderer.js`, `laplace-3d-surface.js`, and `draw-sphere.js`. Employs Three.js scene graphs, orbit controls, custom shader materials, and dynamic mesh rebuilds.',
+    how: 'Implemented in `js/rendering/three-riemann-renderer.js`, `real-plots-renderer.js`, and `draw-sphere.js`. Laplace feeds scalar heightfield data directly into the generalized Real Plots renderer, sharing its orbit controls, palette shading, contours, and mesh uploads.',
     steps: [
       ['Scene Setup', 'Initializes Three.js perspective camera, ambient lighting, and orbit controls.'],
       ['Stereographic Map', 'Projects planar points $z = x+iy$ onto sphere $(\\xi, \\eta, \\zeta) = \\left(\\frac{2x}{|z|^2+1}, \\frac{2y}{|z|^2+1}, \\frac{|z|^2-1}{|z|^2+1}\\right)$.'],
@@ -650,7 +650,7 @@ export const NODES = [
     kind: 'box',
     one: '3Blue1Brown-style winding frequency animations and center-of-mass spectral visualizers.',
     what: 'Visualizes the intuitive geometric meaning of Fourier and Laplace transforms: wraps a signal $f(t)$ around the origin at varying rotational frequencies $\\omega$, tracking the path and the dynamic center of mass (centroid) as $\\omega$ sweeps.',
-    how: 'Built in `js/rendering/draw-fourier-winding.js` and `draw-laplace-winding-3b1b.js`. Animates winding spirals, center-of-mass indicator dots, and frequency spectrum graphs.',
+    how: 'Built in `js/rendering/draw-laplace-winding-3b1b.js` and `draw-laplace-panels.js`. The unified hub animates winding spirals, center-of-mass indicators, and the discrete spectrum; σ = 0 is the Fourier slice.',
     steps: [
       ['Signal Sample', 'Extracts time-domain signal $f(t)$ array.'],
       ['Winding Wrap', 'Calculates wrapped trajectory $g(t) = f(t) e^{-i 2\\pi \\omega t}$.'],
@@ -831,8 +831,8 @@ export const CH = [
     id: 'spectral_winders',
     title: '8. Spectral Transforms & 3b1b Winders',
     reveal: ['TF', '3B'],
-    lede: `Fourier and Laplace transforms unroll into winding frequency animations and 3D s-plane convergence surfaces.`,
-    story: `<p><b>Integral Transforms</b> computes continuous Fourier and Laplace transforms, while <mark>Transform Winders</mark> animates 3Blue1Brown-style rotational winding frequency trajectories, tracking the moving center of mass.</p>`,
+    lede: `The Laplace transform hub unrolls into winding frequency animations, an exact Fourier slice at σ = 0, and 3D s-plane convergence surfaces.`,
+    story: `<p><b>Integral Transforms</b> computes the Laplace transform and its exact Fourier slice at σ = 0, while <mark>Transform Winders</mark> animates 3Blue1Brown-style rotational winding frequency trajectories, tracking the moving center of mass.</p>`,
     flow: [
       ['U', 'TF', 'transform input', { freq: 2.5 }],
       ['TF', '3B', 'winding spiral', { omega: 2.5 }],

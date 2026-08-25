@@ -177,7 +177,7 @@ test('controls visual contract remains stable', async ({ page }) => {
     });
 });
 
-test('full-grid and connected Fourier graph modes stay isolated from standalone Fourier', async ({ page }) => {
+test('full-grid and graph Fourier modes reuse the unified transform hub', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
@@ -235,10 +235,14 @@ test('full-grid and connected Fourier graph modes stay isolated from standalone 
     await expect(page.locator('#enable_graph_trace_cb')).toBeChecked();
     await page.locator('#enable_graph_fourier_cb').evaluate(element => element.click());
     await expect(page.locator('#enable_graph_fourier_cb')).toBeChecked();
-    await expect(page.locator('#fourier_specific_controls')).toBeVisible();
-    await expect(page.locator('#fourier_function_selector')).toHaveValue('current_graph');
-    await expect(page.locator('#fourier_function_selector')).toBeDisabled();
-    await expect(page.locator('#fourier_frequency_label')).toHaveText('Traversal Rate:');
+    await expect(page.locator('#laplace_specific_controls')).toBeVisible();
+    await expect(page.locator('#laplace_function_selector')).toHaveValue('current_graph');
+    await expect(page.locator('#laplace_function_selector')).toBeDisabled();
+    await expect(page.locator('#laplace_frequency_label')).toHaveText('Frequency:');
+    await expect(page.locator('#laplace_frequency_slider')).toBeVisible();
+    await expect(page.locator('#visualization-options-panel')).toBeHidden();
+    await expect(page.locator('#laplace_3d_controls_section')).toBeHidden();
+    await expect(page.locator('#laplace_animation_section')).toBeHidden();
 
     await page.locator('#input_shape_selector').selectOption('grid_logpolar');
     await expect(page.locator('#graph_grid_family_selector option').nth(0)).toHaveText('Circles');
@@ -248,22 +252,49 @@ test('full-grid and connected Fourier graph modes stay isolated from standalone 
     await fullGridToggle.click();
     await expect(page.locator('#graph_column')).toBeVisible();
     await expect(page.locator('#graph_title_label')).toHaveText('Graph + Fourier');
-    await expect(page.locator('#fourier_specific_controls')).toBeVisible();
+    await expect(page.locator('#laplace_specific_controls')).toBeVisible();
     await expect(page.locator('#graph_3d_container canvas')).toHaveCount(1);
 
-    await page.locator('#select_fourier_btn').evaluate(element => element.click());
+    await page.locator('#select_laplace_btn').evaluate(element => element.click());
     await expect(page.locator('#graph_column')).toBeHidden();
     await expect(page.locator('#enable_graph_view_cb')).not.toBeChecked();
     await expect(page.locator('#core_application_controls')).toBeHidden();
     await expect(page.locator('#visualization-options-panel')).toBeHidden();
-    await expect(page.locator('#fourier_specific_controls')).toBeVisible();
-    await expect(page.locator('#fourier_function_selector')).toHaveValue('sine');
-    await expect(page.locator('#fourier_function_selector')).toBeEnabled();
-
-    await page.locator('#select_laplace_btn').evaluate(element => element.click());
     await expect(page.locator('#laplace_specific_controls')).toBeVisible();
     await expect(page.locator('#core_application_controls')).toBeHidden();
     await expect(page.locator('#visualization-options-panel')).toBeHidden();
+    await expect(page.locator('#laplace_function_selector')).toHaveValue('exponential');
+    await expect(page.locator('#laplace_function_selector')).toBeEnabled();
+    await expect(page.locator('#input_shape_selector')).toBeHidden();
+    await expect(page.locator('#laplace_spectrum_column')).toBeVisible();
+    await expect(page.locator('#laplace_spectrum_canvas')).toBeVisible();
+    await expect(page.locator('#laplace_3d_controls_section')).toBeVisible();
+    await expect(page.locator('#laplace_animation_section')).toBeVisible();
+    await expect(page.locator('#laplace_show_roc_cb')).not.toBeChecked();
+    await expect(page.locator('#laplace_hide_integral_evaluation_cb')).toBeChecked();
+    await expect(page.locator('#laplace_show_spectrum_cb')).toBeChecked();
+    await page.locator('#laplace_fourier_slice_btn').click();
+    await expect(page.locator('#laplace_sigma_slider')).toHaveValue('0');
+    await page.locator('label[for="laplace_hide_integral_evaluation_cb"]').click();
+    await expect(page.locator('#laplace_hide_integral_evaluation_cb')).not.toBeChecked();
+    await page.locator('label[for="laplace_hide_integral_evaluation_cb"]').click();
+    await expect(page.locator('#laplace_hide_integral_evaluation_cb')).toBeChecked();
+    await page.locator('label[for="laplace_show_spectrum_cb"]').click();
+    await expect(page.locator('#laplace_spectrum_column')).toBeHidden();
+    await page.locator('label[for="laplace_show_spectrum_cb"]').click();
+    await expect(page.locator('#laplace_spectrum_column')).toBeVisible();
+    await page.locator('label[for="laplace_hide_3d_surface_cb"]').click();
+    await expect(page.locator('#laplace_3d_column')).toBeHidden();
+    await expect(page.locator('#laplace_3d_controls_section')).toBeVisible();
+    await page.locator('label[for="laplace_hide_3d_surface_cb"]').click();
+    await expect(page.locator('#laplace_3d_column')).toBeVisible();
+    await page.evaluate(() => { window.__state.verticalLayoutEnabled = true; });
+    await expect(page.locator('body')).toHaveClass(/vertical-layout/);
+    await page.locator('#laplace_3d_column').scrollIntoViewIfNeeded();
+    await expect(page.locator('#laplace_3d_column')).toBeVisible();
+    await expect(page.locator('#laplace_3d_container')).toBeVisible();
+    await page.locator('#laplace_3d_controls_section').scrollIntoViewIfNeeded();
+    await expect(page.locator('#laplace_3d_controls_section')).toBeVisible();
     expect(errors).toEqual([]);
 });
 
