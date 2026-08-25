@@ -16,7 +16,7 @@ export const EXPRESSION_LIMITS = Object.freeze({
 });
 
 export const FUNCTION_ARITY = Object.freeze({
-    cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
+    sin: [1, 1], cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
     exp: [1, 1], ln: [1, 1], log: [1, 1], gamma: [1, 1], loggamma: [1, 1],
     bessel: [1, 2], sinh: [1, 1], tanh: [1, 1], sqrt: [1, 1],
     zeta: [1, 1], abs: [1, 1], arg: [1, 1], re: [1, 1],

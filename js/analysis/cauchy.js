@@ -51,6 +51,8 @@ function cauchyAnalysisKey(isZPlanar) {
         buildMappedTransformProfileKey(state.currentFunction),
         state.chainingEnabled ? 1 : 0,
         state.chainingMode,
+        state.chainSeed?.re,
+        state.chainSeed?.im,
         state.chainCount,
         state.taylorSeriesEnabled ? 1 : 0,
         state.taylorSeriesOrder,

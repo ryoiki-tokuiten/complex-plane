@@ -650,6 +650,8 @@ function realPlotSurfaceKey() {
         state.chainingEnabled ? 1 : 0,
         state.chainCount,
         state.chainingMode,
+        state.chainSeed?.re,
+        state.chainSeed?.im,
         state.taylorSeriesEnabled ? 1 : 0,
         state.taylorSeriesOrder,
         state.taylorSeriesCenter?.re,

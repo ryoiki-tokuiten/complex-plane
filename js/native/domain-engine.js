@@ -26,6 +26,7 @@ export function domainDynamicsSignature(snapshot) {
         besselOrder: snapshot.besselOrder,
         chainingEnabled: snapshot.chainingEnabled,
         chainMode: snapshot.chainMode,
+        chainSeed: snapshot.chainSeed,
         chainCount: snapshot.chainCount,
         orbitColoringMode: snapshot.orbitColoringMode,
         algebraicChainingEnabled: snapshot.algebraicChainingEnabled,

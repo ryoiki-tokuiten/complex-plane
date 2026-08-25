@@ -17,6 +17,7 @@ const RADIAL_DISCRETE_STEP_COLOR = 'rgba(255, 255, 0, 0.7)';
 const GENERAL_RADIAL_STEP_DOMAIN = Object.freeze({ min: -5, max: 5 });
 const RADIAL_STEP_DOMAINS = Object.freeze({
     identity: GENERAL_RADIAL_STEP_DOMAIN,
+    sin: Object.freeze({ min: 0, max: Math.PI / 2 }),
     cos: Object.freeze({ min: 0, max: Math.PI / 2 }),
     tan: Object.freeze({ min: 0, max: Math.PI / 2 }),
     sec: Object.freeze({ min: 0, max: Math.PI / 2 }),

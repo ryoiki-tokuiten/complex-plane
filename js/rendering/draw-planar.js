@@ -1355,7 +1355,7 @@ export function getPointSetEndpoints(pointSet) {
 }
 
 export function drawFunctionFociOverlay(ctx, planeParams) {
-    if (appState.currentFunction !== 'cos') {
+    if (appState.currentFunction !== 'cos' && appState.currentFunction !== 'sin') {
         return;
     }
 
@@ -1378,7 +1378,8 @@ export function drawFunctionFociOverlay(ctx, planeParams) {
 }
 
 export function shouldDrawPlanarFunctionFociOverlay() {
-    return appState.currentInputShape === 'line' && appState.currentFunction === 'cos';
+    return appState.currentInputShape === 'line' &&
+        (appState.currentFunction === 'cos' || appState.currentFunction === 'sin');
 }
 
 export function shouldDrawPlanarInputRadialOverlay() {

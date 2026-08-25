@@ -35,6 +35,7 @@
                             <button id="select_laplace_btn"
                                 data-tooltip="Open the Laplace transform hub">Laplace</button>
                             <button id="select_cos_btn" data-tooltip="Select w = cos(z) function">w = cos(z)</button>
+                            <button id="select_sin_btn" data-tooltip="Select w = sin(z) function">w = sin(z)</button>
                             <button id="select_tan_btn" data-tooltip="Select w = tan(z) function">w = tan(z)</button>
                             <button id="select_sec_btn" data-tooltip="Select w = sec(z) function">w = sec(z)</button>
                             <button id="select_exp_btn" data-tooltip="Select w = e^z function">w =
@@ -645,8 +646,13 @@
                             <select id="chain_mode_selector" class="control-select chaining-mode-select"
                                 data-tooltip="Mathematical operation to chain across outputs">
                                 <option value="recursion">Recursion: f(w)</option>
-                                <option value="zero_seed">Zero Seed: f(w), z₀ = 0</option>
+                                <option value="zero_seed">Seed: f(w), z₀ = s</option>
                             </select>
+
+                            <div id="chain_seed_control" class="control-group chaining-seed-control hidden">
+                                <label class="chaining-seed-label">Seed value z₀</label>
+                                <div id="chain_seed_ui_container"></div>
+                            </div>
 
                             <label for="chain_count_slider">
                                 Chain Depth:

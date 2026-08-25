@@ -32,7 +32,7 @@ subscribeState(() => {
     'currentFunction', 'mapPresentation', 'mobiusA', 'mobiusB', 'mobiusC', 'mobiusD',
     'polynomialN', 'polynomialCoeffs', 'fractionalPowerN', 'expBase', 'logBase', 'besselOrder',
     'branchCutType', 'branchCutAngle', 'zetaContinuationEnabled', 'chainingEnabled',
-    'chainingMode', 'chainCount', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
+    'chainingMode', 'chainSeed', 'chainCount', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
     'algebraicChainingTerms', 'taylorSeriesEnabled', 'taylorSeriesOrder',
     'taylorSeriesCenter', 'taylorSeriesConvergenceRadius', 'dynamicPlotting'
 ]));
@@ -71,7 +71,7 @@ function nativeTransform(functionKey) {
 }
 
 export const transformFunctions = Object.freeze(Object.fromEntries([
-    'identity', 'cos', 'tan', 'sec', 'exp', 'ln', 'sinh',
+    'identity', 'sin', 'cos', 'tan', 'sec', 'exp', 'ln', 'sinh',
     'tanh', 'asin', 'atan', 'gamma', 'loggamma', 'bessel', 'power', 'mobius', 'zeta',
     'polynomial', 'algebraic_chaining'
 ].map(key => [key, nativeTransform(key)])));
@@ -371,7 +371,7 @@ export function nativeOptionsForActiveMap(map) {
 
 export function getChainedTransformFunction(functionKey = state.currentFunction) {
     const chainCount = normalizeDomainDynamicsChainCount(state.chainCount);
-    const key = `${functionKey}|${buildMappedTransformProfileKey(functionKey)}|${state.chainingEnabled ? 1 : 0}|${state.chainingMode}|${chainCount}|${state.taylorSeriesEnabled ? 1 : 0}|${state.taylorSeriesConvergenceRadius}`;
+    const key = `${functionKey}|${buildMappedTransformProfileKey(functionKey)}|${state.chainingEnabled ? 1 : 0}|${state.chainingMode}|${state.chainSeed?.re}|${state.chainSeed?.im}|${chainCount}|${state.taylorSeriesEnabled ? 1 : 0}|${state.taylorSeriesConvergenceRadius}`;
     if (chainedCache.has(key)) return chainedCache.get(key);
     const transform = state.chainingEnabled
         ? stageTransform(functionKey, chainCount - 1)
@@ -380,7 +380,7 @@ export function getChainedTransformFunction(functionKey = state.currentFunction)
     return transform;
 }
 
-const ENTIRE_FUNCTIONS = new Set(['exp', 'cos', 'polynomial']);
+const ENTIRE_FUNCTIONS = new Set(['exp', 'sin', 'cos', 'polynomial']);
 
 export function updateTaylorSeriesCenterAndRadius() {
     const center = state.taylorSeriesCustomCenterEnabled

@@ -76,6 +76,7 @@ const SHAPE_SPECIFIC_GROUPS = Object.freeze({
 });
 
 const SIMPLE_FUNCTION_LABELS = Object.freeze({
+    sin: 'sin',
     cos: 'cos',
     tan: 'tan',
     sec: 'sec',
@@ -91,6 +92,7 @@ const SIMPLE_FUNCTION_LABELS = Object.freeze({
 });
 
 const FUNCTION_ARGUMENT_HTML = Object.freeze({
+    sin: 'sin(z)',
     cos: 'cos(z)',
     tan: 'tan(z)',
     sec: 'sec(z)',
@@ -426,6 +428,7 @@ function syncComplexParameterControls() {
     setHidden('chainingParams', false);
     setHidden('algebraicChainingParams', false);
     setHidden('dynamicPlottingParams', false);
+    setHidden('chainSeedControl', !state.chainingEnabled || state.chainingMode !== 'zero_seed');
 
     const shape = state.currentInputShape;
     const activeFunctions = collectActiveFunctionKeys();
@@ -1001,8 +1004,9 @@ function getChainedFormula(baseFormula, chainingMode, chainCount) {
     switch (chainingMode) {
         case 'zero_seed':
             let repeatedFZero = '';
+            const seed = formatChainingSeedForFormula(state.chainSeed);
             for (let i = 0; i < Math.min(chainCount, 3); i++) repeatedFZero += 'f(';
-            repeatedFZero += '... f(0)';
+            repeatedFZero += `... f(${seed})`;
             for (let i = 0; i < Math.min(chainCount, 3); i++) repeatedFZero += ')';
             
             return `${repeatedFZero} <span class="formula-note">[${chainCount} times, where f(z, c) = ${baseFormula}]</span>`;
@@ -1010,6 +1014,15 @@ function getChainedFormula(baseFormula, chainingMode, chainCount) {
         default:
             return recursiveChainFormula(baseFormula, chainCount);
     }
+}
+
+function formatChainingSeedForFormula(seed) {
+    const re = formatTaylorNumericValue(seed?.re);
+    const imValue = Number(seed?.im);
+    const im = formatTaylorNumericValue(Math.abs(imValue));
+    if (!imValue) return re;
+    if (!Number(seed?.re)) return `${imValue < 0 ? '-' : ''}${im === '1' ? 'i' : `${im}i`}`;
+    return `${re}${imValue < 0 ? ' - ' : ' + '}${im}i`;
 }
 
 function outputFormulaModel() {

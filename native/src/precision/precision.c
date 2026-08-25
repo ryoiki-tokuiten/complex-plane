@@ -634,7 +634,7 @@ static int pc_eval_map_point(ce_precise_complex *output, const ce_map_config *co
     const mpfr_prec_t precision = mpfr_get_prec(output->re);
     ce_precise_complex current, next;
     pc_init(&current, precision); pc_init(&next, precision);
-    if (config->zero_seed) pc_set_d(&current, 0.0, 0.0);
+    if (config->zero_seed) pc_set_complex(&current, config->chain_seed);
     else pc_set(&current, point);
     int valid = 0;
     const uint32_t count = config->chain_count;
@@ -760,6 +760,9 @@ static int pc_eval_function(ce_precise_complex *output, uint32_t function_id,
             break;
         case CE_FN_COS:
             pc_cos(output, z);
+            break;
+        case CE_FN_SIN:
+            pc_sin(output, z);
             break;
         case CE_FN_TAN:
             pc_sin(&a, z); pc_cos(&b, z); valid = pc_div(output, &a, &b);
@@ -1077,7 +1080,7 @@ static int pc_eval_dynamic(ce_precise_complex *output, const ce_map_config *conf
     pc_init(&point, precision); pc_init(&term, precision); pc_init(&accumulator, precision);
     pc_set_d(&accumulator, config->dynamic_reduction == 2u ? 1.0 : 0.0, 0.0);
     ce_map_config base = *config;
-    base.chain_count = 1u; base.zero_seed = 0u; base.derivative = 0u;
+    base.chain_count = 1u; base.zero_seed = 0u; base.chain_seed = (ce_complex){0.0, 0.0}; base.derivative = 0u;
     base.dynamic_point_expression = NULL; base.dynamic_point_count = 0u;
     base.dynamic_term_expression = NULL; base.dynamic_term_count = 0u;
     base.dynamic_source_count = 0u;
@@ -1425,10 +1428,10 @@ static int pc_delta_trace(const ce_map_config *config,
         reference_point, (ce_complex){dc_re, dc_im}
     );
     ce_sphere_delta current = config->zero_seed
-        ? ce_delta_affine((ce_complex){0.0, 0.0}, (ce_complex){0.0, 0.0})
+        ? ce_delta_affine(config->chain_seed, (ce_complex){0.0, 0.0})
         : parameter;
     ce_complex checkpoint = config->zero_seed
-        ? (ce_complex){0.0, 0.0}
+        ? config->chain_seed
         : (ce_complex){reference_point.re + dc_re, reference_point.im + dc_im};
     uint32_t power = 1u;
 

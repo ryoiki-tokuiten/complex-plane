@@ -35,7 +35,10 @@ export function algebraicExpressionHasBranches(terms, runtimeState) {
 }
 
 function expressionHasBranches(source, runtimeState) {
-    if (!source || typeof source !== 'string' || !source.trim()) return false;
+    // This is advisory metadata used while synchronizing controls. Formula
+    // inputs are allowed to be temporarily incomplete while the user types;
+    // the field-level preview reports the syntax error separately.
+    if (typeof source !== 'string' || !source.trim()) return false;
     let ast;
     try {
         ast = parseExpression(source);

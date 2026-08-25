@@ -220,6 +220,7 @@ const rawState = {
     isContour2DFullScreen: false,
     chainingEnabled: false,
     chainingMode: 'recursion',
+    chainSeed: { re: 0, im: 0 },
     chainCount: 1,
     currentFunctionPreset: null,
     orbitColoringMode: 'value',

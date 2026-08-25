@@ -38,6 +38,7 @@ typedef struct {
 enum ce_function_id {
     CE_FN_C = 0,
     CE_FN_COS,
+    CE_FN_SIN,
     CE_FN_TAN,
     CE_FN_SEC,
     CE_FN_EXP,
@@ -113,6 +114,7 @@ typedef struct {
     ce_complex kernel_polynomial_scale;
     ce_complex kernel_parameter_scale;
     ce_complex kernel_constant;
+    ce_complex chain_seed;
 } ce_map_config;
 
 void *ce_alloc(size_t size);

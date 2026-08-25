@@ -49,6 +49,7 @@ import {
 } from './dynamic-plotting-ui.js';
 import { domainColorForValue } from '../rendering/domain-coloring.js';
 import { resolveActiveMap } from '../math/active-map.js';
+import { compileExpression } from '../math/expression/index.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import {
     disposeTransformationGraphRenderer,
@@ -63,7 +64,6 @@ import {
     getTissotViewportBounds
 } from '../analysis/tissot.js';
 import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
-import { compileExpression } from '../math/expression/index.js';
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
@@ -86,7 +86,7 @@ let fractalRestoreSnapshot = null;
 
 const FRACTAL_RESTORE_KEYS = [
     'currentFunction', 'currentFunctionPreset', 'algebraicChainingEnabled', 'chainingEnabled',
-    'chainingMode', 'chainCount', 'orbitColoringMode', 'domainColoringEnabled',
+    'chainingMode', 'chainSeed', 'chainCount', 'orbitColoringMode', 'domainColoringEnabled',
     'currentInputShape', 'domainPalette', 'polynomialN', 'polynomialCoeffs',
     'algebraicChainingTerms'
 ];
@@ -654,6 +654,7 @@ function disableOutputChaining() {
     state.chainingEnabled = false;
     checked('enableChainingCb', false);
     display(controls.chainingControlsContainer, false);
+    display(controls.chainSeedControl, false);
     updateChainingColumns(1);
 }
 
@@ -724,6 +725,7 @@ function syncChainingControlsFromState() {
     if (state.chainingMode !== 'zero_seed') state.chainingMode = 'recursion';
     checked('enableChainingCb', state.chainingEnabled);
     display(controls.chainingControlsContainer, state.chainingEnabled);
+    display(controls.chainSeedControl, state.chainingEnabled && state.chainingMode === 'zero_seed');
     if (controls.chainModeSelector) controls.chainModeSelector.value = state.chainingMode;
     if (controls.chainCountSlider) controls.chainCountSlider.value = state.chainCount;
     if (controls.chainCountValueDisplay) controls.chainCountValueDisplay.textContent = state.chainCount;
@@ -2298,6 +2300,7 @@ function bindChainingControls() {
         state.chainingEnabled = event.target.checked;
         state.currentFunctionPreset = null;
         display(controls.chainingControlsContainer, state.chainingEnabled);
+        display(controls.chainSeedControl, state.chainingEnabled && state.chainingMode === 'zero_seed');
         syncOrbitColoringModeControl();
         updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
         syncParameterControlsPanelVisibility();
@@ -2307,6 +2310,7 @@ function bindChainingControls() {
     bindElementListener(controls.chainModeSelector, 'change', event => {
         state.chainingMode = event.target.value === 'zero_seed' ? 'zero_seed' : 'recursion';
         state.currentFunctionPreset = null;
+        display(controls.chainSeedControl, state.chainingEnabled && state.chainingMode === 'zero_seed');
         syncOrbitColoringModeControl();
         updateChainingTitles();
         requestUiRedraw();
@@ -2452,14 +2456,24 @@ function bindAlgebraicChainingControls() {
         appendAlgebraicTerm();
     });
 
-    bindFormulaInput({
-        controlKey: 'algebraicChainingZInput',
-        displayKey: 'algebraicChainingZMath',
-        stateKey: 'algebraicChainingZExpr',
-        allowedVariables: ['z'],
-        defaultValue: 'z',
-        onCommit: requestAlgebraicRedraw
-    });
+    const updateAlgebraicZExpression = () => {
+        const input = controls.algebraicChainingZInput;
+        const preview = controls.algebraicChainingZMath;
+        const value = String(input?.value ?? '').trim() || 'z';
+        updateCustomFormulaPreview(input, preview, { allowedVariables: ['z'] });
+        try {
+            compileExpression(value, { allowedVariables: ['z'] });
+        } catch {
+            // Keep the last valid expression active while the user is typing.
+            return;
+        }
+        if (state.algebraicChainingZExpr === value) return;
+        state.algebraicChainingZExpr = value;
+        requestAlgebraicRedraw();
+    };
+
+    bindControlListener('algebraicChainingZInput', 'input', updateAlgebraicZExpression);
+    bindControlListener('algebraicChainingZInput', 'change', updateAlgebraicZExpression);
 }
 
 function bindDomainPaletteCirclePanelListeners() {

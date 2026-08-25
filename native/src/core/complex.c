@@ -166,6 +166,19 @@ static ce_complex ce_sqrt(ce_complex z) {
     return ce_make(re, copysign(sqrt(fmax(0.0, (magnitude - z.re) * 0.5)), z.im));
 }
 
+static inline ce_complex ce_sin(ce_complex z) {
+    if (fabs(z.im) > 700.0) {
+        const double ey = ce_exp_safe(fabs(z.im));
+        const double s = 0.5 * ey * copysign(1.0, z.im);
+        return ce_make(sin(z.re) * 0.5 * ey, cos(z.re) * s);
+    }
+    const double ey = ce_exp_safe(z.im);
+    const double ey_inv = 1.0 / ey;
+    const double sinh_y = 0.5 * (ey - ey_inv);
+    const double cosh_y = 0.5 * (ey + ey_inv);
+    return ce_make(sin(z.re) * cosh_y, cos(z.re) * sinh_y);
+}
+
 static inline ce_complex ce_cos(ce_complex z) {
     if (fabs(z.im) > 700.0) {
         const double ey = ce_exp_safe(fabs(z.im));
@@ -660,6 +673,7 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
     switch (function_id) {
         case CE_FN_C: return c;
         case CE_FN_COS: return ce_cos(z);
+        case CE_FN_SIN: return ce_sin(z);
         case CE_FN_TAN: return ce_tan(z);
         case CE_FN_SEC: return ce_sec(z);
         case CE_FN_EXP: return ce_exp_at_base(z, config->exp_base);
@@ -772,6 +786,7 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
     ce_map_config base = *config;
     base.chain_count = 1u;
     base.zero_seed = 0u;
+    base.chain_seed = ce_make(0.0, 0.0);
     base.derivative = 0u;
     base.dynamic_point_expression = NULL;
     base.dynamic_point_count = 0u;
@@ -898,7 +913,7 @@ static ce_complex ce_eval_dynamic(const ce_map_config *config, ce_complex parame
 static ce_complex ce_eval_map_point(const ce_map_config *config, ce_complex point, int *valid) {
     if (config->dynamic_source_count) {
         const uint32_t count = config->chain_count;
-        ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : point;
+        ce_complex current = config->zero_seed ? config->chain_seed : point;
         ce_complex last = ce_make(NAN, NAN);
         int has_last = 0;
         for (uint32_t iteration = 0; iteration < count; ++iteration) {
@@ -923,7 +938,7 @@ static ce_complex ce_eval_map_point(const ce_map_config *config, ce_complex poin
         return value;
     }
     const uint32_t count = config->chain_count;
-    ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : point;
+    ce_complex current = config->zero_seed ? config->chain_seed : point;
     ce_complex last = ce_make(NAN, NAN);
     int has_last = 0;
     for (uint32_t i = 0; i < count; ++i) {
@@ -994,7 +1009,7 @@ int32_t ce_evaluate_algebraic_points(const ce_map_config *config, const ce_compl
         config->function_id != CE_FN_ALGEBRAIC) return -1;
     const uint32_t chain_count = config->chain_count;
     for (uint32_t point = 0; point < count; ++point) {
-        ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : input[point];
+        ce_complex current = config->zero_seed ? config->chain_seed : input[point];
         ce_complex last = ce_make(NAN, NAN);
         int has_last = 0;
         for (uint32_t iteration = 0; iteration < chain_count; ++iteration) {
@@ -1169,7 +1184,7 @@ int32_t ce_evaluate_sheets(const ce_map_config *config, const ce_complex *input,
     const uint32_t chain_count = config->chain_count;
     if (config->dynamic_source_count) {
         for (uint32_t point = 0; point < count; ++point) {
-            ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : input[point];
+            ce_complex current = config->zero_seed ? config->chain_seed : input[point];
             ce_complex last = ce_make(NAN, NAN);
             int ok = 0;
             for (uint32_t iteration = 0; iteration < chain_count; ++iteration) {
@@ -1184,7 +1199,7 @@ int32_t ce_evaluate_sheets(const ce_map_config *config, const ce_complex *input,
         return 0;
     }
     for (uint32_t point = 0; point < count; ++point) {
-        ce_complex current = config->zero_seed ? ce_make(0.0, 0.0) : input[point];
+        ce_complex current = config->zero_seed ? config->chain_seed : input[point];
         int ok = 0;
         for (uint32_t iteration = 0; iteration < chain_count; ++iteration) {
             current = ce_eval_function_sheet(

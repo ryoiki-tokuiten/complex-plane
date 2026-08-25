@@ -447,6 +447,7 @@ function transformEnvironmentSignature() {
         chaining: {
             enabled: state.chainingEnabled,
             mode: state.chainingMode,
+            seed: state.chainSeed,
             count: state.chainCount
         },
         algebraicTerms: state.algebraicChainingTerms

@@ -30,6 +30,7 @@ subscribeState(() => {
     'algebraicChainingTerms',
     'chainingEnabled',
     'chainingMode',
+    'chainSeed',
     'chainCount',
     'orbitColoringMode',
     'polynomialN',

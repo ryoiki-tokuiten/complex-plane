@@ -66,6 +66,7 @@ const OPERATION_COPY = Object.freeze({
 });
 
 const FUNCTION_LABELS = Object.freeze({
+    sin: 'sin',
     cos: 'cos',
     tan: 'tan',
     sec: 'sec',

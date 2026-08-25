@@ -92,6 +92,7 @@ const UNIFORM_NAMES = Object.freeze({
   uBranchParams: 'u_branchParams',
   uDomainStep: 'u_domainStep',
   uNormalizedStep: 'u_normalizedStep',
+  uChainSeed: 'u_chainSeed',
   uTaylorCenter: 'u_taylorCenter',
   uExpBase: 'u_expBase',
   uLogBase: 'u_logBase',
@@ -111,6 +112,7 @@ uniform vec4 u_domainIntParams;
 uniform vec4 u_branchParams;
 uniform vec4 u_contourParams;
 uniform vec2 u_polyCoeffs[11];
+uniform vec2 u_chainSeed;
 uniform vec2 u_taylorCenter;
 uniform vec2 u_taylorCoefficients[9];
 uniform vec2 u_branchCutPoints[${MAX_DRAWN_BRANCH_CUT_POINTS}];
@@ -372,22 +374,19 @@ function buildAlgebraicUniformDeclarations(appState) {
 
 function buildAlgebraicBranchBody(appState) {
   const terms = algebraicTermsArray(appState);
-  const zExpr = (typeof appState?.algebraicChainingZExpr === 'string' && appState.algebraicChainingZExpr.trim())
-    ? appState.algebraicChainingZExpr.trim()
-    : 'z';
+  const zExpr = appState?.algebraicChainingZExpr;
+  if (typeof zExpr !== 'string' || !zExpr.trim()) {
+    throw new Error('Riemann algebraic rendering requires a z expression.');
+  }
   const steps = [];
 
   if (zExpr !== 'z') {
-    let zCustomExprGLSL = 'z';
-    try {
-      zCustomExprGLSL = compileCustomExpressionToGLSL(
-        zExpr,
-        functionName => getWebGLFunctionIdShared(functionName, true),
-        { sheet: true }
-      ) || 'z';
-    } catch {
-      zCustomExprGLSL = 'z';
-    }
+    const zCustomExprGLSL = compileCustomExpressionToGLSL(
+      zExpr,
+      functionName => getWebGLFunctionIdShared(functionName, true),
+      { sheet: true }
+    );
+    if (!zCustomExprGLSL) throw new Error('Riemann algebraic z expression produced no shader source.');
     if (zCustomExprGLSL !== 'z') {
       steps.push(`    z = ${zCustomExprGLSL};`);
     }
@@ -596,7 +595,7 @@ ${buildAlgebraicBranchBody(appState)}
   out vec2 mapped
 ) {
   if (chainMode == 2) {
-    mapped = vec2(0.0);
+    mapped = u_chainSeed;
     for (int i = 0; i < RIEMANN_SURFACE_ITERATION_LIMIT; i++) {
       if (i >= stage) break;
       bool seedOk = evaluateSurfaceBase(
@@ -816,7 +815,7 @@ float convergenceIntensity(float iteration) {
 
 vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessFactor) {
   int orbitMode = u_orbitColoringMode;
-  vec2 current = chainMode == 2 ? vec2(0.0) : parameterValue;
+  vec2 current = chainMode == 2 ? u_chainSeed : parameterValue;
   vec2 lastFinite = current;
   vec2 eventValue = current;
   float convergenceEpsilonSq = 1.0e-14;
@@ -1241,14 +1240,16 @@ function uploadBuffer(gl, target, data) {
 }
 
 function createGridMesh(gl, resolution) {
-  const { vertices, triangles } = getRiemannSurfaceGridData(resolution);
+  const { vertices, triangles, lines } = getRiemannSurfaceGridData(resolution);
 
   const vertexBuffer = uploadBuffer(gl, gl.ARRAY_BUFFER, vertices);
   const triangleBuffer = uploadBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, triangles);
+  const lineBuffer = uploadBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, lines);
 
-  if (!vertexBuffer || !triangleBuffer) {
-    if (vertexBuffer) gl.deleteBuffer(vertexBuffer);
-    if (triangleBuffer) gl.deleteBuffer(triangleBuffer);
+  if (!vertexBuffer || !triangleBuffer || !lineBuffer) {
+    gl.deleteBuffer(vertexBuffer);
+    gl.deleteBuffer(triangleBuffer);
+    gl.deleteBuffer(lineBuffer);
     return null;
   }
 
@@ -1259,18 +1260,18 @@ function createGridMesh(gl, resolution) {
     triangleBuffer,
     triangleCount: triangles.length,
     triangleIndexType: triangles instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
-    lineBuffer: null,
-    lineCount: 0,
-    lineIndexType: gl.UNSIGNED_SHORT
+    lineBuffer,
+    lineCount: lines.length,
+    lineIndexType: lines instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT
   };
 }
 
 function disposeMesh(gl, mesh) {
   if (!mesh) return;
 
-  if (mesh.vertexBuffer) gl.deleteBuffer(mesh.vertexBuffer);
-  if (mesh.triangleBuffer) gl.deleteBuffer(mesh.triangleBuffer);
-  if (mesh.lineBuffer) gl.deleteBuffer(mesh.lineBuffer);
+  gl.deleteBuffer(mesh.vertexBuffer);
+  gl.deleteBuffer(mesh.triangleBuffer);
+  gl.deleteBuffer(mesh.lineBuffer);
 }
 
 function disposeMeshCache(gl, meshCache) {
@@ -1882,6 +1883,8 @@ function setCommonUniforms(renderer, options) {
   const chainCount = chainingEnabled ? normalizeDomainDynamicsChainCount(state.chainCount) : 1;
   const chainMode = chainingEnabled ? CHAIN_MODE_IDS[state.chainingMode] : 0;
   if (chainingEnabled && !chainMode) throw new Error(`Unsupported Riemann chain mode: ${state.chainingMode}.`);
+  const chainSeed = requireFiniteComplex(state.chainSeed ?? ZERO_COMPLEX, 'Riemann chain seed');
+  gl.uniform2f(locations.uChainSeed, chainSeed.re, chainSeed.im);
   const orbitMode = chainingEnabled
     ? orbitColoringModeId(state.orbitColoringMode)
     : 0;
@@ -1951,51 +1954,19 @@ function ensureCurrentProgram(renderer, signature = getRiemannSurfaceProgramSign
  * after first use instead of deleting and reallocating three large WebGL buffers.
  */
 function ensureMesh(renderer) {
-  const targetResolution = normalizeRendererResolution(state.riemannSurfaceResolution, renderer.uint32ElementIndices);
+  const resolution = normalizeRendererResolution(state.riemannSurfaceResolution, renderer.uint32ElementIndices);
 
-  if (renderer.mesh && renderer.mesh.resolution === targetResolution) {
+  if (renderer.mesh && renderer.mesh.resolution === resolution) {
     return true;
   }
 
-  let mesh = renderer.meshCache.get(targetResolution);
-  if (mesh) {
-    renderer.mesh = mesh;
-    return true;
+  let mesh = renderer.meshCache.get(resolution);
+  if (!mesh) {
+    mesh = createGridMesh(renderer.gl, resolution);
+    if (!mesh) return false;
+    renderer.meshCache.set(resolution, mesh);
   }
 
-  // Progressive initial mesh load: if target mesh is not yet cached and target resolution is high (>256),
-  // immediately show a lightweight base mesh (256) so the first frame renders in < 2ms,
-  // then schedule the full high-resolution mesh generation on the next animation frame.
-  const baseResolution = Math.min(256, targetResolution);
-  if (baseResolution < targetResolution && !renderer.mesh) {
-    let baseMesh = renderer.meshCache.get(baseResolution);
-    if (!baseMesh) {
-      baseMesh = createGridMesh(renderer.gl, baseResolution);
-      if (baseMesh) renderer.meshCache.set(baseResolution, baseMesh);
-    }
-    if (baseMesh) {
-      renderer.mesh = baseMesh;
-      if (!renderer.meshUpgradeQueued) {
-        renderer.meshUpgradeQueued = true;
-        requestAnimationFrame(() => {
-          renderer.meshUpgradeQueued = false;
-          if (!renderer.meshCache.has(targetResolution)) {
-            const highMesh = createGridMesh(renderer.gl, targetResolution);
-            if (highMesh) {
-              renderer.meshCache.set(targetResolution, highMesh);
-              renderer.mesh = highMesh;
-              if (renderer.visible) drawRenderer(renderer);
-            }
-          }
-        });
-      }
-      return true;
-    }
-  }
-
-  mesh = createGridMesh(renderer.gl, targetResolution);
-  if (!mesh) return false;
-  renderer.meshCache.set(targetResolution, mesh);
   renderer.mesh = mesh;
   return true;
 }
@@ -2059,19 +2030,10 @@ function drawSurfaceSheet(renderer, branchIndex, sheetIndex, tintStep, cutWidth,
 
   if (!wireframe) return;
 
-  if (!mesh.lineBuffer) {
-    const { lines } = getRiemannSurfaceGridData(mesh.resolution);
-    mesh.lineBuffer = uploadBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, lines);
-    mesh.lineCount = lines.length;
-    mesh.lineIndexType = lines instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
-  }
-
-  if (mesh.lineBuffer) {
-    gl.uniform4f(locations.uBranchParams, branchIndex, cutWidth, sheetIndex * tintStep, 1);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.lineBuffer);
-    gl.drawElements(gl.LINES, mesh.lineCount, mesh.lineIndexType, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.triangleBuffer);
-  }
+  gl.uniform4f(locations.uBranchParams, branchIndex, cutWidth, sheetIndex * tintStep, 1);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.lineBuffer);
+  gl.drawElements(gl.LINES, mesh.lineCount, mesh.lineIndexType, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.triangleBuffer);
 }
 
 function prepareRendererFrame(renderer, options, signature = getRiemannSurfaceProgramSignature(state)) {
@@ -2311,21 +2273,11 @@ if (typeof window !== 'undefined') {
 
 export function renderRiemannSurface(baseCanvas, options = {}) {
   if (!baseCanvas) throw new Error('Riemann surface rendering requires a target canvas.');
-  let signature;
-  try {
-    signature = getRiemannSurfaceProgramSignature(state);
-  } catch {
-    return false;
-  }
+  const signature = getRiemannSurfaceProgramSignature(state);
   if (!validateDynamicAggregate(state, signature)) {
     throw new Error('The active dynamic aggregate cannot be compiled for the Riemann surface GPU pipeline.');
   }
-  try {
-    return rendererFactory.render(baseCanvas, options, signature);
-  } catch (error) {
-    console.warn('Riemann surface render error:', error);
-    return false;
-  }
+  return rendererFactory.render(baseCanvas, options, signature);
 }
 
 export function hideRiemannSurface(baseCanvas) {

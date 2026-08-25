@@ -25,6 +25,7 @@ import { clonePlain } from '../utils/clone-utils.js';
 const TILE_SIZE = 64;
 const MAX_WORKERS = 16;
 const SUPPORTED_FUNCTIONS = new Set([
+    'sin',
     'cos',
     'tan',
     'sec',
@@ -237,6 +238,7 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         besselOrder: clonePlain(runtimeState.besselOrder),
         chainingEnabled: runtimeState.chainingEnabled,
         chainMode: normalizeChainMode(runtimeState.chainingMode),
+        chainSeed: clonePlain(requireFiniteComplex(runtimeState.chainSeed ?? { re: 0, im: 0 }, 'Domain-dynamics chain seed')),
         chainCount: normalizeDomainDynamicsChainCount(runtimeState.chainCount),
         orbitColoringMode,
         algebraicChainingEnabled: runtimeState.algebraicChainingEnabled,

@@ -690,6 +690,7 @@ static ce_sphere_delta dv_function(uint32_t function_id, ce_sphere_delta z,
     switch (function_id) {
         case CE_FN_C: return c;
         case CE_FN_COS: return dv_cos(z);
+        case CE_FN_SIN: return dv_sin(z);
         case CE_FN_TAN: return dv_tan(z);
         case CE_FN_SEC: return dv_div(dv_constant(dx(1.0, 0.0)), dv_cos(z));
         case CE_FN_EXP: return dv_exp_at_base(z, config->exp_base);
@@ -788,7 +789,7 @@ static int dv_prime(int64_t value) {
 
 static ce_sphere_delta dv_map_point(const ce_map_config *config, ce_sphere_delta point) {
     ce_sphere_delta current = config->zero_seed
-        ? dv_constant(dx(0.0, 0.0)) : point;
+        ? dv_constant(config->chain_seed) : point;
     for (uint32_t index = 0; index < config->chain_count; ++index) {
         current = ce_delta_map_step(config, current, point);
         if (!current.valid) return current;
@@ -1026,6 +1027,7 @@ static ce_sphere_delta dv_dynamic(const ce_map_config *config, ce_sphere_delta p
     ce_map_config base = *config;
     base.chain_count = 1u;
     base.zero_seed = 0u;
+    base.chain_seed = dx(0.0, 0.0);
     base.derivative = 0u;
     base.dynamic_source_count = 0u;
     ce_sphere_delta variables[256];

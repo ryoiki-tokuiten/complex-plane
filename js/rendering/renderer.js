@@ -482,6 +482,7 @@ function scanPlanarLayerDependencies(isWPlane, tracker) {
     captureDependency(tracker, chainingEnabled);
     if (chainingEnabled) {
         captureDependency(tracker, state.chainingMode);
+        captureComplexDependency(tracker, state.chainSeed);
         captureDependency(tracker, state.chainCount);
         captureDependency(tracker, normalizeOrbitColoringMode(state.orbitColoringMode));
     }

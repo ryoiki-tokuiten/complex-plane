@@ -22,6 +22,7 @@ import {
 const ISLANDS = [
     ['polynomial_coeffs_container', PolynomialCoefficients],
     ['taylor_complex_points_ui_container', () => <ComplexParameterEditor stateKey="taylorSeriesCustomCenter" label="z0" />],
+    ['chain_seed_ui_container', () => <ComplexParameterEditor stateKey="chainSeed" label="z₀" />],
     ['exp_base_ui_container', () => <ComplexParameterEditor stateKey="expBase" label="a" />],
     ['log_base_ui_container', () => <ComplexParameterEditor stateKey="logBase" label="a" />],
     ['bessel_order_ui_container', () => <ComplexParameterEditor stateKey="besselOrder" label="ν" />],

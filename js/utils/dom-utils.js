@@ -208,8 +208,9 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
 }
 
 export function getChainingTitleHTML(i, mode) {
+    const seed = mode === 'zero_seed' ? formatChainingSeed(state.chainSeed) : 'z';
     if (i === 0) {
-        return mode === 'zero_seed' ? `w = f(0; c=z)` : `w = f(z)`;
+        return mode === 'zero_seed' ? `w = f(${seed}; c=z)` : `w = f(z)`;
     }
     
     const getNestedHTML = (count, innerText) => {
@@ -225,7 +226,16 @@ export function getChainingTitleHTML(i, mode) {
         return `w = ${res}`;
     };
 
-    return getNestedHTML(i + 1, mode === 'zero_seed' ? '0' : 'z');
+    return getNestedHTML(i + 1, seed);
+}
+
+function formatChainingSeed(seed) {
+    const re = formatTaylorNumericValue(seed?.re);
+    const imValue = Number(seed?.im);
+    const im = formatTaylorNumericValue(Math.abs(imValue));
+    if (!imValue) return re;
+    if (!Number(seed?.re)) return `${imValue < 0 ? '-' : ''}${im === '1' ? 'i' : `${im}i`}`;
+    return `${re} ${imValue < 0 ? '-' : '+'} ${im}i`;
 }
 
 function renderChainingTitle(target, index, derivative = false) {

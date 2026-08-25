@@ -4878,6 +4878,29 @@ body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column
 .chaining-controls { padding-left: 10px; margin-top: 10px; border-left: 2px solid var(--border-color); }
 .chaining-controls label { margin-top: 5px; }
 .chaining-mode-select { margin-bottom: 10px; }
+.chaining-seed-control {
+    margin: 0.35rem 0 0.75rem;
+    padding: 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--accent-purple) 24%, transparent);
+    border-radius: 10px;
+    background: rgba(var(--bg-color-rgb), 0.18);
+}
+.chaining-seed-label {
+    display: block;
+    color: var(--text-secondary-color);
+    font-size: 0.8rem;
+    margin-bottom: 0.55rem;
+}
+.chaining-seed-control .taylor-series-preset-groups {
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+}
+.chaining-seed-control .taylor-series-preset-buttons {
+    gap: 0.35rem;
+}
+.chaining-seed-control .taylor-series-preset-btn {
+    padding: 0.35rem 0.55rem;
+}
 .chaining-grid-button { width: 100%; margin-top: 10px; color: var(--accent-purple); background: transparent; border: 1px solid var(--accent-purple); }
 .formula-editor-stack { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
 .formula-editor-label { color: var(--text-secondary-color); font-size: 0.8rem; }

@@ -104,6 +104,7 @@ vec2 complexTanh(vec2 z) { vec2 den = complexCosh(z); if (dot(den,den) < 1.0e-18
 
 bool evaluateBasicFuncShared(float fId, vec2 z, vec2 mA, vec2 mB, vec2 mC, vec2 mD, int polyDeg, vec2 polyCoeffs[11], float zetaCont, float zetaRefl, float fracPower, out vec2 mapped) {
   ${(!usedFids || usedFids.has(1)) ? `if (abs(fId - 1.0) < 0.5) { mapped = complexCos(z); return isFiniteVec2Compat(mapped); }` : ''}
+  ${(!usedFids || usedFids.has(2)) ? `if (abs(fId - 2.0) < 0.5) { mapped = complexSin(z); return isFiniteVec2Compat(mapped); }` : ''}
   ${(!usedFids || usedFids.has(3)) ? `if (abs(fId - 3.0) < 0.5) { vec2 denTan = complexCos(z); if (dot(denTan, denTan) < 1.0e-18) return false; mapped = complexDiv(complexSin(z), denTan); return isFiniteVec2Compat(mapped); }` : ''}
   ${(!usedFids || usedFids.has(4)) ? `if (abs(fId - 4.0) < 0.5) { vec2 denSec = complexCos(z); if (dot(denSec, denSec) < 1.0e-18) return false; mapped = complexDiv(vec2(1.0, 0.0), denSec); return isFiniteVec2Compat(mapped); }` : ''}
   ${(!usedFids || usedFids.has(5)) ? `if (abs(fId - 5.0) < 0.5) { mapped = complexExpWithBase(z); return isFiniteVec2Compat(mapped); }` : ''}
@@ -211,6 +212,7 @@ export function getWebGLBackendInfoShared(gl) {
 export function getWebGLFunctionIdShared(functionName, ignoreDynamic = false) {
     if (!ignoreDynamic && isDynamicAggregateGLSLActive(state)) return 17;
     switch (functionName) {
+        case 'sin': return 2;
         case 'cos': return 1;
         case 'tan': return 3;
         case 'sec': return 4;

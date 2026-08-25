@@ -20,6 +20,7 @@ function sourceSignature() {
         chaining: state.chainingEnabled,
         chainCount: state.chainCount,
         chainMode: state.chainingMode,
+        chainSeed: state.chainSeed,
         algebraic: state.algebraicChainingTerms,
         algebraicZExpr: state.algebraicChainingZExpr,
         mobius: [state.mobiusA, state.mobiusB, state.mobiusC, state.mobiusD],

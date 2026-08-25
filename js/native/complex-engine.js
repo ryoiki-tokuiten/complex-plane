@@ -51,26 +51,27 @@ if (wasm.ce_abi_version() !== 3) {
 export const NATIVE_FUNCTION_IDS = Object.freeze({
     c: 0,
     cos: 1,
-    tan: 2,
-    sec: 3,
-    exp: 4,
-    ln: 5,
-    sinh: 6,
-    tanh: 7,
-    asin: 8,
-    atan: 9,
-    gamma: 10,
-    loggamma: 11,
-    bessel: 12,
-    power: 13,
-    mobius: 14,
-    zeta: 15,
-    polynomial: 16,
-    algebraic_chaining: 17,
-    identity: 18
+    sin: 2,
+    tan: 3,
+    sec: 4,
+    exp: 5,
+    ln: 6,
+    sinh: 7,
+    tanh: 8,
+    asin: 9,
+    atan: 10,
+    gamma: 11,
+    loggamma: 12,
+    bessel: 13,
+    power: 14,
+    mobius: 15,
+    zeta: 16,
+    polynomial: 17,
+    algebraic_chaining: 18,
+    identity: 19
 });
 
-const MAP_CONFIG_SIZE = 312;
+const MAP_CONFIG_SIZE = 328;
 const FUNCTION_CONFIG_OFFSET = 16;
 const FUNCTION_POLYNOMIAL_PTR = FUNCTION_CONFIG_OFFSET + 112;
 const FUNCTION_POLYNOMIAL_COUNT = FUNCTION_CONFIG_OFFSET + 116;
@@ -99,6 +100,7 @@ const MAP_DYNAMIC_VARIABLE_COUNT = 248;
 const MAP_DYNAMIC_SOURCE_COUNT = 252;
 const MAP_DYNAMIC_REDUCTION = 256;
 const MAP_DYNAMIC_INVALID_POLICY = 260;
+const MAP_CHAIN_SEED = 312;
 
 const EXPRESSION_OPS = Object.freeze({
     constant: 0, z: 1, c: 2, add: 3, subtract: 4, multiply: 5, divide: 6,
@@ -684,6 +686,11 @@ function writeMapConfig(pointer, options, allocations) {
     const chainCount = options.chainingEnabled ? requestedChainCount : 1;
     view.setUint32(pointer + 4, chainCount, true);
     view.setUint32(pointer + 8, options.chainMode === 'zero_seed' ? 1 : 0, true);
+    writeComplex(
+        view,
+        pointer + MAP_CHAIN_SEED,
+        requireFiniteComplex(options.chainSeed ?? { re: 0, im: 0 }, 'Native chain seed')
+    );
     const derivativeOrder = Number(options.derivativeOrder);
     if (!Number.isInteger(derivativeOrder) || derivativeOrder < 0 || derivativeOrder > 2) {
         throw new Error('Native map derivative order must be 0, 1, or 2.');
@@ -1215,6 +1222,7 @@ export function nativeMapOptions(runtimeState, overrides = {}) {
         algebraicChainingTerms: runtimeState.algebraicChainingTerms,
         algebraicChainingZExpr: runtimeState.algebraicChainingZExpr,
         dynamicAggregate: runtimeState.dynamicAggregate,
+        chainSeed: runtimeState.chainSeed ?? { re: 0, im: 0 },
         ...overrides,
         functionKey,
         chainCount,

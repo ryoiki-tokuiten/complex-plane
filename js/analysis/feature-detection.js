@@ -20,6 +20,7 @@ function cacheKey() {
     requireVisibleViewport(zPlaneParams, 'Feature-detection viewport');
     return [
         state.currentFunction, state.mapPresentation, state.chainingEnabled, state.chainCount,
+        state.chainingMode, state.chainSeed?.re, state.chainSeed?.im,
         getAlgebraicStructureSignatureShared(state.algebraicChainingTerms),
         state.algebraicChainingZExpr, JSON.stringify(state.polynomialCoeffs),
         JSON.stringify([state.mobiusA, state.mobiusB, state.mobiusC, state.mobiusD]),
@@ -71,10 +72,11 @@ export function findCriticalPoints() {
     let points = [];
     if (active.presentation !== 'derivative' && ['exp', 'tan', 'ln'].includes(state.currentFunction)) {
         points = [];
-    } else if (active.presentation !== 'derivative' && ['cos', 'sec'].includes(state.currentFunction)) {
-        for (let n = Math.ceil(xRange[0] / Math.PI) - 1;
-            n <= Math.floor(xRange[1] / Math.PI) + 1; n += 1) {
-            points.push({ re: n * Math.PI, im: 0 });
+    } else if (active.presentation !== 'derivative' && ['sin', 'cos', 'sec'].includes(state.currentFunction)) {
+        const offset = state.currentFunction === 'sin' ? 0.5 : 0;
+        for (let n = Math.ceil(xRange[0] / Math.PI - offset) - 1;
+            n <= Math.floor(xRange[1] / Math.PI - offset) + 1; n += 1) {
+            points.push({ re: (n + offset) * Math.PI, im: 0 });
         }
     } else {
         points = findNativePreimages({
@@ -116,15 +118,11 @@ export function findZerosAndPoles() {
 
     if (single && state.currentFunction === 'exp') {
         zeros = [];
-    } else if (single && state.currentFunction === 'cos') {
-        for (let n = Math.ceil(xRange[0] / Math.PI - 0.5) - 1;
-            n <= Math.floor(xRange[1] / Math.PI - 0.5) + 1; n += 1) {
-            zeros.push({ re: (n + 0.5) * Math.PI, im: 0 });
-        }
-    } else if (single && state.currentFunction === 'tan') {
-        for (let n = Math.ceil(xRange[0] / Math.PI) - 1;
-            n <= Math.floor(xRange[1] / Math.PI) + 1; n += 1) {
-            zeros.push({ re: n * Math.PI, im: 0 });
+    } else if (single && ['sin', 'cos', 'tan'].includes(state.currentFunction)) {
+        const offset = state.currentFunction === 'cos' ? 0.5 : 0;
+        for (let n = Math.ceil(xRange[0] / Math.PI - offset) - 1;
+            n <= Math.floor(xRange[1] / Math.PI - offset) + 1; n += 1) {
+            zeros.push({ re: (n + offset) * Math.PI, im: 0 });
         }
     } else if (single && state.currentFunction === 'polynomial') {
         zeros = findNativePolynomialRoots([...state.polynomialCoeffs].reverse(), {
@@ -138,7 +136,7 @@ export function findZerosAndPoles() {
         });
     }
 
-    if (single && ['exp', 'cos', 'polynomial'].includes(state.currentFunction)) {
+    if (single && ['exp', 'sin', 'cos', 'polynomial'].includes(state.currentFunction)) {
         poles = [];
     } else if (single && ['tan', 'sec'].includes(state.currentFunction)) {
         for (let n = Math.ceil(xRange[0] / Math.PI - 0.5) - 1;

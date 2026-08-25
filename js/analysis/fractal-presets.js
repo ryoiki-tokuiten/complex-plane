@@ -24,6 +24,7 @@ export const FRACTAL_PRESETS = Object.freeze({
     mandelbrot: Object.freeze({
         label: 'Mandelbrot',
         chainMode: 'zero_seed',
+        chainSeed: complex(0),
         chainCount: 256,
         orbitColoringMode: 'escape',
         currentInputShape: 'empty_grid',
@@ -42,6 +43,7 @@ export const FRACTAL_PRESETS = Object.freeze({
     newton_fractal: Object.freeze({
         label: 'Newton Fractals',
         chainMode: 'recursion',
+        chainSeed: complex(0),
         chainCount: 64,
         orbitColoringMode: 'attractor',
         currentInputShape: 'empty_grid',
@@ -73,6 +75,7 @@ export function applyFractalPreset(runtimeState, key) {
         algebraicChainingEnabled: true,
         chainingEnabled: true,
         chainingMode: preset.chainMode,
+        chainSeed: clonePlain(preset.chainSeed || complex(0)),
         chainCount: preset.chainCount,
         orbitColoringMode: preset.orbitColoringMode || 'value',
         domainColoringEnabled: true,

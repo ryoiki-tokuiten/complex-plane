@@ -4,7 +4,7 @@ import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 import { syncParameterControlsPanelVisibility, updateTitlesAndGlobalUI } from '../../ui/ui-updates.js';
 
 const FUNCTION_OPTIONS = [
-    ['none', 'None'], ['c', 'c'], ['cos', 'cos(z)'], ['tan', 'tan(z)'],
+    ['none', 'None'], ['c', 'c'], ['sin', 'sin(z)'], ['cos', 'cos(z)'], ['tan', 'tan(z)'],
     ['sec', 'sec(z)'], ['exp', 'e^z'], ['ln', 'ln(z)'], ['sinh', 'sinh(z)'],
     ['tanh', 'tanh(z)'], ['power', 'z^n'],
     ['asin', 'asin(z)'], ['atan', 'atan(z)'], ['gamma', 'Γ(z)'], ['loggamma', 'log Γ(z)'],

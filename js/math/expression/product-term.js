@@ -1,7 +1,7 @@
 import { parseExpression } from './parser.js';
 
 const WRAPPERS = new Set([
-    'factorial', 'ln', 'log', 'exp', 'sqrt', 'cos', 'tan',
+    'factorial', 'ln', 'log', 'exp', 'sqrt', 'sin', 'cos', 'tan',
     'sinh', 'tanh', 'abs', 'conj', 'selected'
 ]);
 
