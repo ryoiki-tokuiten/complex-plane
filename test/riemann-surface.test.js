@@ -203,3 +203,19 @@ test('Riemann surface grid topology is cached and index-safe', () => {
         assert.ok(index >= 0 && index < vertexCount);
     }
 });
+
+test('incomplete and unparseable algebraic expressions fail gracefully without throwing', () => {
+    const incompleteState = makeState({
+        currentFunction: 'algebraic_chaining',
+        algebraicChainingZExpr: 'z + ',
+        algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'cos' }] }]
+    });
+
+    assert.doesNotThrow(() => baseExpressionHasBranches(incompleteState));
+    assert.equal(baseExpressionHasBranches(incompleteState), false);
+
+    assert.doesNotThrow(() => buildRiemannSurfaceMathLibrary(incompleteState));
+    const shaderSource = buildRiemannSurfaceMathLibrary(incompleteState);
+    assert.ok(typeof shaderSource === 'string' && shaderSource.length > 0);
+    assert.match(shaderSource, /evaluateSurfaceBase/);
+});

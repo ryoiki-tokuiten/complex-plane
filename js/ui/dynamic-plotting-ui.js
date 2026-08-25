@@ -354,7 +354,7 @@ function sourceDescription() {
 function sourceForPreview() {
     const source = sourceConfig();
     if (!Array.isArray(source.points)) throw new Error('Dynamic source points must be an array.');
-    const sourceConfig = {
+    const resolvedSource = {
         ...source,
         points: [...source.points]
     };
@@ -370,7 +370,7 @@ function sourceForPreview() {
             im: 0
             }];
         }));
-    return generateDiscreteSource(sourceConfig, { parameters });
+    return generateDiscreteSource(resolvedSource, { parameters });
 }
 
 function sourceRule() {

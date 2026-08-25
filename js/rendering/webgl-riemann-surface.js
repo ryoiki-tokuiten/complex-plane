@@ -2,7 +2,7 @@ import { state, zPlaneParams } from '../store/state.js';
 import { computeTaylorSeriesCoefficients } from '../native/map-runtime.js';
 import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
-  GLSL_COMPLEX_MATH_LIBRARY_BASE,
+  buildComplexMathLibraryGLSL,
   createWebGLProgramShared,
   getWebGLBackendInfoShared,
   getWebGLFunctionIdShared
@@ -14,6 +14,10 @@ import {
   compileCustomExpressionToGLSL,
   createGlslExpressionHelpers
 } from '../math/expression/glsl.js';
+import {
+  parseExpression,
+  collectExpressionDependencies
+} from '../math/expression/index.js';
 import {
   getBranchWindowLabel,
   getSurfaceComponentLabel,
@@ -368,19 +372,22 @@ function buildAlgebraicUniformDeclarations(appState) {
 
 function buildAlgebraicBranchBody(appState) {
   const terms = algebraicTermsArray(appState);
-  const zExpr = appState?.algebraicChainingZExpr;
-  if (typeof zExpr !== 'string' || !zExpr.trim()) {
-    throw new Error('Riemann algebraic rendering requires a z expression.');
-  }
+  const zExpr = (typeof appState?.algebraicChainingZExpr === 'string' && appState.algebraicChainingZExpr.trim())
+    ? appState.algebraicChainingZExpr.trim()
+    : 'z';
   const steps = [];
 
   if (zExpr !== 'z') {
-    const zCustomExprGLSL = compileCustomExpressionToGLSL(
-      zExpr,
-      functionName => getWebGLFunctionIdShared(functionName, true),
-      { sheet: true }
-    );
-    if (!zCustomExprGLSL) throw new Error('Riemann algebraic z expression produced no shader source.');
+    let zCustomExprGLSL = 'z';
+    try {
+      zCustomExprGLSL = compileCustomExpressionToGLSL(
+        zExpr,
+        functionName => getWebGLFunctionIdShared(functionName, true),
+        { sheet: true }
+      ) || 'z';
+    } catch {
+      zCustomExprGLSL = 'z';
+    }
     if (zCustomExprGLSL !== 'z') {
       steps.push(`    z = ${zCustomExprGLSL};`);
     }
@@ -450,7 +457,9 @@ bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 
   },
 
   evaluateBasicOnSheet: {
-    source: `bool evaluateBasicOnSheet(
+    source: ({ appState }) => {
+      const { usedFids } = determineUsedGLSLMathFunctions(appState);
+      return `bool evaluateBasicOnSheet(
   float functionId,
   vec2 z,
   float branchIndex,
@@ -467,10 +476,10 @@ bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 
   out vec2 mapped
 ) {
   float fId = floor(functionId + 0.5);
-  if (abs(fId - 6.0) < 0.5) {
+  ${(!usedFids || usedFids.has(6)) ? `if (abs(fId - 6.0) < 0.5) {
     return complexLnOnSheet(z, branchIndex, branchCutWidth, mapped);
-  }
-  if (abs(fId - 15.0) < 0.5) {
+  }` : ''}
+  ${(!usedFids || usedFids.has(15)) ? `if (abs(fId - 15.0) < 0.5) {
     float nearestInteger = floor(fracPower + 0.5);
     bool isIntegerPower = abs(fracPower - nearestInteger) < 1.0e-5;
     return complexPowRealOnSheet(
@@ -480,29 +489,30 @@ bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 
       isIntegerPower ? 0.0 : branchCutWidth,
       mapped
     );
-  }
-  if (abs(fId - 18.0) < 0.5) {
+  }` : ''}
+  ${(!usedFids || usedFids.has(18)) ? `if (abs(fId - 18.0) < 0.5) {
     vec2 principalAsin = complexArcsin(z);
     float asinParity = mod(abs(branchIndex), 2.0) < 0.5 ? 1.0 : -1.0;
     mapped = asinParity * principalAsin + vec2(branchIndex * PI, 0.0);
     return isFiniteVec2Compat(mapped);
-  }
-  if (abs(fId - 19.0) < 0.5) {
+  }` : ''}
+  ${(!usedFids || usedFids.has(19)) ? `if (abs(fId - 19.0) < 0.5) {
     mapped = complexArctan(z) + vec2(branchIndex * PI, 0.0);
     return isFiniteVec2Compat(mapped);
-  }
-  if (abs(fId - 21.0) < 0.5) {
+  }` : ''}
+  ${(!usedFids || usedFids.has(21)) ? `if (abs(fId - 21.0) < 0.5) {
     mapped = complexLogGamma(z) + vec2(0.0, branchIndex * TWO_PI);
     return isFiniteVec2Compat(mapped);
-  }
-  if (abs(fId - 22.0) < 0.5) {
+  }` : ''}
+  ${(!usedFids || usedFids.has(22)) ? `if (abs(fId - 22.0) < 0.5) {
     mapped = complexMul(complexBesselJ(z, u_besselOrder), complexExp(complexMul(vec2(0.0, branchIndex * TWO_PI), u_besselOrder)));
     return isFiniteVec2Compat(mapped);
-  }
+  }` : ''}
   return evaluateBasicFuncShared(
     fId, z, mA, mB, mC, mD, polyDeg, polyCoeffs, zetaCont, zetaRefl, fracPower, mapped
   );
-}`
+}`;
+    }
   },
 
   evaluateTaylorSurface: {
@@ -904,6 +914,54 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   }
 });
 
+function determineUsedGLSLMathFunctions(appState) {
+  const usedFids = new Set();
+  const isAlgebraic = appState.currentFunction === 'algebraic_chaining';
+  const isDynamic = isDynamicAggregateGLSLActive(appState);
+
+  const addFunc = (funcName) => {
+    if (!funcName || funcName === 'none' || funcName === 'c') return;
+    try {
+      usedFids.add(getWebGLFunctionIdShared(funcName, true));
+    } catch {
+      // Ignore unsupported functions
+    }
+  };
+
+  if (isDynamic && appState.dynamicPlotting?.term?.expression) {
+    try {
+      const ast = parseExpression(appState.dynamicPlotting.term.expression);
+      const deps = collectExpressionDependencies(ast);
+      deps.functions.forEach(addFunc);
+    } catch {}
+  } else if (!isAlgebraic) {
+    addFunc(appState.currentFunction);
+  } else {
+    try {
+      const ast = parseExpression(appState.algebraicChainingZExpr || 'z');
+      const deps = collectExpressionDependencies(ast);
+      deps.functions.forEach(addFunc);
+    } catch {}
+
+    const terms = algebraicTermsArray(appState);
+    terms.forEach(term => {
+      if (Array.isArray(term?.factors)) {
+        term.factors.forEach(factor => {
+          addFunc(factor.func);
+          addFunc(factor.chainedFunc);
+        });
+      }
+    });
+  }
+
+  const useZeta = usedFids.has(11);
+  const useGamma = usedFids.has(20) || usedFids.has(21);
+  const useBessel = usedFids.has(22);
+  const usePoly = usedFids.has(9);
+
+  return { usedFids, useZeta, useGamma, useBessel, usePoly };
+}
+
 function buildRiemannSurfaceMathLibraryUncached(appState) {
   const dynamic = buildDynamicAggregateGLSL(
     appState,
@@ -911,7 +969,7 @@ function buildRiemannSurfaceMathLibraryUncached(appState) {
   );
   const dynamicSource = dynamic.source || EMPTY_DYNAMIC_AGGREGATE_GLSL;
   return `const int RIEMANN_SURFACE_ITERATION_LIMIT = ${riemannSurfaceIterationLimit(appState)};
-${GLSL_COMPLEX_MATH_LIBRARY_BASE}
+${buildComplexMathLibraryGLSL(determineUsedGLSLMathFunctions(appState))}
 ${DOMAIN_DYNAMICS_GLSL}
 ${buildAlgebraicUniformDeclarations(appState)}
 ${[
@@ -922,11 +980,10 @@ ${dynamicSource}
 ${[
   SURFACE_MATH_GLSL.evaluateTaylorSurface.source,
   SURFACE_MATH_GLSL.complexPowRealOnSheet.source,
-  SURFACE_MATH_GLSL.evaluateBasicOnSheet.source,
+  SURFACE_MATH_GLSL.evaluateBasicOnSheet.source({ appState }),
   SURFACE_MATH_GLSL.evaluateSurfaceBase.source({ appState }),
   SURFACE_MATH_GLSL.evaluateSurfaceStage.source
-].join('\n\n')}
-`;
+].join('\n\n')}`;
 }
 
 function buildCachedRiemannSurfaceMathLibrary(appState, signature) {
@@ -1184,16 +1241,14 @@ function uploadBuffer(gl, target, data) {
 }
 
 function createGridMesh(gl, resolution) {
-  const { vertices, triangles, lines } = getRiemannSurfaceGridData(resolution);
+  const { vertices, triangles } = getRiemannSurfaceGridData(resolution);
 
   const vertexBuffer = uploadBuffer(gl, gl.ARRAY_BUFFER, vertices);
   const triangleBuffer = uploadBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, triangles);
-  const lineBuffer = uploadBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, lines);
 
-  if (!vertexBuffer || !triangleBuffer || !lineBuffer) {
-    gl.deleteBuffer(vertexBuffer);
-    gl.deleteBuffer(triangleBuffer);
-    gl.deleteBuffer(lineBuffer);
+  if (!vertexBuffer || !triangleBuffer) {
+    if (vertexBuffer) gl.deleteBuffer(vertexBuffer);
+    if (triangleBuffer) gl.deleteBuffer(triangleBuffer);
     return null;
   }
 
@@ -1204,18 +1259,18 @@ function createGridMesh(gl, resolution) {
     triangleBuffer,
     triangleCount: triangles.length,
     triangleIndexType: triangles instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
-    lineBuffer,
-    lineCount: lines.length,
-    lineIndexType: lines instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT
+    lineBuffer: null,
+    lineCount: 0,
+    lineIndexType: gl.UNSIGNED_SHORT
   };
 }
 
 function disposeMesh(gl, mesh) {
   if (!mesh) return;
 
-  gl.deleteBuffer(mesh.vertexBuffer);
-  gl.deleteBuffer(mesh.triangleBuffer);
-  gl.deleteBuffer(mesh.lineBuffer);
+  if (mesh.vertexBuffer) gl.deleteBuffer(mesh.vertexBuffer);
+  if (mesh.triangleBuffer) gl.deleteBuffer(mesh.triangleBuffer);
+  if (mesh.lineBuffer) gl.deleteBuffer(mesh.lineBuffer);
 }
 
 function disposeMeshCache(gl, meshCache) {
@@ -1265,7 +1320,12 @@ export function getRiemannSurfaceProgramSignature(appState) {
   const dynamicSignature = dynamicActive
     ? dynamicAggregateGLSLSignature(appState)
     : '';
-  return `az:${algebraicZ}|a:${algebraicSignature}|d:${dynamicSignature}|i:${riemannSurfaceIterationLimit(appState)}`;
+    
+  const { usedFids } = determineUsedGLSLMathFunctions(appState);
+  const sortedFids = Array.from(usedFids).sort((a, b) => a - b).join(',');
+  const flagsSignature = `f[${sortedFids}]`;
+  
+  return `az:${algebraicZ}|a:${algebraicSignature}|d:${dynamicSignature}|i:${riemannSurfaceIterationLimit(appState)}|${flagsSignature}`;
 }
 
 function validateDynamicAggregate(appState, signature) {
@@ -1385,16 +1445,25 @@ function rebuildProgram(renderer, signature = getRiemannSurfaceProgramSignature(
     return false;
   }
 
-  const program = createWebGLProgramShared(
-    gl,
-    buildVertexShader(state, signature),
-    buildFragmentShader(state, signature)
-  );
+  let entry = renderer.programCache?.get(signature);
+  if (!entry) {
+    const program = createWebGLProgramShared(
+      gl,
+      buildVertexShader(state, signature),
+      buildFragmentShader(state, signature)
+    );
+    if (!program) return false;
+    entry = {
+      program,
+      locations: collectUniformLocations(gl, program, state)
+    };
+    if (renderer.programCache) {
+      renderer.programCache.set(signature, entry);
+    }
+  }
 
-  if (renderer.program) gl.deleteProgram(renderer.program);
-
-  renderer.program = program;
-  renderer.locations = collectUniformLocations(gl, program, state);
+  renderer.program = entry.program;
+  renderer.locations = entry.locations;
   renderer.programSignature = signature;
   renderer.forceUniformRefresh = true;
   renderer.modelViewDirty = true;
@@ -1529,6 +1598,9 @@ function installInteraction(renderer) {
 
 function resetRendererGpuState(renderer) {
   renderer.meshCache.clear();
+  if (renderer.programCache) {
+    renderer.programCache.clear();
+  }
   Object.assign(renderer, {
     program: null,
     locations: null,
@@ -1879,19 +1951,51 @@ function ensureCurrentProgram(renderer, signature = getRiemannSurfaceProgramSign
  * after first use instead of deleting and reallocating three large WebGL buffers.
  */
 function ensureMesh(renderer) {
-  const resolution = normalizeRendererResolution(state.riemannSurfaceResolution, renderer.uint32ElementIndices);
+  const targetResolution = normalizeRendererResolution(state.riemannSurfaceResolution, renderer.uint32ElementIndices);
 
-  if (renderer.mesh && renderer.mesh.resolution === resolution) {
+  if (renderer.mesh && renderer.mesh.resolution === targetResolution) {
     return true;
   }
 
-  let mesh = renderer.meshCache.get(resolution);
-  if (!mesh) {
-    mesh = createGridMesh(renderer.gl, resolution);
-    if (!mesh) return false;
-    renderer.meshCache.set(resolution, mesh);
+  let mesh = renderer.meshCache.get(targetResolution);
+  if (mesh) {
+    renderer.mesh = mesh;
+    return true;
   }
 
+  // Progressive initial mesh load: if target mesh is not yet cached and target resolution is high (>256),
+  // immediately show a lightweight base mesh (256) so the first frame renders in < 2ms,
+  // then schedule the full high-resolution mesh generation on the next animation frame.
+  const baseResolution = Math.min(256, targetResolution);
+  if (baseResolution < targetResolution && !renderer.mesh) {
+    let baseMesh = renderer.meshCache.get(baseResolution);
+    if (!baseMesh) {
+      baseMesh = createGridMesh(renderer.gl, baseResolution);
+      if (baseMesh) renderer.meshCache.set(baseResolution, baseMesh);
+    }
+    if (baseMesh) {
+      renderer.mesh = baseMesh;
+      if (!renderer.meshUpgradeQueued) {
+        renderer.meshUpgradeQueued = true;
+        requestAnimationFrame(() => {
+          renderer.meshUpgradeQueued = false;
+          if (!renderer.meshCache.has(targetResolution)) {
+            const highMesh = createGridMesh(renderer.gl, targetResolution);
+            if (highMesh) {
+              renderer.meshCache.set(targetResolution, highMesh);
+              renderer.mesh = highMesh;
+              if (renderer.visible) drawRenderer(renderer);
+            }
+          }
+        });
+      }
+      return true;
+    }
+  }
+
+  mesh = createGridMesh(renderer.gl, targetResolution);
+  if (!mesh) return false;
+  renderer.meshCache.set(targetResolution, mesh);
   renderer.mesh = mesh;
   return true;
 }
@@ -1955,10 +2059,19 @@ function drawSurfaceSheet(renderer, branchIndex, sheetIndex, tintStep, cutWidth,
 
   if (!wireframe) return;
 
-  gl.uniform4f(locations.uBranchParams, branchIndex, cutWidth, sheetIndex * tintStep, 1);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.lineBuffer);
-  gl.drawElements(gl.LINES, mesh.lineCount, mesh.lineIndexType, 0);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.triangleBuffer);
+  if (!mesh.lineBuffer) {
+    const { lines } = getRiemannSurfaceGridData(mesh.resolution);
+    mesh.lineBuffer = uploadBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, lines);
+    mesh.lineCount = lines.length;
+    mesh.lineIndexType = lines instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+  }
+
+  if (mesh.lineBuffer) {
+    gl.uniform4f(locations.uBranchParams, branchIndex, cutWidth, sheetIndex * tintStep, 1);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.lineBuffer);
+    gl.drawElements(gl.LINES, mesh.lineCount, mesh.lineIndexType, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.triangleBuffer);
+  }
 }
 
 function prepareRendererFrame(renderer, options, signature = getRiemannSurfaceProgramSignature(state)) {
@@ -2071,7 +2184,12 @@ class RiemannSurfaceRendererFactory {
 
     disposeMeshCache(gl, renderer.meshCache);
 
-    if (renderer.program) {
+    if (renderer.programCache) {
+      renderer.programCache.forEach(entry => {
+        if (entry.program) gl.deleteProgram(entry.program);
+      });
+      renderer.programCache.clear();
+    } else if (renderer.program) {
       gl.deleteProgram(renderer.program);
     }
     if (renderer.continuationProgram) gl.deleteProgram(renderer.continuationProgram);
@@ -2123,6 +2241,7 @@ class RiemannSurfaceRendererFactory {
       gl,
       program: null,
       programSignature: null,
+      programCache: new Map(),
       locations: null,
       mesh: null,
       meshCache: new Map(),
@@ -2192,14 +2311,21 @@ if (typeof window !== 'undefined') {
 
 export function renderRiemannSurface(baseCanvas, options = {}) {
   if (!baseCanvas) throw new Error('Riemann surface rendering requires a target canvas.');
-  const signature = getRiemannSurfaceProgramSignature(state);
+  let signature;
+  try {
+    signature = getRiemannSurfaceProgramSignature(state);
+  } catch {
+    return false;
+  }
   if (!validateDynamicAggregate(state, signature)) {
     throw new Error('The active dynamic aggregate cannot be compiled for the Riemann surface GPU pipeline.');
   }
-  if (!rendererFactory.render(baseCanvas, options, signature)) {
-    throw new Error('Riemann surface WebGL initialization or rendering failed.');
+  try {
+    return rendererFactory.render(baseCanvas, options, signature);
+  } catch (error) {
+    console.warn('Riemann surface render error:', error);
+    return false;
   }
-  return true;
 }
 
 export function hideRiemannSurface(baseCanvas) {

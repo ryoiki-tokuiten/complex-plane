@@ -35,7 +35,13 @@ export function algebraicExpressionHasBranches(terms, runtimeState) {
 }
 
 function expressionHasBranches(source, runtimeState) {
-    const ast = parseExpression(source);
+    if (!source || typeof source !== 'string' || !source.trim()) return false;
+    let ast;
+    try {
+        ast = parseExpression(source);
+    } catch {
+        return false;
+    }
     let hasBranches = false;
 
     walkExpression(ast, node => {

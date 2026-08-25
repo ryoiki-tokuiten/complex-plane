@@ -21,7 +21,11 @@ export function requestRedrawAll() {
         context.redrawRequest = null;
         if (!renderFrame) throw new Error('Redraw scheduler has not been configured');
         const renderedDomainInvalidation = domainInvalidation;
-        renderFrame(timestamp);
+        try {
+            renderFrame(timestamp);
+        } catch (error) {
+            console.error('Render frame error:', error);
+        }
 
         if (domainInvalidation === renderedDomainInvalidation) {
             context.domainColoringDirty = false;

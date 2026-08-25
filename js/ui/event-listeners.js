@@ -63,6 +63,7 @@ import {
     getTissotViewportBounds
 } from '../analysis/tissot.js';
 import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
+import { compileExpression } from '../math/expression/index.js';
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
@@ -524,6 +525,52 @@ function bindSelector(controlKey, stateKey, customCallback = null) {
     });
 }
 
+function bindFormulaInput({
+    controlKey,
+    displayKey,
+    stateKey,
+    allowedVariables = ['z'],
+    defaultValue = 'z',
+    onCommit = () => requestDomainRedraw(true)
+}) {
+    let commitTimer = null;
+
+    const commit = () => {
+        if (commitTimer) {
+            clearTimeout(commitTimer);
+            commitTimer = null;
+        }
+        const inputEl = controls[controlKey];
+        const displayEl = controls[displayKey];
+        const raw = String(inputEl?.value ?? '').trim();
+        const effective = raw === '' ? defaultValue : raw;
+        let valid = false;
+        try {
+            compileExpression(effective, { allowedVariables });
+            valid = true;
+        } catch {
+            valid = false;
+        }
+        updateCustomFormulaPreview(inputEl, displayEl, { allowedVariables });
+        if (valid && state[stateKey] !== effective) {
+            state[stateKey] = effective;
+            onCommit();
+        }
+    };
+
+    bindControlListener(controlKey, 'input', () => {
+        const inputEl = controls[controlKey];
+        const displayEl = controls[displayKey];
+        updateCustomFormulaPreview(inputEl, displayEl, { allowedVariables });
+        if (commitTimer) clearTimeout(commitTimer);
+        commitTimer = setTimeout(commit, 300);
+    });
+
+    bindControlListener(controlKey, 'change', () => {
+        commit();
+    });
+}
+
 function bindSimpleControlRemainder() {
     BASIC_SLIDER_BINDINGS
         .filter(({ controlKey }) => !SPECIAL_SLIDERS.has(controlKey))
@@ -570,7 +617,7 @@ export function requestDomainRedraw(markDomainDirty = false) {
 }
 
 function requestAlgebraicRedraw() {
-    requestDomainRedraw(!(state.riemannSurfaceEnabled || state.realPlotsEnabled));
+    requestDomainRedraw(true);
 }
 
 export function setActiveFunctionButton(activeKey) {
@@ -2405,18 +2452,13 @@ function bindAlgebraicChainingControls() {
         appendAlgebraicTerm();
     });
 
-    bindControlListener('algebraicChainingZInput', 'input', () => {
-        const val = controls.algebraicChainingZInput?.value || 'z';
-        state.algebraicChainingZExpr = val;
-        updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath, { allowedVariables: ['z'] });
-        requestAlgebraicRedraw();
-    });
-
-    bindControlListener('algebraicChainingZInput', 'change', () => {
-        const val = controls.algebraicChainingZInput?.value || 'z';
-        state.algebraicChainingZExpr = val;
-        updateCustomFormulaPreview(controls.algebraicChainingZInput, controls.algebraicChainingZMath, { allowedVariables: ['z'] });
-        requestAlgebraicRedraw();
+    bindFormulaInput({
+        controlKey: 'algebraicChainingZInput',
+        displayKey: 'algebraicChainingZMath',
+        stateKey: 'algebraicChainingZExpr',
+        allowedVariables: ['z'],
+        defaultValue: 'z',
+        onCommit: requestAlgebraicRedraw
     });
 }
 
