@@ -58,7 +58,7 @@ test('Taylor coefficient keys observe the contour radius used for computation', 
     const keys = [
         'currentFunction', 'taylorSeriesEnabled', 'taylorSeriesCenter',
         'taylorSeriesOrder', 'taylorSeriesConvergenceRadius',
-        'riemannSphereViewEnabled', 'splitViewEnabled', 'chainingEnabled'
+        'chainingEnabled'
     ];
     const before = snapshotState(keys);
 
@@ -68,8 +68,6 @@ test('Taylor coefficient keys observe the contour radius used for computation', 
             taylorSeriesEnabled: true,
             taylorSeriesCenter: { re: 0, im: 0 },
             taylorSeriesOrder: 4,
-            riemannSphereViewEnabled: false,
-            splitViewEnabled: false,
             chainingEnabled: false
         });
         state.taylorSeriesConvergenceRadius = 0.5;

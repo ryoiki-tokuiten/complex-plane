@@ -30,8 +30,6 @@ export const COLOR_PROBE_CONFORMAL_LINE_Z_V = 'rgba(255, 165, 0, 0.9)';
 export const COLOR_PROBE_CONFORMAL_LINE_W_H = 'rgba(255, 255, 0, 0.9)';
 export const COLOR_PROBE_CONFORMAL_LINE_W_V = 'rgba(255, 165, 0, 0.9)';
 
-export const COLOR_SPHERE_GRID = 'rgba(128, 137, 255, 0.45)';
-
 // Cauchy Contour
 export const COLOR_CAUCHY_CONTOUR_Z = 'rgb(255, 160, 0)';
 export const COLOR_CAUCHY_CONTOUR_W = 'rgb(255, 160, 0)';

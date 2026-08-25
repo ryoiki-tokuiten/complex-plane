@@ -115,12 +115,10 @@ export function setNavigationModeEnabled(enabled) {
     state.probeActive = false;
 
     if (enabled) {
-        state.riemannSphereViewEnabled = false;
-        state.splitViewEnabled = false;
-        state.threeSphereEnabled = false;
-        if (controls.enableRiemannSphereCb) controls.enableRiemannSphereCb.checked = false;
-        if (controls.enableSplitViewCb) controls.enableSplitViewCb.checked = false;
-        if (controls.enableThreeSphereCb) controls.enableThreeSphereCb.checked = false;
+        state.manifold3dViewEnabled = false;
+        state.manifoldTransformationEnabled = false;
+        if (controls.enableManifold3DCb) controls.enableManifold3DCb.checked = false;
+        if (controls.enableManifoldTransformationCb) controls.enableManifoldTransformationCb.checked = false;
         followNavigationViewports();
     } else {
         runtime.navigation.keys = {};

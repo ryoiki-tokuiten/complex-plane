@@ -5,7 +5,6 @@ import {
     isDynamicAggregateActive
 } from '../analysis/dynamic-plotting.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
-import { drawMappedLineSetOnSphere, drawSphereMappedPoint } from './draw-sphere.js';
 import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
 const COLORS = Object.freeze({
@@ -313,85 +312,12 @@ export function drawDynamicWPlane(ctx, planeParams, transform, stageIndex = 0) {
     }
 }
 
-function spherePath(ctx, sphereParams, points, color) {
-    const validPoints = points.filter(finitePoint);
-    if (validPoints.length < 2) return;
-    drawMappedLineSetOnSphere(ctx, sphereParams, [validPoints], color);
-}
-
-export function drawDynamicSphere(ctx, sphereParams, options = {}) {
-    if (!state.dynamicPlotting?.enabled) return;
-
-    const isWPlane = Boolean(options.isWPlane);
-    const stageIndex = options.stageIndex === undefined
-        ? 0
-        : requireInteger(options.stageIndex, 'Dynamic sphere stage');
-    const transform = options.transform;
-    const result = getDynamicPlotResult({
-        transform: isWPlane && !isDynamicAggregateActive() ? transform : undefined,
-        stageIndex
-    });
-    if (!result) return;
-
-    if (!isWPlane) {
-        if (displayConfig().showInputPath) {
-            spherePath(ctx, sphereParams, result.visibleSamples.map(sample => sample.inputPoint), COLORS.input);
-        }
-        result.visibleSamples.forEach(sample => {
-            if (!finitePoint(sample.inputPoint)) return;
-            drawSphereMappedPoint(
-                ctx,
-                sphereParams,
-                sample.inputPoint,
-                COLORS.input,
-                pointRadius(),
-                { variant: 'outline' }
-            );
-        });
-        return;
-    }
-
-    if (isDynamicAggregateActive()) {
-        if (stageIndex === 0 && displayConfig().showPartialPath) {
-            spherePath(ctx, sphereParams, result.visibleSamples.map(partialValue), COLORS.partial);
-        }
-
-        const s = result.aggregateParameter;
-        const stageValue = typeof transform === 'function' ? transform(s.re, s.im) : result.reduction.finalValue;
-        if (finitePoint(stageValue)) {
-            drawSphereMappedPoint(
-                ctx,
-                sphereParams,
-                stageValue,
-                COLORS.final,
-                pointRadius() + 1.2,
-                { variant: 'final' }
-            );
-        }
-        return;
-    }
-
-    if (displayConfig().showPartialPath && result.reduction.kind !== 'none') {
-        spherePath(ctx, sphereParams, result.visibleSamples.map(partialValue), COLORS.partial);
-    }
-    result.visibleSamples.forEach(sample => {
-        if (!finitePoint(sample.termValue)) return;
-        drawSphereMappedPoint(
-            ctx,
-            sphereParams,
-            sample.termValue,
-            COLORS.term,
-            pointRadius()
-        );
-    });
-}
-
-export function getDynamicSphereSceneData(options = {}) {
+export function getDynamicManifoldSceneData(options = {}) {
     if (!state.dynamicPlotting?.enabled) return null;
 
     const stageIndex = options.stageIndex === undefined
         ? 0
-        : requireInteger(options.stageIndex, 'Dynamic sphere stage');
+        : requireInteger(options.stageIndex, 'Dynamic manifold stage');
     const transform = options.transform;
     const aggregateActive = isDynamicAggregateActive();
     const result = getDynamicPlotResult({
@@ -434,6 +360,8 @@ export function getDynamicSphereSceneData(options = {}) {
         pointSize: pointRadius()
     };
 }
+
+export const getDynamicSphereSceneData = getDynamicManifoldSceneData;
 
 export function findNearestDynamicSample(worldPoint, plane = 'z', options = {}) {
     if (!state.dynamicPlotting?.enabled || !finitePoint(worldPoint)) return null;

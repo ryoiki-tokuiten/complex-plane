@@ -38,14 +38,6 @@ export function orbitColoringModeId(mode) {
     return ORBIT_COLORING_MODE_IDS[normalizeOrbitColoringMode(mode)];
 }
 
-export const SPHERE_VIEW_RADIUS_FACTOR = 0.85;
-export const SPHERE_INITIAL_ROT_X = 0.4;
-export const SPHERE_INITIAL_ROT_Y = -0.6;
-export const SPHERE_SENSITIVITY = 0.01;
-export const SPHERE_GRID_LINE_MAX_WIDTH_W = 1.5;
-export const SPHERE_GRID_LINE_MAX_WIDTH_Z = 1.0;
-export const SPHERE_GRID_LINE_DEPTH_EFFECT = true;
-
 export const PARTICLE_RADIUS = 1.5;
 
 export const LINE_WIDTH_NORMAL = 1.5;

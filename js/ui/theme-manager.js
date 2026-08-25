@@ -51,6 +51,7 @@ export function persistThemePreferences() {
 export function applyTheme(themeId, { preserveGridColors = false } = {}) {
     const theme = themes.find(t => t.id === themeId);
     if (!theme) throw new Error(`Unknown theme: ${themeId}.`);
+    state.themeId = themeId;
     const root = document.documentElement;
     root.style.setProperty('--bg-color', theme.colors.bg);
     root.style.setProperty('--bg-color-rgb', hexToRgbStr(theme.colors.bg));

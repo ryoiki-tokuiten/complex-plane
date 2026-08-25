@@ -1,4 +1,4 @@
-import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sphereViewParams, sliderParamKeys } from '../store/state.js';
+import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
@@ -20,16 +20,13 @@ import {
     DOMAIN_COLOR_LOG_MAGNITUDE_MIN
 } from '../constants/domain-dynamics.js';
 import {
-    SPHERE_SENSITIVITY,
-    SPHERE_INITIAL_ROT_X,
-    SPHERE_INITIAL_ROT_Y,
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncRiemannTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview } from './ui-updates.js';
 import { syncGridDensityControls } from './grid-density-controls.js';
+import { buildThreeJSMeshes } from '../rendering/manifold-transformation-animation.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
-import { toggleRiemannTransformationAnimationZ, toggleRiemannTransformationAnimationW, syncRiemannTransformationPlayPauseButton } from '../rendering/riemann-transformation-animation.js';
 import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
 import { toggleAnimation } from './animation.js';
 import { initializePolynomialCoeffs } from './polynomial-ui.js';
@@ -62,6 +59,7 @@ import { openThemeModal } from '../frontend/components/theme-modal.jsx';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import { findPreimages } from '../analysis/preimage.js';
 import { continuationSheetForPath, evaluateOnSheet } from '../analysis/branch-continuation.js';
+import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
 
 const { controls = {} } = context;
 
@@ -109,7 +107,6 @@ function createCanvasInteractionContext(planeType) {
     ctx.pos = { x: 0, y: 0 };
     ctx.pendingMove = createPointerSnapshot();
     ctx.pendingWheel = createPointerSnapshot();
-    ctx.pendingSphereMove = createPointerSnapshot();
     ctx.clickStart = { x: 0, y: 0 };
     ctx.hasDragged = false;
     ctx.hasFreshRect = false;
@@ -124,7 +121,7 @@ const MOBIUS_PARAMS = ['A', 'B', 'C', 'D'];
 const DOMAIN_DIRTY_STATE_KEYS = new Set([
     'a0', 'b0', 'circleR', 'ellipseA', 'ellipseB',
     'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity', 'vectorFieldScale',
-    'zPlaneZoom', 'wPlaneZoom', 'fractionalPowerN', 'threeSphereOpacity', 'sphereGridOpacity'
+    'zPlaneZoom', 'wPlaneZoom', 'fractionalPowerN', 'manifoldSurfaceOpacity', 'manifoldGridOpacity'
 ]);
 
 const BASIC_SLIDER_BINDINGS = [
@@ -139,8 +136,8 @@ const BASIC_SLIDER_BINDINGS = [
     ['streamlineThicknessSlider', 'streamlineThickness'],
     ['streamlineSeedDensityFactorSlider', 'streamlineSeedDensityFactor'],
     ['radialDiscreteStepsCountSlider', 'radialDiscreteStepsCount', parseInteger],
-    ['threeSphereOpacitySlider', 'threeSphereOpacity'],
-    ['sphereGridOpacitySlider', 'sphereGridOpacity'],
+    ['manifoldSurfaceOpacitySlider', 'manifoldSurfaceOpacity'],
+    ['manifoldGridOpacitySlider', 'manifoldGridOpacity'],
     ['taylorSeriesOrderSlider', 'taylorSeriesOrder', parseInteger],
     ['particleDensitySlider', 'particleDensity', parseInteger],
     ['particleSpeedSlider', 'particleSpeed'],
@@ -172,13 +169,11 @@ const BASIC_CHECKBOX_BINDINGS = [
     ['showZerosPolesCb', 'showZerosPoles'],
     ['showCriticalPointsCb', 'showCriticalPoints'],
     ['enableCauchyIntegralModeCb', 'cauchyIntegralModeEnabled'],
-    ['enableSplitViewCb', 'splitViewEnabled'],
     ['enableVectorFieldCb', 'vectorFieldEnabled'],
     ['enableStreamlineFlowCb', 'streamlineFlowEnabled'],
     ['enableRadialDiscreteStepsCb', 'radialDiscreteStepsEnabled'],
-    ['enableRiemannSphereCb', 'riemannSphereViewEnabled'],
-    ['enableThreeSphereCb', 'threeSphereEnabled'],
-    ['enableRiemannTransformationCb', 'riemannTransformationEnabled'],
+    ['enableManifold3DCb', 'manifold3dViewEnabled'],
+    ['enableManifoldTransformationCb', 'manifoldTransformationEnabled'],
     ['enableTaylorSeriesCb', 'taylorSeriesEnabled'],
     ['enableTaylorSeriesCustomCenterCb', 'taylorSeriesCustomCenterEnabled'],
     ['laplaceShowRocCb', 'laplaceShowROC'],
@@ -200,7 +195,8 @@ const BASIC_SELECTOR_BINDINGS = [
     ['vectorFieldFunctionSelector', 'vectorFieldFunction'],
     ['laplaceFunctionSelector', 'laplaceFunction'],
     ['laplaceVizModeSelector', 'laplaceVizMode'],
-    ['riemannSurfaceComponentSelector', 'riemannSurfaceComponent']
+    ['riemannSurfaceComponentSelector', 'riemannSurfaceComponent'],
+    ['manifoldShapeSelector', 'selectedManifold']
 ].map(([controlKey, stateKey]) => ({ controlKey, stateKey }));
 
 const SPECIAL_SLIDERS = new Set([
@@ -210,7 +206,7 @@ const SPECIAL_SLIDERS = new Set([
     'particleMaxLifetimeSlider', 'imageSizeSlider', 'imageOpacitySlider',
     'videoFpsSlider', 'videoSizeSlider', 'videoOpacitySlider',
     'zPlaneZoomSlider', 'wPlaneZoomSlider', 'taylorSeriesOrderSlider',
-    'radialDiscreteStepsCountSlider', 'laplaceAnimationSpeedSlider',
+    'radialDiscreteStepsCountSlider', 'laplaceAnimationSpeedSlider', 'laplaceAnimationTimeSlider',
     'laplaceFrequencySlider', 'laplaceDampingSlider', 'laplaceAmplitudeSlider',
     'laplaceTimeWindowSlider', 'laplaceSamplesSlider',
     'laplaceSigmaSlider',
@@ -218,9 +214,9 @@ const SPECIAL_SLIDERS = new Set([
 ]);
 
 const SPECIAL_CHECKBOXES = new Set([
-    'enableSplitViewCb', 'enableVectorFieldCb', 'enableStreamlineFlowCb',
-    'enableRadialDiscreteStepsCb', 'enableRiemannSphereCb', 'enableRiemannSurfaceCb',
-    'enableThreeSphereCb', 'enableTaylorSeriesCb', 'enableTaylorSeriesCustomCenterCb',
+    'enableVectorFieldCb', 'enableStreamlineFlowCb',
+    'enableRadialDiscreteStepsCb', 'enableManifold3DCb', 'enableRiemannSurfaceCb',
+    'enableTaylorSeriesCb', 'enableTaylorSeriesCustomCenterCb',
     'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
     'laplaceShowFourierLineCb', 'laplaceHideIntegralEvaluationCb', 'laplaceHide3DSurfaceCb',
     'laplaceShowSpectrumCb', 'laplaceContoursCb',
@@ -232,17 +228,9 @@ const SPECIAL_SELECTORS = new Set([
     'inputShapeSelector',
     'vectorFieldFunctionSelector',
     'laplaceFunctionSelector',
-    'laplaceVizModeSelector'
+    'laplaceVizModeSelector',
+    'manifoldShapeSelector'
 ]);
-
-const SPHERE_VIEW_BUTTONS = {
-    sphereViewNorthBtn: { rotX: -Math.PI / 2 + 0.01, rotY: 0 },
-    sphereViewSouthBtn: { rotX: Math.PI / 2 - 0.01, rotY: 0 },
-    sphereViewEastBtn: { rotX: 0, rotY: -Math.PI / 2 },
-    sphereViewWestBtn: { rotX: 0, rotY: Math.PI / 2 },
-    sphereViewFrontBtn: { rotX: 0, rotY: 0 },
-    sphereViewResetBtn: { rotX: SPHERE_INITIAL_ROT_X, rotY: SPHERE_INITIAL_ROT_Y }
-};
 
 const BINDERS = [
     bindBaseParameterControls,
@@ -912,7 +900,12 @@ function readImageFile(file, callback) {
 }
 
 function processUploadedImage(img) {
-    if (processUploadedImageSource(img)) requestDomainRedraw(true);
+    if (processUploadedImageSource(img)) {
+        requestDomainRedraw(true);
+        if (state.manifold3dViewEnabled || state.manifoldTransformationEnabled) {
+            buildThreeJSMeshes();
+        }
+    }
 }
 
 function complexState(key) {
@@ -1032,20 +1025,13 @@ function bindVideoControls() {
 function bindDomainColoringControls() {
     bindCheckbox('enableDomainColoringCb', 'domainColoringEnabled', () => {
         if (state.domainColoringEnabled) {
-            if (state.riemannSphereViewEnabled) {
-                state.riemannSphereViewEnabled = false;
-                checked('enableRiemannSphereCb', false);
-                state.riemannTransformationEnabled = false;
-                checked('enableRiemannTransformationCb', false);
-                hidden(controls.threeSphereOptionsDiv, true);
-                hidden(controls.riemannSphereOptionsDiv, true);
-                syncRiemannTransformationUI();
-                updateChainingTitles();
-            }
-            if (state.riemannTransformationEnabled) {
-                state.riemannTransformationEnabled = false;
-                checked('enableRiemannTransformationCb', false);
-                syncRiemannTransformationUI();
+            if (state.manifold3dViewEnabled) {
+                state.manifold3dViewEnabled = false;
+                state.manifoldTransformationEnabled = false;
+                checked('enableManifold3DCb', false);
+                checked('enableManifoldTransformationCb', false);
+                hidden(controls.manifoldOptionsDiv, true);
+                syncManifoldTransformationUI();
             }
             if (state.currentInputShape !== 'empty_grid') {
                 if (state.currentInputShape === 'video' && state.videoIsPlaying) {
@@ -1098,7 +1084,7 @@ function bindDerivativeControls() {
 
     bindElementListener(controls.enableDerivativeCb, 'change', event => {
         state.mapPresentation = event.target.checked ? 'derivative' : 'function';
-        syncRiemannTransformationUI();
+        syncManifoldTransformationUI();
         updateChainingTitles();
         requestDomainRedraw(true);
     });
@@ -1179,20 +1165,15 @@ function enableFoldSurface3d() {
     disableRiemannSurface();
     if (state.navigationModeEnabled) setNavigationModeEnabled(false);
     Object.assign(state, {
-        riemannSphereViewEnabled: false,
-        riemannTransformationEnabled: false,
-        splitViewEnabled: false,
-        threeSphereEnabled: false
+        manifold3dViewEnabled: false,
+        manifoldTransformationEnabled: false
     });
     [
-        'enableRiemannSphereCb',
-        'enableRiemannTransformationCb',
-        'enableSplitViewCb',
-        'enableThreeSphereCb'
+        'enableManifold3DCb',
+        'enableManifoldTransformationCb'
     ].forEach(key => checked(key, false));
-    hidden(controls.riemannSphereOptionsDiv, true);
-    hidden(controls.threeSphereOptionsDiv, true);
-    syncRiemannTransformationUI();
+    hidden(controls.manifoldOptionsDiv, true);
+    syncManifoldTransformationUI();
     updateChainingTitles();
 }
 
@@ -1214,20 +1195,6 @@ function disableFoldSurface3d() {
 function bindViewControls() {
     bindFoldSurfaceControl('gridSurface3DCb');
 
-    bindCheckbox('enableSplitViewCb', 'splitViewEnabled', () => {
-        if (state.splitViewEnabled) {
-            disableFoldSurface3d();
-            if (state.riemannSurfaceEnabled) disableRiemannSurface();
-            if (state.riemannTransformationEnabled) {
-                state.riemannTransformationEnabled = false;
-                checked('enableRiemannTransformationCb', false);
-            }
-        }
-        syncRiemannTransformationUI();
-        updateChainingTitles();
-        requestDomainRedraw(true);
-    });
-
     [
         ['zPlaneZoomSlider', 'zPlaneZoom', [true, false]],
         ['wPlaneZoomSlider', 'wPlaneZoom', [false, true]]
@@ -1236,147 +1203,105 @@ function bindViewControls() {
         requestDomainRedraw(true);
     }));
 
-    bindCheckbox('enableRiemannSphereCb', 'riemannSphereViewEnabled', () => {
-        if (state.riemannSphereViewEnabled) {
-            disableFoldSurface3d();
-            if (state.riemannSurfaceEnabled) disableRiemannSurface();
-
+    const onManifold3dToggled = () => {
+        if (state.manifold3dViewEnabled) {
             if (state.domainColoringEnabled) {
                 state.domainColoringEnabled = false;
                 checked('enableDomainColoringCb', false);
                 hidden(controls.domainColoringOptionsDiv, true);
-                hidden(controls.domainColoringKey, true);
-                state.currentInputShape = 'grid_cartesian';
-                if (controls.inputShapeSelector) controls.inputShapeSelector.value = 'grid_cartesian';
+                syncDomainColoringKeyVisibility();
+                syncOrbitColoringModeControl();
             }
+            disableFoldSurface3d();
+            if (state.riemannSurfaceEnabled) disableRiemannSurface();
+            state.manifoldTransformationEnabled = false;
+            checked('enableManifoldTransformationCb', false);
+            state.manifoldTransformationProgressW = 1.0;
 
-            if (!state.threeSphereEnabled) {
-                state.threeSphereEnabled = true;
-                checked('enableThreeSphereCb', true);
-                hidden(controls.threeSphereOptionsDiv, false);
+            const defaultShape = getDefaultInputShapeForManifold(state.selectedManifold);
+            state.currentInputShape = defaultShape;
+            if (controls.inputShapeSelector) {
+                controls.inputShapeSelector.value = defaultShape;
             }
-            if (!state.splitViewEnabled) {
-                state.splitViewEnabled = true;
-                checked('enableSplitViewCb', true);
-            }
+            syncGridDensityControls();
         } else {
-            state.riemannTransformationEnabled = false;
-            state.threeSphereEnabled = false;
-            state.splitViewEnabled = false;
-            checked('enableRiemannTransformationCb', false);
-            checked('enableThreeSphereCb', false);
-            checked('enableSplitViewCb', false);
-            hidden(controls.threeSphereOptionsDiv, true);
+            state.manifoldTransformationEnabled = false;
+            checked('enableManifoldTransformationCb', false);
+            syncGridDensityControls();
         }
-        hidden(controls.riemannSphereOptionsDiv, !state.riemannSphereViewEnabled);
-        syncRiemannTransformationUI();
+        hidden(controls.manifoldOptionsDiv, !state.manifold3dViewEnabled);
+        syncManifoldTransformationUI();
+        updateChainingTitles();
+        requestDomainRedraw(true);
+    };
+    bindCheckbox('enableManifold3DCb', 'manifold3dViewEnabled', onManifold3dToggled);
+
+    bindSelector('manifoldShapeSelector', 'selectedManifold', () => {
+        if (!isRasterInputShape(state.currentInputShape)) {
+            const defaultShape = getDefaultInputShapeForManifold(state.selectedManifold);
+            state.currentInputShape = defaultShape;
+            if (controls.inputShapeSelector) {
+                controls.inputShapeSelector.value = defaultShape;
+            }
+        }
+        syncGridDensityControls();
+        if (state.manifold3dViewEnabled || state.manifoldTransformationEnabled) {
+            buildThreeJSMeshes();
+        }
+        syncManifoldTransformationUI();
         updateChainingTitles();
         requestDomainRedraw(true);
     });
 
-    bindCheckbox('enableThreeSphereCb', 'threeSphereEnabled', () => {
-        if (state.threeSphereEnabled) {
-            disableFoldSurface3d();
-            if (state.riemannTransformationEnabled) {
-                state.riemannTransformationEnabled = false;
-                checked('enableRiemannTransformationCb', false);
-                syncRiemannTransformationUI();
+    const onTransformationToggled = () => {
+        if (state.manifoldTransformationEnabled) {
+            if (state.domainColoringEnabled) {
+                state.domainColoringEnabled = false;
+                checked('enableDomainColoringCb', false);
+                hidden(controls.domainColoringOptionsDiv, true);
+                syncDomainColoringKeyVisibility();
+                syncOrbitColoringModeControl();
             }
-        }
-        hidden(controls.threeSphereOptionsDiv, !state.threeSphereEnabled);
-        updateChainingTitles();
-        requestUiRedraw();
-    });
-
-    bindCheckbox('enableRiemannTransformationCb', 'riemannTransformationEnabled', () => {
-        if (state.riemannTransformationEnabled) {
             disableFoldSurface3d();
-            if (!state.riemannSphereViewEnabled) {
-                state.riemannSphereViewEnabled = true;
-                checked('enableRiemannSphereCb', true);
-                hidden(controls.riemannSphereOptionsDiv, false);
+            if (!state.manifold3dViewEnabled) {
+                state.manifold3dViewEnabled = true;
+                checked('enableManifold3DCb', true);
+                hidden(controls.manifoldOptionsDiv, false);
             }
             if (state.riemannSurfaceEnabled) {
                 disableRiemannSurface();
             }
-            if (state.domainColoringEnabled) {
-                state.domainColoringEnabled = false;
-                checked('enableDomainColoringCb', false);
-                hidden(controls.domainColoringOptionsDiv, true);
-                hidden(controls.domainColoringKey, true);
-            }
-            if (state.splitViewEnabled) {
-                state.splitViewEnabled = false;
-                checked('enableSplitViewCb', false);
-            }
-            if (state.threeSphereEnabled) {
-                state.threeSphereEnabled = false;
-                checked('enableThreeSphereCb', false);
-                hidden(controls.threeSphereOptionsDiv, true);
-            }
+            state.manifoldTransformationProgressZ = 0.0;
+            state.manifoldTransformationProgressW = 0.0;
+            state.manifoldTransformationPlayingZ = true;
+            state.manifoldTransformationPlayingW = true;
+        } else {
+            state.manifoldTransformationPlayingZ = false;
+            state.manifoldTransformationPlayingW = false;
+            state.manifoldTransformationProgressW = 1.0;
         }
-        syncRiemannTransformationUI();
+        syncManifoldTransformationUI();
         updateChainingTitles();
         requestDomainRedraw(true);
-    });
+    };
+    bindCheckbox('enableManifoldTransformationCb', 'manifoldTransformationEnabled', onTransformationToggled);
 
     bindCheckbox('enableRiemannSurfaceCb', 'riemannSurfaceEnabled', () => {
         if (state.riemannSurfaceEnabled) {
             disableFoldSurface3d();
             disableRealPlots();
-            Object.assign(state, { riemannSphereViewEnabled: false, riemannTransformationEnabled: false, splitViewEnabled: false, threeSphereEnabled: false });
-            ['enableRiemannSphereCb', 'enableRiemannTransformationCb', 'enableSplitViewCb', 'enableThreeSphereCb'].forEach(key => checked(key, false));
+            Object.assign(state, { manifold3dViewEnabled: false, manifoldTransformationEnabled: false });
+            ['enableManifold3DCb', 'enableManifoldTransformationCb'].forEach(key => checked(key, false));
             if (state.navigationModeEnabled) setNavigationModeEnabled(false);
         }
 
         hidden(controls.riemannSurfaceOptionsDiv, !state.riemannSurfaceEnabled);
-        hidden(controls.riemannSphereOptionsDiv, true);
+        hidden(controls.manifoldOptionsDiv, true);
         updateChainingTitles();
         requestDomainRedraw(true);
     });
 
-    const transSliderZ = document.getElementById('z_transformation_progress_slider');
-    if (transSliderZ) {
-        bindElementListener(transSliderZ, 'input', event => {
-            state.riemannTransformationPlayingZ = false;
-            state.riemannTransformationProgressZ = parseFloat(event.target.value);
-            syncRiemannTransformationPlayPauseButton();
-            requestDomainRedraw(true);
-        });
-    }
-
-    const transPlayPauseBtnZ = document.getElementById('z_transformation_play_pause_btn');
-    if (transPlayPauseBtnZ) {
-        bindElementListener(transPlayPauseBtnZ, 'click', () => {
-            toggleRiemannTransformationAnimationZ();
-        });
-    }
-
-    const transSliderW = document.getElementById('w_transformation_progress_slider');
-    if (transSliderW) {
-        bindElementListener(transSliderW, 'input', event => {
-            state.riemannTransformationPlayingW = false;
-            state.riemannTransformationProgressW = parseFloat(event.target.value);
-            syncRiemannTransformationPlayPauseButton();
-            requestDomainRedraw(true);
-        });
-    }
-
-    const transPlayPauseBtnW = document.getElementById('w_transformation_play_pause_btn');
-    if (transPlayPauseBtnW) {
-        bindElementListener(transPlayPauseBtnW, 'click', () => {
-            toggleRiemannTransformationAnimationW();
-        });
-    }
-
     bindControlListener('riemannSurfaceResetViewBtn', 'click', () => resetRiemannSurfaceViews());
-
-    Object.entries(SPHERE_VIEW_BUTTONS).forEach(([controlKey, rotation]) => {
-        bindControlListener(controlKey, 'click', () => {
-            [sphereViewParams.z, sphereViewParams.w].forEach(params => Object.assign(params, rotation));
-            requestDomainRedraw(true);
-        });
-    });
 }
 
 function bindNavigationControls() {
@@ -1491,10 +1416,18 @@ function bindLaplaceControls() {
         }
     ));
 
-    ['laplaceSigma', 'laplaceOmega'].forEach(key => bindSlider(`${key}Slider`, key, parseFloat, () => {
-        if (state.laplaceModeEnabled) updateLaplaceEvaluationPoint();
-        requestUiRedraw();
-    }));
+    ['laplaceSigmaSlider', 'laplaceOmegaSlider', 'laplaceWindingFrequencySlider'].forEach(controlKey => {
+        const stateKey = controlKey === 'laplaceSigmaSlider' ? 'laplaceSigma' : 'laplaceOmega';
+        bindSlider(controlKey, stateKey, parseFloat, () => {
+            if (stateKey === 'laplaceOmega') {
+                ['laplaceOmegaSlider', 'laplaceWindingFrequencySlider'].forEach(key => {
+                    if (controls[key]) controls[key].value = String(state.laplaceOmega);
+                });
+            }
+            if (state.laplaceModeEnabled) updateLaplaceEvaluationPoint();
+            requestUiRedraw();
+        });
+    });
 
     bindControlListener('laplaceFourierSliceBtn', 'click', () => {
         state.laplaceSigma = 0;
@@ -1526,6 +1459,10 @@ function bindLaplaceControls() {
         }
         syncLaplacePlayPauseButton();
     });
+    bindSlider('laplaceAnimationTimeSlider', 'laplaceAnimationTime', parseFloat, () => {
+        stopLaplaceAnimation();
+        requestUiRedraw();
+    });
 
     [
         ['laplacePlayPauseBtn', toggleLaplaceAnimation],
@@ -1542,12 +1479,6 @@ function canvasContext(planeType) {
     return planeType === 'z'
         ? { planeType, canvas: zCanvas, params: zPlaneParams, pan: runtime.interaction.panZ, isZ: true }
         : { planeType, canvas: wCanvas, params: wPlaneParams, pan: runtime.interaction.panW, isZ: false };
-}
-
-function isSphereInteractionActive(isZCanvas) {
-    return isZCanvas
-        ? state.riemannSphereViewEnabled && !state.splitViewEnabled
-        : state.riemannSphereViewEnabled || state.splitViewEnabled;
 }
 
 function refreshCanvasRect(ctx) {
@@ -1660,8 +1591,6 @@ function startPan(ctx, pos) {
 }
 
 function handleCanvasMoveNow(ctx, pointer) {
-    if (isSphereInteractionActive(ctx.isZ)) return;
-
     const pos = canvasPosition(ctx, pointer);
 
     if (ctx.isZ && ctx.drawingBranch) {
@@ -1729,7 +1658,6 @@ function scheduleCanvasMove(ctx, event) {
 }
 
 function handleCanvasDown(ctx, event) {
-    if (isSphereInteractionActive(ctx.isZ)) return;
     if (event.button !== 0) return;
 
     refreshCanvasRect(ctx);
@@ -1790,7 +1718,7 @@ function finishCanvasStroke(ctx) {
 }
 
 function handleCanvasUp(ctx, event) {
-    if (finishCanvasStroke(ctx) || isSphereInteractionActive(ctx.isZ)) return;
+    if (finishCanvasStroke(ctx)) return;
     if (event.button !== 0 || !ctx.pan.isPanning) return;
 
     ctx.pan.isPanning = false;
@@ -1814,7 +1742,6 @@ function handleCanvasUp(ctx, event) {
 
 function handleCanvasLeave(ctx) {
     if (finishCanvasStroke(ctx)) return;
-    if (isSphereInteractionActive(ctx.isZ)) return;
 
     ctx.pendingMove.hasData = false;
     invalidateCanvasRect(ctx);
@@ -1853,7 +1780,6 @@ function zoomPlaneAt(ctx, pos, factor) {
 function flushCanvasWheel(ctx) {
     if (!ctx.pendingWheel.hasData) return;
     ctx.pendingWheel.hasData = false;
-    if (isSphereInteractionActive(ctx.isZ)) return;
 
     const pos = canvasPosition(ctx, ctx.pendingWheel);
     const factor = ctx.pendingWheel.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
@@ -1861,8 +1787,6 @@ function flushCanvasWheel(ctx) {
 }
 
 function handleCanvasWheel(ctx, event) {
-    if (isSphereInteractionActive(ctx.isZ)) return;
-
     event.preventDefault();
     canvasRect(ctx);
     updatePointerSnapshot(ctx.pendingWheel, event);
@@ -2001,30 +1925,23 @@ function contextForCanvasEvent(event) {
 
 function onCanvasMouseMove(event) {
     const ctx = contextForCanvasEvent(event);
-    if (!ctx) return;
-    if (isSphereInteractionActive(ctx.isZ)) scheduleSphereMouseMove(ctx, event);
-    else scheduleCanvasMove(ctx, event);
+    if (ctx) scheduleCanvasMove(ctx, event);
 }
 
 function onCanvasMouseDown(event) {
     const ctx = contextForCanvasEvent(event);
-    if (!ctx) return;
-    if (isSphereInteractionActive(ctx.isZ)) handleSphereMouseDown(event, ctx.planeType);
-    else handleCanvasDown(ctx, event);
+    if (ctx) handleCanvasDown(ctx, event);
 }
 
 function onCanvasMouseUp(event) {
     const ctx = contextForCanvasEvent(event);
-    if (!ctx) return;
-    if (isSphereInteractionActive(ctx.isZ)) handleSphereMouseUp(ctx.planeType);
-    else handleCanvasUp(ctx, event);
+    if (ctx) handleCanvasUp(ctx, event);
 }
 
 function onCanvasMouseLeave(event) {
     const ctx = contextForCanvasEvent(event);
     if (!ctx) return;
-    if (isSphereInteractionActive(ctx.isZ)) handleSphereMouseUp(ctx.planeType);
-    else handleCanvasLeave(ctx);
+    handleCanvasLeave(ctx);
     invalidateCanvasRect(ctx);
 }
 
@@ -2035,7 +1952,7 @@ function onCanvasWheel(event) {
 
 function onCanvasClick(event) {
     const ctx = contextForCanvasEvent(event);
-    if (!ctx || isSphereInteractionActive(ctx.isZ)) return;
+    if (!ctx) return;
     if (ctx.hasDragged) {
         ctx.hasDragged = false;
         return;
@@ -2292,6 +2209,9 @@ function bindChainingControls() {
         }
         if (canvasInteractionContexts.z) canvasInteractionContexts.z.drawingArbitraryShape = false;
         syncGridFoldDensity(state.foldSurface3dEnabled && isFoldableInputShape(value));
+        if (state.manifold3dViewEnabled || state.manifoldTransformationEnabled) {
+            buildThreeJSMeshes();
+        }
         requestDomainRedraw(true);
     });
 
@@ -2333,72 +2253,6 @@ function bindThemeControls() {
     bindControlListener('themeSelectorBtn', 'click', openThemeModal);
 }
 
-function sphereParams(planeType) {
-    return planeType === 'z' ? sphereViewParams.z : sphereViewParams.w;
-}
-
-function canvasFor(planeType) {
-    return planeType === 'z' ? zCanvas : wCanvas;
-}
-
-function handleSphereMouseDown(event, planeType) {
-    const params = sphereParams(planeType);
-    if (!isSphereInteractionActive(planeType === 'z')) return;
-
-    const canvas = canvasFor(planeType);
-    if (!canvas) return;
-
-    params.dragging = true;
-    params.lastMouseX = event.clientX;
-    params.lastMouseY = event.clientY;
-    canvas.style.cursor = 'grabbing';
-}
-
-function applySphereMouseMove(planeType, pointer) {
-    const params = sphereParams(planeType);
-    if (!isSphereInteractionActive(planeType === 'z')) return;
-
-    const canvas = canvasFor(planeType);
-    if (!canvas || !params.dragging) return;
-
-    params.rotY += (pointer.clientX - params.lastMouseX) * SPHERE_SENSITIVITY;
-    params.rotX += (pointer.clientY - params.lastMouseY) * SPHERE_SENSITIVITY;
-    params.lastMouseX = pointer.clientX;
-    params.lastMouseY = pointer.clientY;
-    requestDomainRedraw(true);
-}
-
-function flushSphereMouseMove(ctx) {
-    if (!ctx.pendingSphereMove.hasData) return;
-    ctx.pendingSphereMove.hasData = false;
-    applySphereMouseMove(ctx.planeType, ctx.pendingSphereMove);
-}
-
-function scheduleSphereMouseMove(ctx, event) {
-    updatePointerSnapshot(ctx.pendingSphereMove, event);
-    flushSphereMouseMove(ctx);
-}
-
-function handleSphereMouseUp(planeType) {
-    const params = sphereParams(planeType);
-
-    if (planeType === 'z') {
-        context.draggingProbeOnSphere = false;
-    }
-
-    if (!isSphereInteractionActive(planeType === 'z') && !params.dragging) return;
-
-    params.dragging = false;
-    const ctx = canvasInteractionContexts[planeType];
-    if (ctx) {
-        ctx.pendingSphereMove.hasData = false;
-    }
-    const canvas = canvasFor(planeType);
-    if (canvas) {
-        canvas.style.cursor = 'crosshair';
-    }
-}
-
 function fullscreenTarget(planeType, index = 0) {
     const isZ = planeType === 'z';
     if (isZ) {
@@ -2415,7 +2269,7 @@ function fullscreenTarget(planeType, index = 0) {
     const threeContainer = (context.wPlaneThreeContainersList && context.wPlaneThreeContainersList[index]) || controls.wPlaneThreeContainer;
     const surface = state.riemannSurfaceEnabled ? getRiemannSurfaceCanvas(canvas) : null;
     const isThree = threeContainer && (
-        (state.threeSphereEnabled && state.riemannSphereViewEnabled) ||
+        state.manifold3dViewEnabled ||
         (state.foldSurface3dEnabled && (
             isFoldableInputShape(state.currentInputShape) ||
             (isRasterInputShape(state.currentInputShape) && getRasterSourceForShape(state.currentInputShape))

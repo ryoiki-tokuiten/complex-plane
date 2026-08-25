@@ -238,3 +238,24 @@ allocation_error:
     free(refined.values); free(refined.valid); free(lines.values); free(lines.offsets); free(lines.sets);
     free(points.values); free(points.offsets); free(points.sets); return -2;
 }
+
+int32_t ce_build_fold_preimage_markers(const ce_map_config *config,
+                                       const ce_complex *roots, uint32_t root_count,
+                                       double mapped_center_x, double mapped_center_y,
+                                       double source_center, double scale, double height_scale,
+                                       float *positions) {
+    if (!config || !roots || !positions || !isfinite(scale) || scale == 0.0) return -1;
+    uint32_t count = 0u;
+    for (uint32_t index = 0; index < root_count; ++index) {
+        ce_complex mapped;
+        uint8_t valid = 0u;
+        if (!isfinite(roots[index].re) || !isfinite(roots[index].im) ||
+            ce_evaluate_points(config, &roots[index], 1u, &mapped, &valid) != 0 ||
+            !valid || !isfinite(mapped.re) || !isfinite(mapped.im)) continue;
+        positions[count * 3u] = (float)((mapped.re - mapped_center_x) * scale);
+        positions[count * 3u + 1u] = (float)((roots[index].re - source_center) * scale * height_scale);
+        positions[count * 3u + 2u] = (float)((mapped.im - mapped_center_y) * scale);
+        ++count;
+    }
+    return (int32_t)count;
+}

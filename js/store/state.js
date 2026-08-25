@@ -3,9 +3,7 @@
 import { createObservableStore } from './observable-store.js';
 import {
     DEFAULT_CANVAS_WIDTH,
-    DEFAULT_CANVAS_HEIGHT,
-    SPHERE_INITIAL_ROT_X,
-    SPHERE_INITIAL_ROT_Y
+    DEFAULT_CANVAS_HEIGHT
 } from '../constants/rendering.js';
 
 export const zPlaneInitialRanges = { x: [-3.5, 3.5], y: [-3.0, 3.0] };
@@ -29,11 +27,6 @@ export const wPlaneParams = {
     currentVisXRange: [...wPlaneInitialRanges.x],
     currentVisYRange: [...wPlaneInitialRanges.y],
     preciseViewport: null
-};
-
-export const sphereViewParams = {
-    z: { rotX: SPHERE_INITIAL_ROT_X, rotY: SPHERE_INITIAL_ROT_Y, dragging: false, lastMouseX: 0, lastMouseY: 0, radius: 0, centerX: 0, centerY: 0 },
-    w: { rotX: SPHERE_INITIAL_ROT_X, rotY: SPHERE_INITIAL_ROT_Y, dragging: false, lastMouseX: 0, lastMouseY: 0, radius: 0, centerX: 0, centerY: 0 }
 };
 
 export const sliderParamKeys = ['a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'fractionalPowerN'];
@@ -66,13 +59,15 @@ const rawState = {
     probeActive: false,
     probeZ: { re: 0, im: 0 },
     probeNeighborhoodSize: 0.2,
-    riemannSphereViewEnabled: false,
-    riemannTransformationEnabled: false,
-    riemannTransformationProgressZ: 0.0,
-    riemannTransformationPlayingZ: true,
-    riemannTransformationProgressW: 0.0,
-    riemannTransformationPlayingW: true,
-    splitViewEnabled: false, 
+    manifold3dViewEnabled: false,
+    selectedManifold: 'sphere',
+    manifoldTransformationEnabled: false,
+    manifoldTransformationProgressZ: 0.0,
+    manifoldTransformationPlayingZ: true,
+    manifoldTransformationSpeedZ: 1.0,
+    manifoldTransformationProgressW: 0.0,
+    manifoldTransformationPlayingW: true,
+    manifoldTransformationSpeedW: 1.0,
     zPlaneZoom: 1.0,
     wPlaneZoom: 1.0,
     zeros: [],
@@ -159,9 +154,8 @@ const rawState = {
     particleSpeed: 0.04,
     particleMaxLifetime: 300,
 
-    threeSphereEnabled: false,
-    threeSphereOpacity: 0.10,
-    sphereGridOpacity: 0.0,
+    manifoldSurfaceOpacity: 0.35,
+    manifoldGridOpacity: 0.25,
     riemannSurfaceEnabled: false,
     riemannSurfaceSheets: 5,
     riemannSurfaceBranchCenter: 0,
@@ -326,6 +320,20 @@ subscribeState(({ value }) => {
     if (value && state.probeActive) state.probeActive = false;
 }, 'chainingEnabled');
 
+// Preserve mutual exclusivity between domain coloring and 3D manifold modes.
+subscribeState(({ value }) => {
+    if (value && state.manifold3dViewEnabled) {
+        state.manifold3dViewEnabled = false;
+        state.manifoldTransformationEnabled = false;
+    }
+}, 'domainColoringEnabled');
+
+subscribeState(({ value }) => {
+    if (value && state.domainColoringEnabled) {
+        state.domainColoringEnabled = false;
+    }
+}, 'manifold3dViewEnabled');
+
 export const context = {
     zCanvas: null,
     wCanvas: null,
@@ -338,7 +346,6 @@ export const context = {
     wCtxList: [],
     wPlaneParamsList: [],
     wPlaneThreeContainersList: [],
-    sphereViewWParamsList: [],
     wPlanarTransformedLayerCacheList: [],
     redrawRequest: null,
     redrawQueued: false,

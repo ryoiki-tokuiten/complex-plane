@@ -413,20 +413,20 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 3. **Vertex Transform** — Evaluates mapping function in vertex shader or CPU batch buffer.
 4. **Rasterize** — Draws textured warped triangles with bilinear interpolation.
 
-#### T3 · Three.js 3D Engine
+#### T3 · 3D Differential Manifolds & Real Plots Engine
 
-**In one line.** 3D WebGL scene rendering stereographic Riemann spheres, Laplace $|F(s)|$ heightfields, and folded surfaces.
+**In one line.** 3D WebGL scene rendering 10 differential surface topologies, smooth plane-to-manifold morphs, Laplace $|F(s)|$ heightfields, and folded surfaces.
 
-**What it does.** Renders rich 3D mathematical surfaces: the Riemann Sphere (compactification of $\mathbb{C} \cup \{\infty\}$ via stereographic projection), 3D $|F(s)|$ Laplace transform terrain, and folded modular surfaces $|f(z)|$.
+**What it does.** Renders rich 3D differential geometry surfaces across 10 topologies (Riemann sphere, torus, paraboloid, hyperbola, helicoid, pseudosphere, cylinder, catenoid, cone, Mobius strip), 3D $|F(s)|$ Laplace transform terrain, and folded surfaces.
 
-**How it's built.** Implemented in `js/rendering/three-riemann-renderer.js`, `real-plots-renderer.js`, and `draw-sphere.js`. Laplace feeds scalar heightfield data directly into the generalized Real Plots renderer, sharing its orbit controls, palette shading, contours, and mesh uploads.
+**How it's built.** Implemented in `js/rendering/3d-manifolds-renderer.js`, `js/rendering/manifold-registry.js`, and `real-plots-renderer.js`. Supports smooth plane-to-manifold morph animations and interactive OrbitControls across all manifolds.
 
 **Steps in execution.**
 
 1. **Scene Setup** — Initializes Three.js perspective camera, ambient lighting, and orbit controls.
-2. **Stereographic Map** — Projects planar points $z = x+iy$ onto sphere $(\xi, \eta, \zeta) = \left(\frac{2x}{|z|^2+1}, \frac{2y}{|z|^2+1}, \frac{|z|^2-1}{|z|^2+1}\right)$.
+2. **Differential Projection** — Projects complex coordinates $(u, v)$ to 3D manifold geometry with smooth morph interpolation.
 3. **Mesh Heightfield** — Generates 3D vertex elevations $z = \ln(1 + |F(s)|)$.
-4. **Render Pass** — Draws shaded 3D mesh with interactive mouse rotation.
+4. **Render Pass** — Draws shaded 3D mesh with interactive rotation and opacity controls.
 
 #### 3B · Transform Winders
 
@@ -570,9 +570,9 @@ complex-plane/
   │   │   ├── renderer.js          # Planar z/w orchestration
   │   │   ├── draw-planar.js       # Canvas 2D grid/shape drawing
   │   │   ├── domain-coloring.js   # Phase/magnitude color wheel
-  │   │   ├── draw-image-webgl.js  # GPU texture mesh warper
-  │   │   ├── three-riemann-renderer.js # 3D Riemann sphere engine
-  │   │   ├── real-plots-renderer.js # Shared Real Plots and Laplace Three.js heightfield renderer
+  │   │   ├── 3d-manifolds-renderer.js # Generalized 3D Manifolds engine
+  │   │   ├── manifold-registry.js     # 10 Differential manifold topologies
+  │   │   ├── real-plots-renderer.js   # Shared Real Plots and Laplace Three.js heightfield renderer
   │   │   ├── draw-laplace-winding-3b1b.js # Laplace winding, including the Fourier slice
   │   │   └── draw-laplace-panels.js # Time-domain and discrete spectrum panels
   │   ├── frontend/                # Preact reactive UI components

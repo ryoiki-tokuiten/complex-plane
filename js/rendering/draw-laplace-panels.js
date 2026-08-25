@@ -29,6 +29,9 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams, frameData) {
 
     const sigma = frameData.sigma;
     const maxAmp = frameData.maxAmplitude;
+    const progress = Math.max(0, Math.min(1, frameData.animTime ?? 1));
+    const timeWindow = signal.at(-1)?.t || 1;
+    const windingTime = timeWindow * progress;
 
     // Draw ORIGINAL signal f(t) in light blue
     ctx.beginPath();
@@ -116,31 +119,60 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams, frameData) {
         ctx.setLineDash([]);
     }
 
-    // Draw sample points with color coding based on damping
+    // Draw sample points with color coding based on damping and animation progress
     for (let i = 0; i < signal.length; i += Math.max(1, Math.floor(signal.length / 50))) {
         const pt = signal[i];
         const weightedValue = frameData.weighted[i];
 
         const canvasPos = mapToCanvasCoords(pt.t, weightedValue, planeParams);
 
+        const isPast = pt.t <= windingTime;
         const damping = maxAmp > 0 ? frameData.envelope[i] / maxAmp : 0;
         const dampingIntensity = sigma > 0 ? damping : Math.min(1, damping);
 
         // Outer glow
         ctx.beginPath();
         ctx.arc(canvasPos.x, canvasPos.y, 5, 0, 2 * Math.PI);
-        ctx.fillStyle = `rgba(255, 100, 150, ${0.1 * dampingIntensity})`;
+        ctx.fillStyle = isPast
+            ? `rgba(255, 100, 200, ${0.12 * dampingIntensity})`
+            : 'rgba(100, 150, 200, 0.08)';
         ctx.fill();
 
         // Main point
         const gradient = ctx.createRadialGradient(canvasPos.x, canvasPos.y, 0, canvasPos.x, canvasPos.y, 3);
-        gradient.addColorStop(0, `rgba(255, 150, ${200 - sigma * 30}, 1)`);
-        gradient.addColorStop(1, `rgba(255, 100, 150, 0.9)`);
+        gradient.addColorStop(0, isPast ? 'rgba(255, 180, 230, 1)' : 'rgba(120, 160, 210, 0.55)');
+        gradient.addColorStop(1, isPast ? 'rgba(255, 100, 180, 0.9)' : 'rgba(80, 120, 170, 0.35)');
 
         ctx.beginPath();
         ctx.arc(canvasPos.x, canvasPos.y, 3, 0, 2 * Math.PI);
         ctx.fillStyle = gradient;
         ctx.fill();
+        if (isPast) {
+            ctx.strokeStyle = 'rgba(255, 210, 240, 0.85)';
+            ctx.lineWidth = 1.25;
+            ctx.stroke();
+        }
+    }
+
+    if (progress > 0 && progress <= 1) {
+        const cursorX = mapToCanvasCoords(windingTime, 0, planeParams).x;
+        const cursor = ctx.createLinearGradient(cursorX, 0, cursorX, planeParams.height);
+        cursor.addColorStop(0, 'rgba(255, 180, 100, 0.3)');
+        cursor.addColorStop(0.5, 'rgba(255, 150, 100, 0.9)');
+        cursor.addColorStop(1, 'rgba(255, 180, 100, 0.3)');
+        ctx.strokeStyle = cursor;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = 'rgba(255, 150, 100, 0.6)';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(cursorX, 0);
+        ctx.lineTo(cursorX, planeParams.height);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255, 200, 150, 1)';
+        ctx.font = 'bold 11px "SF Pro Text", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`t = ${windingTime.toFixed(2)}s`, cursorX, 16);
     }
 
     ctx.restore();

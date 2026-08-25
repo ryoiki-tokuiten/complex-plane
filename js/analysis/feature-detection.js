@@ -54,7 +54,7 @@ function activeNativeMap(derivativeOrder = null) {
 let criticalKey = null;
 
 export function findCriticalPoints() {
-    if (!state.showCriticalPoints || (state.riemannSphereViewEnabled && !state.splitViewEnabled) ||
+    if (!state.showCriticalPoints || (state.manifold3dViewEnabled && state.manifoldTransformationEnabled) ||
         zPlaneParams.preciseViewport) {
         state.criticalPoints = [];
         state.criticalValues = [];
@@ -96,7 +96,7 @@ function decoratePole(map, point) {
 }
 
 export function findZerosAndPoles() {
-    if (!state.showZerosPoles || (state.riemannSphereViewEnabled && !state.splitViewEnabled) ||
+    if (!state.showZerosPoles || (state.manifold3dViewEnabled && state.manifoldTransformationEnabled) ||
         zPlaneParams.preciseViewport) {
         state.zeros = [];
         state.poles = [];

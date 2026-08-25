@@ -13,8 +13,7 @@ export function ThemeOptions() {
     return themes.map(theme => (
         <button class={`theme-card${activeTheme === theme.id ? ' active' : ''}`}
             data-theme-id={theme.id} type="button" onClick={() => {
-                state.themeId = theme.id;
-                applyTheme(theme.id, { preserveGridColors: true });
+                applyTheme(theme.id);
                 persistThemePreferences();
                 redraw();
             }}>

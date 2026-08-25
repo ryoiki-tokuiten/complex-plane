@@ -15,12 +15,13 @@ import {
     surfaceStageHasBranches
 } from '../analysis/riemann-surface.js';
 import { domainPalettes } from './theme-manager.js';
-import { startRiemannTransformationAnimation, stopRiemannTransformationAnimation, syncRiemannTransformationPlayPauseButton, initThreeJSRenderers, buildThreeJSMeshes, syncRiemannSliders, disposeThreeJSRenderers } from '../rendering/riemann-transformation-animation.js';
+import { startManifoldTransformationAnimation, stopManifoldTransformationAnimation, syncManifoldTransformationPlayPauseButton, initThreeJSRenderers, buildThreeJSMeshes, syncManifoldSliders, disposeThreeJSRenderers } from '../rendering/manifold-transformation-animation.js';
 import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
 import { compileExpression, createExpressionMathML } from '../math/expression/index.js';
 import { createFormulaFragment } from './dom-components.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import { isFullGridPerspectiveSupported, isGraphViewSupported } from '../rendering/transformation-graph.js';
+import { getManifold } from '../rendering/manifold-registry.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 
 const { controls = {} } = context;
@@ -147,8 +148,8 @@ const PARTICLE_VALUE_BINDINGS = Object.freeze([
 ]);
 
 const RIEMANN_VIEW_VALUE_BINDINGS = Object.freeze([
-    { display: 'threeSphereOpacityValueDisplay', key: 'threeSphereOpacity', digits: 2, companion: 'threeSphereOpacitySlider' },
-    { display: 'sphereGridOpacityValueDisplay', key: 'sphereGridOpacity', digits: 2, companion: 'sphereGridOpacitySlider' },
+    { display: 'manifoldSurfaceOpacityValueDisplay', key: 'manifoldSurfaceOpacity', digits: 2, companion: 'manifoldSurfaceOpacitySlider' },
+    { display: 'manifoldGridOpacityValueDisplay', key: 'manifoldGridOpacity', digits: 2, companion: 'manifoldGridOpacitySlider' },
     { display: 'taylorSeriesOrderValueDisplay', key: 'taylorSeriesOrder', companion: 'taylorSeriesOrderSlider' },
     { display: 'riemannSurfaceSheetsValueDisplay', key: 'riemannSurfaceSheets' },
     { display: 'riemannSurfaceBranchCenterValueDisplay', key: 'riemannSurfaceBranchCenter' },
@@ -167,7 +168,8 @@ const LAPLACE_VALUE_BINDINGS = Object.freeze([
     { display: 'laplaceSamplesValueDisplay', key: 'laplaceSamples' },
     { display: 'laplaceSigmaValueDisplay', key: 'laplaceSigma', digits: 1 },
     { display: 'laplaceOmegaValueDisplay', key: 'laplaceOmega', digits: 1 },
-    { display: 'laplaceAnimationTimeValueDisplay', get: () => Math.round(state.laplaceAnimationTime * 100) },
+    { display: 'laplaceWindingFrequencyValueDisplay', key: 'laplaceOmega', digits: 1 },
+    { display: 'laplaceAnimationTimeValueDisplay', get: () => Math.round(state.laplaceAnimationTime * 100), companion: 'laplaceAnimationTimeSlider' },
     { display: 'laplaceClipHeightValueDisplay', key: 'laplaceClipHeight', digits: 0 }
 ]);
 
@@ -577,11 +579,12 @@ function syncRiemannAndTransformDisplays() {
     setText('laplaceSignalSectionTitle', graphSource ? 'Graph Signal' : 'Signal Configuration');
     setText('laplaceFunctionLabel', graphSource ? 'Source' : 'Waveform Type');
     setText('laplaceFrequencyLabel', 'Frequency:');
-    setHidden('laplaceWindingNote', graphSource);
     // Keep the 3D controls available while its canvas is hidden so the user can
     // turn the surface back on. Graph Fourier mode hides the whole section.
     setHidden('laplace3DControlsSection', graphSource);
     setHidden('laplaceAnimationSection', graphSource);
+    ['laplaceOmegaSlider', 'laplaceWindingFrequencySlider']
+        .forEach(key => setValue(key, state.laplaceOmega));
     setChecked('laplaceHideIntegralEvaluationCb', state.laplaceHideIntegralEvaluation);
     setChecked('laplaceHide3DSurfaceCb', state.laplaceHide3DSurface);
     setChecked('laplaceShowSpectrumCb', state.laplaceShowSpectrum);
@@ -756,7 +759,7 @@ function transformedProbeHtml() {
 
 export function updateProbeInfo() {
     runUiTransaction('updateProbeInfo', () => {
-        const zIsPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
+        const zIsPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
         const probeCanRender = state.probeActive
             && zIsPlanar
             && !state.navigationModeEnabled
@@ -1047,46 +1050,17 @@ function defaultZPlaneTitle(fND) {
     const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
 
     if (state.domainColoringEnabled) {
-        const prefix = state.riemannSphereViewEnabled && !state.splitViewEnabled ? 'z-sphere' : 'z-plane';
-        title = `${prefix} (Output: Domain Coloring of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
+        title = `z-plane (Output: Domain Coloring of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
     } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
         const typeStr = state.streamlineFlowEnabled ? 'Streamlines' : 'Vector Field';
         title = `z-plane (Output: ${typeStr} [${state.vectorFieldFunction}] of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
     } else if (showRadialSteps) {
         title = `z-plane (Output: Radial Discrete Steps of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
-    } else if (state.navigationModeEnabled && (!state.riemannSphereViewEnabled || state.splitViewEnabled)) {
+    } else if (state.navigationModeEnabled) {
         title = 'z-plane (Navigation)';
     }
 
     return title;
-}
-
-function splitViewZPlaneTitle(fND) {
-    const showRadialSteps = state.radialDiscreteStepsEnabled;
-    const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
-
-    if (state.domainColoringEnabled) {
-        return `z-plane (Output: Domain Coloring of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
-    }
-
-    if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
-        const typeStr = state.streamlineFlowEnabled ? 'Streamlines' : 'Vector Field';
-        return `z-plane (Output: ${typeStr} [${state.vectorFieldFunction}] of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
-    }
-
-    if (showRadialSteps) {
-        return `z-plane (Output: Radial Discrete Steps of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
-    }
-
-    return `z-plane (Input Grid: ${String(state.currentInputShape ?? '').replace(/_/g, ' ')})`;
-}
-
-function sphereWPlaneTitle(model) {
-    const sphereLabel = state.threeSphereEnabled ? '3D w-sphere' : 'w-sphere';
-
-    return state.domainColoringEnabled
-        ? `${sphereLabel} (Codomain coloring; ${model.mappedWOutputDescriptor})`
-        : `${sphereLabel} (${model.wOutputDescriptor})`;
 }
 
 function syncPrimaryPlaneTitles() {
@@ -1139,29 +1113,19 @@ function syncPrimaryPlaneTitles() {
         return;
     }
 
-    if (state.splitViewEnabled) {
-        setHtml('zPlaneTitle', splitViewZPlaneTitle(model.fND));
-        setHtml('wPlaneTitle', sphereWPlaneTitle(model));
-        setHidden('cauchy_integral_results_info', true);
-        return;
-    }
-
-    if (state.riemannSphereViewEnabled && state.riemannTransformationEnabled && !state.splitViewEnabled) {
-        setHtml('zPlaneTitle', 'z-sphere (Input: Transforming Flat Grid to Sphere)');
+    if (state.manifoldTransformationEnabled && state.manifold3dViewEnabled) {
+        const manifold = getManifold(state.selectedManifold);
+        setHtml('zPlaneTitle', `z-manifold (Input: Transforming Flat Grid to ${manifold.name})`);
         const mappedGridLabel = state.mapPresentation === 'derivative' ? 'Derivative Grid' : 'Mapped Grid';
-        setHtml('wPlaneTitle', `w-sphere (Output: Transforming ${mappedGridLabel} to Sphere)`);
+        setHtml('wPlaneTitle', `w-manifold (Output: Transforming ${mappedGridLabel} to ${manifold.name})`);
         setHidden('cauchy_integral_results_info', true);
         return;
     }
 
-    if (state.riemannSphereViewEnabled) {
-        setHtml(
-            'zPlaneTitle',
-            state.domainColoringEnabled
-                ? `z-sphere (Output: Domain Coloring of ${model.derivativePrefix}<code id="z-plane-title-func">w = ${model.fND}</code>)`
-                : 'z-sphere (Input)'
-        );
-        setHtml('wPlaneTitle', sphereWPlaneTitle(model));
+    if (state.manifold3dViewEnabled) {
+        const manifold = getManifold(state.selectedManifold);
+        setHtml('zPlaneTitle', zPlaneTitle);
+        setHtml('wPlaneTitle', `w-manifold (Output: ${manifold.name})`);
         setHidden('cauchy_integral_results_info', true);
         return;
     }
@@ -1197,8 +1161,8 @@ function syncTransformModeTitles() {
 
 function syncRiemannSurfaceControls() {
     setHidden(
-        'riemannSphereOptionsDiv',
-        !state.riemannSphereViewEnabled || state.riemannSurfaceEnabled
+        'manifoldOptionsDiv',
+        !state.manifold3dViewEnabled || state.riemannSurfaceEnabled
     );
     setHidden('riemannSurfaceOptionsDiv', !state.riemannSurfaceEnabled);
     setChecked('enableRiemannSurfaceCb', state.riemannSurfaceEnabled);
@@ -1228,12 +1192,8 @@ function syncRiemannSurfaceControls() {
     }
 
     setHidden(
-        'threeSphereOptionsDiv',
-        !(state.riemannSphereViewEnabled && state.threeSphereEnabled)
-    );
-    setHidden(
-        'sphereViewControlsDiv',
-        !(state.riemannSphereViewEnabled || state.splitViewEnabled)
+        'manifoldSurfaceOptionsDiv',
+        !state.manifold3dViewEnabled
     );
 }
 
@@ -1487,7 +1447,7 @@ export function updateTitlesAndGlobalUI() {
 
         syncPrimaryPlaneTitles();
         syncVisualizationOptionControls();
-        syncRiemannTransformationUI();
+        syncManifoldTransformationUI();
         sync2DContourUI();
     });
 }
@@ -1531,29 +1491,60 @@ export function updateDomainColoringKey() {
     keyDiv.replaceChildren(content);
 }
 
-export function syncRiemannTransformationUI() {
-    const showOverlay = state.riemannSphereViewEnabled && state.riemannTransformationEnabled && !state.splitViewEnabled;
-    
-    // Z plane UI
+export function syncManifoldTransformationUI() {
+    const isManifoldActive = Boolean(state.manifold3dViewEnabled);
+    const isTransformActive = Boolean(state.manifoldTransformationEnabled && isManifoldActive);
+
     const overlayZ = document.getElementById('z_plane_transformation_overlay');
     const containerZ = document.getElementById('z_plane_threejs_container');
-    if (overlayZ) overlayZ.classList.toggle('hidden', !showOverlay);
-    if (containerZ) containerZ.classList.toggle('hidden', !showOverlay);
+    const canvasZ = document.getElementById('z_plane_canvas');
 
-    // W plane UI
     const overlayW = document.getElementById('w_plane_transformation_overlay');
     const containerW = document.getElementById('w_plane_threejs_container');
-    if (overlayW) overlayW.classList.toggle('hidden', !showOverlay);
-    if (containerW) containerW.classList.toggle('hidden', !showOverlay);
-    
-    if (showOverlay) {
+    const canvasW = document.getElementById('w_plane_canvas');
+
+    // Left panel (Z): In Mode 1 (3D Manifolds), Z is 2D canvas. Only in Mode 2 (Show Transformation) does Z switch to 3D.
+    if (overlayZ) overlayZ.classList.toggle('hidden', !isTransformActive);
+    if (containerZ) containerZ.classList.toggle('hidden', !isTransformActive);
+    if (canvasZ) canvasZ.classList.toggle('hidden', isTransformActive);
+
+    // Right panel (W): Shows 3D Manifold whenever 3D Manifolds is enabled. Shows HUD overlay during transformation.
+    if (overlayW) overlayW.classList.toggle('hidden', !isTransformActive);
+    if (containerW) containerW.classList.toggle('hidden', !isManifoldActive);
+    if (canvasW) canvasW.classList.toggle('hidden', isManifoldActive);
+
+    const manifoldOptionsDiv = document.getElementById('manifold_options_div');
+    if (manifoldOptionsDiv) {
+        manifoldOptionsDiv.classList.toggle('hidden', !isManifoldActive);
+    }
+
+    const selector = document.getElementById('manifold_shape_selector');
+    if (selector && selector.value !== state.selectedManifold) {
+        selector.value = state.selectedManifold || 'sphere';
+    }
+
+    const manifoldCb = document.getElementById('enable_manifold_3d_cb');
+    if (manifoldCb && manifoldCb.checked !== state.manifold3dViewEnabled) {
+        manifoldCb.checked = state.manifold3dViewEnabled;
+    }
+
+    const transCb = document.getElementById('enable_manifold_transformation_cb');
+    if (transCb && transCb.checked !== state.manifoldTransformationEnabled) {
+        transCb.checked = state.manifoldTransformationEnabled;
+    }
+
+    if (isManifoldActive) {
         initThreeJSRenderers();
         buildThreeJSMeshes();
-        startRiemannTransformationAnimation();
-        syncRiemannTransformationPlayPauseButton();
-        syncRiemannSliders();
+        if (isTransformActive) {
+            startManifoldTransformationAnimation();
+        } else {
+            stopManifoldTransformationAnimation();
+            syncManifoldSliders();
+        }
+        syncManifoldTransformationPlayPauseButton();
     } else {
-        stopRiemannTransformationAnimation();
+        stopManifoldTransformationAnimation();
         disposeThreeJSRenderers();
     }
 }

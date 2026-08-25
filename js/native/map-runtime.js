@@ -304,7 +304,7 @@ export function createTaylorApproximationTransform(functionKey, center, order) {
 export function getEffectiveBaseTransformFunction(functionKey = state.currentFunction) {
     let transform = transformFunctions[functionKey];
     if (!transform) throw new Error(`Unknown native transform: ${functionKey}.`);
-    if (state.taylorSeriesEnabled && (!state.riemannSphereViewEnabled || state.splitViewEnabled)) {
+    if (state.taylorSeriesEnabled) {
         transform = createTaylorApproximationTransform(functionKey, state.taylorSeriesCenter, state.taylorSeriesOrder);
     }
     if (activeTransformProvider) {

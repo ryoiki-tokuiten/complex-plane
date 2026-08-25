@@ -84,7 +84,7 @@ function publishCauchyResult(key, { text = null, html = null, hidden = false } =
 
 export function performCauchyAnalysis() {
     if (!controls.cauchy_integral_results_info) return;
-    const isZPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
+    const isZPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
     const analysisKey = cauchyAnalysisKey(isZPlanar);
     const active = state.cauchyIntegralModeEnabled && isZPlanar;
     const cacheInputKey = `${analysisKey}|active:${active ? 1 : 0}`;
@@ -255,7 +255,7 @@ export function updateWindingNumberDisplay() {
     let contourParams = {};
     const N_winding_num_pts = 150; 
     let canCalculateWinding = false;
-    const wIsPlanar = !(state.riemannSphereViewEnabled || state.splitViewEnabled);
+    const wIsPlanar = !state.manifold3dViewEnabled;
 
     if (wIsPlanar && state.cauchyIntegralModeEnabled && (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse' || state.currentInputShape === 'arbitrary')) {
         canCalculateWinding = true;

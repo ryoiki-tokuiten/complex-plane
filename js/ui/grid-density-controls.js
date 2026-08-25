@@ -8,14 +8,16 @@ export const GRID_DENSITY_LIMITS = Object.freeze({
     extended: 250,
     foldDefault: 100,
     layerLock: 150,
-    dotsDefault: 150
+    dotsDefault: 250
 });
 
 export function isExtendedGridDensityNeeded(source = state) {
     return Boolean(
         (source.foldSurface3dEnabled && isFoldableInputShape(source.currentInputShape)) ||
         source.currentInputShape === 'grid_dots' ||
-        source.graphViewEnabled
+        source.graphViewEnabled ||
+        source.manifold3dViewEnabled ||
+        source.manifoldTransformationEnabled
     );
 }
 

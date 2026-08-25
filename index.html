@@ -238,6 +238,39 @@
                             </div>
                         </div>
 
+                        <!-- Winding Analysis Section -->
+                        <div class="control-section laplace-winding">
+                            <div class="section-header">
+                                <div class="section-header-icon"></div>
+                                Winding Analysis
+                            </div>
+
+                            <div class="control-group control-group-compact">
+                                <label for="laplace_winding_frequency_slider" class="slider-label micro-text">
+                                    Winding Freq:
+                                    <output id="laplace_winding_frequency_value_display"
+                                        class="slider-value small-output">1.0</output> rad/s
+                                </label>
+                                <div class="slider-container">
+                                    <input type="range" id="laplace_winding_frequency_slider" min="-10" max="10"
+                                        step="0.1" value="1.0" data-tooltip="Angular frequency used by the winding"
+                                        class="accent-orange">
+                                </div>
+                            </div>
+
+                            <div class="control-group control-group-tight">
+                                <label for="laplace_animation_time_slider" class="slider-label">
+                                    Progress:
+                                    <output id="laplace_animation_time_value_display" class="slider-value">100</output>%
+                                </label>
+                                <div class="slider-container">
+                                    <input type="range" id="laplace_animation_time_slider" min="0" max="1"
+                                        step="0.01" value="1.0" data-tooltip="Control how much of the signal to show"
+                                        class="accent-orange">
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- 3D Visualization Options Section -->
                         <div id="laplace_3d_controls_section" class="control-section laplace-3d">
                             <div class="section-header">
@@ -1964,13 +1997,13 @@
                                         magnitude.</span>
                                 </span>
                             </label>
-                            <label for="enable_riemann_sphere_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="enable_riemann_sphere_cb"
-                                    data-tooltip="Toggle Riemann Sphere projection options">
+                            <label for="enable_manifold_3d_cb" class="viz-toggle-card">
+                                <input type="checkbox" id="enable_manifold_3d_cb"
+                                    data-tooltip="Toggle 3D manifold embedding views (Riemann Sphere, Cylinder, Torus, Helicoid, Minimal Surfaces, Klein Bottle, etc.)">
                                 <span class="custom-checkbox-visual"></span>
                                 <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Riemann Sphere</span>
-                                    <span class="viz-toggle-card-copy">Project the mapped output onto the sphere.</span>
+                                    <span class="viz-toggle-card-title">3D Manifolds</span>
+                                    <span class="viz-toggle-card-copy">Embed complex maps onto differential 3D manifolds.</span>
                                 </span>
                             </label>
                             <label for="enable_riemann_surface_cb" class="viz-toggle-card">
@@ -2192,65 +2225,59 @@
                                 </div>
                             </div>
                         </div>
-                        <div id="riemann_sphere_options_div"
+                        <div id="manifold_options_div"
                             class="dependent-settings-block hidden viz-stacked-options">
-                            <div class="viz-toggle-grid viz-toggle-grid--trio viz-toggle-grid--compact">
-                                <label for="enable_three_sphere_cb"
+                            <div class="control-group" style="margin-bottom: 8px;">
+                                <label for="manifold_shape_selector" class="slider-label" style="margin-bottom: 4px; font-weight: 600;">3D Manifold Surface:</label>
+                                <select id="manifold_shape_selector" class="control-select" data-tooltip="Choose the 3D manifold embedding geometry">
+                                    <option value="sphere" selected>Riemann Sphere (S²)</option>
+                                    <option value="cylinder">Log-Cylinder</option>
+                                    <option value="torus">Complex Torus (T²)</option>
+                                    <option value="helicoid">Riemann Helicoid</option>
+                                    <option value="catenoid">Catenoid Minimal</option>
+                                    <option value="enneper">Enneper Minimal</option>
+                                    <option value="bonnet">Bonnet Isometric Family</option>
+                                    <option value="klein_bottle">Klein Bottle Immersion</option>
+                                    <option value="pseudosphere">Beltrami Pseudosphere (H²)</option>
+                                    <option value="scherk">Scherk Minimal Surface</option>
+                                </select>
+                            </div>
+                            <div class="viz-toggle-grid viz-toggle-grid--compact viz-toggle-grid--single">
+                                <label for="enable_manifold_transformation_cb"
                                     class="viz-toggle-card viz-toggle-card--compact">
-                                    <input type="checkbox" id="enable_three_sphere_cb"
-                                        data-tooltip="Toggle interactive 3D Riemann Sphere rendering using Three.js for the w-plane">
-                                    <span class="custom-checkbox-visual"></span>
-                                    <span class="viz-toggle-card-content">
-                                        <span class="viz-toggle-card-title">3D Sphere</span>
-                                        <span class="viz-toggle-card-copy">Use Three.js for an interactive
-                                            w-sphere.</span>
-                                    </span>
-                                </label>
-                                <label for="enable_split_view_cb"
-                                    class="viz-toggle-card viz-toggle-card--compact">
-                                    <input type="checkbox" id="enable_split_view_cb"
-                                        data-tooltip="Show z-plane as planar and w-plane as Riemann Sphere side-by-side">
-                                    <span class="custom-checkbox-visual"></span>
-                                    <span class="viz-toggle-card-content">
-                                        <span class="viz-toggle-card-title">Split View</span>
-                                        <span class="viz-toggle-card-copy">Keep the z-plane beside the w-sphere.</span>
-                                    </span>
-                                </label>
-                                <label for="enable_riemann_transformation_cb"
-                                    class="viz-toggle-card viz-toggle-card--compact">
-                                    <input type="checkbox" id="enable_riemann_transformation_cb"
-                                        data-tooltip="Show animation of the planar grid wrapping into the Riemann Sphere">
+                                    <input type="checkbox" id="enable_manifold_transformation_cb"
+                                        data-tooltip="Show continuous morph animation from flat plane into 3D manifold">
                                     <span class="custom-checkbox-visual"></span>
                                     <span class="viz-toggle-card-content">
                                         <span class="viz-toggle-card-title">Show Transformation</span>
-                                        <span class="viz-toggle-card-copy">Animate grid wrapping into the sphere.</span>
+                                        <span class="viz-toggle-card-copy">Animate grid morph into 3D manifold.</span>
                                     </span>
                                 </label>
                             </div>
-                            <div id="three_sphere_options_div"
-                                class="dependent-settings-block hidden viz-subdetail-block">
+                            <div id="manifold_surface_options_div"
+                                class="dependent-settings-block viz-subdetail-block">
                                 <div class="viz-settings-grid">
                                     <div class="control-group">
-                                        <label for="three_sphere_opacity_slider">
-                                            Sphere Opacity:
-                                            <output id="three_sphere_opacity_value_display">0.10</output>
+                                        <label for="manifold_surface_opacity_slider">
+                                            Surface Opacity:
+                                            <output id="manifold_surface_opacity_value_display">0.35</output>
                                         </label>
                                         <div class="slider-container">
-                                            <input type="range" id="three_sphere_opacity_slider"
-                                                name="three_sphere_opacity_slider" min="0" max="1" step="0.05"
-                                                value="0.10"
-                                                data-tooltip="Adjust opacity of the base Riemann sphere mesh in 3D view">
+                                            <input type="range" id="manifold_surface_opacity_slider"
+                                                name="manifold_surface_opacity_slider" min="0" max="1" step="0.05"
+                                                value="0.35"
+                                                data-tooltip="Adjust opacity of the 3D surface mesh">
                                         </div>
                                     </div>
                                     <div class="control-group">
-                                        <label for="sphere_grid_opacity_slider">
+                                        <label for="manifold_grid_opacity_slider">
                                             Surface Grid Opacity:
-                                            <output id="sphere_grid_opacity_value_display">0.00</output>
+                                            <output id="manifold_grid_opacity_value_display">0.25</output>
                                         </label>
                                         <div class="slider-container">
-                                            <input type="range" id="sphere_grid_opacity_slider"
-                                                name="sphere_grid_opacity_slider" min="0" max="1" step="0.05" value="0"
-                                                data-tooltip="Adjust opacity of the intrinsic latitude/longitude grid on the sphere">
+                                            <input type="range" id="manifold_grid_opacity_slider"
+                                                name="manifold_grid_opacity_slider" min="0" max="1" step="0.05" value="0.25"
+                                                data-tooltip="Adjust opacity of the manifold intrinsic wireframe grid">
                                         </div>
                                     </div>
                                 </div>
@@ -2501,22 +2528,30 @@
                            >
                         </div>
 
-                        <div id="z_plane_transformation_overlay" class="ui-layer hidden">
-                            <h1>Stereographic Projection</h1>
-                            <div class="controls">
-                                <button id="z_transformation_play_pause_btn" class="play-btn">
+                        <div id="z_plane_transformation_overlay" class="transformation-hud hidden">
+                            <div class="transformation-hud-header">
+                                <span class="transformation-hud-title" id="z_transformation_title">Riemann Sphere (S²)</span>
+                                <span class="transformation-hud-formula" id="z_transformation_formula">Stereographic: (2u, u²+v²-1, 2v) / (u²+v²+1)</span>
+                            </div>
+                            <div class="transformation-hud-controls">
+                                <button id="z_transformation_play_pause_btn" class="hud-play-btn" aria-label="Play/Pause transformation animation">
                                     <svg viewBox="0 0 24 24">
                                         <path d="M8 5v14l11-7z" />
                                     </svg>
                                 </button>
-                                <div class="slider-container">
+                                <div class="hud-slider-container">
                                     <input type="range" id="z_transformation_progress_slider" min="0" max="1"
                                         step="0.001" value="0">
                                 </div>
+                                <div class="hud-speed-group" id="z_transformation_speed_group">
+                                    <button class="speed-btn" data-speed="0.1" data-plane="z" title="0.1x Speed">0.1x</button>
+                                    <button class="speed-btn" data-speed="0.5" data-plane="z" title="0.5x Speed">0.5x</button>
+                                    <button class="speed-btn active" data-speed="1.0" data-plane="z" title="1x Speed">1x</button>
+                                </div>
                             </div>
-                            <div class="labels">
-                                <span>Plane (z)</span>
-                                <span>Riemann Sphere</span>
+                            <div class="transformation-hud-footer">
+                                <span>Flat Plane (z)</span>
+                                <span id="z_transformation_manifold_label">Riemann Sphere</span>
                             </div>
                         </div>
 
@@ -2577,22 +2612,30 @@
                         <div id="w_plane_three_container" class="hidden fill-container"></div>
                         <div id="w_plane_probe_info" class="probe-info-overlay hidden"></div>
 
-                        <div id="w_plane_transformation_overlay" class="ui-layer hidden">
-                            <h1>Stereographic Projection</h1>
-                            <div class="controls">
-                                <button id="w_transformation_play_pause_btn" class="play-btn">
+                        <div id="w_plane_transformation_overlay" class="transformation-hud hidden">
+                            <div class="transformation-hud-header">
+                                <span class="transformation-hud-title" id="w_transformation_title">Riemann Sphere (S²)</span>
+                                <span class="transformation-hud-formula" id="w_transformation_formula">Stereographic: (2u, u²+v²-1, 2v) / (u²+v²+1)</span>
+                            </div>
+                            <div class="transformation-hud-controls">
+                                <button id="w_transformation_play_pause_btn" class="hud-play-btn" aria-label="Play/Pause transformation animation">
                                     <svg viewBox="0 0 24 24">
                                         <path d="M8 5v14l11-7z" />
                                     </svg>
                                 </button>
-                                <div class="slider-container">
+                                <div class="hud-slider-container">
                                     <input type="range" id="w_transformation_progress_slider" min="0" max="1"
                                         step="0.001" value="0">
                                 </div>
+                                <div class="hud-speed-group" id="w_transformation_speed_group">
+                                    <button class="speed-btn" data-speed="0.1" data-plane="w" title="0.1x Speed">0.1x</button>
+                                    <button class="speed-btn" data-speed="0.5" data-plane="w" title="0.5x Speed">0.5x</button>
+                                    <button class="speed-btn active" data-speed="1.0" data-plane="w" title="1x Speed">1x</button>
+                                </div>
                             </div>
-                            <div class="labels">
-                                <span>Plane (w)</span>
-                                <span>Riemann Sphere</span>
+                            <div class="transformation-hud-footer">
+                                <span>Flat Plane (w)</span>
+                                <span id="w_transformation_manifold_label">Riemann Sphere</span>
                             </div>
                         </div>
                         <div id="cauchy_integral_results_info" class="cauchy-info-overlay hidden analysis-copy"

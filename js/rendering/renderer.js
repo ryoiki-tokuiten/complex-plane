@@ -1,4 +1,4 @@
-import { state, context, zPlaneParams as defaultZPlaneParams, wPlaneParams as defaultWPlaneParams, sphereViewParams } from '../store/state.js';
+import { state, context, zPlaneParams as defaultZPlaneParams, wPlaneParams as defaultWPlaneParams } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import {
     COLOR_CANVAS_BACKGROUND,
@@ -23,11 +23,12 @@ import {
     getRasterSizeForShape,
     getRasterAspectRatioForShape,
     getRasterOpacityForShape,
+    getRasterVersionTokenForShape,
     isRasterInputShape
 } from '../utils/raster-media.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
 import { getLaplaceFrameData } from '../analysis/laplace-transform.js';
-import { ThreeRiemannRenderer } from './three-riemann-renderer.js';
+import { ThreeManifoldsRenderer } from './3d-manifolds-renderer.js';
 import { buildNativeGridFold } from '../native/complex-engine.js';
 import {
     generateCurrentInputShapePointSets,
@@ -59,16 +60,14 @@ import { requestRedrawAll, requestUiRedraw } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
 import { matchesPlanarDomainViewport, renderPlanarDomainColoring } from './domain-coloring.js';
-import { drawRiemannSphereBase, drawSphereGridAndShape, drawSphereProbeAndNeighborhood } from './draw-sphere.js';
 import { updateWindingNumberDisplay } from '../analysis/cauchy.js';
 import {
     getDynamicPlottingCacheKey
 } from '../analysis/dynamic-plotting.js';
 import {
-    drawDynamicSphere,
     drawDynamicWPlane,
     drawDynamicZPlane,
-    getDynamicSphereSceneData
+    getDynamicManifoldSceneData
 } from './draw-dynamic-plotting.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices } from '../analysis/tissot.js';
 import { findPreimages } from '../analysis/preimage.js';
@@ -118,7 +117,6 @@ let wCanvasList;
 let wCtxList;
 let wPlaneParamsList;
 let wPlaneThreeContainersList;
-let sphereViewWParamsList;
 const wStaticThreeRenderers = new WeakMap();
 
 const { controls } = context;
@@ -248,7 +246,6 @@ function syncWRenderContext() {
     wCtxList = context.wCtxList;
     wPlaneParamsList = context.wPlaneParamsList;
     wPlaneThreeContainersList = context.wPlaneThreeContainersList;
-    sphereViewWParamsList = context.sphereViewWParamsList;
 
     const externalCaches = context.wPlanarTransformedLayerCacheList;
     if (Array.isArray(externalCaches)) wPlanarTransformedLayerCacheList = externalCaches;
@@ -539,8 +536,7 @@ function buildZFlowLayerCacheKey() {
 }
 
 function shouldUseWPlanarTransformedLayerCache() {
-    return !state.riemannSphereViewEnabled
-        && !state.splitViewEnabled
+    return !state.manifold3dViewEnabled
         && !state.navigationModeEnabled
         && state.currentInputShape !== 'video'
         && !isPanning(runtime.interaction.panZ)
@@ -550,14 +546,14 @@ function shouldUseWPlanarTransformedLayerCache() {
 function shouldUseZPlanarInputLayerCache() {
     return !state.navigationModeEnabled
         && !state.vectorFieldEnabled
-        && !(state.riemannSphereViewEnabled && !state.splitViewEnabled)
+        && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)
         && state.currentInputShape !== 'video'
         && !isPanning(runtime.interaction.panZ);
 }
 
 function shouldUseZFlowLayerCache() {
     return (state.vectorFieldEnabled || state.streamlineFlowEnabled)
-        && !(state.riemannSphereViewEnabled && !state.splitViewEnabled)
+        && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)
         && !isPanning(runtime.interaction.panZ);
 }
 
@@ -788,24 +784,7 @@ export function drawZPlaneContent(timestamp) {
     // pipeline: it snapshots state and dispatches native RGBA tile work to
     // workers rather than evaluating through this map object.
     const map = resolveActiveMap();
-    if (state.riemannSphereViewEnabled && !state.splitViewEnabled) {
-        if (!zCtx || !zPlaneParams) return;
-        const sphereParams = sphereViewParams.z;
-        fillCanvasBackground(zCtx, zPlaneParams);
-        drawCanvasLayer(zCtx, layerCtx => {
-            drawRiemannSphereBase(layerCtx, sphereParams);
-            drawSphereGridAndShape(layerCtx, sphereParams, false);
-            drawDynamicSphere(layerCtx, sphereParams, { isWPlane: false });
-            if (state.probeActive) {
-                drawSphereProbeAndNeighborhood(
-                    layerCtx,
-                    sphereParams,
-                    state.probeZ,
-                    state.probeNeighborhoodSize,
-                    null
-                );
-            }
-        });
+    if (state.manifoldTransformationEnabled) {
         return;
     }
 
@@ -952,14 +931,12 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
     const previousCtx = wCtx;
     const previousParams = wPlaneParams;
     const previousThreeContainer = controls.wPlaneThreeContainer;
-    const previousSphereParams = sphereViewParams.w;
     const previousCache = wPlanarTransformedLayerCache;
 
     wCanvas = wCanvasList?.[index];
     wCtx = wCtxList?.[index];
     wPlaneParams = wPlaneParamsList?.[index];
     controls.wPlaneThreeContainer = wPlaneThreeContainersList?.[index];
-    sphereViewParams.w = sphereViewWParamsList?.[index];
     wPlanarTransformedLayerCache = ensureWPlaneCache(index);
 
     try {
@@ -980,7 +957,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             return;
         }
         if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) return;
-        if (state.riemannTransformationEnabled) {
+        if (state.manifoldTransformationEnabled || state.manifold3dViewEnabled) {
             setWPresentation('hidden');
             return;
         }
@@ -995,30 +972,21 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             }
         }
 
-        const isRiemannW = state.riemannSphereViewEnabled || state.splitViewEnabled;
-        if (state.threeSphereEnabled && isRiemannW) {
-            renderThreeWPlane(map, index);
-            return;
-        }
-
         setWPresentation('canvas');
-        if (!isRiemannW) {
-            fillCanvasBackground(wCtx, wPlaneParams);
-            drawAxes(wCtx, wPlaneParams, 'Re(w)', 'Im(w)');
-            drawPolynomialOriginMarkerOverlay(wCtx, wPlaneParams);
-            drawWOriginGlowOverlay(wCtx, wPlaneParams);
-            if (!state.navigationModeEnabled && state.currentInputShape !== 'empty_grid') {
-                drawGrid(wCtx, wPlaneParams, {
-                    targetCount: state.gridDensity,
-                    minorColor: 'rgba(128, 137, 255, 0.04)',
-                    majorColor: 'rgba(128, 137, 255, 0.12)'
-                });
-            }
+        fillCanvasBackground(wCtx, wPlaneParams);
+        drawAxes(wCtx, wPlaneParams, 'Re(w)', 'Im(w)');
+        drawPolynomialOriginMarkerOverlay(wCtx, wPlaneParams);
+        drawWOriginGlowOverlay(wCtx, wPlaneParams);
+        if (!state.navigationModeEnabled && state.currentInputShape !== 'empty_grid') {
+            drawGrid(wCtx, wPlaneParams, {
+                targetCount: state.gridDensity,
+                minorColor: 'rgba(128, 137, 255, 0.04)',
+                majorColor: 'rgba(128, 137, 255, 0.12)'
+            });
         }
 
         if (state.taylorSeriesEnabled
             && map.presentation !== 'derivative'
-            && !isRiemannW
             && !state.navigationModeEnabled) {
             const cacheKey = buildPlanarLayerCacheKey(true);
             renderThroughCache(
@@ -1030,26 +998,14 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 drawTaylorApproximationLayer,
                 targetCtx => drawCanvasLayer(targetCtx, drawTaylorApproximationLayer)
             );
-        } else if (isRiemannW) {
-            const sphereParams = sphereViewParams.w;
-            fillCanvasBackground(wCtx, wPlaneParams);
-            drawCanvasLayer(wCtx, layerCtx => {
-                drawRiemannSphereBase(layerCtx, sphereParams);
-                drawSphereGridAndShape(layerCtx, sphereParams, true, map);
-                drawDynamicSphere(layerCtx, sphereParams, {
-                    isWPlane: true,
-                    transform: map.evaluate,
-                    stageIndex: index
-                });
-            });
         } else {
             renderWPlanarTransformedShape(index, map);
         }
 
-        if (!isRiemannW && state.dynamicPlotting?.enabled) {
+        if (state.dynamicPlotting?.enabled) {
             drawDynamicWPlane(wCtx, wPlaneParams, map.evaluate, index);
         }
-        if (!isRiemannW && state.preimageExplorerEnabled && state.preimageTarget) {
+        if (state.preimageExplorerEnabled && state.preimageTarget) {
             drawCanvasLayer(wCtx, layerCtx => {
                 drawPreimageMarkers(layerCtx, wPlaneParams, [state.preimageTarget], true);
                 if (state.preimageStatus) {
@@ -1059,12 +1015,11 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 }
             });
         }
-        if (!isRiemannW && state.continuationValues.length > 1) {
+        if (state.continuationValues.length > 1) {
             drawCanvasLayer(wCtx, layerCtx => drawContinuationValues(layerCtx, wPlaneParams));
         }
         if (state.showCriticalPoints
             && !state.navigationModeEnabled
-            && !isRiemannW
             && Array.isArray(state.criticalValues)
             && state.criticalValues.length > 0) {
             drawCanvasLayer(wCtx, layerCtx => {
@@ -1073,32 +1028,21 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
         }
         if (state.probeActive && !state.navigationModeEnabled) {
             drawCanvasLayer(wCtx, layerCtx => {
-                if (isRiemannW) {
-                    drawSphereProbeAndNeighborhood(
-                        layerCtx,
-                        sphereViewParams.w,
-                        state.probeZ,
-                        state.probeNeighborhoodSize,
-                        map
-                    );
-                } else {
-                    drawPlanarTransformedProbe(layerCtx, wPlaneParams, map);
-                }
+                drawPlanarTransformedProbe(layerCtx, wPlaneParams, map);
             });
         }
-        if (state.conformalGridEnabled && !isRiemannW) {
+        if (state.conformalGridEnabled) {
             const indicatrices = getConformalIndicatrixData(map);
             drawCanvasLayer(wCtx, layerCtx => {
                 drawConformalIndicatrices(layerCtx, wPlaneParams, indicatrices, 'mapped');
             });
         }
-        if (!isRiemannW && index === 0) updateWindingNumberDisplay();
+        if (index === 0) updateWindingNumberDisplay();
     } finally {
         wCanvas = previousCanvas;
         wCtx = previousCtx;
         wPlaneParams = previousParams;
         controls.wPlaneThreeContainer = previousThreeContainer;
-        sphereViewParams.w = previousSphereParams;
         wPlanarTransformedLayerCache = previousCache;
     }
 }
@@ -1148,7 +1092,7 @@ function prepareThreeWRenderer() {
     setWPresentation('three');
     let renderer = wStaticThreeRenderers.get(container);
     if (!renderer) {
-        renderer = new ThreeRiemannRenderer(container, 'w');
+        renderer = new ThreeManifoldsRenderer(container, 'w');
         wStaticThreeRenderers.set(container, renderer);
     }
     renderer.onFoldTargetSelected = target => {
@@ -1166,37 +1110,60 @@ function prepareThreeWRenderer() {
 function renderThreeWPlane(map, stageIndex) {
     const threeRenderer = prepareThreeWRenderer();
 
-    threeRenderer.setSphereMode();
-
+    threeRenderer.setManifoldMode();
+    const manifoldChanged = threeRenderer.setManifold(state.selectedManifold);
     const transformChanged = threeRenderer.setTransform(map);
 
-    const gridConfigObj = buildInputShapeGeometryConfig(zPlaneParams, {
-        currentFunction: state.currentFunction,
-        zetaContinuationEnabled: state.zetaContinuationEnabled,
-        gridDensity: state.gridDensity
-    });
-    const gridConfigKey = `${map.signature}:${JSON.stringify(gridConfigObj)}`;
+    if (isRasterInputShape(state.currentInputShape)) {
+        threeRenderer.lastGridConfigKey = null;
+        const source = getRasterSourceForShape(state.currentInputShape);
+        if (source) {
+            const rasterConfigKey = [
+                map.signature,
+                state.currentInputShape,
+                state.a0,
+                state.b0,
+                getRasterSizeForShape(state.currentInputShape),
+                getRasterAspectRatioForShape(state.currentInputShape),
+                getRasterVersionTokenForShape(state.currentInputShape),
+                state.selectedManifold
+            ].join('|');
 
-    // Skip rebuilding heavy 3D geometries continuously during 2D canvas drag-panning.
-    // The pointerup redraw will rebuild any stale geometry.
-    if (threeRenderer.lastGridConfigKey !== gridConfigKey
-        && !runtime.interaction.panZ.isPanning
-        && !runtime.interaction.panW.isPanning) {
-        threeRenderer.lastGridConfigKey = gridConfigKey;
-
-        const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
+            if (threeRenderer.lastRasterConfigKey !== rasterConfigKey) {
+                threeRenderer.lastRasterConfigKey = rasterConfigKey;
+                threeRenderer.buildRasterManifold(source, state.currentInputShape, 1.0);
+            }
+        }
+    } else {
+        threeRenderer.lastRasterConfigKey = null;
+        const gridConfigObj = buildInputShapeGeometryConfig(zPlaneParams, {
             currentFunction: state.currentFunction,
             zetaContinuationEnabled: state.zetaContinuationEnabled,
-            curvePoints: 1000,
             gridDensity: state.gridDensity
         });
+        const gridConfigKey = `${map.signature}:${JSON.stringify(gridConfigObj)}:${state.selectedManifold}`;
 
-        threeRenderer.buildGridFromPointSets(wPointSets, 1.0);
+        // Skip rebuilding heavy 3D geometries continuously during 2D canvas drag-panning.
+        // The pointerup redraw will rebuild any stale geometry.
+        if (threeRenderer.lastGridConfigKey !== gridConfigKey
+            && !runtime.interaction.panZ.isPanning
+            && !runtime.interaction.panW.isPanning) {
+            threeRenderer.lastGridConfigKey = gridConfigKey;
+
+            const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
+                currentFunction: state.currentFunction,
+                zetaContinuationEnabled: state.zetaContinuationEnabled,
+                curvePoints: 1000,
+                gridDensity: state.gridDensity
+            });
+
+            threeRenderer.buildGridFromPointSets(wPointSets, 1.0);
+        }
     }
 
     const geometryChanged = threeRenderer.updateGeometry(1.0);
     const overlayChanged = threeRenderer.setDynamicOverlay(
-        getDynamicSphereSceneData({ transform: map.evaluate, stageIndex }),
+        getDynamicManifoldSceneData({ transform: map.evaluate, stageIndex }),
         `${stageIndex}:${getDynamicPlottingCacheKey()}`
     );
 
@@ -1207,7 +1174,7 @@ function renderThreeWPlane(map, stageIndex) {
         probeChanged = threeRenderer.updateProbe(null);
     }
 
-    if (transformChanged || geometryChanged || overlayChanged || probeChanged) {
+    if (manifoldChanged || transformChanged || geometryChanged || overlayChanged || probeChanged) {
         threeRenderer.render();
     }
 }

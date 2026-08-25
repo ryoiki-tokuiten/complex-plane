@@ -97,7 +97,7 @@ function syncOptionalColumn(column, shouldHide, onHide) {
 export function renderApplicationFrame(timestamp) {
     const graphActive = state.graphViewEnabled
         && !state.laplaceModeEnabled;
-    const zIsPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
+    const zIsPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
     if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar) {
         findZerosAndPoles();
     } else {

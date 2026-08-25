@@ -13,8 +13,8 @@ const NON_UI_STATE_KEYS = new Set([
     'isWFullScreen', 'isZFullScreen', 'laplaceAnimationTime', 'laplaceCurrentValue',
     'laplacePoles', 'laplaceROC', 'laplaceSurface', 'laplaceTimeDomainSignal',
     'laplaceZeros', 'poles', 'polynomialCoeffs', 'probeZ',
-    'riemannTransformationProgressW',
-    'riemannTransformationProgressZ', 'videoFrameVersion', 'zeros'
+    'manifoldTransformationProgressW',
+    'manifoldTransformationProgressZ', 'videoFrameVersion', 'zeros'
 ]);
 
 const UI_STATE_KEYS = Object.freeze(Object.keys(state).filter(key => !NON_UI_STATE_KEYS.has(key)));

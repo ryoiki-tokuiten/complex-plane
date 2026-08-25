@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complex Manifolds 3D — Morph & Transformation Studio</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        :root {
+            --bg-color: #050508;
+            --panel-bg: rgba(12, 14, 20, 0.75);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --accent-blue: #0ea5e9;
+            --accent-purple: #8b5cf6;
+            --accent-pink: #ec4899;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            user-select: none;
+        }
+
+        #canvas_container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 1;
+            background: radial-gradient(circle at 50% 50%, #111424 0%, #050508 100%);
+        }
+
+        /* Glassmorphic UI overlays */
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+            z-index: 10;
+        }
+
+        /* Top Header Bar */
+        #top_nav {
+            position: absolute;
+            top: 20px; left: 20px; right: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            gap: 16px;
+        }
+
+        .brand-title {
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #38bdf8, #c084fc, #f472b6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+        }
+
+        .manifold-tabs {
+            display: flex;
+            gap: 4px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-sub);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
+        .tab-btn.active {
+            background: linear-gradient(135deg, #0284c7, #6d28d9);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(109, 40, 217, 0.4);
+        }
+
+        select.custom-select {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            outline: none;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        /* Bottom Floating Controller */
+        #bottom_controls {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(700px, calc(100vw - 40px));
+            padding: 16px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .timeline-row {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .play-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: #fff;
+            color: #0f172a;
+            border: none;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.3);
+            transition: transform 0.2s, box-shadow 0.2s;
+            flex-shrink: 0;
+        }
+        .play-btn:hover { transform: scale(1.08); box-shadow: 0 6px 25px rgba(255, 255, 255, 0.5); }
+
+        .slider-wrapper { flex-grow: 1; display: flex; flex-direction: column; gap: 8px; }
+        .slider-header { display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 1px;}
+        
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.2);
+            outline: none;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 0 10px rgba(255,255,255,0.8);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+
+        /* Left Side Info HUD */
+        #hud_info {
+            position: absolute;
+            left: 20px;
+            top: 90px;
+            width: 320px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            line-height: 1.5;
+        }
+        #hud_info h3 { font-size: 1.1rem; color: #fff; margin-bottom: 4px;}
+        .formula-box {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 12px;
+            border-radius: 8px;
+            font-family: "SF Mono", monospace;
+            font-size: 0.8rem;
+            color: #38bdf8;
+            border-left: 3px solid #38bdf8;
+        }
+
+        #hud_concept {
+            font-size: 0.85rem;
+            color: var(--text-sub);
+            padding-left: 4px;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="canvas_container"></div>
+
+    <!-- Top Navigation -->
+    <nav id="top_nav" class="glass-panel">
+        <div class="brand-title">Complex Morph 3D</div>
+
+        <div class="manifold-tabs" id="manifold_tabs">
+            <button class="tab-btn active" data-manifold="sphere">Sphere</button>
+            <button class="tab-btn" data-manifold="cylinder">Cylinder</button>
+            <button class="tab-btn" data-manifold="torus">Torus</button>
+            <button class="tab-btn" data-manifold="helicoid">Helicoid</button>
+            <button class="tab-btn" data-manifold="enneper">Enneper</button>
+            <button class="tab-btn" data-manifold="bonnet">Bonnet</button>
+        </div>
+
+        <select id="function_select" class="custom-select">
+            <option value="identity">w = z (Geometry Only)</option>
+            <option value="exp" selected>w = exp(z)</option>
+            <option value="ln">w = ln(z)</option>
+            <option value="cos">w = cos(z)</option>
+            <option value="sin">w = sin(z)</option>
+            <option value="sq">w = z²</option>
+            <option value="sqrt">w = √z</option>
+            <option value="inv">w = 1/z</option>
+            <option value="mobius">w = (z - i)/(z + i)</option>
+        </select>
+    </nav>
+
+    <!-- Info HUD -->
+    <div id="hud_info" class="glass-panel">
+        <h3 id="hud_title">Riemann Sphere</h3>
+        <div class="formula-box" id="hud_formula">Curling the plane into S²</div>
+        <div id="hud_concept">A true geometric folding morph. The complex plane bends upwards into a sphere, continuously mapping ∞ to the North Pole.</div>
+    </div>
+
+    <!-- Bottom Floating Controller -->
+    <div id="bottom_controls" class="glass-panel">
+        <div class="timeline-row">
+            <button id="play_btn" class="play-btn">▶</button>
+            <div class="slider-wrapper">
+                <div class="slider-header">
+                    <span>Flat Complex Plane</span>
+                    <span id="morph_val_display" style="color: #fff;">0%</span>
+                    <span id="morph_label_end">3D Manifold</span>
+                </div>
+                <input type="range" id="morph_slider" min="0" max="1" step="0.001" value="0">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Complex Math ---
+        const Complex = {
+            create: (re = 0, im = 0) => ({ re, im }),
+            abs: (z) => Math.hypot(z.re, z.im),
+            arg: (z) => Math.atan2(z.im, z.re),
+            add: (a, b) => ({ re: a.re + b.re, im: a.im + b.im }),
+            mul: (a, b) => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re }),
+            div: (a, b) => {
+                const d = b.re * b.re + b.im * b.im + 1e-15;
+                return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
+            },
+            exp: (z) => {
+                const r = Math.exp(Math.min(z.re, 25));
+                return { re: r * Math.cos(z.im), im: r * Math.sin(z.im) };
+            },
+            ln: (z) => {
+                const r = Math.hypot(z.re, z.im);
+                return { re: Math.log(Math.max(r, 1e-12)), im: Math.atan2(z.im, z.re) };
+            },
+            sin: (z) => ({ re: Math.sin(z.re) * Math.cosh(z.im), im: Math.cos(z.re) * Math.sinh(z.im) }),
+            cos: (z) => ({ re: Math.cos(z.re) * Math.cosh(z.im), im: -Math.sin(z.re) * Math.sinh(z.im) }),
+            pow: (z, n) => {
+                const r = Math.hypot(z.re, z.im);
+                const th = Math.atan2(z.im, z.re);
+                const rn = Math.pow(r, n);
+                return { re: rn * Math.cos(n * th), im: rn * Math.sin(n * th) };
+            }
+        };
+
+        function evaluateFunction(funcName, z) {
+            switch (funcName) {
+                case 'identity': return z;
+                case 'exp': return Complex.exp(z);
+                case 'ln': return Complex.ln(z);
+                case 'cos': return Complex.cos(z);
+                case 'sin': return Complex.sin(z);
+                case 'sq': return Complex.pow(z, 2);
+                case 'sqrt': return Complex.pow(z, 0.5);
+                case 'inv': return Complex.div({ re: 1, im: 0 }, z);
+                case 'mobius': return Complex.div({ re: z.re, im: z.im - 1 }, { re: z.re, im: z.im + 1 });
+                default: return z;
+            }
+        }
+
+        // --- Geometric Intuitive Morphing Logic ---
+        function computeMorph(manifold, funcName, z_in, t) {
+            const x = z_in.re;
+            const y = z_in.im;
+            const r = Math.hypot(x, y);
+            const theta = Math.atan2(y, x);
+            const w = evaluateFunction(funcName, z_in);
+
+            let res = { X: x, Y: 0, Z: y, w: w }; // Default flat plane (XZ plane)
+
+            if (manifold === 'sphere') {
+                // True geometric curling of the plane into a sphere.
+                // Radius of final sphere = 2.0
+                const R_final = 2.0;
+                // Stereographic projection angle mapping: tan(alpha/2) = r / (2*R_final)
+                const alpha = 2 * Math.atan(r / (2 * R_final)); 
+                
+                if (alpha < 0.0001) return res;
+
+                const curAlpha = t * alpha;
+                let R;
+                if (t < 0.0001) {
+                    return res;
+                } else {
+                    // Radius of curvature blends from infinity (flat) to R_final
+                    // To preserve arc length during bending: arc = R * curAlpha = r => R = r/curAlpha
+                    R = (r / curAlpha) * (1 - t) + R_final * t;
+                }
+
+                res.X = R * Math.sin(curAlpha) * Math.cos(theta);
+                res.Z = R * Math.sin(curAlpha) * Math.sin(theta);
+                res.Y = R * (1 - Math.cos(curAlpha));
+            }
+            else if (manifold === 'cylinder') {
+                // Creative Sequence: Roll into cylinder (0 to 0.5), then Distort to function (0.5 to 1.0)
+                const rollT = Math.min(t * 2.0, 1.0);
+                const funcT = Math.max((t - 0.5) * 2.0, 0.0);
+                
+                // Roll imaginary axis into a circle
+                let Y_roll, Z_roll;
+                if (rollT < 0.0001) {
+                    Y_roll = 0;
+                    Z_roll = y;
+                } else {
+                    const R_roll = 1.0 / rollT; // infinite to radius 1
+                    Y_roll = R_roll * (1 - Math.cos(y / R_roll));
+                    Z_roll = R_roll * Math.sin(y / R_roll);
+                }
+
+                // If function is identity, just stay as cylinder
+                if (funcName === 'identity' || funcT === 0) {
+                    res.X = x;
+                    res.Y = Y_roll;
+                    res.Z = Z_roll;
+                } else {
+                    // Morphs the cylinder cross-section into the complex function's Re/Im output!
+                    // This visually maps how w=f(z) warps the cylindrical domain.
+                    const Y_func = w.re;
+                    const Z_func = w.im;
+                    
+                    res.X = x;
+                    res.Y = Y_roll * (1 - funcT) + Y_func * funcT;
+                    res.Z = Z_roll * (1 - funcT) + Z_func * funcT;
+                }
+            }
+            else if (manifold === 'torus') {
+                // Fold X into cylinder, then Y into torus
+                const roll1 = Math.min(t * 2.0, 1.0);
+                const roll2 = Math.max((t - 0.5) * 2.0, 0.0);
+                
+                const r_minor = 1.0;
+                const R_major = 3.0;
+                
+                let X1, Y1, Z1;
+                if (roll1 < 0.0001) {
+                    X1 = x; Y1 = 0; Z1 = y;
+                } else {
+                    const R1 = r_minor / roll1;
+                    X1 = R1 * Math.sin(x / R1);
+                    Y1 = R1 * (1 - Math.cos(x / R1));
+                    Z1 = y;
+                }
+                
+                if (roll2 < 0.0001) {
+                    res.X = X1; res.Y = Y1; res.Z = Z1;
+                } else {
+                    const R2 = R_major / roll2;
+                    const angle = Z1 / R2;
+                    res.X = X1;
+                    res.Y = R2 - (R2 - Y1) * Math.cos(angle);
+                    res.Z = (R2 - Y1) * Math.sin(angle);
+                }
+            }
+            else if (manifold === 'helicoid') {
+                // Vertical spring-like unrolling to reveal Riemann sheets
+                res.X = r * Math.cos(theta);
+                res.Z = r * Math.sin(theta);
+                res.Y = t * theta * 1.5; 
+            }
+            else if (manifold === 'enneper') {
+                // Direct interpolation to Enneper minimal surface
+                const u = x * 0.5;
+                const v = y * 0.5;
+                const X_end = u - Math.pow(u,3)/3 + u*v*v;
+                const Z_end = v - Math.pow(v,3)/3 + u*u*v; 
+                const Y_end = u*u - v*v;
+                
+                res.X = x * (1 - t) + X_end * 2.0 * t;
+                res.Z = y * (1 - t) + Z_end * 2.0 * t;
+                res.Y = 0 * (1 - t) + Y_end * 2.0 * t;
+            }
+            else if (manifold === 'bonnet') {
+                // Flat plane -> Helicoid -> Catenoid
+                const u = x * 0.4;
+                const v = y * 0.4;
+                
+                // First 30% stretches flat plane into Helicoid
+                const t_heli = Math.min(t / 0.3, 1.0);
+                // Next 70% bends Helicoid into Catenoid
+                const t_cat = Math.max((t - 0.3) / 0.7, 0.0);
+                
+                const theta_b = t_cat * (Math.PI / 2);
+                
+                // Helicoid / Catenoid Isometry Equation
+                const X_end = Math.cos(theta_b) * Math.sinh(v) * Math.sin(u) + Math.sin(theta_b) * Math.cosh(v) * Math.cos(u);
+                const Z_end = -Math.cos(theta_b) * Math.sinh(v) * Math.cos(u) + Math.sin(theta_b) * Math.cosh(v) * Math.sin(u);
+                const Y_end = u * Math.cos(theta_b) + v * Math.sin(theta_b);
+                
+                // Combine with flat plane start
+                res.X = x * (1 - t_heli) + X_end * 3.0 * t_heli;
+                res.Z = y * (1 - t_heli) + Z_end * 3.0 * t_heli;
+                res.Y = 0 * (1 - t_heli) + Y_end * 3.0 * t_heli;
+            }
+            
+            return res;
+        }
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvas_container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050508, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(16, 12, 18);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // Cinematic Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight1 = new THREE.DirectionalLight(0x0ea5e9, 2.0); // Blueish
+        dirLight1.position.set(10, 20, 10);
+        scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0xf472b6, 1.5); // Pinkish
+        dirLight2.position.set(-10, -10, -10);
+        scene.add(dirLight2);
+
+        // Ground Grid
+        const gridHelper = new THREE.GridHelper(40, 40, 0xffffff, 0xffffff);
+        gridHelper.material.opacity = 0.05;
+        gridHelper.material.transparent = true;
+        gridHelper.position.y = -6;
+        scene.add(gridHelper);
+
+        // --- Geometry Generation ---
+        const size = 70; 
+        const surfaceGeometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(size * size * 3);
+        const colors = new Float32Array(size * size * 3);
+        const indices = [];
+
+        for (let i = 0; i < size - 1; i++) {
+            for (let j = 0; j < size - 1; j++) {
+                const a = i * size + j;
+                const b = i * size + j + 1;
+                const c = (i + 1) * size + j;
+                const d = (i + 1) * size + j + 1;
+                indices.push(a, b, d);
+                indices.push(a, d, c);
+            }
+        }
+        surfaceGeometry.setIndex(indices);
+        surfaceGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        surfaceGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        // Gorgeous glass-like material
+        const surfaceMaterial = new THREE.MeshPhysicalMaterial({
+            vertexColors: true,
+            roughness: 0.2,
+            metalness: 0.1,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.1,
+            transmission: 0.3,
+            thickness: 0.5,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.95
+        });
+
+        const surfaceMesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+        scene.add(surfaceMesh);
+
+        // Grid lines overlay
+        const wireframeMaterial = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.15,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const wireframeGeo = new THREE.WireframeGeometry(surfaceGeometry);
+        const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMaterial);
+        scene.add(wireframeMesh);
+
+        // Domain boundaries (Polar vs Rectangular)
+        function getDomainPoint(manifold, i, j, size) {
+            const uNorm = i / (size - 1); // 0 to 1
+            const vNorm = j / (size - 1); // 0 to 1
+
+            if (manifold === 'sphere') {
+                // Polar disk
+                const r = uNorm * 6.0; 
+                const theta = (vNorm * 2 - 1) * Math.PI;
+                return Complex.create(r * Math.cos(theta), r * Math.sin(theta));
+            } else if (manifold === 'cylinder') {
+                // Rectangular exactly matching circumference 2*pi
+                const x = (uNorm * 2 - 1) * 3.0;
+                const y = (vNorm * 2 - 1) * Math.PI;
+                return Complex.create(x, y);
+            } else if (manifold === 'torus') {
+                // Exact 2pi x 2pi patch
+                const x = (uNorm * 2 - 1) * Math.PI;
+                const y = (vNorm * 2 - 1) * Math.PI;
+                return Complex.create(x, y);
+            } else if (manifold === 'helicoid') {
+                // Multi-wind polar disk
+                const r = uNorm * 4.0;
+                const theta = (vNorm * 2 - 1) * Math.PI * 2.5; // 2.5 winds
+                return Complex.create(r * Math.cos(theta), r * Math.sin(theta));
+            } else if (manifold === 'enneper') {
+                const x = (uNorm * 2 - 1) * 2.0;
+                const y = (vNorm * 2 - 1) * 2.0;
+                return Complex.create(x, y);
+            } else if (manifold === 'bonnet') {
+                const x = (uNorm * 2 - 1) * 3.5;
+                const y = (vNorm * 2 - 1) * 1.5;
+                return Complex.create(x, y);
+            }
+            return Complex.create((uNorm*2-1)*3, (vNorm*2-1)*3);
+        }
+
+        let currentManifold = 'sphere';
+        let currentFunction = 'exp';
+        let progress = 0;
+
+        function updateGeometry() {
+            const posAttr = surfaceGeometry.attributes.position;
+            const colAttr = surfaceGeometry.attributes.color;
+
+            for (let i = 0; i < size; i++) {
+                for (let j = 0; j < size; j++) {
+                    const idx = i * size + j;
+                    const z_in = getDomainPoint(currentManifold, i, j, size);
+                    
+                    const morph = computeMorph(currentManifold, currentFunction, z_in, progress);
+                    
+                    posAttr.setXYZ(idx, morph.X, morph.Y, morph.Z);
+
+                    // Domain coloring based on w
+                    let hue, mag;
+                    if (currentFunction === 'identity') {
+                        hue = (Complex.arg(z_in) + Math.PI) / (2 * Math.PI);
+                        mag = Math.min(Complex.abs(z_in) / 4.0, 1.0);
+                    } else {
+                        hue = (Complex.arg(morph.w) + Math.PI) / (2 * Math.PI);
+                        mag = Math.min(Complex.abs(morph.w) / 4.0, 1.0);
+                    }
+
+                    const color = new THREE.Color();
+                    // Phase hue + Magnitude Brightness
+                    color.setHSL(hue, 0.9, 0.3 + 0.4 * Math.sin(mag * Math.PI / 2));
+                    colAttr.setXYZ(idx, color.r, color.g, color.b);
+                }
+            }
+
+            posAttr.needsUpdate = true;
+            colAttr.needsUpdate = true;
+            surfaceGeometry.computeVertexNormals();
+            
+            // Wireframe uses same geometry, but needs normal update
+            wireframeMesh.geometry = new THREE.WireframeGeometry(surfaceGeometry);
+        }
+
+        // --- Event Listeners ---
+        const tabs = document.querySelectorAll('.tab-btn');
+        tabs.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                btn.classList.add('active');
+                currentManifold = btn.dataset.manifold;
+                
+                // Update HUD texts
+                const title = document.getElementById('hud_title');
+                const concept = document.getElementById('hud_concept');
+                const formula = document.getElementById('hud_formula');
+                
+                if (currentManifold === 'sphere') {
+                    title.textContent = 'Riemann Sphere'; formula.textContent = 'Curling the plane into S²'; concept.textContent = 'A true geometric folding morph. The complex plane bends upwards into a sphere, continuously mapping ∞ to the North Pole.';
+                } else if (currentManifold === 'cylinder') {
+                    title.textContent = 'Log-Cylinder'; formula.textContent = 'Roll → Distort with f(z)'; concept.textContent = 'The plane is first physically rolled into a cylinder. Then, the cylinder’s cross-section is squished and warped by the complex function f(z).';
+                } else if (currentManifold === 'torus') {
+                    title.textContent = 'Complex Torus'; formula.textContent = 'Double-periodic lattice fold'; concept.textContent = 'The 2D plane is wrapped horizontally into a cylinder, and then bent vertically, fusing its ends to form a closed doughnut T².';
+                } else if (currentManifold === 'helicoid') {
+                    title.textContent = 'Riemann Helicoid'; formula.textContent = 'Unrolling branch cuts'; concept.textContent = 'The plane separates and stretches vertically like a slinky based on its angle, gracefully revealing multiple Riemann sheets without cuts.';
+                } else if (currentManifold === 'enneper') {
+                    title.textContent = 'Enneper Minimal'; formula.textContent = 'Weierstrass-Enneper folding'; concept.textContent = 'A beautiful self-intersecting saddle flower. The flat plane smoothly warps into a minimal surface with zero mean curvature.';
+                } else if (currentManifold === 'bonnet') {
+                    title.textContent = 'Bonnet Family'; formula.textContent = 'Plane → Helicoid → Catenoid'; concept.textContent = 'A hypnotic three-stage journey: the plane stretches into a Helicoid, which then undergoes an isometric zero-distortion bending into a Catenoid.';
+                }
+                
+                updateGeometry();
+            });
+        });
+
+        document.getElementById('function_select').addEventListener('change', (e) => {
+            currentFunction = e.target.value;
+            updateGeometry();
+        });
+
+        const slider = document.getElementById('morph_slider');
+        const display = document.getElementById('morph_val_display');
+        const playBtn = document.getElementById('play_btn');
+        let isPlaying = false;
+        let lastTime = 0;
+
+        slider.addEventListener('input', (e) => {
+            progress = parseFloat(e.target.value);
+            display.textContent = Math.round(progress * 100) + '%';
+            updateGeometry();
+        });
+
+        playBtn.addEventListener('click', () => {
+            isPlaying = !isPlaying;
+            playBtn.innerHTML = isPlaying ? '❚❚' : '▶';
+        });
+
+        function animate(now) {
+            requestAnimationFrame(animate);
+
+            if (lastTime === 0) lastTime = now;
+            const dt = (now - lastTime) / 1000;
+            lastTime = now;
+
+            if (isPlaying) {
+                progress += dt * 0.25;
+                if (progress > 1.0) { progress = 0; }
+                slider.value = progress;
+                display.textContent = Math.round(progress * 100) + '%';
+                updateGeometry();
+            }
+
+            // Gentle rotation
+            surfaceMesh.rotation.y += 0.002;
+            wireframeMesh.rotation.y += 0.002;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Init
+        updateGeometry();
+        requestAnimationFrame(animate);
+
+    </script>
+</body>
+</html>

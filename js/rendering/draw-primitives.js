@@ -10,7 +10,7 @@ export function drawZerosAndPolesMarkers(ctx, planeParams) {
     let contour = null;
     if (
         state.cauchyIntegralModeEnabled &&
-        (!state.riemannSphereViewEnabled || state.splitViewEnabled) &&
+        !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled) &&
         (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse' || state.currentInputShape === 'arbitrary')
     ) {
         if (state.currentInputShape === 'circle') {

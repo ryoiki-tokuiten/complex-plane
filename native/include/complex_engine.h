@@ -374,38 +374,6 @@ int32_t ce_build_grid_fold(const ce_map_config *config,
                            float *point_positions, uint32_t point_position_capacity,
                            uint32_t *point_offsets, uint32_t *point_point_sets,
                            uint32_t stats[4], double mapping[4]);
-int32_t ce_build_sphere_lines(const ce_map_config *config,
-                              const ce_complex *source_points, const uint32_t *source_offsets,
-                              uint32_t line_count, uint32_t map_points,
-                              double center_x, double center_y, double radius,
-                              double rotation_x, double rotation_y,
-                              float *output, uint32_t output_capacity,
-                              uint32_t *line_offsets);
-int32_t ce_project_sphere_points(const ce_map_config *config,
-                                 const ce_complex *source_points, uint32_t point_count,
-                                 uint32_t map_points,
-                                 double center_x, double center_y, double radius,
-                                 double rotation_x, double rotation_y,
-                                 float *positions, uint8_t *visible);
-int32_t ce_build_sphere_probe(const ce_map_config *config,
-                              double source_re, double source_im, double neighborhood_size,
-                              double crosshair_factor, uint32_t map_points,
-                              double center_x, double center_y, double radius,
-                              double rotation_x, double rotation_y,
-                              float center_position[2], uint8_t *center_visible,
-                              float *output, uint32_t output_capacity,
-                              uint32_t line_offsets[4]);
-int32_t ce_build_riemann_sphere_targets(const ce_map_config *config,
-                                        const ce_complex *source_points, uint32_t point_count,
-                                        uint32_t map_points, double scale, double radius,
-                                        float *start_positions, float *target_positions);
-int32_t ce_interpolate_geometry(const float *start_positions, const float *target_positions,
-                                uint32_t float_count, double progress, float *output);
-int32_t ce_build_riemann_sphere_positions(const ce_complex *points, uint32_t point_count,
-                                          double scale, double radius, float *positions);
-int32_t ce_build_riemann_probe(const ce_map_config *config, double re, double im,
-                               uint32_t map_point, double scale, double radius,
-                               double progress, float active[3], float sphere[3], float ray[6]);
 int32_t ce_build_fold_preimage_markers(const ce_map_config *config,
                                        const ce_complex *roots, uint32_t root_count,
                                        double mapped_center_x, double mapped_center_y,

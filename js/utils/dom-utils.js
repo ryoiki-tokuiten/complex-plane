@@ -1,5 +1,5 @@
-import { state, context, zPlaneParams, wPlaneParams, sphereViewParams, wPlaneInitialRanges, zPlaneInitialRanges } from '../store/state.js';
-import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT, SPHERE_INITIAL_ROT_X, SPHERE_INITIAL_ROT_Y, SPHERE_VIEW_RADIUS_FACTOR } from '../constants/rendering.js';
+import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, zPlaneInitialRanges } from '../store/state.js';
+import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
 import { synchronizePreciseViewport } from '../native/precise-viewport.js';
@@ -11,7 +11,7 @@ import { requireInteger } from './numeric-contracts.js';
 const { controls } = context;
 
 let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas, zDomainColorCtx;
-let wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList, sphereViewWParamsList;
+let wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList;
 
 export function formatTaylorNumericValue(value) {
     if (!Number.isFinite(value)) {
@@ -50,7 +50,6 @@ export function setupDOMReferences() {
     wCtxList = [wCtx];
     wPlaneParamsList = [wPlaneParams];
     wPlaneThreeContainersList = [controls.wPlaneThreeContainer];
-    sphereViewWParamsList = [sphereViewParams.w];
 
     controls.funcButtons = Object.fromEntries(
         [...document.querySelectorAll('[id^="select_"][id$="_btn"]')]
@@ -64,7 +63,7 @@ export function setupDOMReferences() {
         'commonParamsSliders',
         'shapeParamsSliders', 'mobiusParamsSliders', 'polynomialParamsSliders',
         'enableDomainColoringCb', 'showZerosPolesCb', 'showCriticalPointsCb',
-        'enableRiemannSphereCb', 'enableSplitViewCb', 'enableVectorFieldCb',
+        'enableManifold3DCb', 'enableVectorFieldCb',
         'zPlaneZoomSlider', 'wPlaneZoomSlider'
     ];
 
@@ -82,10 +81,9 @@ export function setupDOMReferences() {
     context.wCtxList = wCtxList;
     context.wPlaneParamsList = wPlaneParamsList;
     context.wPlaneThreeContainersList = wPlaneThreeContainersList;
-    context.sphereViewWParamsList = sphereViewWParamsList;
 }
 
-export function setupCanvasBaseParams(planeParams, canvasElement, sphereViewObj, isFullscreen = false) {
+export function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen = false) {
     let newWidth, newHeight;
     if (isFullscreen) {
         const container = canvasElement.parentElement; 
@@ -109,10 +107,6 @@ export function setupCanvasBaseParams(planeParams, canvasElement, sphereViewObj,
     planeParams.width = canvasElement.width;
     planeParams.height = canvasElement.height;
 
-    sphereViewObj.radius = Math.min(planeParams.width, planeParams.height) / 2 * SPHERE_VIEW_RADIUS_FACTOR;
-    sphereViewObj.centerX = planeParams.width / 2;
-    sphereViewObj.centerY = planeParams.height / 2;
-
     if (canvasElement === zCanvas) {
         if (zDomainColorCanvas.width !== planeParams.width) zDomainColorCanvas.width = planeParams.width;
         if (zDomainColorCanvas.height !== planeParams.height) zDomainColorCanvas.height = planeParams.height;
@@ -129,15 +123,15 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
     let wWorldCenterX = (wPlaneParams.currentVisXRange[0] + wPlaneParams.currentVisXRange[1]) / 2;
     let wWorldCenterY = (wPlaneParams.currentVisYRange[0] + wPlaneParams.currentVisYRange[1]) / 2;
 
-    setupCanvasBaseParams(zPlaneParams, zCanvas, sphereViewParams.z, zIsFullscreen);
+    setupCanvasBaseParams(zPlaneParams, zCanvas, zIsFullscreen);
 
     if (wCanvasList && wCanvasList.length > 0) {
         for (let i = 0; i < wCanvasList.length; i++) {
             const isThisWFullscreen = wIsFullscreen && (state.fullscreenWIndex === i);
-            setupCanvasBaseParams(wPlaneParamsList[i], wCanvasList[i], sphereViewWParamsList[i], isThisWFullscreen);
+            setupCanvasBaseParams(wPlaneParamsList[i], wCanvasList[i], isThisWFullscreen);
         }
     } else {
-        setupCanvasBaseParams(wPlaneParams, wCanvas, sphereViewParams.w, wIsFullscreen);
+        setupCanvasBaseParams(wPlaneParams, wCanvas, wIsFullscreen);
     }
 
     let zIsPrecise = !!zPlaneParams.preciseViewport;
@@ -257,8 +251,8 @@ export function updateChainingTitles() {
 
 function getChainedOutputLabel() {
     if (state.riemannSurfaceEnabled) return 'Riemann surface';
-    if (state.riemannSphereViewEnabled || state.splitViewEnabled) {
-        return state.threeSphereEnabled ? '3D w-sphere' : 'w-sphere';
+    if (state.manifold3dViewEnabled) {
+        return '3D Manifold';
     }
     return 'w-plane';
 }
@@ -269,7 +263,6 @@ export function updateChainingColumns(count) {
         wCtxList = [wCtx];
         wPlaneParamsList = [wPlaneParams];
         wPlaneThreeContainersList = [controls.wPlaneThreeContainer];
-        sphereViewWParamsList = [sphereViewParams.w];
     }
     
     const chainCount = requireInteger(count, 'Chaining column count');
@@ -285,7 +278,6 @@ export function updateChainingColumns(count) {
         context.wCtxList = wCtxList;
         context.wPlaneParamsList = wPlaneParamsList;
         context.wPlaneThreeContainersList = wPlaneThreeContainersList;
-        context.sphereViewWParamsList = sphereViewWParamsList;
         return;
     }
 
@@ -352,17 +344,10 @@ export function updateChainingColumns(count) {
             currentVisYRange: [...wPlaneInitialRanges.y]
         };
         
-        const sphereParams = { 
-            rotX: SPHERE_INITIAL_ROT_X, rotY: SPHERE_INITIAL_ROT_Y, 
-            dragging: false, lastMouseX: 0, lastMouseY: 0, 
-            radius: 0, centerX: 0, centerY: 0 
-        };
-        
         wCanvasList.push(newCanvas);
         wCtxList.push(ctx);
         wPlaneParamsList.push(params);
         wPlaneThreeContainersList.push(newThreeContainer);
-        sphereViewWParamsList.push(sphereParams);
     }
     
     // Remove planes if needed
@@ -370,7 +355,7 @@ export function updateChainingColumns(count) {
         const i = wCanvasList.length - 1;
         const colToRemove = document.getElementById(`w_plane_column_${i}`);
         disposeRiemannSurface(wCanvasList[i]);
-        wPlaneThreeContainersList[i]?.__threeRiemannRenderer?.dispose();
+        wPlaneThreeContainersList[i]?.__threeManifoldsRenderer?.dispose();
         if (colToRemove) {
             canvasesRow.removeChild(colToRemove);
         }
@@ -378,7 +363,6 @@ export function updateChainingColumns(count) {
         wCtxList.pop();
         wPlaneParamsList.pop();
         wPlaneThreeContainersList.pop();
-        sphereViewWParamsList.pop();
         context.wPlanarTransformedLayerCacheList?.pop();
     }
     
@@ -393,5 +377,4 @@ export function updateChainingColumns(count) {
     context.wCtxList = wCtxList;
     context.wPlaneParamsList = wPlaneParamsList;
     context.wPlaneThreeContainersList = wPlaneThreeContainersList;
-    context.sphereViewWParamsList = sphereViewWParamsList;
 }

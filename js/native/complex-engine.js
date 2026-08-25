@@ -2072,6 +2072,14 @@ function packPrecisePixelPairs(pixels, label) {
     return packed;
 }
 
+function optionalMapPointer(options, allocations) {
+    if (!options.mapPoints) return 0;
+    const pointer = alloc(MAP_CONFIG_SIZE);
+    allocations.push(pointer);
+    writeMapConfig(pointer, options.mapOptions, allocations);
+    return pointer;
+}
+
 export function projectNativePrecisePixels(options, pixels) {
     const input = preciseViewportArguments(options.inputViewport);
     const output = preciseViewportArguments(options.outputViewport);
@@ -2081,7 +2089,7 @@ export function projectNativePrecisePixels(options, pixels) {
     if (!pointCount) return new Float32Array();
     const allocations = [];
     try {
-        const mapPointer = sphereMapPointer(options, allocations);
+        const mapPointer = optionalMapPointer(options, allocations);
         const inputRePointer = writeCString(options.inputViewport.centerRe, allocations);
         const inputImPointer = writeCString(options.inputViewport.centerIm, allocations);
         const outputRePointer = writeCString(options.outputViewport.centerRe, allocations);
@@ -2111,7 +2119,7 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
     if (!pointCount) return new Float32Array();
     const allocations = [];
     try {
-        const mapPointer = sphereMapPointer(options, allocations);
+        const mapPointer = optionalMapPointer(options, allocations);
         const inputRePointer = writeCString(options.inputViewport.centerRe, allocations);
         const inputImPointer = writeCString(options.inputViewport.centerIm, allocations);
         const pixelsPointer = alloc(packed.byteLength); allocations.push(pixelsPointer);
@@ -2139,7 +2147,7 @@ export function projectNativeValuesToPrecise(options, points) {
     const output = preciseViewportArguments(options.outputViewport);
     const allocations = [];
     try {
-        const mapPointer = sphereMapPointer(options, allocations);
+        const mapPointer = optionalMapPointer(options, allocations);
         const outputRePointer = writeCString(options.outputViewport.centerRe, allocations);
         const outputImPointer = writeCString(options.outputViewport.centerIm, allocations);
         const pointsPointer = alloc(points.length * 16); allocations.push(pointsPointer);
@@ -2621,256 +2629,6 @@ export function buildNativeGridFold(options, pointSets) {
                 sourceCenter: view.getFloat64(mappingPointer + 16, true),
                 scale: view.getFloat64(mappingPointer + 24, true)
             }
-        };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-function sphereParameters(options) {
-    const sphere = options.sphere;
-    const centerX = Number(sphere.centerX);
-    const centerY = Number(sphere.centerY);
-    const radius = Number(sphere.radius);
-    const rotX = Number(sphere.rotX);
-    const rotY = Number(sphere.rotY);
-    if (![centerX, centerY, radius, rotX, rotY].every(Number.isFinite) || radius <= 0) {
-        throw new Error('Native sphere geometry requires finite projection parameters.');
-    }
-    return { centerX, centerY, radius, rotX, rotY };
-}
-
-function sphereMapPointer(options, allocations) {
-    if (!options.mapPoints) return 0;
-    const pointer = alloc(MAP_CONFIG_SIZE);
-    allocations.push(pointer);
-    writeMapConfig(pointer, options.mapOptions, allocations);
-    return pointer;
-}
-
-export function buildNativeSphereLines(options, lines) {
-    if (!Array.isArray(lines) || !lines.length) return [];
-    const offsets = new Uint32Array(lines.length + 1);
-    let pointCount = 0;
-    lines.forEach((line, index) => {
-        offsets[index] = pointCount;
-        pointCount += Array.isArray(line) ? line.length : 0;
-    });
-    offsets[lines.length] = pointCount;
-    if (!pointCount) return lines.map(() => new Float32Array());
-    const segmentCount = Math.max(0, pointCount - lines.length);
-    const outputCapacity = Math.max(8, pointCount * 3 + segmentCount * 768 + lines.length * 2);
-    const projection = sphereParameters(options);
-    const allocations = [];
-    try {
-        const mapPointer = sphereMapPointer(options, allocations);
-        const pointsPointer = alloc(pointCount * 16); allocations.push(pointsPointer);
-        const offsetsPointer = alloc(offsets.byteLength); allocations.push(offsetsPointer);
-        const outputPointer = alloc(outputCapacity * 12); allocations.push(outputPointer);
-        const outputOffsetsPointer = alloc(offsets.byteLength); allocations.push(outputOffsetsPointer);
-        writePointBuffer(pointsPointer, lines.flat());
-        new Uint32Array(wasm.memory.buffer, offsetsPointer, offsets.length).set(offsets);
-        const outputCount = wasm.ce_build_sphere_lines(
-            mapPointer, pointsPointer, offsetsPointer, lines.length, options.mapPoints ? 1 : 0,
-            projection.centerX, projection.centerY, projection.radius, projection.rotX, projection.rotY,
-            outputPointer, outputCapacity, outputOffsetsPointer
-        );
-        if (outputCount < 0) throw new Error(`Native sphere geometry failed with status ${outputCount}.`);
-        const output = new Float32Array(wasm.memory.buffer, outputPointer, outputCount * 3);
-        const view = memoryView();
-        return lines.map((_, index) => {
-            const start = view.getUint32(outputOffsetsPointer + index * 4, true);
-            const end = view.getUint32(outputOffsetsPointer + (index + 1) * 4, true);
-            return new Float32Array(output.subarray(start * 3, end * 3));
-        });
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function projectNativeSpherePoints(options, points) {
-    if (!Array.isArray(points) || !points.length) return { positions: new Float32Array(), visible: new Uint8Array() };
-    const projection = sphereParameters(options);
-    const allocations = [];
-    try {
-        const mapPointer = sphereMapPointer(options, allocations);
-        const pointsPointer = alloc(points.length * 16); allocations.push(pointsPointer);
-        const positionsPointer = alloc(points.length * 8); allocations.push(positionsPointer);
-        const visiblePointer = alloc(points.length); allocations.push(visiblePointer);
-        writePointBuffer(pointsPointer, points);
-        const status = wasm.ce_project_sphere_points(
-            mapPointer, pointsPointer, points.length, options.mapPoints ? 1 : 0,
-            projection.centerX, projection.centerY, projection.radius, projection.rotX, projection.rotY,
-            positionsPointer, visiblePointer
-        );
-        if (status !== 0) throw new Error(`Native sphere projection failed with status ${status}.`);
-        return {
-            positions: new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, points.length * 2)),
-            visible: new Uint8Array(new Uint8Array(wasm.memory.buffer, visiblePointer, points.length))
-        };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function buildNativeSphereProbe(options) {
-    const projection = sphereParameters(options);
-    const outputCapacity = 35 * 768 + 128;
-    const allocations = [];
-    try {
-        const mapPointer = sphereMapPointer(options, allocations);
-        const centerPointer = alloc(8); allocations.push(centerPointer);
-        const visiblePointer = alloc(1); allocations.push(visiblePointer);
-        const outputPointer = alloc(outputCapacity * 12); allocations.push(outputPointer);
-        const offsetsPointer = alloc(16); allocations.push(offsetsPointer);
-        const outputCount = wasm.ce_build_sphere_probe(
-            mapPointer, Number(options.source?.re), Number(options.source?.im),
-            Number(options.neighborhoodSize), Number(options.crosshairFactor), options.mapPoints ? 1 : 0,
-            projection.centerX, projection.centerY, projection.radius, projection.rotX, projection.rotY,
-            centerPointer, visiblePointer, outputPointer, outputCapacity, offsetsPointer
-        );
-        if (outputCount < 0) throw new Error(`Native sphere probe failed with status ${outputCount}.`);
-        const view = memoryView();
-        const output = new Float32Array(wasm.memory.buffer, outputPointer, outputCount * 3);
-        return {
-            center: {
-                x: view.getFloat32(centerPointer, true),
-                y: view.getFloat32(centerPointer + 4, true),
-                visible: new Uint8Array(wasm.memory.buffer, visiblePointer, 1)[0] === 1
-            },
-            lines: Array.from({ length: 3 }, (_, index) => {
-                const start = view.getUint32(offsetsPointer + index * 4, true);
-                const end = view.getUint32(offsetsPointer + (index + 1) * 4, true);
-                return new Float32Array(output.subarray(start * 3, end * 3));
-            })
-        };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function buildNativeRiemannSphereGeometry(options, pointSets) {
-    if (!Array.isArray(pointSets)) throw new Error('Native Riemann geometry point sets must be an array.');
-    if (!pointSets.length) {
-        return { start: new Float32Array(), target: new Float32Array(), positions: new Float32Array(), offsets: new Uint32Array(1) };
-    }
-    if (typeof options?.mapPoints !== 'boolean') throw new Error('Native Riemann geometry requires mapPoints.');
-    const scale = requireFiniteNumber(options.scale, 'Native Riemann geometry scale');
-    const radius = requireFiniteNumber(options.radius, 'Native Riemann geometry radius');
-    const progress = requireFiniteNumber(options.progress, 'Native Riemann geometry progress');
-    if (scale <= 0 || radius <= 0 || progress < 0 || progress > 1) {
-        throw new Error('Native Riemann geometry requires positive scale/radius and progress from zero to one.');
-    }
-    const offsets = new Uint32Array(pointSets.length + 1);
-    let pointCount = 0;
-    pointSets.forEach((set, index) => {
-        if (!Array.isArray(set?.points)) throw new Error(`Native Riemann point set ${index} requires points.`);
-        offsets[index] = pointCount;
-        pointCount += set.points.length;
-    });
-    offsets[pointSets.length] = pointCount;
-    const allocations = [];
-    try {
-        const mapPointer = sphereMapPointer(options, allocations);
-        const pointsPointer = alloc(Math.max(1, pointCount) * 16); allocations.push(pointsPointer);
-        const startPointer = alloc(Math.max(1, pointCount) * 12); allocations.push(startPointer);
-        const targetPointer = alloc(Math.max(1, pointCount) * 12); allocations.push(targetPointer);
-        const positionsPointer = alloc(Math.max(1, pointCount) * 12); allocations.push(positionsPointer);
-        const points = pointSets.flatMap(set => set.points);
-        const pointView = memoryView();
-        points.forEach((point, index) => writeComplex(pointView, pointsPointer + index * 16, point, NaN, NaN));
-        let status = wasm.ce_build_riemann_sphere_targets(
-            mapPointer, pointsPointer, pointCount, options.mapPoints ? 1 : 0,
-            scale, radius, startPointer, targetPointer
-        );
-        if (status !== 0) throw new Error(`Native Riemann sphere geometry failed with status ${status}.`);
-        status = wasm.ce_interpolate_geometry(
-            startPointer, targetPointer, pointCount * 3, progress, positionsPointer
-        );
-        if (status !== 0) throw new Error(`Native Riemann interpolation failed with status ${status}.`);
-        return {
-            start: new Float32Array(new Float32Array(wasm.memory.buffer, startPointer, pointCount * 3)),
-            target: new Float32Array(new Float32Array(wasm.memory.buffer, targetPointer, pointCount * 3)),
-            positions: new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, pointCount * 3)),
-            offsets
-        };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function interpolateNativeGeometry(start, target, progress) {
-    if (!(start instanceof Float32Array) || !(target instanceof Float32Array) || start.length !== target.length) {
-        throw new Error('Native geometry interpolation requires matching Float32Array inputs.');
-    }
-    if (!start.length) return new Float32Array();
-    const progressValue = requireFiniteNumber(progress, 'Native geometry interpolation progress');
-    if (progressValue < 0 || progressValue > 1) {
-        throw new Error('Native geometry interpolation progress must be between zero and one.');
-    }
-    const allocations = [];
-    try {
-        const startPointer = alloc(start.byteLength); allocations.push(startPointer);
-        const targetPointer = alloc(target.byteLength); allocations.push(targetPointer);
-        const outputPointer = alloc(start.byteLength); allocations.push(outputPointer);
-        new Float32Array(wasm.memory.buffer, startPointer, start.length).set(start);
-        new Float32Array(wasm.memory.buffer, targetPointer, target.length).set(target);
-        const status = wasm.ce_interpolate_geometry(startPointer, targetPointer, start.length, progressValue, outputPointer);
-        if (status !== 0) throw new Error(`Native geometry interpolation failed with status ${status}.`);
-        return new Float32Array(new Float32Array(wasm.memory.buffer, outputPointer, start.length));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function buildNativeRiemannSpherePositions(points, scale, radius) {
-    if (!Array.isArray(points)) throw new Error('Native Riemann positions require a point array.');
-    if (!points.length) return new Float32Array();
-    const scaleValue = requireFiniteNumber(scale, 'Native Riemann position scale');
-    const radiusValue = requireFiniteNumber(radius, 'Native Riemann position radius');
-    if (scaleValue <= 0 || radiusValue <= 0) {
-        throw new Error('Native Riemann position scale and radius must be positive.');
-    }
-    const allocations = [];
-    try {
-        const pointsPointer = alloc(points.length * 16); allocations.push(pointsPointer);
-        const positionsPointer = alloc(points.length * 12); allocations.push(positionsPointer);
-        writePointBuffer(pointsPointer, points);
-        const status = wasm.ce_build_riemann_sphere_positions(
-            pointsPointer, points.length, scaleValue, radiusValue, positionsPointer
-        );
-        if (status !== 0) throw new Error(`Native Riemann point geometry failed with status ${status}.`);
-        return new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, points.length * 3));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
-}
-
-export function buildNativeRiemannProbe(options, point) {
-    if (typeof options?.mapPoints !== 'boolean') throw new Error('Native Riemann probe requires mapPoints.');
-    const source = requireFiniteComplex(point, 'Native Riemann probe point');
-    const scale = requireFiniteNumber(options.scale, 'Native Riemann probe scale');
-    const radius = requireFiniteNumber(options.radius, 'Native Riemann probe radius');
-    const progress = requireFiniteNumber(options.progress, 'Native Riemann probe progress');
-    if (scale <= 0 || radius <= 0 || progress < 0 || progress > 1) {
-        throw new Error('Native Riemann probe requires positive scale/radius and progress from zero to one.');
-    }
-    const allocations = [];
-    try {
-        const mapPointer = sphereMapPointer(options, allocations);
-        const activePointer = alloc(12); allocations.push(activePointer);
-        const spherePointer = alloc(12); allocations.push(spherePointer);
-        const rayPointer = alloc(24); allocations.push(rayPointer);
-        const status = wasm.ce_build_riemann_probe(
-            mapPointer, source.re, source.im, options.mapPoints ? 1 : 0,
-            scale, radius, progress,
-            activePointer, spherePointer, rayPointer
-        );
-        if (status !== 0) throw new Error(`Native Riemann probe failed with status ${status}.`);
-        return {
-            active: new Float32Array(new Float32Array(wasm.memory.buffer, activePointer, 3)),
-            sphere: new Float32Array(new Float32Array(wasm.memory.buffer, spherePointer, 3)),
-            ray: new Float32Array(new Float32Array(wasm.memory.buffer, rayPointer, 6))
         };
     } finally {
         for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);

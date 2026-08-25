@@ -13,8 +13,8 @@ if (typeof globalThis.Path2D !== 'function') globalThis.Path2D = TestPath2D;
 const STATE_KEYS = [
     'currentFunction', 'currentInputShape', 'gridDensity', 'domainColoringEnabled',
     'navigationModeEnabled', 'vectorFieldEnabled', 'streamlineFlowEnabled',
-    'riemannSphereViewEnabled', 'splitViewEnabled', 'riemannSurfaceEnabled',
-    'riemannTransformationEnabled', 'foldSurface3dEnabled', 'threeSphereEnabled',
+    'manifold3dViewEnabled', 'selectedManifold', 'manifoldTransformationEnabled',
+    'riemannSurfaceEnabled', 'foldSurface3dEnabled',
     'taylorSeriesEnabled', 'taylorSeriesCenter', 'taylorSeriesOrder',
     'taylorSeriesConvergenceRadius', 'taylorSeriesColorAxisX', 'taylorSeriesColorAxisY',
     'chainingEnabled', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
@@ -57,7 +57,7 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
     };
     const contextKeys = [
         'wCanvasList', 'wCtxList', 'wPlaneParamsList', 'wPlaneThreeContainersList',
-        'sphereViewWParamsList', 'wPlanarTransformedLayerCacheList'
+        'wPlanarTransformedLayerCacheList'
     ];
     const previousContext = Object.fromEntries(contextKeys.map(key => [key, context[key]]));
     const previousAnalysisInfo = context.controls.wPlaneAnalysisInfo;
@@ -100,7 +100,6 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             wCtxList: [targetContext],
             wPlaneParamsList: [wParams],
             wPlaneThreeContainersList: [null],
-            sphereViewWParamsList: [{}],
             wPlanarTransformedLayerCacheList: []
         });
         Object.assign(state, {
@@ -111,12 +110,11 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             navigationModeEnabled: false,
             vectorFieldEnabled: false,
             streamlineFlowEnabled: false,
-            riemannSphereViewEnabled: false,
-            splitViewEnabled: false,
+            manifold3dViewEnabled: false,
+            selectedManifold: 'sphere',
+            manifoldTransformationEnabled: false,
             riemannSurfaceEnabled: false,
-            riemannTransformationEnabled: false,
             foldSurface3dEnabled: false,
-            threeSphereEnabled: false,
             taylorSeriesEnabled: false,
             chainingEnabled: false,
             cauchyIntegralModeEnabled: false,
