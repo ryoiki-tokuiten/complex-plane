@@ -2,7 +2,8 @@ import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
-import { processUploadedImageSource, loadUploadedVideoFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
+import { processUploadedImageSource, loadUploadedVideoFile, loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
+import { initPlaneContextMenu } from './plane-context-menu.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import { clonePlain } from '../utils/clone-utils.js';
@@ -134,8 +135,8 @@ const COMPLEX_PARTS = ['re', 'im'];
 const MOBIUS_PARAMS = ['A', 'B', 'C', 'D'];
 
 const DOMAIN_DIRTY_STATE_KEYS = new Set([
-    'a0', 'b0', 'circleR', 'ellipseA', 'ellipseB',
-    'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity', 'vectorFieldScale',
+    'a0', 'b0', 'circleR',
+    'mediaSize', 'mediaOpacity', 'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity', 'vectorFieldScale',
     'zPlaneZoom', 'wPlaneZoom', 'fractionalPowerN', 'manifoldSurfaceOpacity', 'manifoldGridOpacity'
 ]);
 
@@ -157,6 +158,8 @@ const BASIC_SLIDER_BINDINGS = [
     ['particleDensitySlider', 'particleDensity', parseInteger],
     ['particleSpeedSlider', 'particleSpeed'],
     ['particleMaxLifetimeSlider', 'particleMaxLifetime', parseInteger],
+    ['mediaSizeSlider', 'mediaSize'],
+    ['mediaOpacitySlider', 'mediaOpacity'],
     ['imageSizeSlider', 'imageSize'],
     ['imageOpacitySlider', 'imageOpacity'],
     ['videoFpsSlider', 'videoProcessingFps', parseInteger],
@@ -175,6 +178,7 @@ const BASIC_SLIDER_BINDINGS = [
     ['riemannSurfaceBranchCenterSlider', 'riemannSurfaceBranchCenter', parseInteger],
     ['riemannSurfaceHeightScaleSlider', 'riemannSurfaceHeightScale'],
     ['gridSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
+    ['mediaSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
     ['imageSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
     ['videoSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
     ['riemannSurfaceHeightClipSlider', 'riemannSurfaceHeightClip']
@@ -289,13 +293,13 @@ const BINDERS = [
 ];
 
 function syncPreimageCheckboxes(value) {
-    for (const key of ['gridPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
+    for (const key of ['gridPreimageExplorerCb', 'mediaPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
         if (controls[key]) controls[key].checked = value;
     }
 }
 
 function bindRequestedExplorerControls() {
-    for (const key of ['gridPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
+    for (const key of ['gridPreimageExplorerCb', 'mediaPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
         bindControlListener(key, 'change', (_event, checkbox) => {
             state.preimageExplorerEnabled = checkbox.checked;
             if (!checkbox.checked) {
@@ -1058,11 +1062,26 @@ function firstFile(event) {
 }
 
 function bindImageControls() {
-    bindControlListener('imageUploadInput', 'change', event => {
+    bindControlListener('mediaUploadInput', 'change', event => {
         const file = firstFile(event);
-        if (file) readImageFile(file, processUploadedImage);
+        if (file) loadUploadedMediaFile(file);
     });
 
+    bindControlListener('imageUploadInput', 'change', event => {
+        const file = firstFile(event);
+        if (file) loadUploadedMediaFile(file);
+    });
+
+    bindSlider('mediaSizeSlider', 'mediaSize', parseFloat, () => {
+        state.imageSize = state.mediaSize;
+        state.videoSize = state.mediaSize;
+        requestDomainRedraw(true);
+    });
+    bindSlider('mediaOpacitySlider', 'mediaOpacity', parseFloat, () => {
+        state.imageOpacity = state.mediaOpacity;
+        state.videoOpacity = state.mediaOpacity;
+        requestDomainRedraw(true);
+    });
     bindSlider('imageSizeSlider', 'imageSize', parseFloat, () => requestDomainRedraw(true));
     bindSlider('imageOpacitySlider', 'imageOpacity', parseFloat, () => requestDomainRedraw(true));
 }
@@ -1070,14 +1089,14 @@ function bindImageControls() {
 function bindVideoControls() {
     bindControlListener('videoUploadInput', 'change', event => {
         const file = firstFile(event);
-        if (file) loadUploadedVideoFile(file);
+        if (file) loadUploadedMediaFile(file);
     });
 
     bindControlListener('videoPlayPauseBtn', 'click', () => toggleUploadedVideoPlayback());
 
     bindSlider('videoFpsSlider', 'videoProcessingFps', parseInteger, () => {
         syncVideoPlaybackUI();
-        if (state.videoIsPlaying && state.currentInputShape === 'video') startVideoProcessingLoop();
+        if (state.videoIsPlaying && isRasterInputShape(state.currentInputShape)) startVideoProcessingLoop();
         requestUiRedraw();
     });
     bindSlider('videoSizeSlider', 'videoSize', parseFloat, () => requestDomainRedraw(true));
@@ -2389,15 +2408,16 @@ export function setupEventListeners() {
     subscribeState(() => updateSurfacePaletteCirclePanel(), 'surfacePalette');
     BINDERS.forEach(fn => fn());
 
+    initPlaneContextMenu();
     syncTopControlsCollapseState();
     updateModePanels();
 }
 
 function bindChainingControls() {
     bindSelector('inputShapeSelector', 'currentInputShape', (_event, value) => {
-        if (value !== 'video' && state.videoIsPlaying) {
+        if (!isRasterInputShape(value) && state.videoIsPlaying) {
             pauseUploadedVideoPlayback();
-        } else if (value === 'video' && runtime.media.video && state.videoIsPlaying) {
+        } else if (isRasterInputShape(value) && runtime.media.video && state.videoIsPlaying) {
             startVideoProcessingLoop();
         }
         if (state.graphFullGridEnabled && !isFullGridPerspectiveSupported(value)) {

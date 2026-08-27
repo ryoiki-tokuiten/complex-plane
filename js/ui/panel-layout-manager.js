@@ -82,66 +82,182 @@ export function updateWorkspaceBounds(container, isInteracting = false, activeDr
 }
 
 export function resolveCollisions(activePanel, container) {
-    if (!activePanel || !container) return;
+    if (!container || !activePanel) return;
 
-    const siblings = [...container.children].filter(
-        child => child !== activePanel && !child.classList.contains('hidden') && !child.classList.contains('workspace-bounds-extender') && Boolean(child.id)
+    const allPanels = [...container.children].filter(
+        child => !child.classList.contains('hidden') && !child.classList.contains('workspace-bounds-extender') && !child.classList.contains('panel-snap-indicator') && Boolean(child.id)
     );
 
-    for (let pass = 0; pass < 3; pass++) {
-        let changed = false;
+    const GAP = COLLISION_GAP;
 
-        const activeRect = {
-            left: activePanel.offsetLeft,
-            top: activePanel.offsetTop,
-            width: activePanel.offsetWidth,
-            height: activePanel.offsetHeight,
-            right: activePanel.offsetLeft + activePanel.offsetWidth,
-            bottom: activePanel.offsetTop + activePanel.offsetHeight
-        };
+    const getRect = (el) => {
+        const left = parseInt(el.style.left, 10) || el.offsetLeft || 0;
+        const top = parseInt(el.style.top, 10) || el.offsetTop || 0;
+        const width = parseInt(el.style.width, 10) || el.offsetWidth || 500;
+        const height = parseInt(el.style.height, 10) || el.offsetHeight || 400;
+        return { el, left, top, width, height, right: left + width, bottom: top + height };
+    };
 
-        siblings.forEach(sibling => {
-            const sibRect = {
-                left: sibling.offsetLeft,
-                top: sibling.offsetTop,
-                width: sibling.offsetWidth,
-                height: sibling.offsetHeight,
-                right: sibling.offsetLeft + sibling.offsetWidth,
-                bottom: sibling.offsetTop + sibling.offsetHeight
-            };
+    const isVertical = typeof document !== 'undefined' && (
+        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
+    );
 
-            const overlapX = Math.min(activeRect.right, sibRect.right) - Math.max(activeRect.left, sibRect.left);
-            const overlapY = Math.min(activeRect.bottom, sibRect.bottom) - Math.max(activeRect.top, sibRect.top);
+    for (let pass = 0; pass < 4; pass++) {
+        let anyMoved = false;
+        const activeRect = getRect(activePanel);
+        const others = allPanels.filter(p => p !== activePanel).map(getRect);
 
+        others.forEach(p => {
+            const overlapX = Math.min(activeRect.right, p.right) - Math.max(activeRect.left, p.left);
+            const overlapY = Math.min(activeRect.bottom, p.bottom) - Math.max(activeRect.top, p.top);
             if (overlapX > 0 && overlapY > 0) {
-                changed = true;
-                // Axis with least overlap determines push direction
-                if (overlapX < overlapY) {
-                    if (sibRect.left + sibRect.width / 2 >= activeRect.left + activeRect.width / 2) {
-                        sibling.style.left = `${activeRect.right + COLLISION_GAP}px`;
-                    } else {
-                        sibling.style.left = `${Math.max(16, activeRect.left - sibRect.width - COLLISION_GAP)}px`;
-                    }
+                if (overlapX > overlapY || (overlapX === overlapY && isVertical)) {
+                    p.el.style.top = `${activeRect.bottom + GAP}px`;
                 } else {
-                    if (sibRect.top + sibRect.height / 2 >= activeRect.top + activeRect.height / 2) {
-                        sibling.style.top = `${activeRect.bottom + COLLISION_GAP}px`;
-                    } else {
-                        sibling.style.top = `${Math.max(16, activeRect.top - sibRect.height - COLLISION_GAP)}px`;
-                    }
+                    p.el.style.left = `${activeRect.right + GAP}px`;
                 }
+                anyMoved = true;
             }
         });
 
-        if (!changed) break;
+        const updated = allPanels.map(getRect);
+        for (let i = 0; i < updated.length; i++) {
+            for (let j = i + 1; j < updated.length; j++) {
+                const rA = updated[i];
+                const rB = updated[j];
+                if (rA.el === activePanel || rB.el === activePanel) continue;
+
+                const overlapX = Math.min(rA.right, rB.right) - Math.max(rA.left, rB.left);
+                const overlapY = Math.min(rA.bottom, rB.bottom) - Math.max(rA.top, rB.top);
+
+                if (overlapX > 0 && overlapY > 0) {
+                    if (overlapX > overlapY || (overlapX === overlapY && isVertical)) {
+                        rB.el.style.top = `${rA.bottom + GAP}px`;
+                    } else {
+                        rB.el.style.left = `${rA.right + GAP}px`;
+                    }
+                    anyMoved = true;
+                }
+            }
+        }
+
+        if (!anyMoved) break;
     }
 
-    // Final safety check to ensure panels are within boundaries
-    siblings.forEach(sibling => {
-        if (sibling.offsetLeft < 24) sibling.style.left = '24px';
-        if (sibling.offsetTop < 24) sibling.style.top = '24px';
-    });
+    savePanelLayout(container);
+}
+
+export function compactPanelGaps(container) {
+    if (!container) return;
+    const isVertical = typeof document !== 'undefined' && (
+        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
+    );
+    const visiblePanels = [...container.children].filter(
+        el => !el.classList.contains('hidden') && !el.classList.contains('workspace-bounds-extender') && !el.classList.contains('panel-snap-indicator') && Boolean(el.id)
+    );
+    if (visiblePanels.length <= 1) return;
+
+    const GAP = COLLISION_GAP;
+
+    const getRect = (el) => {
+        const left = parseInt(el.style.left, 10) || el.offsetLeft || 0;
+        const top = parseInt(el.style.top, 10) || el.offsetTop || 0;
+        const width = parseInt(el.style.width, 10) || el.offsetWidth || 540;
+        const height = parseInt(el.style.height, 10) || el.offsetHeight || 420;
+        return { el, left, top, width, height, right: left + width, bottom: top + height };
+    };
+
+    const rects = visiblePanels.map(getRect);
+
+    if (isVertical) {
+        // Group panels into columns by X overlap
+        const columns = [];
+        rects.sort((a, b) => a.left - b.left);
+        rects.forEach(r => {
+            let col = columns.find(c => c.some(item => {
+                const xOverlap = Math.min(r.right, item.right) - Math.max(r.left, item.left);
+                return xOverlap > 0;
+            }));
+            if (!col) {
+                col = [];
+                columns.push(col);
+            }
+            col.push(r);
+        });
+
+        columns.forEach(col => {
+            col.sort((a, b) => a.top - b.top);
+            let runningTop = 24;
+            col.forEach(r => {
+                r.top = runningTop;
+                r.bottom = runningTop + r.height;
+                r.el.style.top = `${runningTop}px`;
+                runningTop += r.height + GAP;
+            });
+        });
+    } else {
+        // Group panels into rows by Y overlap
+        const rows = [];
+        rects.sort((a, b) => a.top - b.top);
+        rects.forEach(r => {
+            let row = rows.find(rowList => rowList.some(item => {
+                const yOverlap = Math.min(r.bottom, item.bottom) - Math.max(r.top, item.top);
+                return yOverlap > 0;
+            }));
+            if (!row) {
+                row = [];
+                rows.push(row);
+            }
+            row.push(r);
+        });
+
+        rows.forEach(row => {
+            row.sort((a, b) => a.left - b.left);
+            let runningLeft = 24;
+            row.forEach(r => {
+                r.left = runningLeft;
+                r.right = runningLeft + r.width;
+                r.el.style.left = `${runningLeft}px`;
+                runningLeft += r.width + GAP;
+            });
+        });
+    }
 
     savePanelLayout(container);
+}
+
+export function calculateSnapTarget(panel, container, rawLeft, rawTop) {
+    if (!container || !panel) return null;
+    const siblings = [...container.children].filter(
+        c => c !== panel && !c.classList.contains('hidden') && !c.classList.contains('workspace-bounds-extender') && !c.classList.contains('panel-snap-indicator') && Boolean(c.id)
+    );
+    const pW = parseInt(panel.style.width, 10) || panel.offsetWidth || 500;
+    const pH = parseInt(panel.style.height, 10) || panel.offsetHeight || 400;
+    const xCandidates = [24, ...siblings.flatMap(s => [s.offsetLeft, s.offsetLeft + s.offsetWidth + 24, s.offsetLeft + s.offsetWidth - pW])];
+    const yCandidates = [24, ...siblings.flatMap(s => [s.offsetTop, s.offsetTop + s.offsetHeight + 24, s.offsetTop + s.offsetHeight - pH])];
+    const snapX = xCandidates.find(x => Math.abs(rawLeft - x) <= 32) ?? rawLeft;
+    const snapY = yCandidates.find(y => Math.abs(rawTop - y) <= 32) ?? rawTop;
+    return (snapX !== rawLeft || snapY !== rawTop) ? { left: snapX, top: snapY, width: pW, height: pH } : null;
+}
+
+export function updateSnapIndicator(container, target) {
+    let ind = container?.querySelector('#panel_snap_indicator');
+    if (!ind && container) {
+        ind = document.createElement('div');
+        ind.id = 'panel_snap_indicator';
+        ind.className = 'panel-snap-indicator';
+        container.appendChild(ind);
+    }
+    if (!ind) return;
+    if (target) {
+        Object.assign(ind.style, { left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px`, display: 'block', opacity: '1' });
+    } else {
+        Object.assign(ind.style, { display: 'none', opacity: '0' });
+    }
+}
+
+export function hideSnapIndicator(container) {
+    updateSnapIndicator(container || document.querySelector('.two-column-layout'), null);
 }
 
 export function savePanelLayout(container) {
@@ -309,9 +425,10 @@ export function computeNormalModeLayout(containerWidth, containerHeight) {
             height: `${panelHeight}px`
         };
 
+        const graphTop = wTop + panelHeight + gap;
         layout.graph_column = {
             left: `${padding}px`,
-            top: `${wTop}px`,
+            top: `${graphTop}px`,
             width: `${panelWidth}px`,
             height: `${panelHeight}px`
         };
@@ -326,7 +443,7 @@ export function computeNormalModeLayout(containerWidth, containerHeight) {
             };
         }
     } else {
-        // Horizontal mode: panels are side-by-side horizontally (Track 1 left, Track 2 right)
+        // Horizontal mode: panels are side-by-side horizontally (Track 1 left, Track 2 right, Track 3 right)
         // 50% horizontal view, 100% vertical height
         const availWidth = Math.max(480, containerWidth - padding * 2);
         const panelWidth = Math.max(220, Math.floor((availWidth - gap) / 2));
@@ -347,8 +464,9 @@ export function computeNormalModeLayout(containerWidth, containerHeight) {
             height: `${panelHeight}px`
         };
 
+        const graphLeft = wLeft + panelWidth + gap;
         layout.graph_column = {
-            left: `${wLeft}px`,
+            left: `${graphLeft}px`,
             top: `${padding}px`,
             width: `${panelWidth}px`,
             height: `${panelHeight}px`
@@ -552,7 +670,8 @@ export function initializeDefaultPanelPositions(container) {
         document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
     );
     const hasContour = Boolean(state?.show2DContourPlot);
-    const currentModeKey = `${mode}_${isVertical ? 'vert' : 'horiz'}_${hasContour}`;
+    const hasGraph = Boolean(state?.graphViewEnabled);
+    const currentModeKey = `${mode}_${isVertical ? 'vert' : 'horiz'}_${hasContour}_${hasGraph}`;
 
     // When transform mode, orientation, or contour state changes, reset panel initialization marks to reposition correctly for the mode
     if (lastInitializedMode !== currentModeKey) {
@@ -800,6 +919,13 @@ function bindGripEvents(triggerEl, panel) {
         if (container) {
             const pW = panel.offsetWidth || 500;
             const pH = panel.offsetHeight || 400;
+            const snapTarget = calculateSnapTarget(panel, container, newLeft, newTop);
+            if (snapTarget) {
+                updateSnapIndicator(container, snapTarget);
+            } else {
+                hideSnapIndicator();
+            }
+
             updateWorkspaceBounds(container, true, {
                 right: newLeft + pW + 2000,
                 bottom: newTop + pH + 2000
@@ -822,9 +948,20 @@ function bindGripEvents(triggerEl, panel) {
 
         const container = panel.closest('.two-column-layout');
         if (container) {
+            const curL = parseInt(panel.style.left, 10) || panel.offsetLeft || 0;
+            const curT = parseInt(panel.style.top, 10) || panel.offsetTop || 0;
+            const snapTarget = calculateSnapTarget(panel, container, curL, curT);
+            if (snapTarget) {
+                panel.style.left = `${snapTarget.left}px`;
+                panel.style.top = `${snapTarget.top}px`;
+            }
+            hideSnapIndicator();
+
             resolveCollisions(panel, container);
             updateWorkspaceBounds(container, false);
             savePanelLayout(container);
+        } else {
+            hideSnapIndicator();
         }
 
         triggerLayoutRedraw();

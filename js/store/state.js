@@ -52,11 +52,11 @@ export const laplaceSpectrumPlaneParams = {
     preciseViewport: null
 };
 
-export const sliderParamKeys = ['a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'fractionalPowerN'];
+export const sliderParamKeys = ['a0', 'b0', 'circleR', 'fractionalPowerN'];
 
 const rawState = {
     a0: 0.0, b0: 0.0,
-    circleR: 1.0, ellipseA: 1.5, ellipseB: 0.7,
+    circleR: 1.0,
     mobiusA: { re: 1, im: 0 },
     mobiusB: { re: 0, im: 0 },
     mobiusC: { re: 0, im: 0 },
@@ -109,6 +109,8 @@ const rawState = {
     streamlineThickness: 1.5,
     streamlineSeedDensityFactor: 0.8,
 
+    mediaSize: 2.0,
+    mediaOpacity: 1.0,
     imageSize: 2.0,
     imageOpacity: 1.0,
     imageAspectRatio: 1.0,

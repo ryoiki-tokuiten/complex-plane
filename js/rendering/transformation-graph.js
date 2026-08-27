@@ -19,7 +19,6 @@ const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_logcartesian',
     'line',
     'circle',
-    'ellipse',
     'arbitrary'
 ]);
 const GRID_INPUT_SHAPES = new Set([
@@ -734,8 +733,6 @@ function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
         state.a0,
         state.b0,
         state.circleR,
-        state.ellipseA,
-        state.ellipseB,
         SAMPLE_COUNT,
         xRange[0],
         xRange[1],

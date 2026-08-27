@@ -4874,3 +4874,147 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
 .domain-palette-label { justify-content: flex-start; gap: 0.5rem; margin: 0; }
 .auxiliary-surface-column { display: flex; flex-direction: column; }
 .canvas-fill-host { position: relative; display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+
+/* Custom Plane Context Menu */
+.plane-context-menu {
+    position: fixed;
+    z-index: 10000;
+    min-width: 200px;
+    padding: 0.35rem 0;
+    background: color-mix(in srgb, var(--card-bg-color, #1e1e28) 92%, var(--bg-color, #12121a));
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid color-mix(in srgb, var(--border-color, #333) 80%, var(--accent-purple, #8c70d0) 20%);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    user-select: none;
+    animation: contextMenuFadeIn 0.12s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.plane-context-menu.hidden {
+    display: none !important;
+}
+
+.plane-context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: calc(100% - 0.4rem);
+    margin: 0 0.2rem;
+    padding: 0.45rem 0.85rem;
+    background: transparent;
+    border: none;
+    color: var(--text-color, #e0e0e8);
+    font-family: var(--font-family, inherit);
+    font-size: 0.82rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    border-radius: 6px;
+}
+
+.plane-context-menu-item:hover:not(.disabled) {
+    background: color-mix(in srgb, var(--accent-purple, #8c70d0) 25%, transparent);
+    color: #ffffff;
+}
+
+.plane-context-menu-item.checked {
+    color: color-mix(in srgb, var(--accent-purple, #a68be0) 80%, white);
+}
+
+.plane-context-menu-item.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.plane-context-menu-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--text-secondary-color, #999);
+    flex-shrink: 0;
+}
+
+.plane-context-menu-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--accent-purple, #8c70d0);
+    flex-shrink: 0;
+}
+
+.plane-context-menu-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plane-context-menu-divider {
+    height: 1px;
+    background: color-mix(in srgb, var(--border-color, #333) 80%, transparent);
+    margin: 0.3rem 0;
+}
+
+.plane-context-menu-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 0.5rem;
+    color: var(--text-secondary-color, #999);
+    flex-shrink: 0;
+}
+
+.plane-context-menu-item:hover:not(.disabled) .plane-context-menu-arrow {
+    color: #ffffff;
+}
+
+.plane-context-submenu {
+    position: fixed;
+    z-index: 10001;
+}
+
+.panel-snap-indicator {
+    position: absolute;
+    pointer-events: none;
+    border: 2px dashed var(--accent-purple, #8c70d0);
+    background: color-mix(in srgb, var(--accent-purple, #8c70d0) 16%, transparent);
+    border-radius: 12px;
+    z-index: 100;
+    transition: left 0.08s cubic-bezier(0.2, 0.9, 0.3, 1),
+                top 0.08s cubic-bezier(0.2, 0.9, 0.3, 1),
+                width 0.08s ease,
+                height 0.08s ease,
+                opacity 0.12s ease;
+    opacity: 0;
+    display: none;
+    box-shadow: 0 0 20px color-mix(in srgb, var(--accent-purple, #8c70d0) 35%, transparent),
+                inset 0 0 15px color-mix(in srgb, var(--accent-purple, #8c70d0) 15%, transparent);
+}
+
+.panel-snap-indicator.is-active {
+    display: block;
+    opacity: 1;
+}
+

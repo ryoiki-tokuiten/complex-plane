@@ -42,6 +42,10 @@ const CENTER_LABELS = Object.freeze({
         'Fixed Re(z) (<code>a<sub>0</sub></code>):',
         'Fixed Im(z) (<code>b<sub>0</sub></code>):'
     ],
+    media: [
+        'Media Center Re (<code>a<sub>0</sub></code>):',
+        'Media Center Im (<code>b<sub>0</sub></code>):'
+    ],
     image: [
         'Image Center Re (<code>a<sub>0</sub></code>):',
         'Image Center Im (<code>b<sub>0</sub></code>):'
@@ -59,21 +63,20 @@ const CENTER_LABELS = Object.freeze({
 const INPUT_SHAPE_TITLE_SUFFIX = Object.freeze({
     line: ': Lines',
     circle: ': Circle',
-    ellipse: ': Ellipse',
     grid_cartesian: ': Cartesian Grid',
     grid_polar: ': Polar Grid',
     grid_logpolar: ': Log-Polar Grid',
     grid_logcartesian: ': Log-Cartesian Grid',
     grid_dots: ': Dots',
     arbitrary: ': Arbitrary Shape',
+    media: ': Media',
     image: ': Image',
     video: ': Video',
     empty_grid: ': Empty'
 });
 
 const SHAPE_SPECIFIC_GROUPS = Object.freeze({
-    circle: 'circleRSliderGroup',
-    ellipse: 'ellipseParamsSliderGroup'
+    circle: 'circleRSliderGroup'
 });
 
 const SIMPLE_FUNCTION_LABELS = Object.freeze({
@@ -124,6 +127,8 @@ const NORMAL_MODE_VALUE_BINDINGS = Object.freeze([
     { display: 'domainContrastValueDisplay', key: 'domainContrast', digits: 2 },
     { display: 'domainSaturationValueDisplay', key: 'domainSaturation', digits: 2 },
     { display: 'domainLightnessCyclesValueDisplay', key: 'domainLightnessCycles', digits: 2 },
+    { display: 'mediaSizeValueDisplay', key: 'mediaSize', digits: 1 },
+    { display: 'mediaOpacityValueDisplay', key: 'mediaOpacity', digits: 2 },
     { display: 'imageSizeValueDisplay', key: 'imageSize', digits: 1 },
     { display: 'imageOpacityValueDisplay', key: 'imageOpacity', digits: 2 },
     { display: 'videoFpsValueDisplay', key: 'videoProcessingFps' },
@@ -158,6 +163,7 @@ const RIEMANN_VIEW_VALUE_BINDINGS = Object.freeze([
     { display: 'riemannSurfaceBranchCenterValueDisplay', key: 'riemannSurfaceBranchCenter' },
     { display: 'riemannSurfaceHeightScaleValueDisplay', key: 'riemannSurfaceHeightScale', digits: 2 },
     { display: 'gridSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
+    { display: 'mediaSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
     { display: 'imageSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
     { display: 'videoSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
     { display: 'riemannSurfaceHeightClipValueDisplay', key: 'riemannSurfaceHeightClip', digits: 1 }
@@ -436,15 +442,15 @@ function syncComplexParameterControls() {
     const activeFunctions = collectActiveFunctionKeys();
     const isLine = shape === 'line';
     const isCircle = shape === 'circle';
-    const isEllipse = shape === 'ellipse';
+    const isMedia = shape === 'media' || shape === 'image' || shape === 'video';
     const isImage = shape === 'image';
     const isVideo = shape === 'video';
     const isGrid = isFoldableInputShape(shape);
-    const showFoldControl = isGrid || isImage || isVideo;
+    const showFoldControl = isGrid || isMedia;
     const isArbitrary = shape === 'arbitrary';
-    const showCommonParams = isLine || isCircle || isEllipse;
-    const showMediaCenterParams = isImage || isVideo;
-    const showShapeSpecificSliders = isCircle || isEllipse;
+    const showCommonParams = isLine || isCircle;
+    const showMediaCenterParams = isMedia;
+    const showShapeSpecificSliders = isCircle;
     const isMobiusFunc = activeFunctions.has('mobius');
     const isPolyFunc = activeFunctions.has('polynomial');
     const isPowerFunc = activeFunctions.has('power');
@@ -480,6 +486,8 @@ function syncComplexParameterControls() {
                     ? 'Draw a cut, then continue a value along a crossing path.'
                     : 'Cut ready. Continue along a path to move between sheets.';
     setText('continuationStatus', continuationText);
+    setHidden('mediaUploadControls', !isMedia);
+    setHidden('mediaVideoControls', !isMedia || !runtime.media.video);
     setHidden('imageUploadControls', !isImage);
     setHidden('videoUploadControls', !isVideo);
     setHidden('arbitraryShapeControls', !isArbitrary);
@@ -497,6 +505,7 @@ function syncComplexParameterControls() {
         : 'Drag anywhere on the z-plane. New strokes are appended.');
     setHidden('gridSurface3DControl', !showFoldControl);
     setHidden('gridSurface3DOptions', !isGrid || !state.foldSurface3dEnabled);
+    setHidden('mediaSurface3DOptions', !isMedia || !state.foldSurface3dEnabled);
     setHidden('imageSurface3DOptions', !isImage || !state.foldSurface3dEnabled);
     setHidden('videoSurface3DOptions', !isVideo || !state.foldSurface3dEnabled);
     setChecked('gridSurface3DCb', state.foldSurface3dEnabled);
@@ -533,13 +542,9 @@ function syncNormalModeDisplays() {
 }
 
 function syncTaylorControls() {
-    syncDisclosure('enableTaylorSeriesCb', 'taylorSeriesOptionsDetailDiv', state.taylorSeriesEnabled);
-    syncDisclosure(
-        'enableTaylorSeriesCustomCenterCb',
-        'taylorSeriesCustomCenterInputsDiv',
-        state.taylorSeriesCustomCenterEnabled
-    );
-
+    setHidden('taylorSeriesOptionsDetailDiv', !state.taylorSeriesEnabled);
+    setHidden('taylorSeriesCustomCenterInputsDiv', !state.taylorSeriesCustomCenterEnabled);
+    setChecked('enableTaylorSeriesCustomCenterCb', state.taylorSeriesCustomCenterEnabled);
     syncTaylorSeriesCenterStatus();
 }
 

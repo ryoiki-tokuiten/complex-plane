@@ -1144,7 +1144,7 @@ export function drawPlanarInputShape(ctx, planeParams) {
         ? filterGraphFullGridPointSets(generatedPointSets)
         : generatedPointSets;
     const highlightContour = appState.cauchyIntegralModeEnabled &&
-        (inputShape === 'circle' || inputShape === 'ellipse' || inputShape === 'arbitrary');
+        (inputShape === 'circle' || inputShape === 'arbitrary');
 
     drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, {
         colorResolver: pointSet => highlightContour && (pointSet.role === 'shape-curve' || pointSet.role === 'shape-arbitrary')
@@ -1489,7 +1489,7 @@ export function createPlanarTransformedShapeRenderJob(map) {
             ? getMappedTransformProfile(appState.currentFunction, tf)
             : null,
         highlightContour: appState.cauchyIntegralModeEnabled &&
-            (inputShape === 'circle' || inputShape === 'ellipse' || inputShape === 'arbitrary')
+            (inputShape === 'circle' || inputShape === 'arbitrary')
     };
 }
 

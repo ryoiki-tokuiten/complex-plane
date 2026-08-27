@@ -62,8 +62,6 @@ function cauchyAnalysisKey(isZPlanar) {
         state.a0,
         state.b0,
         state.circleR,
-        state.ellipseA,
-        state.ellipseB,
         state.arbitraryShapeMode,
         state.arbitraryShapeExpression,
         state.arbitraryShapeTMin,
@@ -111,16 +109,6 @@ export function resolveCauchyContour(state, { planeParams = null, curvePoints = 
             valid: true
         };
     }
-    if (shape === 'ellipse') {
-        if (state.ellipseA <= 0 || state.ellipseB <= 0) return { valid: false, error: 'invalid-ellipse-axes', message: 'Cauchy mode: Ellipse axes must be positive.' };
-        const params = { cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB };
-        return {
-            type: 'ellipse',
-            params,
-            pointSets: curvePoints ? [generateNativeContourPoints('ellipse', { type: 'ellipse', ...params }, curvePoints)] : null,
-            valid: true
-        };
-    }
     if (shape === 'arbitrary') {
         if (!state.arbitraryShapeClosed) return { valid: false, error: 'open-arbitrary-shape', message: 'Cauchy mode: Close the arbitrary shape before integrating.' };
         const contours = generateInputShapePointSets(buildInputShapeGeometryConfig(planeParams, {
@@ -137,7 +125,7 @@ export function resolveCauchyContour(state, { planeParams = null, curvePoints = 
             valid: true
         };
     }
-    return { valid: false, error: 'unsupported-shape', message: 'Cauchy mode: Select Circle, Ellipse, or Arbitrary Shape.' };
+    return { valid: false, error: 'unsupported-shape', message: 'Cauchy mode: Select Circle or Arbitrary Shape.' };
 }
 
 export function performCauchyAnalysis() {

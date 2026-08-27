@@ -64,7 +64,7 @@ export function setupDOMReferences() {
         'functionControlsPanel', 'visualizationOptionsPanel',
         'commonParamsSliders',
         'shapeParamsSliders', 'mobiusParamsSliders', 'polynomialParamsSliders',
-        'enableDomainColoringCb', 'showZerosPolesCb', 'showCriticalPointsCb',
+        'enableDomainColoringCb',
         'enableManifold3DCb', 'enableVectorFieldCb',
         'zPlaneZoomSlider', 'wPlaneZoomSlider'
     ];
@@ -404,4 +404,18 @@ export function updateChainingColumns(count) {
     context.wPlaneParamsList = wPlaneParamsList;
     context.wPlaneThreeContainersList = wPlaneThreeContainersList;
     refreshPanelEdgeHandles(true);
+}
+
+export function downloadCanvasImage(canvas, filename = 'complex-plane.png') {
+    if (!canvas) return;
+    try {
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = canvas.toDataURL('image/png');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (error) {
+        console.error('Failed to download canvas image:', error);
+    }
 }

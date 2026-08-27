@@ -507,17 +507,6 @@
                             <div id="continuation_status" class="compact-text">Active sheet k = 0</div>
                         </div>
 
-                    <!-- Derivative Panel -->
-                    <div class="control-group control-toggle-heading"
-                       >
-                        <label for="enable_derivative_cb" class="slider-label"
-                            data-tooltip="Show the numerical derivative of the active map in map visualizations">
-                            <input type="checkbox" id="enable_derivative_cb">
-                            <span class="custom-checkbox-visual"></span>
-                            Show Derivative
-                        </label>
-                    </div>
-
                     <!-- Real Plots Panel -->
                     <div class="control-group control-toggle-heading"
                        >
@@ -1261,63 +1250,6 @@
                         </div>
                     </div>
 
-                    <div id="grid_surface_3d_control" class="control-group control-toggle-heading">
-                        <label for="grid_surface_3d_cb" class="slider-label"
-                            data-tooltip="Show the transformed grid as an interactive 3D fold view, with overlapping output curves separated by their source real coordinate.">
-                            <input type="checkbox" id="grid_surface_3d_cb">
-                            <span class="custom-checkbox-visual"></span>
-                            Show folds in 3d
-                        </label>
-                        <div id="grid_surface_3d_options" class="dependent-settings-block hidden">
-                            <div class="control-group">
-                                <label for="grid_surface_3d_height_scale_slider">
-                                    Height Scale:
-                                    <output id="grid_surface_3d_height_scale_value_display">1.00</output>
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="grid_surface_3d_height_scale_slider" min="0.15"
-                                        max="2.5" step="0.05" value="1.0"
-                                        data-tooltip="Scale the height of the transformed grid folds.">
-                                </div>
-                            </div>
-                            <label for="grid_preimage_explorer_cb" class="slider-label">
-                                <input type="checkbox" id="grid_preimage_explorer_cb">
-                                <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
-                            </label>
-                        </div>
-                    </div>
-
-                    <div id="graph_view_control" class="control-group control-toggle-heading">
-                        <label for="enable_graph_view_cb" class="slider-label"
-                            data-tooltip="Plot the selected input line as Re and Im output curves">
-                            <input type="checkbox" id="enable_graph_view_cb">
-                            <span class="custom-checkbox-visual"></span>
-                            View Graph
-                        </label>
-                        <div id="full_grid_perspective_control" class="dependent-settings-block hidden">
-                            <label for="view_full_grid_perspective_btn" class="slider-label"
-                                data-tooltip="Show the active grid family and its mapped graphs in 3D">
-                                <input type="checkbox" id="view_full_grid_perspective_btn">
-                                <span class="custom-checkbox-visual"></span>
-                                View Full Grid Perspective
-                            </label>
-                            <label id="graph_focus_box_toggle" for="enable_graph_focus_box_cb"
-                                class="slider-label hidden"
-                                data-tooltip="Outline the 3D graph corresponding to the selected input shape">
-                                <input type="checkbox" id="enable_graph_focus_box_cb" checked>
-                                <span class="custom-checkbox-visual"></span>
-                                Enable the focus box
-                            </label>
-                            <label id="graph_layer_lock_toggle" for="enable_graph_layer_lock_cb"
-                                class="slider-label hidden"
-                                data-tooltip="Connect the selected grid shape to every intersecting shape from the other family">
-                                <input type="checkbox" id="enable_graph_layer_lock_cb">
-                                <span class="custom-checkbox-visual"></span>
-                                Lock a layer
-                            </label>
-                        </div>
-                    </div>
-
                     <!-- Complex Plane Navigation Panel -->
                     <div id="navigation_params" class="control-group control-toggle-heading"
                        >
@@ -1446,175 +1378,75 @@
                                 </select>
                             </div>
                         </div>
-                        <div id="ellipse_params_slider_group" class="hidden">
-                            <div class="control-group">
-                                <label for="ellipseA_slider">
-                                    Semi-axis A:
-                                    <output id="ellipseA_value_display">1.5</output>
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="ellipseA_slider" name="ellipseA_slider" min="0.1" max="3"
-                                        step="0.05" value="1.5"
-                                        data-tooltip="Adjusts semi-axis A for the ellipse input shape">
-                                    <button id="play_ellipseA_btn"
-                                        data-tooltip="Animate ellipse semi-axis A">Play</button>
-                                    <select id="speed_ellipseA_selector" class="animation-speed-selector"
-                                        data-tooltip="Select animation speed for ellipse semi-axis A">
-                                        <option value="0.01">0.01x</option>
-                                        <option value="0.1">0.1x</option>
-                                        <option value="0.5">0.5x</option>
-                                        <option value="1" selected>1x</option>
-                                        <option value="2">2x</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="control-group">
-                                <label for="ellipseB_slider">
-                                    Semi-axis B:
-                                    <output id="ellipseB_value_display">0.7</output>
-                                </label>
-                                <div class="slider-container">
-                                    <input type="range" id="ellipseB_slider" name="ellipseB_slider" min="0.1" max="3"
-                                        step="0.05" value="0.7"
-                                        data-tooltip="Adjusts semi-axis B for the ellipse input shape">
-                                    <button id="play_ellipseB_btn"
-                                        data-tooltip="Animate ellipse semi-axis B">Play</button>
-                                    <select id="speed_ellipseB_selector" class="animation-speed-selector"
-                                        data-tooltip="Select animation speed for ellipse semi-axis B">
-                                        <option value="0.01">0.01x</option>
-                                        <option value="0.1">0.1x</option>
-                                        <option value="0.5">0.5x</option>
-                                        <option value="1" selected>1x</option>
-                                        <option value="2">2x</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
                     </div>
 
-                    <div id="image_upload_controls" class="dependent-settings-block hidden image-upload-panel">
+                    <div id="media_upload_controls" class="dependent-settings-block hidden image-upload-panel">
                         <div class="panel-inline-heading">
-                            <span class="panel-inline-title">Image Upload</span>
-                            <span class="panel-inline-copy">Bring a source image into the z-plane and map it like any
-                                other input shape.</span>
+                            <span class="panel-inline-title">Media Upload</span>
+                            <span class="panel-inline-copy">Map image or video frames into the z-plane and transform them through the active complex function.</span>
                         </div>
                         <div class="control-group image-upload-field">
-                            <label for="image_upload_input" class="upload-control-label">
-                                <span class="upload-control-title">Choose Source Image</span>
-                                <span class="upload-control-copy">PNG, JPG, GIF, or WEBP</span>
+                            <label for="media_upload_input" class="upload-control-label">
+                                <span class="upload-control-title">Choose Source Image or Video</span>
+                                <span class="upload-control-copy">PNG, JPG, GIF, WEBP, MP4, WEBM, MOV, OGG</span>
                             </label>
-                            <input type="file" id="image_upload_input" accept="image/*" class="control-file-input">
+                            <input type="file" id="media_upload_input" accept="image/*,video/*" class="control-file-input">
                         </div>
                         <div class="control-group">
-                            <label for="image_size_slider">
-                                Image Base Size:
-                                <output id="image_size_value_display">2.0</output>
+                            <label for="media_size_slider">
+                                Media Base Size:
+                                <output id="media_size_value_display">2.0</output>
                             </label>
                             <div class="slider-container">
-                                <input type="range" id="image_size_slider" name="image_size_slider" min="0.5" max="20"
+                                <input type="range" id="media_size_slider" name="media_size_slider" min="0.5" max="20"
                                     step="0.1" value="2.0"
-                                    data-tooltip="Set logical size of the image in the complex plane.">
+                                    data-tooltip="Set logical size of the media in the complex plane.">
                             </div>
                         </div>
                         <div class="control-group">
-                            <label for="image_opacity_slider">
+                            <label for="media_opacity_slider">
                                 Opacity:
-                                <output id="image_opacity_value_display">1.0</output>
+                                <output id="media_opacity_value_display">1.0</output>
                             </label>
                             <div class="slider-container">
-                                <input type="range" id="image_opacity_slider" name="image_opacity_slider" min="0.1"
+                                <input type="range" id="media_opacity_slider" name="media_opacity_slider" min="0.1"
                                     max="1.0" step="0.05" value="1.0"
-                                    data-tooltip="Set transparency of the drawn image points.">
+                                    data-tooltip="Set transparency of the drawn media points.">
                             </div>
                         </div>
-                        <div id="image_surface_3d_options" class="dependent-settings-block hidden">
+                        <div id="media_video_controls" class="control-group hidden">
+                            <div class="media-status-row">
+                                <button id="video_play_pause_btn" type="button" disabled>▶ Play</button>
+                                <div id="video_status_display" class="media-status-text">No video loaded.</div>
+                            </div>
                             <div class="control-group">
-                                <label for="image_surface_3d_height_scale_slider">
-                                    Height Scale:
-                                    <output id="image_surface_3d_height_scale_value_display">1.00</output>
+                                <label for="video_fps_slider">
+                                    Processing FPS:
+                                    <output id="video_fps_value_display">60</output>
                                 </label>
                                 <div class="slider-container">
-                                    <input type="range" id="image_surface_3d_height_scale_slider" min="0.15"
-                                        max="2.5" step="0.05" value="1.0"
-                                        data-tooltip="Scale the height of the transformed image fold.">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="control-group">
-                            <label for="image_preimage_explorer_cb" class="slider-label">
-                                <input type="checkbox" id="image_preimage_explorer_cb">
-                                <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
-                            </label>
-                        </div>
-                    </div>
-
-                    <div id="video_upload_controls" class="dependent-settings-block hidden image-upload-panel">
-                        <div class="panel-inline-heading">
-                            <span class="panel-inline-title">Video Upload</span>
-                            <span class="panel-inline-copy">Map video frames through the active complex function with
-                                controllable playback, FPS sampling, and scale.</span>
-                        </div>
-                        <div class="control-group image-upload-field">
-                            <label for="video_upload_input" class="upload-control-label">
-                                <span class="upload-control-title">Choose Source Video</span>
-                                <span class="upload-control-copy">MP4, WEBM, MOV, OGG, or any browser-playable
-                                    video</span>
-                            </label>
-                            <input type="file" id="video_upload_input" accept="video/*" class="control-file-input">
-                        </div>
-                        <div class="media-status-row">
-                            <button id="video_play_pause_btn" type="button" disabled>▶ Play</button>
-                            <div id="video_status_display" class="media-status-text">No video loaded.</div>
-                        </div>
-                        <div class="control-group">
-                            <label for="video_fps_slider">
-                                Processing FPS:
-                                <output id="video_fps_value_display">60</output>
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="video_fps_slider" name="video_fps_slider" min="1" max="60"
+                                    <input type="range" id="video_fps_slider" name="video_fps_slider" min="1" max="60"
                                     step="1" value="60"
                                     data-tooltip="Set how often the uploaded video is sampled and redrawn.">
+                                </div>
                             </div>
                         </div>
-                        <div class="control-group">
-                            <label for="video_size_slider">
-                                Video Base Size:
-                                <output id="video_size_value_display">2.0</output>
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="video_size_slider" name="video_size_slider" min="0.5" max="20"
-                                    step="0.1" value="2.0"
-                                    data-tooltip="Set logical size of the video in the complex plane.">
-                            </div>
-                        </div>
-                        <div class="control-group">
-                            <label for="video_opacity_slider">
-                                Opacity:
-                                <output id="video_opacity_value_display">1.0</output>
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="video_opacity_slider" name="video_opacity_slider" min="0.1"
-                                    max="1.0" step="0.05" value="1.0"
-                                    data-tooltip="Set transparency of the drawn video points.">
-                            </div>
-                        </div>
-                        <div id="video_surface_3d_options" class="dependent-settings-block hidden">
+                        <div id="media_surface_3d_options" class="dependent-settings-block hidden">
                             <div class="control-group">
-                                <label for="video_surface_3d_height_scale_slider">
+                                <label for="media_surface_3d_height_scale_slider">
                                     Height Scale:
-                                    <output id="video_surface_3d_height_scale_value_display">1.00</output>
+                                    <output id="media_surface_3d_height_scale_value_display">1.00</output>
                                 </label>
                                 <div class="slider-container">
-                                    <input type="range" id="video_surface_3d_height_scale_slider" min="0.15"
+                                    <input type="range" id="media_surface_3d_height_scale_slider" min="0.15"
                                         max="2.5" step="0.05" value="1.0"
-                                        data-tooltip="Scale the height of the transformed video fold.">
+                                        data-tooltip="Scale the height of the transformed media fold.">
                                 </div>
                             </div>
                         </div>
                         <div class="control-group">
-                            <label for="video_preimage_explorer_cb" class="slider-label">
-                                <input type="checkbox" id="video_preimage_explorer_cb">
+                            <label for="media_preimage_explorer_cb" class="slider-label">
+                                <input type="checkbox" id="media_preimage_explorer_cb">
                                 <span class="custom-checkbox-visual"></span>Inverse / Preimage Explorer
                             </label>
                         </div>
@@ -1909,62 +1741,7 @@
                         </div>
                     </div>
 
-                    <div class="viz-feature-section">
-                        <div class="viz-feature-section-header">
-                            <span class="viz-feature-section-title">Analysis</span>
-                        </div>
-                        <div class="viz-toggle-grid">
-                            <label for="show_zeros_poles_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="show_zeros_poles_cb"
-                                    data-tooltip="Show detected zeros (roots) and poles (singularities) of f(z)">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Zeros & Poles</span>
-                                    <span class="viz-toggle-card-copy">Mark detected roots and singularities.</span>
-                                </span>
-                            </label>
-                            <label for="show_critical_points_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="show_critical_points_cb"
-                                    data-tooltip="Show detected critical points (where f'(z) = 0 or is undefined)">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Critical Points</span>
-                                    <span class="viz-toggle-card-copy">Show where f'(z) vanishes or breaks.</span>
-                                </span>
-                            </label>
-                            <label for="enable_radial_discrete_steps_cb"
-                                class="viz-toggle-card">
-                                <input type="checkbox" id="enable_radial_discrete_steps_cb"
-                                    data-tooltip="Toggle radial discrete steps visualization">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Radial Steps</span>
-                                    <span class="viz-toggle-card-copy">Draw discrete sampling circles on the input
-                                        plane.</span>
-                                </span>
-                            </label>
-                            <label for="enable_cauchy_integral_mode_cb"
-                                class="viz-toggle-card">
-                                <input type="checkbox" id="enable_cauchy_integral_mode_cb"
-                                    data-tooltip="Enable Cauchy Integral mode: draw a contour on z-plane to visualize its image and related integral values on w-plane">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Cauchy Integral</span>
-                                    <span class="viz-toggle-card-copy">Contour image, winding, and residue
-                                        readout.</span>
-                                </span>
-                            </label>
-                            <label for="enable_taylor_series_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="enable_taylor_series_cb"
-                                    data-tooltip="Toggle the Taylor series approximation of f(z) in the w-plane. The default expansion center is z0 = 0, and the convergence disk is shown on the z-plane.">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Taylor Series</span>
-                                    <span class="viz-toggle-card-copy">Local polynomial expansion around z0.</span>
-                                </span>
-                            </label>
-                        </div>
-                        <div id="radial_discrete_steps_options_div" class="dependent-settings-block hidden">
+                    <div id="radial_discrete_steps_options_div" class="dependent-settings-block hidden">
                             <div class="control-group">
                                 <label for="radial_discrete_steps_count_slider">
                                     Discrete steps:
@@ -2015,7 +1792,6 @@
                                 <div id="taylor_complex_points_ui_container"></div>
                             </div>
                         </div>
-                    </div>
 
                     <div class="viz-feature-section">
                         <div class="viz-feature-section-header">
@@ -2526,18 +2302,16 @@
                             <select id="input_shape_selector" class="canvas-shape-select"
                                 aria-label="Select input shape"
                                 data-tooltip="Select the input shape/grid to draw on the z-plane">
+                                <option value="empty_grid">Empty</option>
                                 <option value="grid_cartesian" selected>Grid (Cartesian)</option>
-                                <option value="grid_polar">Grid (Polar)</option>
-                                <option value="grid_logpolar">Grid (Log-Polar)</option>
-                                <option value="grid_logcartesian">Grid (Log-Cartesian)</option>
-                                <option value="grid_dots">Grid (Dots)</option>
+                                <option value="grid_logcartesian">Cartesian-Log</option>
+                                <option value="grid_polar">Polar</option>
+                                <option value="grid_logpolar">Polar-Log</option>
+                                <option value="grid_dots">Dots</option>
                                 <option value="arbitrary">Arbitrary Shape</option>
-                                <option value="empty_grid">Grid (Empty)</option>
-                                <option value="line">Lines (Re/Im Fixed)</option>
+                                <option value="line">Lines</option>
                                 <option value="circle">Circle</option>
-                                <option value="ellipse">Ellipse</option>
-                                <option value="image">Image Upload</option>
-                                <option value="video">Video Upload</option>
+                                <option value="media">Media</option>
                             </select>
                             <button id="toggle_fullscreen_z_btn" class="icon-button canvas-icon-button" type="button"
                                 data-tooltip="Toggle fullscreen view for z-plane"

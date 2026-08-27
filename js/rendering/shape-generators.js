@@ -70,8 +70,6 @@ export function buildInputShapeGeometryConfig(planeParams, options = {}) {
         a0: options.a0 ?? state.a0,
         b0: options.b0 ?? state.b0,
         circleR: options.circleR ?? state.circleR,
-        ellipseA: options.ellipseA ?? state.ellipseA,
-        ellipseB: options.ellipseB ?? state.ellipseB,
         arbitraryShapeMode: options.arbitraryShapeMode ?? state.arbitraryShapeMode,
         arbitraryShapeExpression: options.arbitraryShapeExpression ?? state.arbitraryShapeExpression,
         arbitraryShapeTMin: options.arbitraryShapeTMin ?? state.arbitraryShapeTMin,
@@ -110,7 +108,7 @@ function styleForRole(role) {
 }
 
 export function generateInputShapePointSets(config) {
-    if (['empty_grid', 'image', 'video'].includes(config?.currentInputShape)) return [];
+    if (['empty_grid', 'media', 'image', 'video'].includes(config?.currentInputShape)) return [];
     const lines = generateNativeInputShape(config, nativeMapOptions(state, {
         functionKey: config.currentFunction,
         chainingEnabled: false,
