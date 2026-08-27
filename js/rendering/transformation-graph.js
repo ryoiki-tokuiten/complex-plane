@@ -1269,8 +1269,9 @@ function graphFourierSignal(samples, component, scale) {
 function graphFourierWinding(samples, component, scale) {
     const signal = graphFourierSignal(samples, component, scale);
     if (signal.length < 2) return buildLaplaceWinding([]);
+    const sigma = Number.isFinite(state.laplaceSigma) ? state.laplaceSigma : 0;
     return buildLaplaceWinding(signal, {
-        sigma: 0,
+        sigma,
         omega: requireFiniteNumber(state.laplaceOmega, 'Graph winding omega'),
         progress: requireFiniteNumber(state.laplaceAnimationTime, 'Graph winding progress')
     });

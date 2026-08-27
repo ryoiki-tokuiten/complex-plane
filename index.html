@@ -165,11 +165,11 @@
                             <div class="control-group control-group-flush">
                                 <label for="laplace_samples_slider" class="slider-label">
                                     Samples:
-                                    <output id="laplace_samples_value_display" class="slider-value">128</output>
+                                    <output id="laplace_samples_value_display" class="slider-value">1024</output>
                                 </label>
                                 <div class="slider-container">
-                                    <input type="range" id="laplace_samples_slider" min="32" max="512" step="32"
-                                        value="128" data-tooltip="Number of samples used by every transform view" class="accent-teal">
+                                    <input type="range" id="laplace_samples_slider" min="32" max="2048" step="32"
+                                        value="1024" data-tooltip="Number of samples used by every transform view" class="accent-teal">
                                 </div>
                             </div>
                         </div>
@@ -237,6 +237,24 @@
                                     Show Discrete Spectrum
                                 </label>
                             </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_show_com_cb" class="slider-label"
+                                    data-tooltip="Show Center of Mass vs Frequency analysis graph">
+                                    <input type="checkbox" id="laplace_show_com_cb" checked>
+                                    <span class="custom-checkbox-visual"></span>
+                                    Show Center of Mass Graph
+                                </label>
+                            </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_show_fourier_3d_cb" class="slider-label"
+                                    data-tooltip="Show 3D Fourier Decomposition and Linearity Sum pipeline">
+                                    <input type="checkbox" id="laplace_show_fourier_3d_cb" checked>
+                                    <span class="custom-checkbox-visual"></span>
+                                    Show 3D Fourier Decomposition
+                                </label>
+                            </div>
                         </div>
 
                         <!-- Winding Analysis Section -->
@@ -269,6 +287,24 @@
                                         step="0.01" value="1.0" data-tooltip="Control how much of the signal to show"
                                         class="accent-orange">
                                 </div>
+                            </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_sync_winding_vector_cb" class="slider-label"
+                                    data-tooltip="Synchronize moving tracer arrow between the time-domain graph and winding spiral">
+                                    <input type="checkbox" id="laplace_sync_winding_vector_cb" checked>
+                                    <span class="custom-checkbox-visual"></span>
+                                    Sync Tracer Vector
+                                </label>
+                            </div>
+
+                            <div class="control-group control-group-flush">
+                                <label for="laplace_show_barriers_cb" class="slider-label"
+                                    data-tooltip="Show winding period cycle boundaries (dotted lines)">
+                                    <input type="checkbox" id="laplace_show_barriers_cb" checked>
+                                    <span class="custom-checkbox-visual"></span>
+                                    Show Winding Barriers
+                                </label>
                             </div>
                         </div>
 
@@ -662,11 +698,6 @@
                                 <input type="range" id="chain_count_slider" name="chain_count_slider" min="1" max="1024"
                                     step="1" value="1" data-tooltip="Number of repeated applications">
                             </div>
-
-                            <button id="grid_view_btn" class="chaining-grid-button"
-                               >
-                                <span>⊞</span> Grid View
-                            </button>
                         </div>
                     </div>
 
@@ -2480,13 +2511,6 @@
         <section id="canvases_section">
             <div class="canvas-row two-column-layout">
                 <div id="z_plane_column" class="plane-column">
-                    <div class="collapsed-placeholder-content">
-                        <button class="expand-plane-btn" id="expand_z_btn" title="Expand z-plane"
-                            aria-label="Expand z-plane">
-                            <i data-lucide="chevron-right" aria-hidden="true"></i>
-                        </button>
-                        <div class="collapsed-vertical-title">z-plane (Input)</div>
-                    </div>
                     <div class="canvas-header-line">
                         <h2 class="section-title"><span id="z-plane-title">z-plane (Input:
                                 <code>z = a + ib</code>)</span></h2>
@@ -2507,11 +2531,6 @@
                                 <option value="image">Image Upload</option>
                                 <option value="video">Video Upload</option>
                             </select>
-                            <button id="collapse_z_btn" class="icon-button canvas-icon-button" type="button"
-                                data-tooltip="Collapse z-plane" aria-label="Collapse z-plane">
-                                <i data-lucide="chevron-left" aria-hidden="true"></i>
-                                <span class="hidden-visually">Collapse z-plane</span>
-                            </button>
                             <button id="toggle_fullscreen_z_btn" class="icon-button canvas-icon-button" type="button"
                                 data-tooltip="Toggle fullscreen view for z-plane"
                                 aria-label="Toggle fullscreen view for z-plane">
@@ -2584,23 +2603,11 @@
                     </div>
                 </div>
                 <div id="w_plane_column" class="plane-column">
-                    <div class="collapsed-placeholder-content">
-                        <button class="expand-plane-btn" id="expand_w_btn" title="Expand w-plane"
-                            aria-label="Expand w-plane">
-                            <i data-lucide="chevron-left" aria-hidden="true"></i>
-                        </button>
-                        <div class="collapsed-vertical-title">w-plane (Output)</div>
-                    </div>
                     <div class="canvas-header-line">
                         <h2 class="section-title"><span id="w-plane-title">w-plane (Output: <code
                                     id="w-plane-title-func">w = cos(z)</code>)</span></h2>
                         <div class="canvas-header-controls">
                             <div id="w_plane_analysis_info"></div>
-                            <button id="collapse_w_btn" class="icon-button canvas-icon-button" type="button"
-                                data-tooltip="Collapse w-plane" aria-label="Collapse w-plane">
-                                <i data-lucide="chevron-right" aria-hidden="true"></i>
-                                <span class="hidden-visually">Collapse w-plane</span>
-                            </button>
                             <button id="toggle_fullscreen_w_btn" class="icon-button canvas-icon-button" type="button"
                                 data-tooltip="Toggle fullscreen view for w-plane"
                                 aria-label="Toggle fullscreen view for w-plane">
@@ -2651,10 +2658,64 @@
                 <div id="laplace_spectrum_column" class="hidden auxiliary-surface-column">
                     <div class="canvas-header-line">
                         <h2 class="section-title">Discrete Spectrum</h2>
+                        <div class="canvas-header-controls">
+                            <button id="toggle_fullscreen_laplace_spectrum_btn" class="icon-button canvas-icon-button"
+                                type="button" data-tooltip="Toggle fullscreen view for Discrete Spectrum"
+                                aria-label="Toggle fullscreen view for Discrete Spectrum">
+                                <i data-lucide="maximize-2" aria-hidden="true"></i>
+                                <span class="hidden-visually">Toggle fullscreen view for Discrete Spectrum</span>
+                            </button>
+                        </div>
                     </div>
                     <div class="flex-relative-host">
                         <canvas id="laplace_spectrum_canvas" width="420" height="320"
                             aria-label="Discrete Fourier spectrum magnitude"></canvas>
+                    </div>
+                </div>
+                <div id="laplace_com_column" class="hidden auxiliary-surface-column">
+                    <div class="canvas-header-line">
+                        <h2 class="section-title"><span id="laplace_com_title_label">Center of Mass vs Frequency</span></h2>
+                        <div class="canvas-header-controls canvas-header-control-row">
+                            <div class="control-row">
+                                <label class="compact-label" for="laplace_com_component_selector">Plot:</label>
+                                <select id="laplace_com_component_selector" class="control-select compact-control-select">
+                                    <option value="both" selected>Both (X &amp; Y)</option>
+                                    <option value="x">X-coord: Re(COM)</option>
+                                    <option value="y">Y-coord: Im(COM)</option>
+                                    <option value="magnitude">Magnitude |COM|</option>
+                                </select>
+                            </div>
+                            <button id="toggle_fullscreen_laplace_com_btn" class="icon-button canvas-icon-button"
+                                type="button" data-tooltip="Toggle fullscreen view for Center of Mass Graph"
+                                aria-label="Toggle fullscreen view for Center of Mass Graph">
+                                <i data-lucide="maximize-2" aria-hidden="true"></i>
+                                <span class="hidden-visually">Toggle fullscreen view for Center of Mass Graph</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex-relative-host">
+                        <canvas id="laplace_com_canvas" width="420" height="320"
+                            aria-label="Center of mass against frequency graph"></canvas>
+                    </div>
+                </div>
+                <div id="fourier_3d_column" class="hidden auxiliary-surface-column">
+                    <div class="canvas-header-line">
+                        <h2 class="section-title"><span id="fourier_3d_title_label">3D Fourier Decomposition &amp; Sum</span></h2>
+                        <div class="canvas-header-controls canvas-header-control-row">
+                            <div class="control-row">
+                                <label class="compact-label" for="laplace_fourier_3d_count_slider">Parallel Graphs: <output id="laplace_fourier_3d_count_value_display" class="slider-value small-output">4</output></label>
+                                <input type="range" id="laplace_fourier_3d_count_slider" min="1" max="12" step="1" value="4" class="control-slider compact-control-slider" style="width: 85px;">
+                            </div>
+                            <button id="toggle_fullscreen_fourier_3d_btn" class="icon-button canvas-icon-button"
+                                type="button" data-tooltip="Toggle fullscreen view for 3D Fourier Decomposition"
+                                aria-label="Toggle fullscreen view for 3D Fourier Decomposition">
+                                <i data-lucide="maximize-2" aria-hidden="true"></i>
+                                <span class="hidden-visually">Toggle fullscreen view for 3D Fourier Decomposition</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex-relative-host">
+                        <div id="fourier_3d_container" class="fill-container"></div>
                     </div>
                 </div>
                 <div id="graph_column" class="hidden">
@@ -2714,9 +2775,8 @@
                         <div class="canvas-header-controls canvas-header-control-row">
                             <div class="control-row">
                                 <label class="compact-label">Display
-                                    Component:</label>
-                                <select id="real_plots_output_component" class="control-select compact-control-select"
-                                   >
+                                     Component:</label>
+                                <select id="real_plots_output_component" class="control-select compact-control-select">
                                     <option value="real" selected>Real Part: Re(f)</option>
                                     <option value="imag">Imaginary Part: Im(f)</option>
                                     <option value="magnitude">Magnitude: |f|</option>

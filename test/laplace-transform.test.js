@@ -8,6 +8,7 @@ import {
 import {
     buildLaplaceSurfaceGeometry,
     buildLaplaceWinding,
+    computeCenterOfMassFrequencySweep,
     computeLaplaceSpectrum,
     generateLaplaceSignal
 } from '../js/analysis/laplace-transform.js';
@@ -127,3 +128,64 @@ test('Laplace surface geometry exposes shared-renderer scalar fields', () => {
     assert.equal(geometry.contourValues.length, geometry.positions.length / 3);
     assert.ok(geometry.colors.every(Number.isFinite));
 });
+
+test('computeCenterOfMassFrequencySweep identifies peak frequency correctly for sinusoidal signal', () => {
+    // Generate a 2 Hz cosine wave over 4 seconds
+    const N = 256;
+    const duration = 4.0;
+    const freq = 2.0;
+    const signal = Array.from({ length: N }, (_, i) => {
+        const t = (i / (N - 1)) * duration;
+        return { t, value: Math.cos(2 * Math.PI * freq * t) };
+    });
+
+    const sweep = computeCenterOfMassFrequencySweep(signal, {
+        sigma: 0,
+        minFreq: 0,
+        maxFreq: 5,
+        steps: 100
+    });
+
+    assert.ok(sweep.length > 0);
+    // Find frequency at maximum real part (X-coordinate of COM)
+    let maxReal = -Infinity;
+    let peakFreq = 0;
+    sweep.forEach(pt => {
+        if (pt.real > maxReal) {
+            maxReal = pt.real;
+            peakFreq = pt.freq;
+        }
+    });
+
+    assert.ok(Math.abs(peakFreq - 2.0) <= 0.1, `Expected peak near 2.0 Hz, got ${peakFreq}`);
+    assert.ok(maxReal > 0.4, `Expected strong COM peak at resonant frequency, got ${maxReal}`);
+});
+
+test('computeCenterOfMassFrequencySweep supports composite signal with dual peaks', () => {
+    // Composite: 2 Hz + 3 Hz
+    const N = 256;
+    const duration = 4.0;
+    const signal = Array.from({ length: N }, (_, i) => {
+        const t = (i / (N - 1)) * duration;
+        return { t, value: Math.cos(2 * Math.PI * 2 * t) + Math.cos(2 * Math.PI * 3 * t) };
+    });
+
+    const sweep = computeCenterOfMassFrequencySweep(signal, {
+        sigma: 0,
+        minFreq: 0,
+        maxFreq: 5,
+        steps: 200
+    });
+
+    // Find local peaks
+    const peaks = [];
+    for (let i = 1; i < sweep.length - 1; i++) {
+        if (sweep[i].real > sweep[i - 1].real && sweep[i].real > sweep[i + 1].real && sweep[i].real > 0.3) {
+            peaks.push(sweep[i].freq);
+        }
+    }
+
+    assert.ok(peaks.some(f => Math.abs(f - 2.0) <= 0.15), 'Expected peak near 2 Hz');
+    assert.ok(peaks.some(f => Math.abs(f - 3.0) <= 0.15), 'Expected peak near 3 Hz');
+});
+

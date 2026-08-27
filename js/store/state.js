@@ -29,6 +29,29 @@ export const wPlaneParams = {
     preciseViewport: null
 };
 
+export const laplaceComInitialRanges = { x: [0, 8], y: [-1.2, 1.2] };
+export const laplaceSpectrumInitialRanges = { x: [-0.5, 16.5], y: [0, 1.5] };
+
+export const laplaceComPlaneParams = {
+    width: DEFAULT_CANVAS_WIDTH,
+    height: DEFAULT_CANVAS_HEIGHT,
+    origin: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    currentVisXRange: [...laplaceComInitialRanges.x],
+    currentVisYRange: [...laplaceComInitialRanges.y],
+    preciseViewport: null
+};
+
+export const laplaceSpectrumPlaneParams = {
+    width: DEFAULT_CANVAS_WIDTH,
+    height: DEFAULT_CANVAS_HEIGHT,
+    origin: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    currentVisXRange: [...laplaceSpectrumInitialRanges.x],
+    currentVisYRange: [...laplaceSpectrumInitialRanges.y],
+    preciseViewport: null
+};
+
 export const sliderParamKeys = ['a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'fractionalPowerN'];
 
 const rawState = {
@@ -172,7 +195,7 @@ const rawState = {
     laplaceDamping: 0.5,
     laplaceAmplitude: 1.0,
     laplaceTimeWindow: 4.0,
-    laplaceSamples: 128,
+    laplaceSamples: 1024,
     laplaceSigma: 0.0,
     laplaceOmega: 1.0,
     laplaceShowROC: false,
@@ -183,18 +206,29 @@ const rawState = {
     laplaceHideIntegralEvaluation: true,
     laplaceHide3DSurface: false,
     laplaceShowSpectrum: true,
+    laplaceShowComGraph: true,
+    laplaceComComponent: 'both',
+    laplaceSyncWindingVector: true,
+    laplaceShowBarriers: true,
     laplaceAnimationTime: 1.0,
     laplaceAnimationPlaying: false,
     laplaceAnimationSpeed: 3.0,
     laplaceAnimationLoop: true,
     laplaceTimeDomainSignal: [],
     laplaceSpectrum: [],
+    laplaceComSweep: [],
     laplaceSurface: null,
     laplacePoles: [],
     laplaceZeros: [],
     laplaceCurrentValue: null,
     laplaceROC: null,
     isLaplace3DFullScreen: false,
+    isLaplaceComFullScreen: false,
+    isLaplaceSpectrumFullScreen: false,
+    laplaceShowFourier3D: true,
+    fourier3DParallelGraphs: 4,
+    isFourier3DFullScreen: false,
+    graphSumEnabled: true,
     realPlotsEnabled: false,
     realPlotsInputExpr: 'x',
     realPlotsInputIsCustom: false,

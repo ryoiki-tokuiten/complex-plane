@@ -1,0 +1,12 @@
+--- css/styles.css
++++ css/styles.css
+@@ -919,6 +919,10 @@
+     transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+ }
+ 
++.two-column-layout > *:last-child .panel-edge-handle-bar {
++    display: none !important;
++}
++
+ #canvases_section .plane-column:hover .panel-edge-handle-bar,
+ #canvases_section .auxiliary-surface-column:hover .panel-edge-handle-bar,

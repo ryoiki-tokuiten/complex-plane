@@ -180,6 +180,7 @@ function updateLaplaceEvaluationPoint() {
     const signal = state.laplaceTimeDomainSignal;
     if (!Array.isArray(signal) || signal.length < 2) {
         state.laplaceCurrentValue = null;
+        state.laplaceComSweep = [];
         return;
     }
     const winding = buildLaplaceWinding(signal, {
@@ -195,6 +196,7 @@ function updateLaplaceEvaluationPoint() {
         magnitude: Math.hypot(real, imag),
         phase: Math.atan2(imag, real)
     };
+    state.laplaceComSweep = computeCenterOfMassFrequencySweep(signal);
 }
 
 export { updateLaplaceEvaluationPoint };
@@ -255,7 +257,70 @@ export function updateLaplaceTransform() {
 
     state.laplaceTimeDomainSignal = signal;
     state.laplaceSpectrum = computeLaplaceSpectrum(signal);
+    state.laplaceComSweep = computeCenterOfMassFrequencySweep(signal);
     updateLaplaceEvaluationPoint();
+}
+
+export function computeCenterOfMassFrequencySweep(signal, options = {}) {
+    if (!Array.isArray(signal) || signal.length < 2) return [];
+
+    const sigma = requireFiniteNumber(
+        options.sigma === undefined ? state.laplaceSigma : options.sigma,
+        'Laplace sigma'
+    );
+    const maxFreq = requireFiniteNumber(
+        options.maxFreq === undefined ? Math.max(10, (state.laplaceFrequency || 2) * 2.5) : options.maxFreq,
+        'COM max frequency'
+    );
+    const minFreq = requireFiniteNumber(options.minFreq === undefined ? 0 : options.minFreq, 'COM min frequency');
+    const steps = requireInteger(options.steps === undefined ? 300 : options.steps, 'COM sweep steps');
+
+    const n = signal.length;
+    const t0 = signal[0].t;
+    const t1 = signal[n - 1].t;
+    const totalT = Math.max(1e-6, t1 - t0);
+
+    const weightedValues = new Float64Array(n);
+    const times = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+        times[i] = signal[i].t;
+        const damping = sigma !== 0 ? Math.exp(Math.max(-700, Math.min(700, -sigma * times[i]))) : 1;
+        weightedValues[i] = signal[i].value * damping;
+    }
+
+    const sweep = [];
+    for (let s = 0; s <= steps; s++) {
+        const freq = minFreq + (s / steps) * (maxFreq - minFreq);
+        const omega = 2 * Math.PI * freq;
+
+        let sumRe = 0;
+        let sumIm = 0;
+        for (let i = 0; i < n; i++) {
+            const dt = (i === 0
+                ? (times[1] - times[0])
+                : i === n - 1
+                    ? (times[n - 1] - times[n - 2])
+                    : (times[i + 1] - times[i - 1]) * 0.5);
+            const angle = -omega * times[i];
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            sumRe += weightedValues[i] * cos * dt;
+            sumIm += weightedValues[i] * sin * dt;
+        }
+
+        const real = sumRe / totalT;
+        const imag = sumIm / totalT;
+        const magnitude = Math.hypot(real, imag);
+
+        sweep.push({
+            freq,
+            omega,
+            real,
+            imag,
+            magnitude
+        });
+    }
+    return sweep;
 }
 
 const PI = Math.PI;

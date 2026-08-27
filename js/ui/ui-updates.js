@@ -172,7 +172,8 @@ const LAPLACE_VALUE_BINDINGS = Object.freeze([
     { display: 'laplaceOmegaValueDisplay', key: 'laplaceOmega', digits: 1 },
     { display: 'laplaceWindingFrequencyValueDisplay', key: 'laplaceOmega', digits: 1 },
     { display: 'laplaceAnimationTimeValueDisplay', get: () => Math.round(state.laplaceAnimationTime * 100), companion: 'laplaceAnimationTimeSlider' },
-    { display: 'laplaceClipHeightValueDisplay', key: 'laplaceClipHeight', digits: 0 }
+    { display: 'laplaceClipHeightValueDisplay', key: 'laplaceClipHeight', digits: 0 },
+    { display: 'laplaceFourier3DCountValueDisplay', key: 'fourier3DParallelGraphs' }
 ]);
 
 function control(key) {
@@ -587,6 +588,12 @@ function syncRiemannAndTransformDisplays() {
     setChecked('laplaceHideIntegralEvaluationCb', state.laplaceHideIntegralEvaluation);
     setChecked('laplaceHide3DSurfaceCb', state.laplaceHide3DSurface);
     setChecked('laplaceShowSpectrumCb', state.laplaceShowSpectrum);
+    setChecked('laplaceShowComCb', state.laplaceShowComGraph);
+    setChecked('laplaceShowFourier3DCb', state.laplaceShowFourier3D);
+    setValue('laplaceFourier3DCountSlider', state.fourier3DParallelGraphs || 4);
+    setChecked('laplaceSyncWindingVectorCb', state.laplaceSyncWindingVector);
+    setChecked('laplaceShowBarriersCb', state.laplaceShowBarriers);
+    setValue('laplaceComComponentSelector', state.laplaceComComponent);
     setChecked('laplaceContoursCb', state.contoursEnabled);
     setValue('laplaceContourIntervalSlider', state.contourInterval);
     setText('laplaceContourIntervalValueDisplay', Number(state.contourInterval).toFixed(2));

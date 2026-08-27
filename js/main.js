@@ -175,5 +175,6 @@ function hidePreloader() {
 
 window.addEventListener('resize', () => {
     setupVisualParameters(false, false); 
-    requestDomainRedraw();
+    requestDomainRedraw(true);
+    requestUiRedraw();
 });

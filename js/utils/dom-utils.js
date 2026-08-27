@@ -1,4 +1,5 @@
-import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, zPlaneInitialRanges } from '../store/state.js';
+import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, zPlaneInitialRanges, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
+import { bindGenericPlaneInteractions } from '../ui/event-listeners.js';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
@@ -87,29 +88,31 @@ export function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen =
     let newWidth, newHeight;
     if (isFullscreen) {
         const container = canvasElement.parentElement; 
-        newWidth = container.clientWidth;
-        newHeight = container.clientHeight;
+        newWidth = container ? container.clientWidth : DEFAULT_CANVAS_WIDTH;
+        newHeight = container ? container.clientHeight : DEFAULT_CANVAS_HEIGHT;
     } else {
         const parentElement = canvasElement.parentElement;
         if (parentElement && parentElement.clientWidth > 50 && parentElement.clientHeight > 50) {
             newWidth = parentElement.clientWidth;
             newHeight = parentElement.clientHeight;
         } else {
-            
             newWidth = DEFAULT_CANVAS_WIDTH;
             newHeight = DEFAULT_CANVAS_HEIGHT;
         }
     }
-    newWidth = Math.max(1, Math.round(newWidth));
-    newHeight = Math.max(1, Math.round(newHeight));
+    // Hard upper limits to prevent runaway canvas memory allocation and GPU/browser crashes
+    const MAX_CANVAS_DIM = 2560;
+    newWidth = Math.min(MAX_CANVAS_DIM, Math.max(1, Math.round(newWidth)));
+    newHeight = Math.min(MAX_CANVAS_DIM, Math.max(1, Math.round(newHeight)));
+
     if (canvasElement.width !== newWidth) canvasElement.width = newWidth;
     if (canvasElement.height !== newHeight) canvasElement.height = newHeight;
     planeParams.width = canvasElement.width;
     planeParams.height = canvasElement.height;
 
     if (canvasElement === zCanvas) {
-        if (zDomainColorCanvas.width !== planeParams.width) zDomainColorCanvas.width = planeParams.width;
-        if (zDomainColorCanvas.height !== planeParams.height) zDomainColorCanvas.height = planeParams.height;
+        if (zDomainColorCanvas && zDomainColorCanvas.width !== planeParams.width) zDomainColorCanvas.width = planeParams.width;
+        if (zDomainColorCanvas && zDomainColorCanvas.height !== planeParams.height) zDomainColorCanvas.height = planeParams.height;
     }
 }
 
@@ -138,69 +141,76 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
     if (updateZFromSlider) { 
         const zoomZ = state.zPlaneZoom;
         zIsPrecise = synchronizePreciseViewport(zPlaneParams, zoomZ);
-        if (!zIsPrecise) {
-            const initialXSpanZ = zPlaneInitialRanges.x[1] - zPlaneInitialRanges.x[0];
-            const initialYSpanZ = zPlaneInitialRanges.y[1] - zPlaneInitialRanges.y[0];
-            const currentXSpanZ = initialXSpanZ / zoomZ;
-            const currentYSpanZ = initialYSpanZ / zoomZ;
-            zPlaneParams.currentVisXRange[0] = zWorldCenterX - currentXSpanZ / 2;
-            zPlaneParams.currentVisXRange[1] = zWorldCenterX + currentXSpanZ / 2;
-            zPlaneParams.currentVisYRange[0] = zWorldCenterY - currentYSpanZ / 2;
-            zPlaneParams.currentVisYRange[1] = zWorldCenterY + currentYSpanZ / 2;
-        }
     }
     if (!zIsPrecise) {
-        const xSpanZ = zPlaneParams.currentVisXRange[1] - zPlaneParams.currentVisXRange[0];
-        const ySpanZ = zPlaneParams.currentVisYRange[1] - zPlaneParams.currentVisYRange[0];
-        if (xSpanZ === 0 || ySpanZ === 0) { return; }
-        const scaleXZ = zPlaneParams.width / xSpanZ;
-        const scaleYZ = zPlaneParams.height / ySpanZ;
-        zPlaneParams.scale.x = zPlaneParams.scale.y = Math.min(scaleXZ, scaleYZ); 
-        zPlaneParams.origin.x = (zPlaneParams.width / 2) - zWorldCenterX * zPlaneParams.scale.x;
-        zPlaneParams.origin.y = (zPlaneParams.height / 2) + zWorldCenterY * zPlaneParams.scale.y; 
-        updatePlaneViewportRanges(zPlaneParams);
+        const initialXSpanZ = zPlaneInitialRanges.x[1] - zPlaneInitialRanges.x[0];
+        const initialYSpanZ = zPlaneInitialRanges.y[1] - zPlaneInitialRanges.y[0];
+        if (initialXSpanZ > 0 && initialYSpanZ > 0) {
+            const baseScaleZ = Math.min(zPlaneParams.width / initialXSpanZ, zPlaneParams.height / initialYSpanZ);
+            const scaleZ = baseScaleZ * (state.zPlaneZoom || 1);
+            zPlaneParams.scale.x = zPlaneParams.scale.y = scaleZ; 
+            zPlaneParams.origin.x = (zPlaneParams.width / 2) - zWorldCenterX * scaleZ;
+            zPlaneParams.origin.y = (zPlaneParams.height / 2) + zWorldCenterY * scaleZ; 
+            updatePlaneViewportRanges(zPlaneParams);
+        }
     }
 
     let wIsPrecise = !!wPlaneParams.preciseViewport;
     if (updateWFromSlider) { 
         const zoomW = state.wPlaneZoom;
         wIsPrecise = synchronizePreciseViewport(wPlaneParams, zoomW);
-        if (!wIsPrecise) {
-            const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
-            const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
-            const currentXSpanW = initialXSpanW / zoomW;
-            const currentYSpanW = initialYSpanW / zoomW;
-            wPlaneParams.currentVisXRange[0] = wWorldCenterX - currentXSpanW / 2;
-            wPlaneParams.currentVisXRange[1] = wWorldCenterX + currentXSpanW / 2;
-            wPlaneParams.currentVisYRange[0] = wWorldCenterY - currentYSpanW / 2;
-            wPlaneParams.currentVisYRange[1] = wWorldCenterY + currentYSpanW / 2;
-        }
     }
-    const xSpanW = wPlaneParams.currentVisXRange[1] - wPlaneParams.currentVisXRange[0];
-    const ySpanW = wPlaneParams.currentVisYRange[1] - wPlaneParams.currentVisYRange[0];
     if (!wIsPrecise) {
-        if (xSpanW === 0 || ySpanW === 0) { return; }
-        const scaleXW = wPlaneParams.width / xSpanW;
-        const scaleYW = wPlaneParams.height / ySpanW;
-        wPlaneParams.scale.x = wPlaneParams.scale.y = Math.min(scaleXW, scaleYW);
-        wPlaneParams.origin.x = (wPlaneParams.width / 2) - wWorldCenterX * wPlaneParams.scale.x;
-        wPlaneParams.origin.y = (wPlaneParams.height / 2) + wWorldCenterY * wPlaneParams.scale.y;
-        updatePlaneViewportRanges(wPlaneParams);
+        const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
+        const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
+        if (initialXSpanW > 0 && initialYSpanW > 0) {
+            const baseScaleW = Math.min(wPlaneParams.width / initialXSpanW, wPlaneParams.height / initialYSpanW);
+            const scaleW = baseScaleW * (state.wPlaneZoom || 1);
+            wPlaneParams.scale.x = wPlaneParams.scale.y = scaleW;
+            wPlaneParams.origin.x = (wPlaneParams.width / 2) - wWorldCenterX * scaleW;
+            wPlaneParams.origin.y = (wPlaneParams.height / 2) + wWorldCenterY * scaleW;
+            updatePlaneViewportRanges(wPlaneParams);
+        }
     }
 
     // Propagate zoom/pan to all recursive planes
     if (!wIsPrecise && wPlaneParamsList && wPlaneParamsList.length > 1) {
+        const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
+        const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
         for (let i = 1; i < wPlaneParamsList.length; i++) {
             const p = wPlaneParamsList[i];
-            p.currentVisXRange = [...wPlaneParams.currentVisXRange];
-            p.currentVisYRange = [...wPlaneParams.currentVisYRange];
-            // Recompute scale and origin per-canvas using its own dimensions
-            const pScaleX = p.width / xSpanW;
-            const pScaleY = p.height / ySpanW;
-            p.scale.x = p.scale.y = Math.min(pScaleX, pScaleY);
-            p.origin.x = (p.width / 2) - wWorldCenterX * p.scale.x;
-            p.origin.y = (p.height / 2) + wWorldCenterY * p.scale.y;
+            const baseScaleP = Math.min(p.width / initialXSpanW, p.height / initialYSpanW);
+            const scaleP = baseScaleP * (state.wPlaneZoom || 1);
+            p.scale.x = p.scale.y = scaleP;
+            p.origin.x = (p.width / 2) - wWorldCenterX * scaleP;
+            p.origin.y = (p.height / 2) + wWorldCenterY * scaleP;
             updatePlaneViewportRanges(p);
+        }
+    }
+
+    if (controls.laplaceComCanvas) {
+        setupCanvasBaseParams(laplaceComPlaneParams, controls.laplaceComCanvas, state.isLaplaceComFullScreen);
+        const xSpan = laplaceComPlaneParams.currentVisXRange[1] - laplaceComPlaneParams.currentVisXRange[0];
+        const ySpan = laplaceComPlaneParams.currentVisYRange[1] - laplaceComPlaneParams.currentVisYRange[0];
+        if (xSpan > 0 && ySpan > 0) {
+            laplaceComPlaneParams.scale.x = laplaceComPlaneParams.width / xSpan;
+            laplaceComPlaneParams.scale.y = laplaceComPlaneParams.height / ySpan;
+            laplaceComPlaneParams.origin.x = -laplaceComPlaneParams.currentVisXRange[0] * laplaceComPlaneParams.scale.x;
+            laplaceComPlaneParams.origin.y = laplaceComPlaneParams.height * 0.5;
+            updatePlaneViewportRanges(laplaceComPlaneParams);
+        }
+    }
+
+    if (controls.laplaceSpectrumCanvas) {
+        setupCanvasBaseParams(laplaceSpectrumPlaneParams, controls.laplaceSpectrumCanvas, state.isLaplaceSpectrumFullScreen);
+        const xSpan = laplaceSpectrumPlaneParams.currentVisXRange[1] - laplaceSpectrumPlaneParams.currentVisXRange[0];
+        const ySpan = laplaceSpectrumPlaneParams.currentVisYRange[1] - laplaceSpectrumPlaneParams.currentVisYRange[0];
+        if (xSpan > 0 && ySpan > 0) {
+            laplaceSpectrumPlaneParams.scale.x = laplaceSpectrumPlaneParams.width / xSpan;
+            laplaceSpectrumPlaneParams.scale.y = laplaceSpectrumPlaneParams.height / ySpan;
+            laplaceSpectrumPlaneParams.origin.x = -laplaceSpectrumPlaneParams.currentVisXRange[0] * laplaceSpectrumPlaneParams.scale.x;
+            laplaceSpectrumPlaneParams.origin.y = laplaceSpectrumPlaneParams.height - 20;
+            updatePlaneViewportRanges(laplaceSpectrumPlaneParams);
         }
     }
 
@@ -300,6 +310,9 @@ export function updateChainingColumns(count) {
         const newCol = originalCol.cloneNode(true);
         newCol.id = `w_plane_column_${i}`;
         
+        // Remove cloned edge handle bars so the layout manager recreates them with fresh event listeners
+        newCol.querySelectorAll('.panel-edge-handle-bar').forEach(el => el.remove());
+        
         // Update IDs within the new column
         const titleSpan = newCol.querySelector('#w-plane-title');
         if (titleSpan) {
@@ -327,18 +340,27 @@ export function updateChainingColumns(count) {
             fsBtn.id = `toggle_fullscreen_w_btn_${i}`;
         }
 
-        // Hide collapse/expand buttons — not relevant for chained panels
-        newCol.querySelectorAll('[id^="collapse_w"], [id^="expand_w"]').forEach(el => el.style.display = 'none');
+
         
         const probeInfo = newCol.querySelector('#w_plane_probe_info');
         if (probeInfo) probeInfo.id = `w_plane_probe_info_${i}`;
         
-        const analysisInfo = newCol.querySelector('#w_plane_analysis_info');
-        if (analysisInfo) analysisInfo.id = `w_plane_analysis_info_${i}`;
-        
         const cauchyInfo = newCol.querySelector('#cauchy_integral_results_info');
         if (cauchyInfo) cauchyInfo.id = `cauchy_integral_results_info_${i}`;
-        
+
+        // Position new column cleanly in whiteboard coordinates next to previous column
+        const prevCol = (i === 1) ? originalCol : document.getElementById(`w_plane_column_${i-1}`);
+        if (prevCol) {
+            const prevLeft = prevCol.offsetLeft || parseInt(prevCol.style.left, 10) || 0;
+            const prevTop = prevCol.offsetTop || parseInt(prevCol.style.top, 10) || 24;
+            const prevWidth = prevCol.offsetWidth || parseInt(prevCol.style.width, 10) || 540;
+            const prevHeight = prevCol.offsetHeight || parseInt(prevCol.style.height, 10) || 480;
+            newCol.style.left = `${prevLeft + prevWidth + 24}px`;
+            newCol.style.top = `${prevTop}px`;
+            newCol.style.width = `${prevWidth}px`;
+            newCol.style.height = `${prevHeight}px`;
+        }
+
         // Append to DOM
         canvasesRow.appendChild(newCol);
         
@@ -358,6 +380,9 @@ export function updateChainingColumns(count) {
         wCtxList.push(ctx);
         wPlaneParamsList.push(params);
         wPlaneThreeContainersList.push(newThreeContainer);
+
+        // Allow pan/zoom in chained canvases
+        bindGenericPlaneInteractions(newCanvas, params, () => eventBus.emit('redraw:domain'));
     }
     
     // Remove planes if needed

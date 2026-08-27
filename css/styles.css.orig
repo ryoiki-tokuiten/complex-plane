@@ -845,12 +845,12 @@ main {
 }
 
 #canvases_section {
+
     flex-grow: 1;
     display: flex;
     flex-direction: column;
     min-height: 0;
-    padding: 0;
-    position: relative;
+    padding: 0.7rem;
     border-radius: 20px;
     background: transparent;
     border: 1px solid transparent;
@@ -859,17 +859,14 @@ main {
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
     opacity: 1;
     transform: translateY(0);
-    overflow: hidden;
 }
 
 #canvases_section .two-column-layout {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    min-width: 100%;
-    min-height: 100%;
-    overflow: auto;
-    padding: 0;
+    flex-grow: 1;
+    min-height: 0;
+
+    align-items: stretch;
+
 }
 
 #canvases_section .plane-column,
@@ -878,69 +875,70 @@ main {
 #laplace_com_column,
 #fourier_3d_column,
 #real_plots_column,
-#graph_column,
-.auxiliary-surface-column {
+#graph_column {
     display: flex;
     flex-direction: column;
-    min-height: 200px;
-    min-width: 220px;
-    max-width: 2560px;
-    max-height: 2000px;
-    position: absolute;
+    min-height: 0;
+    position: relative;
+    /* Allow floating edge handle to overflow slightly onto border boundary */
     overflow: visible;
-    box-sizing: border-box;
+
+    flex: 0 0 var(--panel-width, calc(50% - 0.75rem));
+    min-width: 200px;
+    max-width: none;
+    width: var(--panel-width, auto);
 
     background: var(--card-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 1.5rem;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    transition: flex 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+        min-width 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+        max-width 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+        padding 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.is-resizing,
-.is-dragging {
+.is-resizing {
     transition: none !important;
     user-select: none !important;
 }
 
-.is-dragging {
-    z-index: 1000 !important;
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.65), 0 0 0 2px var(--accent-purple, #a78bfa) !important;
-    cursor: grabbing !important;
-}
-
+/* ── Panel Edge Handles (Resize & Grip Reorder) ─────────────────────────── */
 .panel-edge-handle-bar {
     position: absolute;
-    right: 8px;
-    bottom: 8px;
-    z-index: 100;
+    top: 0;
+    right: -13px;
+    bottom: 0;
+    width: 26px;
+    z-index: 1000;
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: auto;
+    pointer-events: none;
     opacity: 0;
     transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.show-edge-handle .panel-edge-handle-bar,
+#canvases_section .plane-column:hover .panel-edge-handle-bar,
+#canvases_section .auxiliary-surface-column:hover .panel-edge-handle-bar,
+#graph_column:hover .panel-edge-handle-bar,
+#real_plots_column:hover .panel-edge-handle-bar,
 .panel-edge-handle-bar:hover,
-.panel-edge-handle-bar:focus-within,
-.is-resizing .panel-edge-handle-bar,
-.is-dragging .panel-edge-handle-bar {
+.panel-edge-handle-bar:focus-within {
     opacity: 1;
 }
 
 .panel-edge-btn-group {
     display: inline-flex;
-    flex-direction: row;
+    flex-direction: column;
     align-items: center;
     gap: 4px;
-    padding: 4px 6px;
-    background: rgba(13, 17, 28, 0.88);
+    padding: 5px 3px;
+    background: rgba(13, 17, 28, 0.85);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 9999px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
     pointer-events: auto;
@@ -986,7 +984,7 @@ main {
 }
 
 .panel-resize-btn {
-    cursor: nwse-resize;
+    cursor: col-resize;
 }
 
 .panel-grip-btn {
@@ -995,6 +993,50 @@ main {
 
 .panel-grip-btn:active {
     cursor: grabbing;
+}
+
+/* Horizontal vs Vertical layout icon switching */
+.panel-edge-handle-bar .icon-vertical {
+    display: none !important;
+}
+
+.panel-edge-handle-bar .icon-horizontal {
+    display: block !important;
+}
+
+/* Vertical layout positioning and icon switching */
+body.vertical-layout .panel-edge-handle-bar {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: -13px;
+    width: 100%;
+    height: 26px;
+}
+
+body.vertical-layout .panel-edge-btn-group {
+    flex-direction: row;
+    padding: 3px 5px;
+}
+
+body.vertical-layout .panel-resize-btn {
+    cursor: row-resize;
+}
+
+body.vertical-layout .panel-edge-handle-bar .icon-horizontal {
+    display: none !important;
+}
+
+body.vertical-layout .panel-edge-handle-bar .icon-vertical {
+    display: block !important;
+}
+
+/* Panel Drag & Drop active states */
+.is-panel-dragging {
+    opacity: 0.45 !important;
+    transform: scale(0.985);
+    outline: 2px dashed var(--accent-purple, #a78bfa) !important;
+    outline-offset: 4px;
 }
 
 /* Styling for the direct container of each canvas. */
@@ -1255,27 +1297,32 @@ input[type="range"]:focus::-moz-range-thumb {
 }
 
 .two-column-layout {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    min-width: 100%;
-    min-height: 100%;
-    overflow: auto;
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 1.5rem;
+    align-items: stretch;
+    padding-bottom: 0.5rem;
+    /* Space for scrollbar */
 }
 
 .two-column-layout::-webkit-scrollbar {
-    width: 8px;
     height: 8px;
 }
 
 .two-column-layout::-webkit-scrollbar-track {
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.2);
 }
 
 .two-column-layout::-webkit-scrollbar-thumb {
     background-color: var(--accent-purple);
     border-radius: 4px;
+}
+
+.two-column-layout > div {
+    flex: 0 0 calc(50% - 0.75rem);
+    min-width: 400px;
 }
 
 
@@ -1368,6 +1415,60 @@ input[type="range"]:focus::-moz-range-thumb {
     height: 100% !important;
 }
 
+/* Output Chaining Grid View Override */
+.two-column-layout.chaining-grid-view {
+    position: fixed !important;
+    inset: 0;
+    max-height: 100vh;
+    z-index: 10000;
+    background: var(--bg-color);
+    display: grid !important;
+    grid-template-columns: repeat(5, 1fr) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: min(calc(100vh / 5), 280px) !important;
+    gap: 3px;
+    padding: 6px !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-sizing: border-box;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    flex-wrap: unset !important;
+    align-items: stretch;
+    justify-items: stretch;
+}
+
+.two-column-layout.chaining-grid-view>div {
+    flex: unset !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.two-column-layout.chaining-grid-view .canvas-header-line {
+    display: none !important;
+}
+
+/* Custom vertical scrollbar for grid view */
+.two-column-layout.chaining-grid-view::-webkit-scrollbar {
+    width: 8px;
+}
+
+.two-column-layout.chaining-grid-view::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+}
+
+.two-column-layout.chaining-grid-view::-webkit-scrollbar-thumb {
+    background-color: var(--accent-purple);
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+}
 
 @media (max-width: 800px) {
     .two-column-layout {
@@ -4754,7 +4855,6 @@ body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column
     flex: 1;
     width: 100%;
     height: 100%;
-    min-height: 0;
 }
 
 .canvas-overlay {
@@ -4893,5 +4993,7 @@ body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column
 
 .domain-palette-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; gap: 0.5rem; }
 .domain-palette-label { justify-content: flex-start; gap: 0.5rem; margin: 0; }
-.auxiliary-surface-column { display: flex; flex-direction: column; }
+.analysis-copy { font-size: 0.8rem; line-height: 1.3; }
+.auxiliary-surface-column { display: flex; flex: 1; flex-direction: column; }
+.canvas-header-control-row { display: flex; align-items: center; gap: 1rem; }
 .canvas-fill-host { position: relative; display: flex; flex: 1; width: 100%; height: 100%; }

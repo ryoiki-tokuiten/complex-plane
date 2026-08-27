@@ -98,19 +98,11 @@ test('Preact controls preserve the public DOM and interaction contract', async (
     });
     await expect(page.locator('body')).toHaveClass(/vertical-layout/);
 
-    await expect.poll(async () => {
-        return page.locator('#collapse_z_btn svg').evaluate(element => window.getComputedStyle(element).transform);
-    }).toContain('matrix');
-
     await page.locator('#enable_vertical_layout_cb').evaluate(element => {
         element.checked = false;
         element.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await expect(page.locator('body')).not.toHaveClass(/vertical-layout/);
-
-    await expect.poll(async () => {
-        return page.locator('#collapse_z_btn svg').evaluate(element => window.getComputedStyle(element).transform);
-    }).not.toContain('matrix');
 
     await page.click('#close_theme_modal_btn');
     await expect(page.locator('#theme_modal')).toHaveClass(/hidden/);

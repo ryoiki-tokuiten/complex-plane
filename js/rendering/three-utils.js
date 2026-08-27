@@ -30,7 +30,7 @@ export function createCanvasTextSprite(THREE, text, options = {}) {
         shadowBlur = 12,
         scale = null,
         height = null,
-        maxWidth = 768,
+        maxWidth = 2048,
         padding = 32
     } = options;
 
@@ -56,6 +56,8 @@ export function createCanvasTextSprite(THREE, text, options = {}) {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 4;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
     const material = new THREE.SpriteMaterial({
         map: texture,
         transparent: true,

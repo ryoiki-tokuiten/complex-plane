@@ -1,4 +1,4 @@
-import { state } from '../store/state.js';
+import { state, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
 import { COLOR_CANVAS_BACKGROUND } from '../constants/colors.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { drawAxes, drawGrid, drawTipToTailVectors, drawSpiral, drawArrowHead } from './canvas-primitives.js';
@@ -98,24 +98,77 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams, frameData) {
         }
     }
 
+    if (state.laplaceShowBarriers !== false && Math.abs(frameData.omega) > 0.05) {
+        const period = (2 * Math.PI) / Math.abs(frameData.omega);
+        const maxCycles = Math.floor(timeWindow / period);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        for (let k = 1; k <= maxCycles; k++) {
+            const tBarrier = k * period;
+            if (tBarrier > timeWindow) break;
+            const barrierCanvas = mapToCanvasCoords(tBarrier, 0, planeParams);
+            ctx.beginPath();
+            ctx.moveTo(barrierCanvas.x, 0);
+            ctx.lineTo(barrierCanvas.x, planeParams.height);
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(220, 240, 255, 0.65)';
+            ctx.font = '9px "SF Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${k}T (${tBarrier.toFixed(1)}s)`, barrierCanvas.x, planeParams.height - 8);
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
     if (progress > 0 && progress <= 1) {
         const cursorX = mapToCanvasCoords(windingTime, 0, planeParams).x;
         const cursor = ctx.createLinearGradient(cursorX, 0, cursorX, planeParams.height);
-        cursor.addColorStop(0, 'rgba(255, 180, 100, 0.3)');
-        cursor.addColorStop(0.5, 'rgba(255, 150, 100, 0.9)');
-        cursor.addColorStop(1, 'rgba(255, 180, 100, 0.3)');
+        cursor.addColorStop(0, 'rgba(255, 180, 100, 0.2)');
+        cursor.addColorStop(0.5, 'rgba(255, 150, 100, 0.6)');
+        cursor.addColorStop(1, 'rgba(255, 180, 100, 0.2)');
         ctx.strokeStyle = cursor;
-        ctx.lineWidth = 3;
-        ctx.shadowColor = 'rgba(255, 150, 100, 0.6)';
-        ctx.shadowBlur = 10;
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(cursorX, 0); ctx.lineTo(cursorX, planeParams.height);
         ctx.stroke();
-        ctx.shadowBlur = 0;
+
         ctx.fillStyle = 'rgba(255, 200, 150, 1)';
         ctx.font = 'bold 11px "SF Pro Text", sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(`t = ${windingTime.toFixed(2)}s`, cursorX, 16);
+
+        if (state.laplaceSyncWindingVector !== false) {
+            const sampleIdx = Math.min(signal.length - 1, Math.max(0, Math.floor(progress * (signal.length - 1))));
+            const val = frameData.weighted[sampleIdx] ?? 0;
+            const basePt = mapToCanvasCoords(windingTime, 0, planeParams);
+            const tipPt = mapToCanvasCoords(windingTime, val, planeParams);
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+            ctx.lineWidth = 3.5;
+            ctx.shadowColor = 'rgba(255, 230, 100, 0.85)';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.moveTo(basePt.x, basePt.y);
+            ctx.lineTo(tipPt.x, tipPt.y);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            const arrowAngle = Math.atan2(tipPt.y - basePt.y, tipPt.x - basePt.x);
+            drawArrowHead(ctx, tipPt.x, tipPt.y, arrowAngle, 12, 'rgba(255, 255, 255, 1)');
+
+            ctx.fillStyle = 'rgba(255, 240, 150, 1)';
+            ctx.beginPath();
+            ctx.arc(tipPt.x, tipPt.y, 4.5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+        }
     }
     ctx.restore();
 }
@@ -255,6 +308,36 @@ export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameD
     drawRadialWindingVectors(ctx, frameData, planeParams);
     drawSpiral(ctx, frameData, planeParams, { baseColor: { r: 255, g: 100, b: 200 } });
     drawWindingSamples(ctx, frameData, planeParams);
+
+    if (state.laplaceSyncWindingVector !== false && frameData.points.length > 0) {
+        const activePoint = frameData.points[frameData.points.length - 1];
+        const tip = mapToCanvasCoords(activePoint.real, activePoint.imag, planeParams);
+        const origin = mapToCanvasCoords(0, 0, planeParams);
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = 'rgba(255, 230, 100, 0.85)';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(origin.x, origin.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        const angle = Math.atan2(tip.y - origin.y, tip.x - origin.x);
+        drawArrowHead(ctx, tip.x, tip.y, angle, 12, 'rgba(255, 255, 255, 1)');
+
+        ctx.fillStyle = 'rgba(255, 240, 150, 1)';
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, 5, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+    }
+
     if (options.showIntegralEvaluation !== false) {
         drawTipToTailVectors(ctx, frameData, planeParams, {
             style: 'enhanced',
@@ -264,6 +347,21 @@ export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameD
         });
         drawIntegralResult(ctx, frameData, planeParams);
     }
+
+    // Equation badge
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
+    ctx.font = '12px "SF Pro Text", -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    const eqLabel = Math.abs(frameData.sigma) > 0.01
+        ? '∫ g(t) e^-(σ+iω)t dt'
+        : 'COM(f) = 1/(t₂-t₁) ∫ g(t) e^(-2πift) dt';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    const eqWidth = ctx.measureText(eqLabel).width;
+    ctx.fillRect(planeParams.width - eqWidth - 22, 10, eqWidth + 14, 22);
+    ctx.fillStyle = 'rgba(255, 230, 150, 0.95)';
+    ctx.fillText(eqLabel, planeParams.width - 15, 25);
+    ctx.restore();
 
     const origin = mapToCanvasCoords(0, 0, planeParams);
     const grad = ctx.createRadialGradient(origin.x, origin.y, 0, origin.x, origin.y, 6);
@@ -281,62 +379,160 @@ export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameD
     drawPolesAndZerosOverlay(ctx, planeParams);
 }
 
-export function drawLaplaceSpectrum(canvas, spectrum) {
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+export function drawLaplaceSpectrum(ctx, spectrum = state.laplaceSpectrum, planeParams = laplaceSpectrumPlaneParams) {
+    if (!ctx || !planeParams) return;
 
-    const width = Math.max(1, Math.floor(canvas.clientWidth || canvas.width || 420));
-    const height = Math.max(1, Math.floor(canvas.clientHeight || canvas.height || 320));
-    if (canvas.width !== width) canvas.width = width;
-    if (canvas.height !== height) canvas.height = height;
-    ctx.clearRect(0, 0, width, height);
+    ctx.save();
     ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, planeParams.width, planeParams.height);
+    drawGrid(ctx, planeParams);
+    drawAxes(ctx, planeParams, "Harmonic (k)", "Magnitude |X[k]|");
 
     if (!Array.isArray(spectrum) || spectrum.length === 0) {
         ctx.fillStyle = 'rgba(200, 220, 255, 0.7)';
         ctx.font = '12px "SF Pro Text", sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Spectrum appears after a signal is generated', width / 2, height / 2);
+        ctx.fillText('Spectrum appears after a signal is generated', planeParams.width / 2, planeParams.height / 2);
+        ctx.restore();
         return;
     }
 
-    const visible = spectrum.slice(0, Math.max(1, Math.floor(spectrum.length / 2)));
+    const visible = spectrum.slice(0, Math.min(spectrum.length, 16));
     const maximum = Math.max(Number.EPSILON, ...visible.map(point => point.magnitude || 0));
-    const padding = { top: 18, right: 10, bottom: 22, left: 28 };
-    const plotWidth = Math.max(1, width - padding.left - padding.right);
-    const plotHeight = Math.max(1, height - padding.top - padding.bottom);
-    const barWidth = plotWidth / visible.length;
 
-    ctx.strokeStyle = 'rgba(180, 220, 240, 0.16)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, padding.top);
-    ctx.lineTo(padding.left, height - padding.bottom);
-    ctx.lineTo(width - padding.right, height - padding.bottom);
-    ctx.stroke();
+    visible.forEach(point => {
+        const k = point.k ?? 0;
+        const mag = Math.max(0, point.magnitude || 0);
+        const basePt = mapToCanvasCoords(k - 0.35, 0, planeParams);
+        const topPt = mapToCanvasCoords(k + 0.35, mag, planeParams);
+        const barWidth = Math.max(2, Math.abs(topPt.x - basePt.x));
+        const barHeight = Math.abs(basePt.y - topPt.y);
+        const x = Math.min(basePt.x, topPt.x);
+        const y = topPt.y;
 
-    visible.forEach((point, index) => {
-        const magnitude = Math.max(0, point.magnitude || 0);
-        const barHeight = (magnitude / maximum) * plotHeight;
-        const x = padding.left + index * barWidth;
-        const y = height - padding.bottom - barHeight;
-        const gradient = ctx.createLinearGradient(x, y, x, height - padding.bottom);
+        const gradient = ctx.createLinearGradient(x, y, x, basePt.y);
         gradient.addColorStop(0, 'rgba(255, 220, 120, 0.95)');
         gradient.addColorStop(1, 'rgba(160, 120, 255, 0.35)');
         ctx.fillStyle = gradient;
-        ctx.fillRect(x + 0.5, y, Math.max(1, barWidth - 1), barHeight);
+        ctx.fillRect(x, y, barWidth, barHeight);
+
+        ctx.strokeStyle = 'rgba(255, 220, 120, 0.8)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, barWidth, barHeight);
     });
 
     ctx.fillStyle = 'rgba(200, 220, 255, 0.75)';
     ctx.font = '10px "SF Mono", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('DFT magnitude', padding.left, 12);
-    ctx.textAlign = 'center';
-    ctx.fillText('frequency bin k', width / 2, height - 5);
-    ctx.textAlign = 'right';
-    ctx.fillText(maximum.toFixed(2), padding.left - 4, padding.top + 4);
+    ctx.fillText(`Max |X[k]|: ${maximum.toFixed(2)}`, 12, 20);
+
+    ctx.restore();
+}
+
+export function drawLaplaceComGraph(ctx, comSweep = state.laplaceComSweep, planeParams = laplaceComPlaneParams) {
+    if (!ctx || !planeParams) return;
+
+    ctx.save();
+    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
+    ctx.fillRect(0, 0, planeParams.width, planeParams.height);
+    drawGrid(ctx, planeParams);
+    drawAxes(ctx, planeParams, "Frequency (Hz)", "Center of Mass");
+
+    if (!Array.isArray(comSweep) || comSweep.length < 2) {
+        ctx.fillStyle = 'rgba(200, 220, 255, 0.7)';
+        ctx.font = '12px "SF Pro Text", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Center of mass graph appears after signal is generated', planeParams.width / 2, planeParams.height / 2);
+        ctx.restore();
+        return;
+    }
+
+    const componentMode = state.laplaceComComponent || 'both';
+
+    const drawCurve = (prop, color, glowColor) => {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        comSweep.forEach((pt, idx) => {
+            const canvasPt = mapToCanvasCoords(pt.freq, pt[prop], planeParams);
+            if (idx === 0) ctx.moveTo(canvasPt.x, canvasPt.y);
+            else ctx.lineTo(canvasPt.x, canvasPt.y);
+        });
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+    };
+
+    if (componentMode === 'both' || componentMode === 'x') {
+        drawCurve('real', 'rgba(255, 107, 107, 0.95)', 'rgba(255, 107, 107, 0.6)');
+    }
+    if (componentMode === 'both' || componentMode === 'y') {
+        drawCurve('imag', 'rgba(77, 171, 247, 0.95)', 'rgba(77, 171, 247, 0.6)');
+    }
+    if (componentMode === 'magnitude') {
+        drawCurve('magnitude', 'rgba(255, 212, 59, 0.95)', 'rgba(255, 212, 59, 0.6)');
+    }
+
+    // Active Frequency Marker
+    const activeFreq = Math.abs((state.laplaceOmega || 0) / (2 * Math.PI));
+    const activeCanvas = mapToCanvasCoords(activeFreq, 0, planeParams);
+    if (activeCanvas.x >= 0 && activeCanvas.x <= planeParams.width) {
+        ctx.save();
+        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = 'rgba(255, 220, 100, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(activeCanvas.x, 0);
+        ctx.lineTo(activeCanvas.x, planeParams.height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const activeIdx = Math.min(comSweep.length - 1, Math.max(0, Math.floor((activeFreq / (comSweep[comSweep.length - 1].freq || 8)) * (comSweep.length - 1))));
+        const pt = comSweep[activeIdx];
+        if (pt) {
+            if (componentMode === 'both' || componentMode === 'x') {
+                const ptCanvas = mapToCanvasCoords(activeFreq, pt.real, planeParams);
+                ctx.fillStyle = 'rgba(255, 107, 107, 1)';
+                ctx.beginPath();
+                ctx.arc(ptCanvas.x, ptCanvas.y, 5, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+            if (componentMode === 'both' || componentMode === 'y') {
+                const ptCanvas = mapToCanvasCoords(activeFreq, pt.imag, planeParams);
+                ctx.fillStyle = 'rgba(77, 171, 247, 1)';
+                ctx.beginPath();
+                ctx.arc(ptCanvas.x, ptCanvas.y, 5, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+            if (componentMode === 'magnitude') {
+                const ptCanvas = mapToCanvasCoords(activeFreq, pt.magnitude, planeParams);
+                ctx.fillStyle = 'rgba(255, 212, 59, 1)';
+                ctx.beginPath();
+                ctx.arc(ptCanvas.x, ptCanvas.y, 5, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+        }
+
+        ctx.fillStyle = 'rgba(255, 220, 100, 0.95)';
+        ctx.font = 'bold 11px "SF Pro Text", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`f = ${activeFreq.toFixed(2)} Hz`, activeCanvas.x, 16);
+        ctx.restore();
+    }
+
+    ctx.restore();
 }
 
 export function drawPolesAndZerosOverlay(ctx, planeParams) {

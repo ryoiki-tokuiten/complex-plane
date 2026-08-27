@@ -1,4 +1,4 @@
-import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, sliderParamKeys } from '../store/state.js';
+import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, laplaceComPlaneParams, laplaceSpectrumPlaneParams, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
@@ -40,9 +40,9 @@ import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVeh
 import { toggleAnimation } from './animation.js';
 import { initializePolynomialCoeffs } from './polynomial-ui.js';
 import { resizeScalarSurface } from '../rendering/real-plots-renderer.js';
-import { getRiemannSurfaceCanvas, resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
 import { applyTheme, domainPalettes, surfacePalettes, loadThemePreferences, persistThemePreferences } from './theme-manager.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
+import { initPanelLayoutManager, refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import {
     initializeDynamicPlottingUI,
     syncDynamicPlottingUI
@@ -196,6 +196,10 @@ const BASIC_CHECKBOX_BINDINGS = [
     ['laplaceHideIntegralEvaluationCb', 'laplaceHideIntegralEvaluation'],
     ['laplaceHide3DSurfaceCb', 'laplaceHide3DSurface'],
     ['laplaceShowSpectrumCb', 'laplaceShowSpectrum'],
+    ['laplaceShowComCb', 'laplaceShowComGraph'],
+    ['laplaceShowFourier3DCb', 'laplaceShowFourier3D'],
+    ['laplaceSyncWindingVectorCb', 'laplaceSyncWindingVector'],
+    ['laplaceShowBarriersCb', 'laplaceShowBarriers'],
     ['laplaceAnimationLoopCb', 'laplaceAnimationLoop'],
     ['enableParticleAnimationCb', 'particleAnimationEnabled'],
     ['enableDomainColoringCb', 'domainColoringEnabled'],
@@ -209,6 +213,7 @@ const BASIC_SELECTOR_BINDINGS = [
     ['vectorFieldFunctionSelector', 'vectorFieldFunction'],
     ['laplaceFunctionSelector', 'laplaceFunction'],
     ['laplaceVizModeSelector', 'laplaceVizMode'],
+    ['laplaceComComponentSelector', 'laplaceComComponent'],
     ['riemannSurfaceComponentSelector', 'riemannSurfaceComponent'],
     ['manifoldShapeSelector', 'selectedManifold']
 ].map(([controlKey, stateKey]) => ({ controlKey, stateKey }));
@@ -224,7 +229,8 @@ const SPECIAL_SLIDERS = new Set([
     'laplaceFrequencySlider', 'laplaceDampingSlider', 'laplaceAmplitudeSlider',
     'laplaceTimeWindowSlider', 'laplaceSamplesSlider',
     'laplaceSigmaSlider',
-    'laplaceOmegaSlider', 'laplaceClipHeightSlider'
+    'laplaceOmegaSlider', 'laplaceClipHeightSlider',
+    'laplaceFourier3DCountSlider'
 ]);
 
 const SPECIAL_CHECKBOXES = new Set([
@@ -233,7 +239,7 @@ const SPECIAL_CHECKBOXES = new Set([
     'enableTaylorSeriesCb', 'enableTaylorSeriesCustomCenterCb',
     'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
     'laplaceShowFourierLineCb', 'laplaceHideIntegralEvaluationCb', 'laplaceHide3DSurfaceCb',
-    'laplaceShowSpectrumCb', 'laplaceContoursCb',
+    'laplaceShowSpectrumCb', 'laplaceShowComCb', 'laplaceShowFourier3DCb', 'laplaceSyncWindingVectorCb', 'laplaceShowBarriersCb', 'laplaceContoursCb',
     'laplaceAnimationLoopCb', 'enableParticleAnimationCb',
     'enableDomainColoringCb', 'enableCauchyIntegralModeCb'
 ]);
@@ -265,7 +271,6 @@ const BINDERS = [
     bindRadialAndZetaControls,
     bindParticleControls,
     bindLaplaceControls,
-    bindCollapseControls,
     bindChainingControls,
     bindSimpleControlRemainder,
     bindCanvasInteractions,
@@ -278,7 +283,8 @@ const BINDERS = [
     bindGraphControls,
     bindRealPlotsControls,
     bindContourControls,
-    bindRequestedExplorerControls
+    bindRequestedExplorerControls,
+    initPanelLayoutManager
 ];
 
 function syncPreimageCheckboxes(value) {
@@ -634,6 +640,7 @@ function updateModePanels() {
     syncTransformControlPanels();
     syncLaplacePlayPauseButton();
     syncParameterControlsPanelVisibility();
+    refreshPanelEdgeHandles(true);
 }
 
 function disableAlgebraicChaining() {
@@ -1486,6 +1493,10 @@ function bindLaplaceControls() {
         requestUiRedraw();
     });
 
+    bindSlider('laplaceFourier3DCountSlider', 'fourier3DParallelGraphs', parseInteger, () => {
+        requestUiRedraw();
+    });
+
     [
         ['laplaceShowRocCb', 'laplaceShowROC'],
         ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
@@ -1846,6 +1857,77 @@ function handleCanvasWheel(ctx, event) {
     flushCanvasWheel(ctx);
 }
 
+export function bindGenericPlaneInteractions(canvas, planeParams, onRedraw) {
+    if (!canvas || !planeParams) return;
+
+    let isPanning = false;
+    let startX = 0;
+    let startY = 0;
+    let startXRange = [...planeParams.currentVisXRange];
+    let startYRange = [...planeParams.currentVisYRange];
+
+    canvas.addEventListener('mousedown', event => {
+        if (event.button !== 0) return;
+        isPanning = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        startXRange = [...planeParams.currentVisXRange];
+        startYRange = [...planeParams.currentVisYRange];
+    }, PASSIVE_LISTENER_OPTIONS);
+
+    bindElementListener(window, 'mousemove', event => {
+        if (!isPanning) return;
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(1, rect.width);
+        const height = Math.max(1, rect.height);
+        const dx = event.clientX - startX;
+        const dy = event.clientY - startY;
+        const xSpan = startXRange[1] - startXRange[0];
+        const ySpan = startYRange[1] - startYRange[0];
+        const shiftX = -dx * (xSpan / width);
+        const shiftY = dy * (ySpan / height);
+
+        planeParams.currentVisXRange = [startXRange[0] + shiftX, startXRange[1] + shiftX];
+        planeParams.currentVisYRange = [startYRange[0] + shiftY, startYRange[1] + shiftY];
+        planeParams.scale.x = planeParams.width / (planeParams.currentVisXRange[1] - planeParams.currentVisXRange[0]);
+        planeParams.scale.y = planeParams.height / (planeParams.currentVisYRange[1] - planeParams.currentVisYRange[0]);
+        planeParams.origin.x = -planeParams.currentVisXRange[0] * planeParams.scale.x;
+        planeParams.origin.y = planeParams.currentVisYRange[1] * planeParams.scale.y;
+        onRedraw();
+    }, PASSIVE_LISTENER_OPTIONS);
+
+    bindElementListener(window, 'mouseup', () => {
+        isPanning = false;
+    }, PASSIVE_LISTENER_OPTIONS);
+
+    canvas.addEventListener('wheel', event => {
+        event.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(1, rect.width);
+        const height = Math.max(1, rect.height);
+        const px = clamp(event.clientX - rect.left, 0, width);
+        const py = clamp(event.clientY - rect.top, 0, height);
+        const xRange = planeParams.currentVisXRange;
+        const yRange = planeParams.currentVisYRange;
+        const xSpan = xRange[1] - xRange[0];
+        const ySpan = yRange[1] - yRange[0];
+        const u = xRange[0] + (px / width) * xSpan;
+        const v = yRange[1] - (py / height) * ySpan;
+        const factor = event.deltaY < 0 ? 0.85 : 1.15;
+        const newXSpan = xSpan * factor;
+        const newYSpan = ySpan * factor;
+        const newX0 = u - (px / width) * newXSpan;
+        const newY1 = v + (py / height) * newYSpan;
+        planeParams.currentVisXRange = [newX0, newX0 + newXSpan];
+        planeParams.currentVisYRange = [newY1 - newYSpan, newY1];
+        planeParams.scale.x = planeParams.width / newXSpan;
+        planeParams.scale.y = planeParams.height / newYSpan;
+        planeParams.origin.x = -newX0 * planeParams.scale.x;
+        planeParams.origin.y = newY1 * planeParams.scale.y;
+        onRedraw();
+    }, ACTIVE_LISTENER_OPTIONS);
+}
+
 function bindCanvasInteractions() {
     ['z', 'w'].forEach(planeType => {
         const ctx = createCanvasInteractionContext(planeType);
@@ -1865,6 +1947,9 @@ function bindCanvasInteractions() {
             if (ctx) handleCanvasUp(ctx, event);
         }
     }, PASSIVE_LISTENER_OPTIONS);
+
+    bindGenericPlaneInteractions(controls.laplaceComCanvas, laplaceComPlaneParams, requestUiRedraw);
+    bindGenericPlaneInteractions(controls.laplaceSpectrumCanvas, laplaceSpectrumPlaneParams, requestUiRedraw);
 
     bindContourCanvasInteractions();
 }
@@ -1966,9 +2051,21 @@ function bindContourCanvasInteractions() {
 }
 
 function bindCanvasRectInvalidation() {
-    bindElementListener(window, 'resize', invalidateAllCanvasRects, PASSIVE_LISTENER_OPTIONS);
+    const handleLayoutRefresh = () => {
+        invalidateAllCanvasRects();
+        setupVisualParameters(false, false);
+        requestDomainRedraw(true);
+        requestUiRedraw();
+    };
+
+    bindElementListener(window, 'resize', handleLayoutRefresh, PASSIVE_LISTENER_OPTIONS);
     bindElementListener(window, 'scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
     bindElementListener(document, 'scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
+    bindElementListener(document, 'transitionend', (e) => {
+        if (e.target && (e.target.id === 'canvases_section' || e.target.classList?.contains('plane-column') || e.target.classList?.contains('two-column-layout') || e.target.classList?.contains('controls-panel') || e.target.id === 'controls_options_section')) {
+            handleLayoutRefresh();
+        }
+    }, PASSIVE_LISTENER_OPTIONS);
     eventBus.on('layout:canvas', invalidateAllCanvasRects);
 }
 
@@ -2143,6 +2240,9 @@ function bindFullscreenControls() {
     bindControlListener('toggleFullscreenZBtn', 'click', () => handleFullScreenToggle('z'));
     bindControlListener('toggleFullscreenWBtn', 'click', () => handleFullScreenToggle('w', 0));
     bindControlListener('toggleFullscreenLaplace3DBtn', 'click', toggleLaplace3DFullscreen);
+    bindControlListener('toggleFullscreenLaplaceComBtn', 'click', toggleLaplaceComFullscreen);
+    bindControlListener('toggleFullscreenLaplaceSpectrumBtn', 'click', toggleLaplaceSpectrumFullscreen);
+    bindControlListener('toggleFullscreenFourier3DBtn', 'click', toggleFourier3DFullscreen);
 
     // Event delegation for dynamic chained w-plane fullscreen buttons
     bindElementListener(document, 'click', event => {
@@ -2162,6 +2262,15 @@ function bindFullscreenControls() {
         if (state.isLaplace3DFullScreen && controls.toggleFullscreenLaplace3DBtn) {
             controls.toggleFullscreenLaplace3DBtn.click();
         }
+        if (state.isLaplaceComFullScreen && controls.toggleFullscreenLaplaceComBtn) {
+            controls.toggleFullscreenLaplaceComBtn.click();
+        }
+        if (state.isLaplaceSpectrumFullScreen && controls.toggleFullscreenLaplaceSpectrumBtn) {
+            controls.toggleFullscreenLaplaceSpectrumBtn.click();
+        }
+        if (state.isFourier3DFullScreen && controls.toggleFullscreenFourier3DBtn) {
+            controls.toggleFullscreenFourier3DBtn.click();
+        }
         if (state.isGraphFullScreen && controls.toggleFullscreenGraphBtn) {
             controls.toggleFullscreenGraphBtn.click();
         }
@@ -2176,6 +2285,47 @@ function toggleLaplace3DFullscreen() {
         stateKey: 'isLaplace3DFullScreen',
         closeButton: controls.toggleFullscreenLaplace3DBtn,
         onResize: () => resizeScalarSurface(container)
+    });
+}
+
+function toggleLaplaceComFullscreen() {
+    const container = controls.laplaceComCanvas?.parentElement;
+    toggleFullscreenPanel({
+        container,
+        column: controls.laplaceComColumn,
+        stateKey: 'isLaplaceComFullScreen',
+        closeButton: controls.toggleFullscreenLaplaceComBtn,
+        onResize: () => {
+            setupVisualParameters(false, false);
+            requestUiRedraw();
+        }
+    });
+}
+
+function toggleLaplaceSpectrumFullscreen() {
+    const container = controls.laplaceSpectrumCanvas?.parentElement;
+    toggleFullscreenPanel({
+        container,
+        column: controls.laplaceSpectrumColumn,
+        stateKey: 'isLaplaceSpectrumFullScreen',
+        closeButton: controls.toggleFullscreenLaplaceSpectrumBtn,
+        onResize: () => {
+            setupVisualParameters(false, false);
+            requestUiRedraw();
+        }
+    });
+}
+
+function toggleFourier3DFullscreen() {
+    const container = controls.fourier3DContainer;
+    toggleFullscreenPanel({
+        container,
+        column: controls.fourier3DColumn,
+        stateKey: 'isFourier3DFullScreen',
+        closeButton: controls.toggleFullscreenFourier3DBtn,
+        onResize: () => {
+            drawFourier3DPipeline();
+        }
     });
 }
 
@@ -2224,32 +2374,7 @@ function bindTopControlsToggle() {
     bindControlListener('toggleTopControlsCollapsedBtn', 'click', toggle);
 }
 
-function triggerPlaneLayoutRefresh() {
-    const refresh = () => {
-        setupVisualParameters(false, false);
-        requestDomainRedraw(true);
-    };
-    refresh();
-    setTimeout(refresh, 340);
-}
 
-function bindCollapseControls() {
-    [
-        ['collapseZBtn', 'expandZBtn', controls.zPlaneColumn],
-        ['collapseWBtn', 'expandWBtn', controls.wPlaneColumn]
-    ].forEach(([collapseKey, expandKey, column]) => {
-        bindControlListener(collapseKey, 'click', () => {
-            if (!column) return;
-            column.classList.add('plane-collapsed');
-            triggerPlaneLayoutRefresh();
-        });
-        bindControlListener(expandKey, 'click', () => {
-            if (!column) return;
-            column.classList.remove('plane-collapsed');
-            triggerPlaneLayoutRefresh();
-        });
-    });
-}
 
 export function setupEventListeners() {
     zCanvas = context.zCanvas;
@@ -2314,14 +2439,6 @@ function bindChainingControls() {
         syncOrbitColoringModeControl();
         updateChainingTitles();
         requestUiRedraw();
-    });
-
-    bindElementListener(controls.gridViewBtn, 'click', () => {
-        const row = document.querySelector('.canvas-row.two-column-layout');
-        if (!row) return;
-        const active = row.classList.toggle('chaining-grid-view');
-        controls.gridViewBtn.textContent = active ? '⊟ Exit Grid View' : '⊞ Grid View';
-        window.dispatchEvent(new Event('resize'));
     });
 }
 

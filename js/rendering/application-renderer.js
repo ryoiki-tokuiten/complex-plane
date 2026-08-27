@@ -1,10 +1,11 @@
-import { state, context } from '../store/state.js';
+import { state, context, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
 import { findZerosAndPoles, findCriticalPoints } from '../analysis/feature-detection.js';
 import { updateTaylorSeriesCenterAndRadius } from '../native/map-runtime.js';
 import { performCauchyAnalysis } from '../analysis/cauchy.js';
 import { drawZPlaneContent, drawWPlaneContent } from './renderer.js';
 import { updateProbeInfo } from '../ui/ui-updates.js';
-import { drawLaplaceSpectrum } from './draw-laplace-panels.js';
+import { drawLaplaceSpectrum, drawLaplaceComGraph } from './draw-laplace-panels.js';
+import { drawFourier3DPipeline, disposeFourier3DPipeline } from './fourier-3d-pipeline.js';
 import {
     applySurfaceCoordinateZoom,
     drawRealPlot,
@@ -26,6 +27,7 @@ import {
 import { draw2DContourPlot } from './contour-2d.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
+import { refreshPanelEdgeHandles } from '../ui/panel-layout-manager.js';
 
 const { controls } = context;
 let surfaceRedrawFrame = null;
@@ -84,6 +86,8 @@ function syncOptionalColumn(column, shouldHide, onHide) {
     column.classList.toggle('hidden', shouldHide);
     if (shouldHide) onHide?.();
 
+    refreshPanelEdgeHandles(true);
+
     const refreshPlanes = () => {
         setupVisualParameters(false, false);
         requestUiRedraw();
@@ -131,9 +135,28 @@ export function renderApplicationFrame(timestamp) {
         controls.laplaceSpectrumColumn,
         !state.laplaceModeEnabled || !state.laplaceShowSpectrum
     );
+    syncOptionalColumn(
+        controls.laplaceComColumn,
+        !state.laplaceModeEnabled || !state.laplaceShowComGraph
+    );
+    syncOptionalColumn(
+        controls.fourier3DColumn,
+        !state.laplaceModeEnabled || !state.laplaceShowFourier3D,
+        disposeFourier3DPipeline
+    );
     if (state.laplaceModeEnabled) {
         if (!state.laplaceHide3DSurface) drawLaplaceSurface();
-        drawLaplaceSpectrum(controls.laplaceSpectrumCanvas, state.laplaceSpectrum);
+        if (state.laplaceShowSpectrum && controls.laplaceSpectrumCanvas) {
+            const ctx = controls.laplaceSpectrumCanvas.getContext('2d');
+            if (ctx) drawLaplaceSpectrum(ctx, state.laplaceSpectrum, laplaceSpectrumPlaneParams);
+        }
+        if (state.laplaceShowComGraph && controls.laplaceComCanvas) {
+            const ctx = controls.laplaceComCanvas.getContext('2d');
+            if (ctx) drawLaplaceComGraph(ctx, state.laplaceComSweep, laplaceComPlaneParams);
+        }
+        if (state.laplaceShowFourier3D) {
+            drawFourier3DPipeline();
+        }
     }
 
     syncOptionalColumn(controls.realPlotsColumn, !state.realPlotsEnabled);
