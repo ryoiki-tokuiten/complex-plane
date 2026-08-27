@@ -8,6 +8,7 @@ import {
 } from '../constants/rendering.js';
 import { syncVideoPlaybackUI } from '../utils/raster-media.js';
 import { findTaylorCenterPreset, formatTaylorNumericValue, getChainingTitleHTML } from '../utils/dom-utils.js';
+import { refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import { syncNavigationControls } from '../navigation-plane.js';
 import {
     getBranchWindowLabel,
@@ -1716,4 +1717,6 @@ export function sync2DContourUI() {
             contourCol.classList.add('hidden');
         }
     }
+
+    refreshPanelEdgeHandles();
 }

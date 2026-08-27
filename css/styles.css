@@ -879,6 +879,7 @@ main {
 #fourier_3d_column,
 #real_plots_column,
 #graph_column,
+#contour_2d_column,
 .auxiliary-surface-column {
     display: flex;
     flex-direction: column;
@@ -918,9 +919,9 @@ main {
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: auto;
+    pointer-events: none;
     opacity: 0;
-    transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.15s ease;
 }
 
 .show-edge-handle .panel-edge-handle-bar,
@@ -929,6 +930,7 @@ main {
 .is-resizing .panel-edge-handle-bar,
 .is-dragging .panel-edge-handle-bar {
     opacity: 1;
+    pointer-events: auto;
 }
 
 .panel-edge-btn-group {
@@ -1004,15 +1006,16 @@ main {
 #laplace_com_column>div:not(.canvas-header-line):not(.panel-edge-handle-bar),
 #fourier_3d_column>div:not(.canvas-header-line):not(.panel-edge-handle-bar),
 #real_plots_column>div:not(.canvas-header-line):not(.panel-edge-handle-bar),
-#graph_column>div:not(.canvas-header-line):not(.panel-edge-handle-bar) {
+#graph_column>div:not(.canvas-header-line):not(.panel-edge-handle-bar),
+.auxiliary-surface-column>div:not(.canvas-header-line):not(.panel-edge-handle-bar) {
     flex-grow: 1;
-
     min-height: 0;
+    min-width: 0;
+    width: 100%;
     /* Essential for descendant flex items (like canvas) to scale correctly */
     position: relative;
     /* For positioning overlays like probe_info */
     display: flex;
-
     flex-direction: column;
     /* Stack canvas and overlays */
     border: 1px solid var(--border-color);
@@ -1028,11 +1031,8 @@ main {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
-
     flex-wrap: nowrap;
-
     gap: 1rem;
-    /* Spacing between title and controls block */
 }
 
 .canvas-header-line .section-title {
@@ -1072,16 +1072,16 @@ main {
 }
 
 canvas {
-
     display: block;
-
     border-radius: 8px;
     flex-grow: 1;
-
     min-height: 0;
-    /* Essential for scaling within a flex container */
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
     cursor: crosshair;
-
 }
 
 .riemann-surface-canvas {
@@ -1307,12 +1307,7 @@ input[type="range"]:focus::-moz-range-thumb {
     transform: translateY(0);
 }
 
-/* Single-column full-width layout for Real Plots mode */
-.two-column-layout:has(#real_plots_column:not(.hidden)) > div:not(.hidden) {
-    flex: 1 1 100% !important;
-    width: 100% !important;
-    max-width: 100% !important;
-}
+
 
 .graph-trace-toggle {
     align-items: center !important;
@@ -4374,16 +4369,7 @@ body.vertical-layout #canvases_section .two-column-layout {
     padding-bottom: 0 !important;
 }
 
-body.vertical-layout #canvases_section .two-column-layout > div,
-body.vertical-layout #canvases_section .two-column-layout > .plane-column,
-body.vertical-layout #canvases_section .two-column-layout:has(#laplace_3d_column:not(.hidden)) > div {
-    flex: 0 0 var(--panel-height, calc(50% - 0.75rem)) !important;
-    min-height: 200px !important;
-    height: var(--panel-height, calc(50% - 0.75rem)) !important;
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
-}
+
 
 
 
@@ -4532,17 +4518,7 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-purple) 12%, transparent);
 }
 
-.two-column-layout:has(#real_plots_column:not(.hidden)):has(#contour_2d_column:not(.hidden)) > div:not(.hidden) {
-    flex: 1 1 calc(50% - 1rem) !important;
-    width: auto !important;
-    max-width: 50% !important;
-}
 
-body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column:not(.hidden)):has(#contour_2d_column:not(.hidden)) > div:not(.hidden) {
-    flex: 1 1 100% !important;
-    width: 100% !important;
-    max-width: none !important;
-}
 
 #contour_2d_column:not(.hidden) {
     min-height: 340px;
@@ -4743,18 +4719,21 @@ body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column
     font-weight: 700;
 }
 
-.fill-container { width: 100%; height: 100%; }
-.fill-relative { position: relative; width: 100%; height: 100%; }
-.flex-relative-host { position: relative; flex: 1; }
+.fill-container { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.fill-relative { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.flex-relative-host { position: relative; display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .full-width-control { min-width: 100%; }
 
 .canvas-layer-host {
     position: relative;
     display: flex;
+    flex-direction: column;
     flex: 1;
     width: 100%;
     height: 100%;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .canvas-overlay {
@@ -4894,4 +4873,4 @@ body.vertical-layout #canvases_section .two-column-layout:has(#real_plots_column
 .domain-palette-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; gap: 0.5rem; }
 .domain-palette-label { justify-content: flex-start; gap: 0.5rem; margin: 0; }
 .auxiliary-surface-column { display: flex; flex-direction: column; }
-.canvas-fill-host { position: relative; display: flex; flex: 1; width: 100%; height: 100%; }
+.canvas-fill-host { position: relative; display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }

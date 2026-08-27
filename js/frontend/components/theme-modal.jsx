@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'preact/hooks';
 import { getStateSignal, state } from '../../store/state.js';
 import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 import { persistThemePreferences } from '../../ui/theme-manager.js';
+import { refreshPanelEdgeHandles } from '../../ui/panel-layout-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
 
 const isOpen = signal(false);
@@ -45,6 +46,7 @@ export function ThemeModal() {
         }
         document.body.classList.toggle('vertical-layout', vertical);
         localStorage.setItem('complex_verticalLayoutEnabled', String(vertical));
+        refreshPanelEdgeHandles(true);
         const needsRefresh = vertical || layoutApplied.current;
         layoutApplied.current = true;
         return needsRefresh ? refreshLayout() : undefined;

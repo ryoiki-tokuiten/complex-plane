@@ -66,6 +66,7 @@ import {
 import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
 import { openThemeModal } from '../frontend/components/theme-modal.jsx';
+import { resetAllPanelLayouts } from './panel-layout-manager.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import {
     continuationNativeSheet,
@@ -2446,6 +2447,7 @@ function bindThemeControls() {
     loadThemePreferences();
     applyTheme(state.themeId, { preserveGridColors: true });
     bindControlListener('themeSelectorBtn', 'click', openThemeModal);
+    bindControlListener('resetWorkspaceLayoutBtn', 'click', resetAllPanelLayouts);
 }
 
 function fullscreenTarget(planeType, index = 0) {

@@ -8,6 +8,7 @@ import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
 import { eventBus } from '../store/events.js';
 import { registerControls } from '../ui/control-registry.js';
 import { requireInteger } from './numeric-contracts.js';
+import { refreshPanelEdgeHandles } from '../ui/panel-layout-manager.js';
 
 const { controls } = context;
 
@@ -309,6 +310,9 @@ export function updateChainingColumns(count) {
         const originalCol = document.getElementById('w_plane_column');
         const newCol = originalCol.cloneNode(true);
         newCol.id = `w_plane_column_${i}`;
+        delete newCol.dataset.handlesBound;
+        delete newCol.dataset.layoutInitialized;
+        newCol.classList.remove('show-edge-handle', 'is-dragging', 'is-resizing');
         
         // Remove cloned edge handle bars so the layout manager recreates them with fresh event listeners
         newCol.querySelectorAll('.panel-edge-handle-bar').forEach(el => el.remove());
@@ -347,19 +351,6 @@ export function updateChainingColumns(count) {
         
         const cauchyInfo = newCol.querySelector('#cauchy_integral_results_info');
         if (cauchyInfo) cauchyInfo.id = `cauchy_integral_results_info_${i}`;
-
-        // Position new column cleanly in whiteboard coordinates next to previous column
-        const prevCol = (i === 1) ? originalCol : document.getElementById(`w_plane_column_${i-1}`);
-        if (prevCol) {
-            const prevLeft = prevCol.offsetLeft || parseInt(prevCol.style.left, 10) || 0;
-            const prevTop = prevCol.offsetTop || parseInt(prevCol.style.top, 10) || 24;
-            const prevWidth = prevCol.offsetWidth || parseInt(prevCol.style.width, 10) || 540;
-            const prevHeight = prevCol.offsetHeight || parseInt(prevCol.style.height, 10) || 480;
-            newCol.style.left = `${prevLeft + prevWidth + 24}px`;
-            newCol.style.top = `${prevTop}px`;
-            newCol.style.width = `${prevWidth}px`;
-            newCol.style.height = `${prevHeight}px`;
-        }
 
         // Append to DOM
         canvasesRow.appendChild(newCol);
@@ -412,4 +403,5 @@ export function updateChainingColumns(count) {
     context.wCtxList = wCtxList;
     context.wPlaneParamsList = wPlaneParamsList;
     context.wPlaneThreeContainersList = wPlaneThreeContainersList;
+    refreshPanelEdgeHandles(true);
 }

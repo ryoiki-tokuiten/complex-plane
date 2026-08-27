@@ -517,7 +517,7 @@ class ScalarSurfaceRenderer {
         this.#syncPixelRatio();
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height);
+        this.renderer.setSize(width, height, false);
         this.render();
     }
 

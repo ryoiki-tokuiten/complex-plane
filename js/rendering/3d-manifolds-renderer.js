@@ -64,7 +64,7 @@ export class ThreeManifoldsRenderer {
         this.camera.position.set(12, 10, 16);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight, false);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.setClearColor(COLOR_BACKGROUND);
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1136,7 +1136,7 @@ export class ThreeManifoldsRenderer {
         if (w === 0 || h === 0) return;
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(w, h);
+        this.renderer.setSize(w, h, false);
         this.pointerRectValid = false;
         this.renderDirty = true;
         this.render();
