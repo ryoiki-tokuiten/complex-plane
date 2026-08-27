@@ -383,7 +383,7 @@ export function getChainedTransformFunction(functionKey = state.currentFunction)
 const ENTIRE_FUNCTIONS = new Set(['exp', 'sin', 'cos', 'polynomial']);
 
 export function updateTaylorSeriesCenterAndRadius() {
-    const center = state.taylorSeriesCustomCenterEnabled
+    const center = state.taylorSeriesCustomCenter
         ? { re: state.taylorSeriesCustomCenter.re, im: state.taylorSeriesCustomCenter.im }
         : { ...DEFAULT_TAYLOR_SERIES_CENTER };
     if (state.taylorSeriesCenter.re !== center.re || state.taylorSeriesCenter.im !== center.im) {

@@ -108,7 +108,7 @@ function styleForRole(role) {
 }
 
 export function generateInputShapePointSets(config) {
-    if (['empty_grid', 'media', 'image', 'video'].includes(config?.currentInputShape)) return [];
+    if (['empty_grid', 'navigate', 'media', 'image', 'video'].includes(config?.currentInputShape)) return [];
     const lines = generateNativeInputShape(config, nativeMapOptions(state, {
         functionKey: config.currentFunction,
         chainingEnabled: false,

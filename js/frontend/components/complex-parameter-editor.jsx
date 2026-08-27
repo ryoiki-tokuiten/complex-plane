@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getStateSignal, mutateState } from '../../store/state.js';
-import { TAYLOR_CENTER_PRESET_GROUPS } from '../../constants/numerical.js';
+import { TAYLOR_CENTER_PRESETS } from '../../constants/numerical.js';
 import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 import { formatTaylorNumericValue } from '../../utils/dom-utils.js';
 
@@ -32,12 +32,11 @@ export function ComplexParameterEditor({ stateKey, label }) {
 
     return <>
         <div class="taylor-series-preset-groups">
-            {TAYLOR_CENTER_PRESET_GROUPS.map(group => <div class="taylor-series-preset-group" key={group.label}>
-                <div class="taylor-series-preset-group-title">{group.label}</div>
-                <div class="taylor-series-preset-buttons">{group.presets.map(preset =>
-                    <button type="button" class={`taylor-series-preset-btn${samePoint(point, preset) ? ' toggle-active' : ''}`}
-                        onClick={() => setPoint(preset.re, preset.im)}>{preset.label}</button>)}</div>
-            </div>)}
+            <div class="taylor-series-preset-buttons">
+                {TAYLOR_CENTER_PRESETS.map(preset =>
+                    <button type="button" key={preset.label} class={`taylor-series-preset-btn${samePoint(point, preset) ? ' toggle-active' : ''}`}
+                        onClick={() => setPoint(preset.re, preset.im)}>{preset.label}</button>)}
+            </div>
         </div>
         <div class="taylor-series-input-row">
             <label class="taylor-series-input-field"><span class="taylor-series-input-caption">Re({label})</span>

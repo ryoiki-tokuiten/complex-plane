@@ -664,6 +664,74 @@ function drawTaylorConvergenceOverlay(ctx, planeParams) {
     }
 }
 
+function drawTaylorPickerReticle(ctx, planeParams, isZ) {
+    if (!state.taylorSeriesCanvasClickCenterEnabled || !state.taylorSeriesHoverPoint) return;
+    if (state.taylorSeriesHoverPoint.isZ !== isZ) return;
+
+    const { world } = state.taylorSeriesHoverPoint;
+    const pt = mapToCanvasCoords(world.x, world.y, planeParams);
+    if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return;
+
+    withCanvasState(ctx, () => {
+        // Glowing circle around mouse
+        const radius = 24;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(192, 132, 252, 0.95)';
+        ctx.stroke();
+
+        // Inner center dot
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#9333ea';
+        ctx.stroke();
+
+        // Subtle crosshairs
+        ctx.beginPath();
+        ctx.moveTo(pt.x - 32, pt.y);
+        ctx.lineTo(pt.x - 10, pt.y);
+        ctx.moveTo(pt.x + 10, pt.y);
+        ctx.lineTo(pt.x + 32, pt.y);
+        ctx.moveTo(pt.x, pt.y - 32);
+        ctx.lineTo(pt.x, pt.y - 10);
+        ctx.moveTo(pt.x, pt.y + 10);
+        ctx.lineTo(pt.x, pt.y + 32);
+        ctx.strokeStyle = 'rgba(192, 132, 252, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Coordinate text badge
+        const reVal = Number(world.x);
+        const imVal = Number(world.y);
+        const reStr = reVal.toFixed(2);
+        const imSign = imVal < 0 ? '−' : '+';
+        const imStr = Math.abs(imVal).toFixed(2);
+        const text = `z₀ = ${reStr} ${imSign} ${imStr}i`;
+
+        ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+        const textWidth = ctx.measureText(text).width;
+        const badgeX = pt.x + 18;
+        const badgeY = pt.y - 18;
+
+        ctx.fillStyle = 'rgba(10, 12, 20, 0.92)';
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(badgeX - 5, badgeY - 13, textWidth + 10, 18, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(text, badgeX, badgeY);
+    });
+}
+
 function drawPolynomialOriginMarkerOverlay(ctx, planeParams) {
     if (
         state.currentFunction !== 'polynomial'
@@ -887,6 +955,9 @@ export function drawZPlaneContent(timestamp) {
     if (state.preimageExplorerEnabled && state.preimageRoots.length) {
         drawCanvasLayer(zCtx, layerCtx => drawPreimageMarkers(layerCtx, zPlaneParams, state.preimageRoots));
     }
+    if (state.taylorSeriesCanvasClickCenterEnabled) {
+        drawCanvasLayer(zCtx, layerCtx => drawTaylorPickerReticle(layerCtx, zPlaneParams, true));
+    }
 
     if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
         runtime.particlesLastUpdateTime = null;
@@ -1032,6 +1103,9 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             drawCanvasLayer(wCtx, layerCtx => {
                 drawConformalIndicatrices(layerCtx, wPlaneParams, indicatrices, 'mapped');
             });
+        }
+        if (state.taylorSeriesCanvasClickCenterEnabled) {
+            drawCanvasLayer(wCtx, layerCtx => drawTaylorPickerReticle(layerCtx, wPlaneParams, false));
         }
         if (index === 0) updateWindingNumberDisplay();
     } finally {

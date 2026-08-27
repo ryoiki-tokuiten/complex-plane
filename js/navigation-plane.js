@@ -66,15 +66,14 @@ function readNavigationControlValue(controlKey, parser = parseFloat) {
 }
 
 export function initializeNavigationStateFromControls() {
-    state.navigationSize = readNavigationControlValue('navigationSizeSlider');
-    state.navigationOpacity = readNavigationControlValue('navigationOpacitySlider');
-    state.navigationSpeed = readNavigationControlValue('navigationSpeedSlider');
-    state.navigationTrailLength = readNavigationControlValue(
+    state.navigationSize = controls.navigationSizeSlider ? readNavigationControlValue('navigationSizeSlider') : (state.navigationSize || 0.55);
+    state.navigationOpacity = controls.navigationOpacitySlider ? readNavigationControlValue('navigationOpacitySlider') : (state.navigationOpacity || 0.9);
+    state.navigationSpeed = controls.navigationSpeedSlider ? readNavigationControlValue('navigationSpeedSlider') : (state.navigationSpeed || 1.1);
+    state.navigationTrailLength = controls.navigationTrailLengthSlider ? readNavigationControlValue(
         'navigationTrailLengthSlider',
         value => parseInt(value, 10)
-    );
-    if (!controls.enableNavigationModeCb) throw new Error('Missing navigation mode control.');
-    state.navigationModeEnabled = controls.enableNavigationModeCb.checked;
+    ) : (state.navigationTrailLength || 0);
+    state.navigationModeEnabled = controls.enableNavigationModeCb ? controls.enableNavigationModeCb.checked : Boolean(state.navigationModeEnabled);
     syncNavigationControls();
 }
 

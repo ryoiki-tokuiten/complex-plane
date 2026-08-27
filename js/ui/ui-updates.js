@@ -72,6 +72,7 @@ const INPUT_SHAPE_TITLE_SUFFIX = Object.freeze({
     media: ': Media',
     image: ': Image',
     video: ': Video',
+    navigate: ': Navigation',
     empty_grid: ': Empty'
 });
 
@@ -459,7 +460,8 @@ function syncComplexParameterControls() {
     const hasLog = activeFunctions.has('ln') || requireArray(state.algebraicChainingTerms, 'Algebraic terms')
         .some(term => requireArray(term?.factors, 'Algebraic factors').some(factor => factor?.log));
 
-    setHidden('commonParamsSliders', !(showCommonParams || showMediaCenterParams));
+    setHidden('zPlaneShapeControlsOverlay', !showCommonParams);
+    setHidden('commonParamsSliders', !showCommonParams);
     setHidden('mobiusParamsSliders', !isMobiusFunc);
     setHidden('polynomialParamsSliders', !isPolyFunc);
     setHidden('fractionalPowerParamsSliders', !isPowerFunc);
@@ -541,24 +543,34 @@ function syncNormalModeDisplays() {
     setValue('wPlaneZoomSlider', Math.log10(state.wPlaneZoom || 1));
 }
 
-function syncTaylorControls() {
-    setHidden('taylorSeriesOptionsDetailDiv', !state.taylorSeriesEnabled);
-    setHidden('taylorSeriesCustomCenterInputsDiv', !state.taylorSeriesCustomCenterEnabled);
-    setChecked('enableTaylorSeriesCustomCenterCb', state.taylorSeriesCustomCenterEnabled);
+export function syncTaylorControls() {
+    const detailDiv = document.getElementById('taylor_series_options_detail_div');
+    if (detailDiv && detailDiv.parentElement?.id !== 'plane_context_submenu') {
+        setHidden('taylorSeriesOptionsDetailDiv', !state.taylorSeriesEnabled);
+    } else if (detailDiv) {
+        detailDiv.classList.remove('hidden');
+    }
+    const pickBtn = document.getElementById('pick_taylor_center_canvas_btn');
+    const pickBtnText = document.getElementById('pick_taylor_center_btn_text');
+    if (pickBtn) {
+        pickBtn.classList.toggle('is-picking', Boolean(state.taylorSeriesCanvasClickCenterEnabled));
+        if (pickBtnText) {
+            pickBtnText.textContent = state.taylorSeriesCanvasClickCenterEnabled
+                ? 'Click Canvas to Pin z₀…'
+                : 'Pick Center on Canvas';
+        }
+    }
     syncTaylorSeriesCenterStatus();
 }
 
-function syncVectorFlowControls() {
-    setChecked('enableVectorFieldCb', state.vectorFieldEnabled);
+export function syncVectorFlowControls() {
+    const isAnyActive = Boolean(state.vectorFieldEnabled || state.streamlineFlowEnabled || state.particleAnimationEnabled);
+    setHidden('vectorFlowCanvasOverlay', !isAnyActive);
     setHidden('vectorFieldOptionsDiv', !state.vectorFieldEnabled);
-
-    setChecked('enableStreamlineFlowCb', state.streamlineFlowEnabled);
     setHidden('streamlineOptionsDetailsDiv', !state.streamlineFlowEnabled);
-    syncValueBindings(STREAMLINE_VALUE_BINDINGS);
-
-    syncValueBindings(PARTICLE_VALUE_BINDINGS);
-    setChecked('enableParticleAnimationCb', state.particleAnimationEnabled);
     setHidden('particleAnimationDetailsDiv', !state.particleAnimationEnabled);
+    syncValueBindings(STREAMLINE_VALUE_BINDINGS);
+    syncValueBindings(PARTICLE_VALUE_BINDINGS);
 }
 
 export function syncTransformControlPanels() {
@@ -659,9 +671,7 @@ export function updateSliderLabelsAndDisplay() {
 }
 
 export function getTaylorDisplayCenter() {
-    return state.taylorSeriesCustomCenterEnabled
-        ? state.taylorSeriesCustomCenter
-        : DEFAULT_TAYLOR_SERIES_CENTER;
+    return state.taylorSeriesCustomCenter || state.taylorSeriesCenter || DEFAULT_TAYLOR_SERIES_CENTER;
 }
 
 export function formatTaylorCenterStatusText(center) {
@@ -1075,7 +1085,7 @@ function defaultZPlaneTitle(fND) {
         title = `z-plane (Output: Domain Coloring of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
     } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
         const typeStr = state.streamlineFlowEnabled ? 'Streamlines' : 'Vector Field';
-        title = `z-plane (Output: ${typeStr} [${state.vectorFieldFunction}] of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
+        title = `z-plane (Output: ${typeStr} of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
     } else if (showRadialSteps) {
         title = `z-plane (Output: Radial Discrete Steps of ${derivativePrefix}<code id="z-plane-title-func">w = ${fND}</code>)`;
     } else if (state.navigationModeEnabled) {

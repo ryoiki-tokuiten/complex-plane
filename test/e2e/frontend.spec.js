@@ -83,7 +83,7 @@ test('Preact controls preserve the public DOM and interaction contract', async (
     await expect(page.locator('#domain_palette_circles button')).toHaveCount(8);
     await expect(page.locator('#real_plots_palette_circles button')).toHaveCount(6);
     await expect(page.locator('#polynomial_coeffs_container .polynomial-coeff-row')).toHaveCount(3);
-    await expect(page.locator('#taylor_complex_points_ui_container button')).toHaveCount(20);
+    await expect(page.locator('#taylor_complex_points_ui_container button')).toHaveCount(16);
     await expect(page.locator('#algebraic_terms_list .algebraic-term-card')).toHaveCount(1);
     await expect(page.locator('#dynamic_example_gallery .dynamic-example-button')).toHaveCount(14);
     await expect(page.locator('#dynamic_term_factors .dynamic-term-factor-card')).toHaveCount(1);
@@ -263,7 +263,8 @@ test('grid selector order matches specification and custom context menus functio
         'Arbitrary Shape',
         'Lines',
         'Circle',
-        'Media'
+        'Media',
+        'Navigate'
     ]);
     await expect(page.locator('#ellipse_params_slider_group')).toHaveCount(0);
 
@@ -274,16 +275,22 @@ test('grid selector order matches specification and custom context menus functio
 
     // Verify initial z-plane menu items
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Download Image")')).toBeVisible();
-    await expect(zMenu.locator('.plane-context-menu-item:has-text("Show zeroes & poles")')).toBeVisible();
-    await expect(zMenu.locator('.plane-context-menu-item:has-text("Show critical points")')).toBeVisible();
-    await expect(zMenu.locator('.plane-context-menu-item:has-text("Cauchy Integral")')).toBeVisible();
+    await expect(zMenu.locator('.plane-context-menu-item:has-text("Analysis")')).toBeVisible();
+    await expect(zMenu.locator('.plane-context-menu-item:has-text("Vector Field")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Take radial steps")')).toBeVisible();
     // Derivative and Taylor series should NOT be visible on z-plane when domain coloring is disabled
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Show derivative")')).toHaveCount(0);
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Taylor Series")')).toHaveCount(0);
 
-    // Toggle zeroes & poles
-    await zMenu.locator('.plane-context-menu-item:has-text("Show zeroes & poles")').click();
+    // Hover Analysis and toggle zeroes & poles in submenu
+    await zMenu.locator('.plane-context-menu-item:has-text("Analysis")').hover();
+    const subMenu = page.locator('#plane_context_submenu');
+    await expect(subMenu).toBeVisible();
+    await expect(subMenu.locator('.plane-context-menu-item:has-text("Show zeroes & poles")')).toBeVisible();
+    await expect(subMenu.locator('.plane-context-menu-item:has-text("Show critical points")')).toBeVisible();
+    await expect(subMenu.locator('.plane-context-menu-item:has-text("Cauchy Integral")')).toBeVisible();
+
+    await subMenu.locator('.plane-context-menu-item:has-text("Show zeroes & poles")').click();
     await expect(zMenu).toBeHidden();
     const zerosPolesState = await page.evaluate(async () => {
         const { state } = await import('./js/store/state.js');
@@ -299,6 +306,13 @@ test('grid selector order matches specification and custom context menus functio
     await page.locator('#z_plane_canvas_wrapper').click({ button: 'right' });
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Show derivative")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Taylor Series")')).toBeVisible();
+    await expect(zMenu.locator('.plane-context-menu-item:has-text("Vector Field")')).toBeVisible();
+
+    await zMenu.locator('.plane-context-menu-item:has-text("Vector Field")').hover();
+    await expect(page.locator('#plane_context_submenu')).toBeVisible();
+    await expect(page.locator('#plane_context_submenu .plane-context-menu-item:has-text("Vector Field")')).toBeVisible();
+    await expect(page.locator('#plane_context_submenu .plane-context-menu-item:has-text("Streamlines")')).toBeVisible();
+    await expect(page.locator('#plane_context_submenu .plane-context-menu-item:has-text("Particle Motion")')).toBeVisible();
 
     // Dismiss with Escape
     await page.keyboard.press('Escape');
@@ -314,10 +328,13 @@ test('grid selector order matches specification and custom context menus functio
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Show folds in 3d")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("View Graph")')).toBeVisible();
 
-    // Click Taylor Series on w-plane and verify Taylor options panel reveals
-    await zMenu.locator('.plane-context-menu-item:has-text("Taylor Series")').click();
-    await expect(zMenu).toBeHidden();
-    await expect(page.locator('#taylor_series_options_detail_div')).not.toHaveClass(/hidden/);
+    // Hover Taylor Series on w-plane and verify exact Taylor submenu panel reveals with controls
+    await zMenu.locator('.plane-context-menu-item:has-text("Taylor Series")').hover();
+    await expect(page.locator('#plane_context_submenu')).toBeVisible();
+    await expect(page.locator('#plane_context_submenu #taylor_series_options_detail_div')).toBeVisible();
+    await expect(page.locator('#plane_context_submenu #taylor_series_order_slider')).toBeVisible();
+    await expect(page.locator('#plane_context_submenu #taylor_complex_points_ui_container')).toBeVisible();
+    await expect(page.locator('#plane_context_submenu #pick_taylor_center_canvas_btn')).toBeVisible();
 });
 
 test('full-grid and graph Fourier modes reuse the unified transform hub', async ({ page }) => {
@@ -336,7 +353,9 @@ test('full-grid and graph Fourier modes reuse the unified transform hub', async 
 
     // Toggle Full Grid Perspective via submenu panel
     await page.locator('#w_plane_canvas_wrapper').click({ button: 'right' });
+    await expect(page.locator('#plane_context_menu')).toBeVisible();
     await page.locator('#plane_context_menu .plane-context-menu-item:has-text("View Graph")').hover();
+    await expect(page.locator('#plane_context_submenu')).toBeVisible();
     await page.locator('#plane_context_submenu .plane-context-menu-item:has-text("Full Grid Perspective")').click();
     await expect(page.locator('#graph_title_label')).toHaveText('Full Grid Perspective');
     await expect(page.locator('#graph_3d_container canvas')).toHaveCount(1);
@@ -346,7 +365,9 @@ test('full-grid and graph Fourier modes reuse the unified transform hub', async 
 
     // Toggle Lock Layer via submenu panel
     await page.locator('#w_plane_canvas_wrapper').click({ button: 'right' });
+    await expect(page.locator('#plane_context_menu')).toBeVisible();
     await page.locator('#plane_context_menu .plane-context-menu-item:has-text("View Graph")').hover();
+    await expect(page.locator('#plane_context_submenu')).toBeVisible();
     await page.locator('#plane_context_submenu .plane-context-menu-item:has-text("Lock Layer")').click();
     await expect(page.locator('#graph_title_label')).toHaveText('Locked Layer Perspective');
     await expect(page.locator('#graph_fourier_toggle')).toBeHidden();

@@ -169,6 +169,8 @@ const rawState = {
     taylorSeriesConvergenceRadius: Infinity,
     taylorSeriesCustomCenterEnabled: false,
     taylorSeriesCustomCenter: { re: 0, im: 0 },
+    taylorSeriesCanvasClickCenterEnabled: false,
+    taylorSeriesHoverPoint: null,
     taylorSeriesColorAxisX: 'rgba(200, 150, 255, 0.7)',
     taylorSeriesColorAxisY: 'rgba(255, 150, 100, 0.7)',
     taylorSeriesColorConvergenceDiskFill: 'rgba(150, 150, 150, 0.2)',

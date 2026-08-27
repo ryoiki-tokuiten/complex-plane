@@ -3,9 +3,11 @@ import { eventBus } from '../store/events.js';
 import {
     syncParameterControlsPanelVisibility,
     syncManifoldTransformationUI,
-    syncTransformControlPanels
+    syncTransformControlPanels,
+    syncTaylorControls,
+    syncVectorFlowControls
 } from './ui-updates.js';
-import { updateChainingTitles, downloadCanvasImage, setupVisualParameters } from '../utils/dom-utils.js';
+import { updateChainingTitles, downloadCanvasImage, setupVisualParameters, formatTaylorNumericValue } from '../utils/dom-utils.js';
 import {
     isGraphViewSupported,
     isFullGridPerspectiveSupported,
@@ -13,6 +15,8 @@ import {
 } from '../rendering/transformation-graph.js';
 import { syncGridDensityControls } from './grid-density-controls.js';
 import { refreshPanelEdgeHandles } from './panel-layout-manager.js';
+import { setNavigationModeEnabled } from '../navigation-plane.js';
+import { TAYLOR_CENTER_PRESET_GROUPS } from '../constants/numerical.js';
 
 let menuElement = null;
 let submenuElement = null;
@@ -54,7 +58,19 @@ function getOrCreateSubmenuElement() {
         }, 220);
     });
 
+    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
+        submenuElement.addEventListener(evt, e => e.stopPropagation());
+    });
+
     return submenuElement;
+}
+
+function restoreStagedPanels() {
+    const taylorPanel = document.getElementById('taylor_series_options_detail_div');
+    const staging = document.getElementById('taylor_panel_staging');
+    if (taylorPanel && staging && taylorPanel.parentNode && taylorPanel.parentNode !== staging) {
+        staging.appendChild(taylorPanel);
+    }
 }
 
 function hideSubmenu() {
@@ -62,6 +78,7 @@ function hideSubmenu() {
         clearTimeout(submenuCloseTimer);
         submenuCloseTimer = null;
     }
+    restoreStagedPanels();
     if (submenuElement) {
         submenuElement.classList.add('hidden');
         submenuElement.innerHTML = '';
@@ -76,8 +93,8 @@ export function hidePlaneContextMenu() {
     isMenuOpen = false;
 }
 
-function requestDomainRedraw() {
-    eventBus.emit('redraw:domain');
+function requestDomainRedraw(fullRedraw = false) {
+    eventBus.emit('redraw:domain', fullRedraw);
 }
 
 function requestUiRedraw() {
@@ -169,6 +186,78 @@ function toggleLockLayer() {
     requestUiRedraw();
 }
 
+function getTaylorSubmenuItems() {
+    return [
+        {
+            type: 'custom',
+            id: 'taylor_series_exact_panel',
+            render: (container) => {
+                const panel = document.getElementById('taylor_series_options_detail_div');
+                if (panel) {
+                    panel.classList.remove('hidden');
+                    container.appendChild(panel);
+                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
+                        panel.addEventListener(evt, e => e.stopPropagation());
+                    });
+                }
+            }
+        }
+    ];
+}
+
+function getVectorFieldSubmenuItems() {
+    return [
+        {
+            id: 'vector_field_sub_item',
+            label: 'Vector Field',
+            type: 'checkbox',
+            checked: Boolean(state.vectorFieldEnabled),
+            keepOpenOnClick: true,
+            onClick: () => {
+                state.vectorFieldEnabled = !state.vectorFieldEnabled;
+                if (state.vectorFieldEnabled) {
+                    state.streamlineFlowEnabled = false;
+                }
+                syncVectorFlowControls();
+                requestDomainRedraw(true);
+                requestUiRedraw();
+            }
+        },
+        {
+            id: 'streamlines_sub_item',
+            label: 'Streamlines',
+            type: 'checkbox',
+            checked: Boolean(state.streamlineFlowEnabled),
+            keepOpenOnClick: true,
+            onClick: () => {
+                state.streamlineFlowEnabled = !state.streamlineFlowEnabled;
+                if (state.streamlineFlowEnabled) {
+                    state.vectorFieldEnabled = false;
+                }
+                syncVectorFlowControls();
+                requestDomainRedraw(true);
+                requestUiRedraw();
+            }
+        },
+        {
+            id: 'particle_motion_sub_item',
+            label: 'Particle Motion',
+            type: 'checkbox',
+            checked: Boolean(state.particleAnimationEnabled),
+            keepOpenOnClick: true,
+            onClick: () => {
+                state.particleAnimationEnabled = !state.particleAnimationEnabled;
+                if (state.particleAnimationEnabled && !state.vectorFieldEnabled && !state.streamlineFlowEnabled) {
+                    state.vectorFieldEnabled = true;
+                }
+                syncVectorFlowControls();
+                requestDomainRedraw(true);
+                requestUiRedraw();
+            }
+        }
+    ];
+}
+
 function getZPlaneMenuItems() {
     if (Boolean(state.laplaceModeEnabled)) {
         return null;
@@ -186,46 +275,42 @@ function getZPlaneMenuItems() {
         },
         { type: 'divider' },
         {
-            id: 'show_zeros_poles',
-            label: 'Show zeroes & poles',
-            type: 'checkbox',
-            checked: Boolean(state.showZerosPoles),
-            onClick: () => {
-                state.showZerosPoles = !state.showZerosPoles;
-                requestUiRedraw();
-            }
-        },
-        {
-            id: 'show_critical_points',
-            label: 'Show critical points',
-            type: 'checkbox',
-            checked: Boolean(state.showCriticalPoints),
-            onClick: () => {
-                state.showCriticalPoints = !state.showCriticalPoints;
-                requestUiRedraw();
-            }
-        },
-        {
-            id: 'cauchy_integral',
-            label: 'Cauchy Integral',
-            type: 'checkbox',
-            checked: Boolean(state.cauchyIntegralModeEnabled),
-            onClick: () => {
-                state.cauchyIntegralModeEnabled = !state.cauchyIntegralModeEnabled;
-                syncParameterControlsPanelVisibility();
-                requestUiRedraw();
-            }
-        },
-        {
-            id: 'take_radial_steps',
-            label: 'Take radial steps',
-            type: 'checkbox',
-            checked: Boolean(state.radialDiscreteStepsEnabled),
-            onClick: () => {
-                state.radialDiscreteStepsEnabled = !state.radialDiscreteStepsEnabled;
-                syncParameterControlsPanelVisibility();
-                requestDomainRedraw();
-            }
+            id: 'analysis_z',
+            label: 'Analysis',
+            type: 'menuitem',
+            children: [
+                {
+                    id: 'show_zeros_poles',
+                    label: 'Show zeroes & poles',
+                    type: 'checkbox',
+                    checked: Boolean(state.showZerosPoles),
+                    onClick: () => {
+                        state.showZerosPoles = !state.showZerosPoles;
+                        requestUiRedraw();
+                    }
+                },
+                {
+                    id: 'show_critical_points',
+                    label: 'Show critical points',
+                    type: 'checkbox',
+                    checked: Boolean(state.showCriticalPoints),
+                    onClick: () => {
+                        state.showCriticalPoints = !state.showCriticalPoints;
+                        requestUiRedraw();
+                    }
+                },
+                {
+                    id: 'cauchy_integral',
+                    label: 'Cauchy Integral',
+                    type: 'checkbox',
+                    checked: Boolean(state.cauchyIntegralModeEnabled),
+                    onClick: () => {
+                        state.cauchyIntegralModeEnabled = !state.cauchyIntegralModeEnabled;
+                        syncParameterControlsPanelVisibility();
+                        requestUiRedraw();
+                    }
+                }
+            ]
         }
     ];
 
@@ -247,13 +332,46 @@ function getZPlaneMenuItems() {
             label: 'Taylor Series',
             type: 'checkbox',
             checked: Boolean(state.taylorSeriesEnabled),
+            children: getTaylorSubmenuItems(),
             onClick: () => {
                 state.taylorSeriesEnabled = !state.taylorSeriesEnabled;
-                syncParameterControlsPanelVisibility();
-                requestDomainRedraw();
+                requestDomainRedraw(true);
             }
         });
     }
+
+    items.push({
+        id: 'vector_field_z',
+        label: 'Vector Field',
+        type: 'checkbox',
+        checked: Boolean(state.vectorFieldEnabled || state.streamlineFlowEnabled || state.particleAnimationEnabled),
+        getSubmenu: getVectorFieldSubmenuItems,
+        onClick: () => {
+            const isAnyActive = state.vectorFieldEnabled || state.streamlineFlowEnabled || state.particleAnimationEnabled;
+            if (isAnyActive) {
+                state.vectorFieldEnabled = false;
+                state.streamlineFlowEnabled = false;
+                state.particleAnimationEnabled = false;
+            } else {
+                state.vectorFieldEnabled = true;
+                state.streamlineFlowEnabled = false;
+            }
+            syncVectorFlowControls();
+            requestDomainRedraw(true);
+            requestUiRedraw();
+        }
+    });
+
+    items.push({
+        id: 'take_radial_steps',
+        label: 'Take radial steps',
+        type: 'checkbox',
+        checked: Boolean(state.radialDiscreteStepsEnabled),
+        onClick: () => {
+            state.radialDiscreteStepsEnabled = !state.radialDiscreteStepsEnabled;
+            requestDomainRedraw();
+        }
+    });
 
     return items;
 }
@@ -300,10 +418,10 @@ function getWPlaneMenuItems() {
             label: 'Taylor Series',
             type: 'checkbox',
             checked: Boolean(state.taylorSeriesEnabled),
+            children: getTaylorSubmenuItems(),
             onClick: () => {
                 state.taylorSeriesEnabled = !state.taylorSeriesEnabled;
-                syncParameterControlsPanelVisibility();
-                requestDomainRedraw();
+                requestDomainRedraw(true);
             }
         },
         {
@@ -371,6 +489,7 @@ function getWPlaneMenuItems() {
 function renderSubmenu(parentBtn, children) {
     if (!children || children.length === 0) return;
     const sub = getOrCreateSubmenuElement();
+    restoreStagedPanels();
     sub.innerHTML = '';
 
     children.forEach(child => {
@@ -381,9 +500,15 @@ function renderSubmenu(parentBtn, children) {
             return;
         }
 
+        if (child.type === 'custom' && typeof child.render === 'function') {
+            child.render(sub);
+            return;
+        }
+
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'plane-context-menu-item';
+        if (child.id) btn.id = child.id;
         if (child.disabled) {
             btn.classList.add('disabled');
             btn.disabled = true;
@@ -409,9 +534,26 @@ function renderSubmenu(parentBtn, children) {
 
         btn.addEventListener('click', event => {
             event.stopPropagation();
-            hidePlaneContextMenu();
-            if (!child.disabled && typeof child.onClick === 'function') {
-                child.onClick();
+            if (child.keepOpenOnClick) {
+                if (!child.disabled && typeof child.onClick === 'function') {
+                    child.onClick();
+                    if (parentBtn && typeof parentBtn._getSubmenuItems === 'function') {
+                        renderSubmenu(parentBtn, parentBtn._getSubmenuItems());
+                    } else {
+                        child.checked = !child.checked;
+                        btn.setAttribute('aria-checked', child.checked ? 'true' : 'false');
+                        btn.classList.toggle('checked', child.checked);
+                        const checkSpan = btn.querySelector('.plane-context-menu-check');
+                        if (checkSpan) {
+                            checkSpan.innerHTML = child.checked ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : '';
+                        }
+                    }
+                }
+            } else {
+                hidePlaneContextMenu();
+                if (!child.disabled && typeof child.onClick === 'function') {
+                    child.onClick();
+                }
             }
         });
 
@@ -421,16 +563,23 @@ function renderSubmenu(parentBtn, children) {
     sub.classList.remove('hidden');
 
     const parentRect = parentBtn.getBoundingClientRect();
-    const subRect = sub.getBoundingClientRect();
     const margin = 8;
+    const offset = 10;
+    const maxHeight = Math.max(120, window.innerHeight - 2 * margin);
 
-    let subX = parentRect.right + 2;
+    sub.style.maxHeight = `${maxHeight}px`;
+    sub.style.overflowY = 'auto';
+    sub.style.overflowX = 'hidden';
+
+    const subRect = sub.getBoundingClientRect();
+
+    let subX = parentRect.right + offset;
     if (subX + subRect.width > window.innerWidth - margin) {
-        subX = parentRect.left - subRect.width - 2;
+        subX = parentRect.left - subRect.width - offset;
     }
     if (subX < margin) subX = margin;
 
-    let subY = parentRect.top;
+    let subY = parentRect.top - 4;
     if (subY + subRect.height > window.innerHeight - margin) {
         subY = window.innerHeight - subRect.height - margin;
     }
@@ -493,19 +642,22 @@ function renderMenu(items, x, y) {
         labelSpan.textContent = item.label;
         btn.appendChild(labelSpan);
 
-        if (item.children && item.children.length > 0) {
+        const getChildren = () => typeof item.getSubmenu === 'function' ? item.getSubmenu() : item.children;
+        const children = getChildren();
+        if (children && children.length > 0) {
             btn.classList.add('has-submenu');
             const arrowSpan = document.createElement('span');
             arrowSpan.className = 'plane-context-menu-arrow';
             arrowSpan.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
             btn.appendChild(arrowSpan);
+            btn._getSubmenuItems = getChildren;
 
             btn.addEventListener('mouseenter', () => {
                 if (submenuCloseTimer) {
                     clearTimeout(submenuCloseTimer);
                     submenuCloseTimer = null;
                 }
-                renderSubmenu(btn, item.children);
+                renderSubmenu(btn, getChildren());
             });
 
             btn.addEventListener('mouseleave', () => {
@@ -520,7 +672,7 @@ function renderMenu(items, x, y) {
                     hidePlaneContextMenu();
                     item.onClick();
                 } else {
-                    renderSubmenu(btn, item.children);
+                    renderSubmenu(btn, getChildren());
                 }
             });
         } else {
@@ -559,6 +711,14 @@ function renderMenu(items, x, y) {
 export function handlePlaneContextMenu(event, planeType) {
     event.preventDefault();
     event.stopPropagation();
+
+    if (state.taylorSeriesCanvasClickCenterEnabled) {
+        state.taylorSeriesCanvasClickCenterEnabled = false;
+        state.taylorSeriesHoverPoint = null;
+        syncTaylorControls();
+        requestUiRedraw();
+        return;
+    }
 
     const items = planeType === 'z' ? getZPlaneMenuItems() : getWPlaneMenuItems();
     if (!items) {

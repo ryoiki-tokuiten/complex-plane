@@ -3,7 +3,7 @@ import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
-import { initPlaneContextMenu } from './plane-context-menu.js';
+import { initPlaneContextMenu, hidePlaneContextMenu } from './plane-context-menu.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import { clonePlain } from '../utils/clone-utils.js';
@@ -33,7 +33,7 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, syncVectorFlowControls, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview } from './ui-updates.js';
 import { syncGridDensityControls } from './grid-density-controls.js';
 import { buildThreeJSMeshes } from '../rendering/manifold-transformation-animation.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
@@ -194,7 +194,6 @@ const BASIC_CHECKBOX_BINDINGS = [
     ['enableManifold3DCb', 'manifold3dViewEnabled'],
     ['enableManifoldTransformationCb', 'manifoldTransformationEnabled'],
     ['enableTaylorSeriesCb', 'taylorSeriesEnabled'],
-    ['enableTaylorSeriesCustomCenterCb', 'taylorSeriesCustomCenterEnabled'],
     ['laplaceShowRocCb', 'laplaceShowROC'],
     ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
     ['laplaceShowFourierLineCb', 'laplaceShowFourierLine'],
@@ -215,7 +214,6 @@ const BASIC_CHECKBOX_BINDINGS = [
 
 const BASIC_SELECTOR_BINDINGS = [
     ['inputShapeSelector', 'currentInputShape'],
-    ['vectorFieldFunctionSelector', 'vectorFieldFunction'],
     ['laplaceFunctionSelector', 'laplaceFunction'],
     ['laplaceVizModeSelector', 'laplaceVizMode'],
     ['laplaceComComponentSelector', 'laplaceComComponent'],
@@ -241,7 +239,7 @@ const SPECIAL_SLIDERS = new Set([
 const SPECIAL_CHECKBOXES = new Set([
     'enableVectorFieldCb', 'enableStreamlineFlowCb',
     'enableRadialDiscreteStepsCb', 'enableManifold3DCb', 'enableRiemannSurfaceCb',
-    'enableTaylorSeriesCb', 'enableTaylorSeriesCustomCenterCb',
+    'enableTaylorSeriesCb',
     'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
     'laplaceShowFourierLineCb', 'laplaceHideIntegralEvaluationCb', 'laplaceHide3DSurfaceCb',
     'laplaceShowSpectrumCb', 'laplaceShowComCb', 'laplaceShowFourier3DCb', 'laplaceSyncWindingVectorCb', 'laplaceShowBarriersCb', 'laplaceContoursCb',
@@ -251,7 +249,6 @@ const SPECIAL_CHECKBOXES = new Set([
 
 const SPECIAL_SELECTORS = new Set([
     'inputShapeSelector',
-    'vectorFieldFunctionSelector',
     'laplaceFunctionSelector',
     'laplaceVizModeSelector',
     'manifoldShapeSelector'
@@ -673,9 +670,7 @@ function disableOutputChaining() {
 function restoreRealPlotsLayout() {
     const dynamicParams = $('dynamic_plotting_params');
     const algParams = $('algebraic_chaining_params');
-    const chainParams = $('chaining_params');
-    if (dynamicParams && algParams && chainParams) {
-        dynamicParams.parentNode.insertBefore(chainParams, dynamicParams);
+    if (dynamicParams && algParams) {
         dynamicParams.parentNode.insertBefore(algParams, dynamicParams);
     }
 
@@ -1404,13 +1399,6 @@ function bindNavigationControls() {
 }
 
 function bindVectorFieldControls() {
-    bindCheckbox('enableVectorFieldCb', 'vectorFieldEnabled', () => {
-        hidden(controls.vectorFieldOptionsDiv, !state.vectorFieldEnabled);
-        requestDomainRedraw(true);
-    });
-
-    bindSelector('vectorFieldFunctionSelector', 'vectorFieldFunction', () => requestUiRedraw());
-
     [
         ['vectorFieldScaleSlider', 'vectorFieldScale'],
         ['vectorArrowThicknessSlider', 'vectorArrowThickness'],
@@ -1420,7 +1408,6 @@ function bindVectorFieldControls() {
         ['streamlineThicknessSlider', 'streamlineThickness'],
         ['streamlineSeedDensityFactorSlider', 'streamlineSeedDensityFactor']
     ].forEach(([controlKey, stateKey, parser = parseFloat]) => bindSlider(controlKey, stateKey, parser));
-    bindCheckbox('enableStreamlineFlowCb', 'streamlineFlowEnabled');
 }
 
 function bindTaylorControls() {
@@ -1431,12 +1418,27 @@ function bindTaylorControls() {
 
     bindSlider('taylorSeriesOrderSlider', 'taylorSeriesOrder', parseInteger);
 
-    bindCheckbox('enableTaylorSeriesCustomCenterCb', 'taylorSeriesCustomCenterEnabled', () => {
-        hidden(controls.taylorSeriesCustomCenterInputsDiv, !state.taylorSeriesCustomCenterEnabled);
-        syncTaylorSeriesCenterStatus();
-        requestUiRedraw();
-    });
+    const pickBtn = document.getElementById('pick_taylor_center_canvas_btn');
+    if (pickBtn) {
+        pickBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.taylorSeriesCanvasClickCenterEnabled = !state.taylorSeriesCanvasClickCenterEnabled;
+            if (!state.taylorSeriesCanvasClickCenterEnabled) {
+                state.taylorSeriesHoverPoint = null;
+            } else {
+                hidePlaneContextMenu();
+            }
+            syncTaylorControls();
+            requestUiRedraw();
+        });
+    }
 
+    const taylorDiv = document.getElementById('taylor_series_options_detail_div');
+    if (taylorDiv) {
+        ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
+            taylorDiv.addEventListener(evt, e => e.stopPropagation());
+        });
+    }
 }
 
 function bindPolynomialControls() {
@@ -1456,12 +1458,6 @@ function bindRadialAndZetaControls() {
 }
 
 function bindParticleControls() {
-    bindCheckbox('enableParticleAnimationCb', 'particleAnimationEnabled', () => {
-        hidden(controls.particleAnimationDetailsDiv, !state.particleAnimationEnabled);
-        if (!state.particleAnimationEnabled) runtime.particles.length = 0;
-        requestUiRedraw();
-    });
-
     bindSlider('particleDensitySlider', 'particleDensity', parseInteger, () => {
         runtime.particles.length = 0;
         requestUiRedraw();
@@ -1728,6 +1724,17 @@ function handleCanvasMoveNow(ctx, pointer) {
         updateProbe(ctx, pos, true);
         requestUiRedraw();
     }
+
+    if (state.taylorSeriesCanvasClickCenterEnabled) {
+        const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        state.taylorSeriesHoverPoint = {
+            canvasX: pos.x,
+            canvasY: pos.y,
+            world,
+            isZ: ctx.isZ
+        };
+        requestUiRedraw();
+    }
 }
 
 function flushCanvasMove(ctx) {
@@ -1746,6 +1753,27 @@ function handleCanvasDown(ctx, event) {
 
     refreshCanvasRect(ctx);
     updatePointerSnapshot(ctx.pendingMove, event);
+
+    if (state.taylorSeriesCanvasClickCenterEnabled) {
+        const pos = canvasPosition(ctx, ctx.pendingMove);
+        const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        mutateState('taylorSeriesCustomCenter', v => Object.assign(v, { re: world.x, im: world.y }));
+        state.taylorSeriesCustomCenter = { re: world.x, im: world.y };
+        state.taylorSeriesCustomCenterEnabled = true;
+        state.taylorSeriesEnabled = true;
+        state.taylorSeriesHoverPoint = {
+            canvasX: pos.x,
+            canvasY: pos.y,
+            world,
+            isZ: ctx.isZ
+        };
+        ctx.hasDragged = false;
+        syncTaylorControls();
+        syncTaylorSeriesCenterStatus();
+        requestDomainRedraw(true);
+        requestUiRedraw();
+        return;
+    }
     if (ctx.isZ && state.branchDrawMode) {
         const mode = state.branchDrawMode;
         const pos = canvasPosition(ctx, ctx.pendingMove);
@@ -1837,6 +1865,9 @@ function handleCanvasLeave(ctx) {
     }
 
     updateProbe(ctx, null, false);
+    if (state.taylorSeriesCanvasClickCenterEnabled) {
+        state.taylorSeriesHoverPoint = null;
+    }
     if (domainDirty) requestDomainRedraw(true);
     else requestUiRedraw();
 }
@@ -1970,6 +2001,15 @@ function bindCanvasInteractions() {
 
     bindGenericPlaneInteractions(controls.laplaceComCanvas, laplaceComPlaneParams, requestUiRedraw);
     bindGenericPlaneInteractions(controls.laplaceSpectrumCanvas, laplaceSpectrumPlaneParams, requestUiRedraw);
+
+    ['z_plane_shape_controls_overlay', 'radial_discrete_steps_options_div'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'pointerdown', 'touchstart'].forEach(evtName => {
+                el.addEventListener(evtName, event => event.stopPropagation());
+            });
+        }
+    });
 
     bindContourCanvasInteractions();
 }
@@ -2131,6 +2171,24 @@ function onCanvasClick(event) {
     refreshCanvasRect(ctx);
     updatePointerSnapshot(ctx.pendingMove, event);
     const pos = canvasPosition(ctx, ctx.pendingMove);
+    if (state.taylorSeriesCanvasClickCenterEnabled) {
+        const target = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+        mutateState('taylorSeriesCustomCenter', v => Object.assign(v, { re: target.x, im: target.y }));
+        state.taylorSeriesCustomCenter = { re: target.x, im: target.y };
+        state.taylorSeriesCustomCenterEnabled = true;
+        state.taylorSeriesEnabled = true;
+        state.taylorSeriesHoverPoint = {
+            canvasX: pos.x,
+            canvasY: pos.y,
+            world: target,
+            isZ: ctx.isZ
+        };
+        syncTaylorControls();
+        syncTaylorSeriesCenterStatus();
+        requestDomainRedraw(true);
+        requestUiRedraw();
+        return;
+    }
     if (!ctx.isZ && state.preimageExplorerEnabled) {
         const target = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
         const map = resolveActiveMap();
@@ -2415,6 +2473,11 @@ export function setupEventListeners() {
 
 function bindChainingControls() {
     bindSelector('inputShapeSelector', 'currentInputShape', (_event, value) => {
+        if (value === 'navigate') {
+            setNavigationModeEnabled(true);
+        } else if (state.navigationModeEnabled) {
+            setNavigationModeEnabled(false);
+        }
         if (!isRasterInputShape(value) && state.videoIsPlaying) {
             pauseUploadedVideoPlayback();
         } else if (isRasterInputShape(value) && runtime.media.video && state.videoIsPlaying) {
@@ -2784,10 +2847,8 @@ function bindRealPlotsControls() {
             disableRiemannSurface();
             const rpContainer = controls.realPlotsControlsContainer;
             const algParams = $('algebraic_chaining_params');
-            const chainParams = $('chaining_params');
-            if (rpContainer && algParams && chainParams) {
+            if (rpContainer && algParams) {
                 rpContainer.appendChild(algParams);
-                rpContainer.appendChild(chainParams);
             }
 
             hidden(controls.zPlaneColumn, true);

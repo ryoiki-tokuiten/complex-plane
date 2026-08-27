@@ -31,17 +31,13 @@ export const TAYLOR_CENTER_PRESET_GROUPS = Object.freeze([
             Object.freeze({ label: '0', re: 0, im: 0 }),
             Object.freeze({ label: '+1', re: 1, im: 0 }),
             Object.freeze({ label: '-1', re: -1, im: 0 }),
-            Object.freeze({ label: 'pi/4', re: PI / 4, im: 0 }),
-            Object.freeze({ label: '-pi/4', re: -PI / 4, im: 0 }),
-            Object.freeze({ label: 'pi/2', re: PI / 2, im: 0 }),
-            Object.freeze({ label: '-pi/2', re: -PI / 2, im: 0 }),
-            Object.freeze({ label: '3pi/4', re: (3 * PI) / 4, im: 0 }),
-            Object.freeze({ label: 'pi', re: PI, im: 0 }),
-            Object.freeze({ label: '-pi', re: -PI, im: 0 }),
-            Object.freeze({ label: '2pi', re: TWO_PI, im: 0 }),
-            Object.freeze({ label: '-2pi', re: -TWO_PI, im: 0 }),
-            Object.freeze({ label: '4pi', re: 2 * TWO_PI, im: 0 }),
-            Object.freeze({ label: '-4pi', re: -2 * TWO_PI, im: 0 })
+            Object.freeze({ label: 'π/2', re: PI / 2, im: 0 }),
+            Object.freeze({ label: '-π/2', re: -PI / 2, im: 0 }),
+            Object.freeze({ label: 'π', re: PI, im: 0 }),
+            Object.freeze({ label: '-π', re: -PI, im: 0 }),
+            Object.freeze({ label: '2π', re: TWO_PI, im: 0 }),
+            Object.freeze({ label: '-2π', re: -TWO_PI, im: 0 }),
+            Object.freeze({ label: '4π', re: 2 * TWO_PI, im: 0 })
         ])
     }),
     Object.freeze({
@@ -49,10 +45,10 @@ export const TAYLOR_CENTER_PRESET_GROUPS = Object.freeze([
         presets: Object.freeze([
             Object.freeze({ label: 'i', re: 0, im: 1 }),
             Object.freeze({ label: '-i', re: 0, im: -1 }),
-            Object.freeze({ label: 'pi*i', re: 0, im: PI }),
-            Object.freeze({ label: '-pi*i', re: 0, im: -PI }),
-            Object.freeze({ label: '2pi*i', re: 0, im: TWO_PI }),
-            Object.freeze({ label: '-2pi*i', re: 0, im: -TWO_PI })
+            Object.freeze({ label: 'πi', re: 0, im: PI }),
+            Object.freeze({ label: '-πi', re: 0, im: -PI }),
+            Object.freeze({ label: '2πi', re: 0, im: TWO_PI }),
+            Object.freeze({ label: '-2πi', re: 0, im: -TWO_PI })
         ])
     })
 ]);
