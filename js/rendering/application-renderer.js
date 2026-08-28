@@ -8,6 +8,7 @@ import { drawLaplaceSpectrum, drawLaplaceComGraph } from './draw-laplace-panels.
 import { drawFourier3DPipeline, disposeFourier3DPipeline } from './fourier-3d-pipeline.js';
 import {
     applySurfaceCoordinateZoom,
+    disposeScalarSurface,
     drawRealPlot,
     drawScalarSurface
 } from './real-plots-renderer.js';
@@ -129,7 +130,8 @@ export function renderApplicationFrame(timestamp) {
 
     syncOptionalColumn(
         controls.laplace3DColumn,
-        !state.laplaceModeEnabled || state.laplaceHide3DSurface
+        !state.laplaceModeEnabled || state.laplaceHide3DSurface,
+        () => disposeScalarSurface('laplace_3d_container')
     );
     syncOptionalColumn(
         controls.laplaceSpectrumColumn,

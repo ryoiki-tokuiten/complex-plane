@@ -64,9 +64,9 @@ import {
     selectStableTissotIndicatrices,
     getTissotViewportBounds
 } from '../analysis/tissot.js';
-import { disposeRealPlotsRenderer, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
-import { appendAlgebraicTerm } from '../frontend/components/algebraic-term-editor.jsx';
-import { openThemeModal } from '../frontend/components/theme-modal.jsx';
+import { disposeRealPlotsRenderer, disposeScalarSurface, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
+import { appendAlgebraicTerm } from '../math/algebraic-term-utils.js';
+import { openThemeModal } from '../frontend/theme-state.js';
 import { resetAllPanelLayouts } from './panel-layout-manager.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import {
@@ -628,6 +628,25 @@ function requestAlgebraicRedraw() {
     requestDomainRedraw(true);
 }
 
+export function updateCategoryNavState(activeCategory) {
+    const complexBtn = document.getElementById('toggle_complex_functions_btn');
+    const customBtn = document.getElementById('select_custom_complex_btn');
+    const fractalsBtn = document.getElementById('toggle_fractals_btn');
+    const realPlotsBtn = document.getElementById('select_real_plots_btn');
+    const laplaceBtn = document.getElementById('select_laplace_btn');
+
+    if (complexBtn) complexBtn.classList.toggle('active', activeCategory === 'complex_functions');
+    if (customBtn) customBtn.classList.toggle('active', activeCategory === 'custom_complex');
+    if (fractalsBtn) fractalsBtn.classList.toggle('active', activeCategory === 'fractals');
+    if (realPlotsBtn) realPlotsBtn.classList.toggle('active', activeCategory === 'real_plots');
+    if (laplaceBtn) laplaceBtn.classList.toggle('active', activeCategory === 'laplace');
+
+    const complexGrid = document.getElementById('complex_functions_grid_container');
+    const fractalsGrid = document.getElementById('fractals_grid_container');
+    if (complexGrid) complexGrid.classList.toggle('hidden', activeCategory !== 'complex_functions');
+    if (fractalsGrid) fractalsGrid.classList.toggle('hidden', activeCategory !== 'fractals');
+}
+
 export function setActiveFunctionButton(activeKey) {
     Object.entries(controls.funcButtons || {}).forEach(([key, button]) => {
         if (!button) return;
@@ -636,6 +655,18 @@ export function setActiveFunctionButton(activeKey) {
         button.classList.toggle('btn-primary', active);
         button.classList.toggle('btn-outline-secondary', !active);
     });
+
+    if (activeKey === 'laplace') {
+        updateCategoryNavState('laplace');
+    } else if (isFractalPresetKey(activeKey)) {
+        updateCategoryNavState('fractals');
+    } else if (state.realPlotsEnabled) {
+        updateCategoryNavState('real_plots');
+    } else if (activeKey === 'custom_complex' || state.algebraicChainingEnabled) {
+        updateCategoryNavState('custom_complex');
+    } else {
+        updateCategoryNavState('complex_functions');
+    }
 }
 
 function updateModePanels() {
@@ -654,6 +685,7 @@ function disableAlgebraicChaining() {
     state.algebraicChainingEnabled = false;
     algebraicChainingSourceFunction = null;
     checked('enableAlgebraicChainingCb', false);
+    hidden(controls.algebraicChainingParams, true);
     display(controls.algebraicChainingControlsContainer, false);
 }
 
@@ -668,10 +700,11 @@ function disableOutputChaining() {
 }
 
 function restoreRealPlotsLayout() {
-    const dynamicParams = $('dynamic_plotting_params');
+    const paramPanel = $('parameter-controls-panel');
     const algParams = $('algebraic_chaining_params');
-    if (dynamicParams && algParams) {
-        dynamicParams.parentNode.insertBefore(algParams, dynamicParams);
+    const coreControls = $('core_application_controls');
+    if (paramPanel && algParams && coreControls && algParams.parentNode !== paramPanel) {
+        paramPanel.insertBefore(algParams, coreControls);
     }
 
     hidden(controls.zPlaneColumn, false);
@@ -911,7 +944,10 @@ function activateFunctionMode(key) {
     const enteringTransform = enteringLaplace;
     const leavingTransform = state.laplaceModeEnabled && !enteringTransform;
 
-    if (state.laplaceModeEnabled && !enteringLaplace) stopLaplaceAnimation();
+    if (state.laplaceModeEnabled && !enteringLaplace) {
+        stopLaplaceAnimation();
+        disposeScalarSurface('laplace_3d_container');
+    }
     if (enteringTransform && state.currentInputShape === 'video') pauseUploadedVideoPlayback();
 
     if (enteringTransform) snapshotNormalViewports();
@@ -1047,7 +1083,138 @@ function bindMobiusControls() {
 }
 
 function bindFunctionButtons() {
+    // 1. Category Nav: Complex Functions
+    bindControlListener('toggleComplexFunctionsBtn', 'click', () => {
+        if (state.realPlotsEnabled) {
+            disableRealPlots();
+        }
+        if (state.laplaceModeEnabled) {
+            stopLaplaceAnimation();
+            disposeScalarSurface('laplace_3d_container');
+            state.laplaceModeEnabled = false;
+            restoreNormalViewports();
+        }
+        if (state.algebraicChainingEnabled) {
+            disableAlgebraicChaining();
+        }
+        const funcToRestore = (!isFractalPresetKey(state.currentFunction) && state.currentFunction !== 'laplace' && state.currentFunction !== 'algebraic_chaining' && state.currentFunction)
+            ? state.currentFunction
+            : 'cos';
+        activateFunctionMode(funcToRestore);
+        updateCategoryNavState('complex_functions');
+    });
+
+    // 2. Category Nav: Custom Complex Function (Algebraic Chaining)
+    bindControlListener('selectCustomComplexBtn', 'click', () => {
+        if (state.realPlotsEnabled) {
+            disableRealPlots();
+        }
+        if (state.laplaceModeEnabled) {
+            stopLaplaceAnimation();
+            disposeScalarSurface('laplace_3d_container');
+            state.laplaceModeEnabled = false;
+            restoreNormalViewports();
+        }
+
+        const currentFunction = state.currentFunction === 'algebraic_chaining'
+            ? (algebraicChainingSourceFunction || state.algebraicChainingTerms?.[0]?.factors?.[0]?.func || 'cos')
+            : state.currentFunction;
+
+        if (currentFunction !== 'algebraic_chaining') {
+            algebraicChainingSourceFunction = currentFunction;
+            mutateState('algebraicChainingTerms', terms => {
+                const firstFactor = terms?.[0]?.factors?.[0];
+                if (firstFactor) {
+                    firstFactor.func = currentFunction;
+                    firstFactor.chainedFunc = 'none';
+                }
+            }, 'algebraicChainingTerms.factor.func');
+        }
+
+        state.algebraicChainingEnabled = true;
+        state.currentFunction = 'algebraic_chaining';
+        state.currentFunctionPreset = null;
+        checked('enableAlgebraicChainingCb', true);
+
+        setActiveFunctionButton('custom_complex');
+        display(controls.algebraicChainingControlsContainer, true);
+        hidden(controls.algebraicChainingParams, false);
+        hidden(controls.realPlotsControlsContainer, true);
+        hidden(controls.laplaceSpecificControls, true);
+        updateModePanels();
+        syncComplexParameterControls();
+        requestAlgebraicRedraw();
+    });
+
+    // 3. Category Nav: Fractals
+    bindControlListener('toggleFractalsBtn', 'click', () => {
+        if (state.realPlotsEnabled) {
+            disableRealPlots();
+        }
+        if (state.laplaceModeEnabled) {
+            stopLaplaceAnimation();
+            disposeScalarSurface('laplace_3d_container');
+            state.laplaceModeEnabled = false;
+            restoreNormalViewports();
+        }
+        if (state.algebraicChainingEnabled) {
+            disableAlgebraicChaining();
+        }
+        const fractalKey = isFractalPresetKey(state.currentFunction) ? state.currentFunction : 'mandelbrot';
+        activateFunctionMode(fractalKey);
+        updateCategoryNavState('fractals');
+    });
+
+    // 4. Category Nav: Real Plots button
+    bindControlListener('selectRealPlotsBtn', 'click', () => {
+        if (state.laplaceModeEnabled) {
+            stopLaplaceAnimation();
+            disposeScalarSurface('laplace_3d_container');
+            state.laplaceModeEnabled = false;
+            restoreNormalViewports();
+        }
+        disableGraphView();
+        disableRiemannSurface();
+
+        if (fractalRestoreSnapshot || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
+            restoreFractalState('cos');
+            disableAlgebraicChaining();
+            disableOutputChaining();
+        }
+
+        state.realPlotsEnabled = true;
+        checked('enableRealPlotsCb', true);
+
+        if (state.currentFunction === 'laplace' || isFractalPresetKey(state.currentFunction) || !state.currentFunction) {
+            state.currentFunction = 'cos';
+        }
+
+        const rpContainer = controls.realPlotsControlsContainer;
+        const algParams = $('algebraic_chaining_params');
+        const chainParams = $('chaining_params');
+        if (rpContainer && algParams && chainParams) {
+            rpContainer.appendChild(algParams);
+            rpContainer.appendChild(chainParams);
+        }
+
+        hidden(controls.realPlotsControlsContainer, false);
+        hidden(controls.realPlotsColumn, false);
+        hidden(controls.zPlaneColumn, true);
+        hidden(controls.wPlaneColumn, true);
+        hidden(controls.laplaceSpecificControls, true);
+        hidden(controls.coreApplicationControls, true);
+        hidden(controls.algebraicChainingParams, false);
+        display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
+        checked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
+
+        updateCategoryNavState('real_plots');
+        refreshPlanesAfterLayoutChange();
+        requestUiRedraw();
+    });
+
+    // Standard function & fractal & laplace buttons
     Object.entries(controls.funcButtons || {}).forEach(([key, button]) => {
+        if (key === 'custom_complex' || key === 'real_plots') return;
         bindElementListener(button, 'click', () => activateFunctionMode(key));
     });
 }
@@ -1208,6 +1375,11 @@ function disableRiemannSurface() {
 
 function syncFoldSurfaceControls() {
     checked('gridSurface3DCb', state.foldSurface3dEnabled);
+    const isFoldActive = Boolean(
+        state.foldSurface3dEnabled &&
+        (isFoldableInputShape(state.currentInputShape) || isRasterInputShape(state.currentInputShape))
+    );
+    hidden(controls.wPlaneFoldsOverlay, !isFoldActive);
     hidden(
         controls.gridSurface3DOptions,
         !state.foldSurface3dEnabled || !isFoldableInputShape(state.currentInputShape)
@@ -2625,34 +2797,45 @@ function handleFullScreenToggle(planeType, index = 0) {
 }
 
 function bindAlgebraicChainingControls() {
-    bindElementListener(controls.enableAlgebraicChainingCb, 'change', event => {
-        const enabled = event.target.checked;
-        const currentFunction = state.currentFunction === 'algebraic_chaining'
-            ? algebraicChainingSourceFunction || state.algebraicChainingTerms?.[0]?.factors?.[0]?.func || 'cos'
-            : state.currentFunction;
+    if (controls.enableAlgebraicChainingCb) {
+        bindElementListener(controls.enableAlgebraicChainingCb, 'change', event => {
+            const enabled = event.target.checked;
+            const currentFunction = state.currentFunction === 'algebraic_chaining'
+                ? algebraicChainingSourceFunction || state.algebraicChainingTerms?.[0]?.factors?.[0]?.func || 'cos'
+                : state.currentFunction;
 
-        if (enabled && currentFunction !== 'algebraic_chaining') {
-            algebraicChainingSourceFunction = currentFunction;
-            mutateState('algebraicChainingTerms', terms => {
-                const firstFactor = terms?.[0]?.factors?.[0];
-                if (firstFactor) {
-                    firstFactor.func = currentFunction;
-                    firstFactor.chainedFunc = 'none';
-                }
-            }, 'algebraicChainingTerms.factor.func');
-        }
+            if (enabled && currentFunction !== 'algebraic_chaining') {
+                algebraicChainingSourceFunction = currentFunction;
+                mutateState('algebraicChainingTerms', terms => {
+                    const firstFactor = terms?.[0]?.factors?.[0];
+                    if (firstFactor) {
+                        firstFactor.func = currentFunction;
+                        firstFactor.chainedFunc = 'none';
+                    }
+                }, 'algebraicChainingTerms.factor.func');
+            }
 
-        state.algebraicChainingEnabled = enabled;
-        state.currentFunctionPreset = null;
-        display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
+            state.algebraicChainingEnabled = enabled;
+            state.currentFunctionPreset = null;
+            if (state.realPlotsEnabled) {
+                hidden(controls.algebraicChainingParams, false);
+            } else {
+                hidden(controls.algebraicChainingParams, !enabled);
+            }
+            display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
 
-        state.currentFunction = enabled ? 'algebraic_chaining' : (algebraicChainingSourceFunction || 'cos');
-        setActiveFunctionButton(enabled ? currentFunction : state.currentFunction);
-        if (!enabled) algebraicChainingSourceFunction = null;
+            state.currentFunction = enabled ? 'algebraic_chaining' : (algebraicChainingSourceFunction || 'cos');
+            if (state.realPlotsEnabled) {
+                updateCategoryNavState('real_plots');
+            } else {
+                setActiveFunctionButton(enabled ? 'custom_complex' : state.currentFunction);
+            }
+            if (!enabled) algebraicChainingSourceFunction = null;
 
-        syncParameterControlsPanelVisibility();
-        requestAlgebraicRedraw();
-    });
+            syncParameterControlsPanelVisibility();
+            requestAlgebraicRedraw();
+        });
+    }
 
     bindElementListener(controls.addAlgebraicTermBtn, 'click', () => {
         appendAlgebraicTerm();
@@ -2845,17 +3028,35 @@ function bindRealPlotsControls() {
         if (val) {
             disableGraphView();
             disableRiemannSurface();
-            const rpContainer = controls.realPlotsControlsContainer;
-            const algParams = $('algebraic_chaining_params');
-            if (rpContainer && algParams) {
-                rpContainer.appendChild(algParams);
+            if (fractalRestoreSnapshot || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
+                restoreFractalState('cos');
+                disableAlgebraicChaining();
+                disableOutputChaining();
             }
-
+            if (state.currentFunction === 'laplace' || isFractalPresetKey(state.currentFunction) || !state.currentFunction) {
+                state.currentFunction = 'cos';
+            }
             hidden(controls.zPlaneColumn, true);
             hidden(controls.wPlaneColumn, true);
+            hidden(controls.laplaceSpecificControls, true);
+            const rpContainer = controls.realPlotsControlsContainer;
+            const algParams = $('algebraic_chaining_params');
+            const chainParams = $('chaining_params');
+            if (rpContainer && algParams && chainParams) {
+                rpContainer.appendChild(algParams);
+                rpContainer.appendChild(chainParams);
+            }
+            hidden(controls.algebraicChainingParams, false);
+            display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
+            checked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
+            hidden(controls.coreApplicationControls, true);
+            updateCategoryNavState('real_plots');
         } else {
             restoreRealPlotsLayout();
             disposeRealPlotsRenderer();
+            hidden(controls.coreApplicationControls, false);
+            updateCategoryNavState('complex_functions');
+            setActiveFunctionButton(state.currentFunction || 'cos');
         }
         refreshPlanesAfterLayoutChange();
     });

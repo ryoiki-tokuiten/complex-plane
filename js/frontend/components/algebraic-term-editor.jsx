@@ -17,13 +17,13 @@ const SYMBOLS = new Map([
     ['loggamma', 'log Γ'], ['bessel', 'Jν']
 ]);
 
-export const createAlgebraicFactor = (func = 'cos') => ({
-    func, chainedFunc: 'none', power: 1, reciprocal: false, log: false, exp: false
-});
+import {
+    createAlgebraicFactor,
+    createAlgebraicTerm,
+    appendAlgebraicTerm
+} from '../../math/algebraic-term-utils.js';
 
-export const createAlgebraicTerm = () => ({
-    coeff: { re: 1, im: 0 }, factors: [createAlgebraicFactor()]
-});
+export { createAlgebraicFactor, createAlgebraicTerm, appendAlgebraicTerm };
 
 function redraw(commit = false) {
     if (commit) {
@@ -36,10 +36,6 @@ function redraw(commit = false) {
 function mutate(mutator, path, commit = false) {
     mutateState('algebraicChainingTerms', mutator, path);
     redraw(commit);
-}
-
-export function appendAlgebraicTerm() {
-    mutate(terms => terms.push(createAlgebraicTerm()), 'algebraicChainingTerms', true);
 }
 
 const nearZero = value => Math.abs(value) < 1e-9;

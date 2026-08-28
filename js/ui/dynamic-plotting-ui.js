@@ -818,8 +818,12 @@ function bindControls() {
         syncStudioChrome();
     });
     bind('dynamic_close_studio_btn', 'click', () => {
+        update(dynamic => {
+            dynamic.enabled = false;
+            dynamic.playback.playing = false;
+        }, { preservePreset: true });
         const checkbox = element('enable_dynamic_plotting_cb');
-        if (checkbox?.checked) checkbox.click();
+        if (checkbox) checkbox.checked = false;
     });
 
     bind('dynamic_formula_help_btn', 'click', () => {

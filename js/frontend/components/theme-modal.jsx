@@ -7,9 +7,9 @@ import { persistThemePreferences } from '../../ui/theme-manager.js';
 import { refreshPanelEdgeHandles } from '../../ui/panel-layout-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
 
-const isOpen = signal(false);
+import { isThemeModalOpen, openThemeModal, closeThemeModal } from '../theme-state.js';
 
-export const openThemeModal = () => { isOpen.value = true; };
+export { openThemeModal, closeThemeModal };
 
 function refreshLayout() {
     window.dispatchEvent(new Event('resize'));
@@ -52,9 +52,9 @@ export function ThemeModal() {
         return needsRefresh ? refreshLayout() : undefined;
     }, [vertical]);
 
-    const close = () => { isOpen.value = false; };
+    const close = closeThemeModal;
     return (
-        <div id="theme_modal" class={isOpen.value ? '' : 'hidden'}>
+        <div id="theme_modal" class={isThemeModalOpen.value ? '' : 'hidden'}>
             <div class="theme-modal-backdrop" id="theme_modal_backdrop" onClick={close} />
             <div class="theme-modal-content">
                 <button id="close_theme_modal_btn" class="theme-modal-close-btn" aria-label="Close theme modal"

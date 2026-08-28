@@ -232,10 +232,10 @@ main {
 
 
 #function-controls-panel {
-    flex: 0.9 1 0;
+    flex: 2.1 1 0;
+    gap: 0.75rem;
 }
 
-#parameter-controls-panel,
 #visualization-options-panel {
     flex: 1.15 1 0;
 }
@@ -1531,6 +1531,79 @@ button:active {
     color: #fff;
     box-shadow: 0 1px 5px rgba(var(--bg-color-rgb), 0.2);
 
+}
+
+/* Navigation and category buttons in function-controls-panel */
+.panel-category-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+}
+
+.category-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.46rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--card-bg-color) 92%, white);
+    color: var(--text-secondary-color);
+    font-size: 0.82rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.category-nav-btn:hover {
+    border-color: color-mix(in srgb, var(--accent-purple) 60%, var(--border-color));
+    background: color-mix(in srgb, var(--accent-purple) 10%, var(--card-bg-color));
+    color: var(--text-color);
+}
+
+.category-nav-btn.active {
+    background: color-mix(in srgb, var(--accent-purple) 14%, var(--card-bg-color));
+    color: var(--accent-purple);
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 14px var(--glow-color);
+    font-weight: 600;
+}
+
+.category-nav-chevron {
+    width: 14px;
+    height: 14px;
+    stroke-width: 2.2;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0.75;
+}
+
+.category-nav-btn[aria-expanded="true"] .category-nav-chevron,
+.category-nav-btn.is-expanded .category-nav-chevron {
+    transform: rotate(180deg);
+    opacity: 1;
+}
+
+.function-subgrid-container {
+    padding: 0.15rem 0 0.35rem;
+    transition: all 0.25s ease;
+}
+
+.function-subgrid-container.hidden {
+    display: none !important;
+}
+
+.panel-content-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    min-width: 0;
 }
 
 /* Container for function selection buttons */
@@ -4054,6 +4127,22 @@ textarea.dynamic-formula-input {
     flex-grow: 1;
     display: flex;
     align-items: center;
+}
+
+.hud-slider-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+
+.hud-value-display {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.76rem;
+    color: #c4b5fd;
+    font-weight: 600;
+    min-width: 32px;
+    text-align: right;
 }
 
 .hud-speed-group {

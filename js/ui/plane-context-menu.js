@@ -17,6 +17,7 @@ import { syncGridDensityControls } from './grid-density-controls.js';
 import { refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
 import { TAYLOR_CENTER_PRESET_GROUPS } from '../constants/numerical.js';
+import { updateDynamicPlotting } from './dynamic-plotting-ui.js';
 
 let menuElement = null;
 let submenuElement = null;
@@ -370,6 +371,20 @@ function getZPlaneMenuItems() {
         onClick: () => {
             state.radialDiscreteStepsEnabled = !state.radialDiscreteStepsEnabled;
             requestDomainRedraw();
+        }
+    });
+
+    items.push({
+        id: 'dynamic_plotting_z',
+        label: 'Dynamic Plotting',
+        type: 'checkbox',
+        checked: Boolean(state.dynamicPlotting?.enabled),
+        onClick: () => {
+            const nextEnabled = !state.dynamicPlotting?.enabled;
+            updateDynamicPlotting(dynamic => {
+                dynamic.enabled = nextEnabled;
+                if (!nextEnabled) dynamic.playback.playing = false;
+            }, { preservePreset: true });
         }
     });
 

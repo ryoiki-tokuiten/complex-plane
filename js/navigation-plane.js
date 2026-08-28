@@ -25,6 +25,7 @@ const NAVIGATION_ROCKET_IMAGES = {
 };
 
 (() => {
+    if (typeof Image === 'undefined') return;
     Object.entries(ROCKET_DATA_URIS).forEach(([key, dataUri]) => {
         const img = new Image();
         img.onload = () => { NAVIGATION_ROCKET_IMAGES[key] = img; };

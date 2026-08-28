@@ -435,8 +435,10 @@ function syncComplexParameterControls() {
     }
 
     setHidden('chainingParams', false);
-    setHidden('algebraicChainingParams', false);
-    setHidden('dynamicPlottingParams', false);
+    setHidden('chainingControlsContainer', !state.chainingEnabled);
+    setChecked('enableChainingCb', state.chainingEnabled);
+    setChecked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
+    setHidden('algebraicChainingParams', !state.realPlotsEnabled && !state.algebraicChainingEnabled);
     setHidden('chainSeedControl', !state.chainingEnabled || state.chainingMode !== 'zero_seed');
 
     const shape = state.currentInputShape;
@@ -511,6 +513,8 @@ function syncComplexParameterControls() {
     setHidden('imageSurface3DOptions', !isImage || !state.foldSurface3dEnabled);
     setHidden('videoSurface3DOptions', !isVideo || !state.foldSurface3dEnabled);
     setChecked('gridSurface3DCb', state.foldSurface3dEnabled);
+    const isFoldActive = Boolean(state.foldSurface3dEnabled && (isGrid || isMedia || isImage || isVideo || isFoldableInputShape(shape)));
+    setHidden('w_plane_folds_overlay', !isFoldActive);
 
     syncShapeSpecificParameterGroups(shape, showShapeSpecificSliders);
 

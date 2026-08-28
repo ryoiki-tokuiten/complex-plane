@@ -1009,6 +1009,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
     try {
         if (!wCtx || !wPlaneParams) return;
         if (isSpecialMode) {
+            controls.wPlaneFoldsOverlay?.classList.add('hidden');
             hideRiemannSurface(wCanvas);
             setWPresentation('canvas');
             if (state.laplaceModeEnabled) {
@@ -1023,22 +1024,29 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             }
             return;
         }
-        if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) return;
+        if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) {
+            controls.wPlaneFoldsOverlay?.classList.add('hidden');
+            return;
+        }
         if (state.manifoldTransformationEnabled || state.manifold3dViewEnabled) {
+            controls.wPlaneFoldsOverlay?.classList.add('hidden');
             setWPresentation('hidden');
             return;
         }
         if (state.foldSurface3dEnabled) {
             if (isRasterInputShape(state.currentInputShape)) {
+                controls.wPlaneFoldsOverlay?.classList.remove('hidden');
                 renderThreeWRasterSurface(map);
                 return;
             }
             if (isFoldableInputShape(state.currentInputShape)) {
+                controls.wPlaneFoldsOverlay?.classList.remove('hidden');
                 renderThreeWGridFold(map);
                 return;
             }
         }
 
+        controls.wPlaneFoldsOverlay?.classList.add('hidden');
         setWPresentation('canvas');
         fillCanvasBackground(wCtx, wPlaneParams);
         drawAxes(wCtx, wPlaneParams, 'Re(w)', 'Im(w)');

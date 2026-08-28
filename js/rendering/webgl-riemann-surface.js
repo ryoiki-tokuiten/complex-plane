@@ -381,12 +381,17 @@ function buildAlgebraicBranchBody(appState) {
   const steps = [];
 
   if (zExpr !== 'z') {
-    const zCustomExprGLSL = compileCustomExpressionToGLSL(
-      zExpr,
-      functionName => getWebGLFunctionIdShared(functionName, true),
-      { sheet: true }
-    );
-    if (!zCustomExprGLSL) throw new Error('Riemann algebraic z expression produced no shader source.');
+    let zCustomExprGLSL = null;
+    try {
+      zCustomExprGLSL = compileCustomExpressionToGLSL(
+        zExpr,
+        functionName => getWebGLFunctionIdShared(functionName, true),
+        { sheet: true }
+      );
+    } catch {
+      zCustomExprGLSL = 'z';
+    }
+    if (!zCustomExprGLSL) zCustomExprGLSL = 'z';
     if (zCustomExprGLSL !== 'z') {
       steps.push(`    z = ${zCustomExprGLSL};`);
     }
@@ -941,16 +946,6 @@ function determineUsedGLSLMathFunctions(appState) {
       const deps = collectExpressionDependencies(ast);
       deps.functions.forEach(addFunc);
     } catch {}
-
-    const terms = algebraicTermsArray(appState);
-    terms.forEach(term => {
-      if (Array.isArray(term?.factors)) {
-        term.factors.forEach(factor => {
-          addFunc(factor.func);
-          addFunc(factor.chainedFunc);
-        });
-      }
-    });
   }
 
   const useZeta = usedFids.has(11);
