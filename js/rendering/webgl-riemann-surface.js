@@ -946,6 +946,16 @@ function determineUsedGLSLMathFunctions(appState) {
       const deps = collectExpressionDependencies(ast);
       deps.functions.forEach(addFunc);
     } catch {}
+
+    for (const [termIndex, term] of algebraicTermsArray(appState).entries()) {
+      if (!Array.isArray(term?.factors)) {
+        throw new Error(`Riemann algebraic term ${termIndex} requires a factor array.`);
+      }
+      for (const factor of term.factors) {
+        addFunc(factor?.func);
+        addFunc(factor?.chainedFunc);
+      }
+    }
   }
 
   const useZeta = usedFids.has(11);

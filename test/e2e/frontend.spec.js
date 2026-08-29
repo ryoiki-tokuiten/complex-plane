@@ -42,6 +42,43 @@ test('branch-aware algebraic Riemann shaders compile', async ({ page }) => {
     expect(shaderErrors).toEqual([]);
 });
 
+test('Riemann surface stays visible while algebraic and output chaining state changes', async ({ page }) => {
+    test.setTimeout(90000);
+
+    const expectRenderedSurface = async surface => {
+        await expect.poll(
+            async () => (await surface.screenshot({ animations: 'disabled' })).byteLength,
+            { timeout: 20000 }
+        ).toBeGreaterThan(20000);
+    };
+
+    await page.locator('#w_plane_canvas_wrapper').click({ button: 'right' });
+    await page.locator('#plane_context_menu .plane-context-menu-item:has-text("Riemann Surface")').click();
+
+    await expect(page.locator('.riemann-surface-canvas')).toHaveCount(1, { timeout: 15000 });
+    await expect(page.locator('#w_plane_canvas')).toHaveClass(/hidden/);
+
+    await page.locator('#select_custom_complex_btn').click();
+    await page.locator('#add_algebraic_term_btn').click();
+    await expect(page.locator('#w_plane_canvas')).toHaveClass(/hidden/);
+    await expect(page.locator('.riemann-surface-canvas')).toBeVisible();
+    await expectRenderedSurface(page.locator('.riemann-surface-canvas'));
+
+    await page.locator('#enable_chaining_cb').evaluate(element => {
+        element.checked = true;
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.locator('#chain_count_slider').evaluate(element => {
+        element.value = '2';
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await expect(page.locator('.riemann-surface-canvas')).toHaveCount(2, { timeout: 20000 });
+    await expect(page.locator('canvas[id^="w_plane_canvas"]:not(.hidden)')).toHaveCount(0);
+    await expectRenderedSurface(page.locator('.riemann-surface-canvas').nth(0));
+    await expectRenderedSurface(page.locator('.riemann-surface-canvas').nth(1));
+});
+
 test('arbitrary shapes support freehand drawing without Cauchy mode', async ({ page }) => {
     await page.locator('#input_shape_selector').selectOption('arbitrary');
     await expect(page.locator('#arbitrary_shape_controls')).not.toHaveClass(/hidden/);
@@ -332,6 +369,7 @@ test('grid selector keeps extended grids in its More submenu and custom context 
 
     // Verify initial z-plane menu items
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Download Image")')).toBeVisible();
+    await expect(zMenu.locator('.plane-context-menu-item:has-text("Domain Coloring")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Analysis")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Vector Field")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Take radial steps")')).toBeVisible();
@@ -400,6 +438,8 @@ test('grid selector keeps extended grids in its More submenu and custom context 
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Show Derivative")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Taylor Series")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Show folds in 3d")')).toBeVisible();
+    await expect(zMenu.locator('.plane-context-menu-item:has-text("3D Manifolds")')).toBeVisible();
+    await expect(zMenu.locator('.plane-context-menu-item:has-text("Riemann Surface")')).toBeVisible();
     await expect(zMenu.locator('.plane-context-menu-item:has-text("View Graph")')).toBeVisible();
 
     // Hover Taylor Series on w-plane and verify exact Taylor submenu panel reveals with controls

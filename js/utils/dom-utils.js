@@ -64,8 +64,6 @@ export function setupDOMReferences() {
         'functionControlsPanel', 'visualizationOptionsPanel',
         'commonParamsSliders',
         'shapeParamsSliders', 'mobiusParamsSliders', 'polynomialParamsSliders',
-        'enableDomainColoringCb',
-        'enableManifold3DCb',
         'zPlaneZoomSlider', 'wPlaneZoomSlider'
     ];
 

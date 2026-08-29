@@ -1586,7 +1586,12 @@ export function syncManifoldTransformationUI() {
     // Right panel (W): Shows 3D Manifold whenever 3D Manifolds is enabled. Shows HUD overlay during transformation.
     if (overlayW) overlayW.classList.toggle('hidden', !isTransformActive);
     if (containerW) containerW.classList.toggle('hidden', !isManifoldActive);
-    if (canvasW) canvasW.classList.toggle('hidden', isManifoldActive);
+    if (canvasW) {
+        canvasW.classList.toggle(
+            'hidden',
+            isManifoldActive || state.riemannSurfaceEnabled
+        );
+    }
 
     const manifoldOptionsDiv = document.getElementById('manifold_options_div');
     if (manifoldOptionsDiv) {

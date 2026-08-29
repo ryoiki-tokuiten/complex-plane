@@ -5388,6 +5388,67 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     background: rgba(167, 139, 250, 0.7);
 }
 
+#plane_context_submenu #domain_coloring_options_div {
+    width: 380px;
+    max-width: min(420px, 92vw);
+    padding: 10px 14px;
+    margin: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+#plane_context_submenu #domain_coloring_options_div .viz-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem 1rem;
+}
+
+#plane_context_submenu #domain_coloring_options_div .viz-control-span-2 {
+    grid-column: 1 / -1;
+}
+
+#plane_context_submenu #domain_coloring_options_div label.slider-label {
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#plane_context_submenu #manifold_options_div,
+#plane_context_submenu #riemann_surface_options_div {
+    width: 380px;
+    max-width: min(420px, 92vw);
+    padding: 10px 14px;
+    margin: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+#plane_context_submenu #riemann_surface_options_div .viz-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem 1rem;
+}
+
+#plane_context_submenu #riemann_surface_options_div .viz-control-span-2 {
+    grid-column: 1 / -1;
+}
+
+#plane_context_submenu #riemann_surface_options_div .riemann-surface-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#plane_context_submenu #manifold_options_div .control-group {
+    margin-bottom: 8px;
+}
+
 #plane_context_submenu .taylor-series-panel {
     width: 290px;
     max-width: 90vw;

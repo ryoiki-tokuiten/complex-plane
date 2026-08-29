@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
 
 async function enableDomainColoring(page) {
-    await page.locator('#enable_domain_coloring_cb').evaluate(el => {
-        el.checked = true;
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+    await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        state.domainColoringEnabled = true;
+        const { requestDomainRedraw } = await import('./js/rendering/redraw-scheduler.js');
+        requestDomainRedraw(true);
     });
 }
 

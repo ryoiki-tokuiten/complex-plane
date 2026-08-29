@@ -1168,303 +1168,6 @@
                             </div>
                         </div>
                     </div>
-
-                    <div class="viz-feature-section">
-                        <div class="viz-feature-section-header">
-                            <span class="viz-feature-section-title">Surface & Projection</span>
-                        </div>
-                        <div class="viz-toggle-grid">
-                            <label for="enable_domain_coloring_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="enable_domain_coloring_cb"
-                                    data-tooltip="Toggle domain coloring visualization (color indicates argument, lightness indicates magnitude)">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Domain Coloring</span>
-                                    <span class="viz-toggle-card-copy">Hue for argument, lightness bands for
-                                        magnitude.</span>
-                                </span>
-                            </label>
-                            <label for="enable_manifold_3d_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="enable_manifold_3d_cb"
-                                    data-tooltip="Toggle 3D manifold embedding views (Riemann Sphere, Cylinder, Torus, Helicoid, Minimal Surfaces, Klein Bottle, etc.)">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">3D Manifolds</span>
-                                    <span class="viz-toggle-card-copy">Embed complex maps onto differential 3D
-                                        manifolds.</span>
-                                </span>
-                            </label>
-                            <label for="enable_riemann_surface_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="enable_riemann_surface_cb"
-                                    data-tooltip="Render the branch-aware Riemann surface of the current function on the GPU">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Riemann Surface</span>
-                                    <span class="viz-toggle-card-copy">Explore branch sheets as an interactive WebGL
-                                        surface.</span>
-                                </span>
-                            </label>
-                        </div>
-                        <div id="riemann_surface_options_div" class="dependent-settings-block hidden">
-                            <div class="viz-settings-grid">
-                                <div class="control-group">
-                                    <label for="riemann_surface_component_selector">Surface Height</label>
-                                    <select id="riemann_surface_component_selector" class="control-select"
-                                        data-tooltip="Choose the component of w used as surface height">
-                                        <option value="imaginary" selected>Im(w)</option>
-                                        <option value="real">Re(w)</option>
-                                        <option value="magnitude">|w|</option>
-                                        <option value="phase">arg(w)</option>
-                                    </select>
-                                </div>
-                                <div class="control-group">
-                                    <label for="riemann_surface_resolution_slider">
-                                        Resolution:
-                                        <output id="riemann_surface_resolution_value_display">50</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="riemann_surface_resolution_slider" min="5" max="50"
-                                            step="1" value="50"
-                                            data-tooltip="Geometric detail of the Riemann surface mesh">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="riemann_surface_sheets_slider">
-                                        Visible Sheets:
-                                        <output id="riemann_surface_sheets_value_display">5</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="riemann_surface_sheets_slider" min="1" max="9" step="2"
-                                            value="5" data-tooltip="Number of branch sheets rendered at once">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="riemann_surface_branch_center_slider">
-                                        Branch Center k:
-                                        <output id="riemann_surface_branch_center_value_display">0</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="riemann_surface_branch_center_slider" min="-20" max="20"
-                                            step="1" value="0"
-                                            data-tooltip="Move the visible window through the infinite branch family">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="riemann_surface_height_scale_slider">
-                                        Height Scale:
-                                        <output id="riemann_surface_height_scale_value_display">1.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="riemann_surface_height_scale_slider" min="0.15"
-                                            max="2.5" step="0.05" value="1.0">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="riemann_surface_height_clip_slider">
-                                        Height Clip:
-                                        <output id="riemann_surface_height_clip_value_display">8.0</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="riemann_surface_height_clip_slider" min="0.5" max="40"
-                                            step="0.5" value="8.0"
-                                            data-tooltip="Symmetric value range mapped into the surface height">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="riemann_surface_wireframe_cb">
-                                        <input type="checkbox" id="riemann_surface_wireframe_cb" checked>
-                                        <span class="custom-checkbox-visual"></span>
-                                        Surface Grid
-                                    </label>
-                                </div>
-                                <div class="control-group">
-                                    <label for="riemann_surface_contours_cb"
-                                        data-tooltip="Overlay height level contour lines onto the surface">
-                                        <input type="checkbox" id="riemann_surface_contours_cb">
-                                        <span class="custom-checkbox-visual"></span>
-                                        Contour Lines
-                                    </label>
-                                </div>
-                                <div id="riemann_surface_contours_details"
-                                    class="contour-controls-panel contour-controls-panel--grid viz-control-span-2 hidden">
-                                    <div class="control-group contour-slider-field">
-                                        <div class="contour-slider-label">
-                                            <label for="riemann_surface_contour_interval_slider">Contour
-                                                Interval:</label>
-                                            <output id="riemann_surface_contour_interval_value_display">0.50</output>
-                                        </div>
-                                        <div class="slider-container">
-                                            <input type="range" id="riemann_surface_contour_interval_slider" min="0.05"
-                                                max="3.00" step="0.05" value="0.50">
-                                        </div>
-                                    </div>
-                                    <div class="control-group contour-slider-field">
-                                        <div class="contour-slider-label">
-                                            <label for="riemann_surface_contour_thickness_slider">Contour
-                                                Thickness:</label>
-                                            <output id="riemann_surface_contour_thickness_value_display">1.5</output>
-                                        </div>
-                                        <div class="slider-container">
-                                            <input type="range" id="riemann_surface_contour_thickness_slider" min="0.5"
-                                                max="5.0" step="0.1" value="1.5">
-                                        </div>
-                                    </div>
-                                    <div class="contour-action-row">
-                                        <button id="riemann_surface_show_2d_contour_btn" class="contour-2d-toggle-btn"
-                                            type="button">
-                                            <i data-lucide="image"></i>
-                                            <span>Show 2D Contour Plot</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="riemann-surface-actions">
-                                <span id="riemann_surface_status" class="riemann-surface-status">GPU surface
-                                    ready</span>
-                                <button id="riemann_surface_reset_view_btn" type="button">Reset View</button>
-                            </div>
-                        </div>
-                        <div id="domain_coloring_options_div" class="dependent-settings-block hidden">
-                            <div class="viz-settings-grid">
-                                <div class="domain-palette-selector-container">
-                                    <div class="domain-palette-header">
-                                        <span class="domain-palette-selector-label domain-palette-label">
-                                            <span>Domain Palette:</span>
-                                            <span id="active_domain_palette_name" class="active-palette-label">Analytic
-                                                Base</span>
-                                        </span>
-                                        <button id="view_palette_circle_btn" class="view-palette-circle-btn"
-                                            type="button" data-tooltip="View color guide circle for active palette">
-                                            View Color Circle
-                                        </button>
-                                    </div>
-                                    <div class="domain-palette-circles" id="domain_palette_circles">
-                                        <!-- Circles generated dynamically -->
-                                    </div>
-                                </div>
-                                <div class="control-group" id="orbit_coloring_mode_group">
-                                    <label for="orbit_coloring_mode_select" class="compact-text">Orbit
-                                        Coloring:</label>
-                                    <select id="orbit_coloring_mode_select" class="control-select"
-                                        data-tooltip="Choose which orbit observable colors recursive output chains">
-                                        <option value="value">Final Value</option>
-                                        <option value="escape">Escape</option>
-                                        <option value="attractor">Attractor</option>
-                                        <option value="hybrid">Hybrid</option>
-                                    </select>
-                                </div>
-                                <div class="control-group">
-                                    <label for="domain_brightness_slider" class="compact-text">
-                                        Brightness:
-                                        <output id="domain_brightness_value_display">1.0</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="domain_brightness_slider"
-                                            name="domain_brightness_slider" min="0.5" max="1.5" step="0.05" value="1.0"
-                                            data-tooltip="Adjust overall brightness of the domain coloring">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="domain_contrast_slider" class="compact-text">
-                                        Contrast:
-                                        <output id="domain_contrast_value_display">1.0</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="domain_contrast_slider" name="domain_contrast_slider"
-                                            min="0.5" max="2.0" step="0.05" value="1.0"
-                                            data-tooltip="Adjust contrast of the domain coloring">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="domain_saturation_slider" class="compact-text">
-                                        Saturation:
-                                        <output id="domain_saturation_value_display">1.0</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="domain_saturation_slider"
-                                            name="domain_saturation_slider" min="0.0" max="1.0" step="0.05" value="1.0"
-                                            data-tooltip="Adjust color saturation of the domain coloring">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="domain_lightness_cycles_slider" class="compact-text">
-                                        Lightness Cycles:
-                                        <output id="domain_lightness_cycles_value_display">1.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="domain_lightness_cycles_slider"
-                                            name="domain_lightness_cycles_slider" min="0.0" max="4.0" step="0.25"
-                                            value="1.0"
-                                            data-tooltip="0 disables magnitude lightness modulation; higher values add optional magnitude shading">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="show_domain_coloring_key_cb" class="slider-label">
-                                        <input type="checkbox" id="show_domain_coloring_key_cb">
-                                        <span class="custom-checkbox-visual"></span>
-                                        Show the color key panel
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="manifold_options_div" class="dependent-settings-block hidden viz-stacked-options">
-                            <div class="control-group" style="margin-bottom: 8px;">
-                                <label for="manifold_shape_selector" class="slider-label"
-                                    style="margin-bottom: 4px; font-weight: 600;">3D Manifold Surface:</label>
-                                <select id="manifold_shape_selector" class="control-select"
-                                    data-tooltip="Choose the 3D manifold embedding geometry">
-                                    <option value="sphere" selected>Riemann Sphere (S²)</option>
-                                    <option value="cylinder">Log-Cylinder</option>
-                                    <option value="torus">Complex Torus (T²)</option>
-                                    <option value="helicoid">Riemann Helicoid</option>
-                                    <option value="catenoid">Catenoid Minimal</option>
-                                    <option value="enneper">Enneper Minimal</option>
-                                    <option value="bonnet">Bonnet Isometric Family</option>
-                                    <option value="klein_bottle">Klein Bottle Immersion</option>
-                                    <option value="pseudosphere">Beltrami Pseudosphere (H²)</option>
-                                    <option value="scherk">Scherk Minimal Surface</option>
-                                </select>
-                            </div>
-                            <div class="viz-toggle-grid viz-toggle-grid--compact viz-toggle-grid--single">
-                                <label for="enable_manifold_transformation_cb"
-                                    class="viz-toggle-card viz-toggle-card--compact">
-                                    <input type="checkbox" id="enable_manifold_transformation_cb"
-                                        data-tooltip="Show continuous morph animation from flat plane into 3D manifold">
-                                    <span class="custom-checkbox-visual"></span>
-                                    <span class="viz-toggle-card-content">
-                                        <span class="viz-toggle-card-title">Show Transformation</span>
-                                        <span class="viz-toggle-card-copy">Animate grid morph into 3D manifold.</span>
-                                    </span>
-                                </label>
-                            </div>
-                            <div id="manifold_surface_options_div" class="dependent-settings-block viz-subdetail-block">
-                                    <div class="control-group">
-                                        <label for="manifold_surface_opacity_slider">
-                                            Surface Opacity:
-                                            <output id="manifold_surface_opacity_value_display">0.35</output>
-                                        </label>
-                                        <div class="slider-container">
-                                            <input type="range" id="manifold_surface_opacity_slider"
-                                                name="manifold_surface_opacity_slider" min="0" max="1" step="0.05"
-                                                value="0.35" data-tooltip="Adjust opacity of the 3D surface mesh">
-                                        </div>
-                                    </div>
-                                    <div class="control-group">
-                                        <label for="manifold_grid_opacity_slider">
-                                            Surface Grid Opacity:
-                                            <output id="manifold_grid_opacity_value_display">0.25</output>
-                                        </label>
-                                        <div class="slider-container">
-                                            <input type="range" id="manifold_grid_opacity_slider"
-                                                name="manifold_grid_opacity_slider" min="0" max="1" step="0.05"
-                                                value="0.25"
-                                                data-tooltip="Adjust opacity of the manifold intrinsic wireframe grid">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </section>
@@ -2169,6 +1872,275 @@
 
     <div id="tooltip"></div>
     <div id="frontend_modal_root"></div>
+    <!-- Domain Coloring Submenu Panel Staging -->
+    <div id="domain_coloring_panel_staging" class="hidden">
+        <div id="domain_coloring_options_div" class="dependent-settings-block hidden">
+            <div class="viz-settings-grid">
+                <div class="domain-palette-selector-container">
+                    <div class="domain-palette-header">
+                        <span class="domain-palette-selector-label domain-palette-label">
+                            <span>Domain Palette:</span>
+                            <span id="active_domain_palette_name" class="active-palette-label">Analytic
+                                Base</span>
+                        </span>
+                        <button id="view_palette_circle_btn" class="view-palette-circle-btn"
+                            type="button" data-tooltip="View color guide circle for active palette">
+                            View Color Circle
+                        </button>
+                    </div>
+                    <div class="domain-palette-circles" id="domain_palette_circles">
+                        <!-- Circles generated dynamically -->
+                    </div>
+                </div>
+                <div class="control-group" id="orbit_coloring_mode_group">
+                    <label for="orbit_coloring_mode_select" class="compact-text">Orbit
+                        Coloring:</label>
+                    <select id="orbit_coloring_mode_select" class="control-select"
+                        data-tooltip="Choose which orbit observable colors recursive output chains">
+                        <option value="value">Final Value</option>
+                        <option value="escape">Escape</option>
+                        <option value="attractor">Attractor</option>
+                        <option value="hybrid">Hybrid</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="domain_brightness_slider" class="compact-text">
+                        Brightness:
+                        <output id="domain_brightness_value_display">1.0</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="domain_brightness_slider"
+                            name="domain_brightness_slider" min="0.5" max="1.5" step="0.05" value="1.0"
+                            data-tooltip="Adjust overall brightness of the domain coloring">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="domain_contrast_slider" class="compact-text">
+                        Contrast:
+                        <output id="domain_contrast_value_display">1.0</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="domain_contrast_slider" name="domain_contrast_slider"
+                            min="0.5" max="2.0" step="0.05" value="1.0"
+                            data-tooltip="Adjust contrast of the domain coloring">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="domain_saturation_slider" class="compact-text">
+                        Saturation:
+                        <output id="domain_saturation_value_display">1.0</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="domain_saturation_slider"
+                            name="domain_saturation_slider" min="0.0" max="1.0" step="0.05" value="1.0"
+                            data-tooltip="Adjust color saturation of the domain coloring">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="domain_lightness_cycles_slider" class="compact-text">
+                        Lightness Cycles:
+                        <output id="domain_lightness_cycles_value_display">1.00</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="domain_lightness_cycles_slider"
+                            name="domain_lightness_cycles_slider" min="0.0" max="4.0" step="0.25"
+                            value="1.0"
+                            data-tooltip="0 disables magnitude lightness modulation; higher values add optional magnitude shading">
+                    </div>
+                </div>
+                <div class="control-group viz-control-span-2">
+                    <label for="show_domain_coloring_key_cb" class="slider-label">
+                        <input type="checkbox" id="show_domain_coloring_key_cb">
+                        <span class="custom-checkbox-visual"></span>
+                        Show the color key panel
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D Manifolds Submenu Panel Staging -->
+    <div id="manifold_panel_staging" class="hidden">
+        <div id="manifold_options_div" class="dependent-settings-block hidden viz-stacked-options">
+            <div class="control-group" style="margin-bottom: 8px;">
+                <label for="manifold_shape_selector" class="slider-label"
+                    style="margin-bottom: 4px; font-weight: 600;">3D Manifold Surface:</label>
+                <select id="manifold_shape_selector" class="control-select"
+                    data-tooltip="Choose the 3D manifold embedding geometry">
+                    <option value="sphere" selected>Riemann Sphere (S²)</option>
+                    <option value="cylinder">Log-Cylinder</option>
+                    <option value="torus">Complex Torus (T²)</option>
+                    <option value="helicoid">Riemann Helicoid</option>
+                    <option value="catenoid">Catenoid Minimal</option>
+                    <option value="enneper">Enneper Minimal</option>
+                    <option value="bonnet">Bonnet Isometric Family</option>
+                    <option value="klein_bottle">Klein Bottle Immersion</option>
+                    <option value="pseudosphere">Beltrami Pseudosphere (H²)</option>
+                    <option value="scherk">Scherk Minimal Surface</option>
+                </select>
+            </div>
+            <div class="viz-toggle-grid viz-toggle-grid--compact viz-toggle-grid--single">
+                <label for="enable_manifold_transformation_cb"
+                    class="viz-toggle-card viz-toggle-card--compact">
+                    <input type="checkbox" id="enable_manifold_transformation_cb"
+                        data-tooltip="Show continuous morph animation from flat plane into 3D manifold">
+                    <span class="custom-checkbox-visual"></span>
+                    <span class="viz-toggle-card-content">
+                        <span class="viz-toggle-card-title">Show Transformation</span>
+                        <span class="viz-toggle-card-copy">Animate grid morph into 3D manifold.</span>
+                    </span>
+                </label>
+            </div>
+            <div id="manifold_surface_options_div" class="dependent-settings-block viz-subdetail-block">
+                <div class="control-group">
+                    <label for="manifold_surface_opacity_slider">
+                        Surface Opacity:
+                        <output id="manifold_surface_opacity_value_display">0.35</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="manifold_surface_opacity_slider"
+                            name="manifold_surface_opacity_slider" min="0" max="1" step="0.05"
+                            value="0.35" data-tooltip="Adjust opacity of the 3D surface mesh">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="manifold_grid_opacity_slider">
+                        Surface Grid Opacity:
+                        <output id="manifold_grid_opacity_value_display">0.25</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="manifold_grid_opacity_slider"
+                            name="manifold_grid_opacity_slider" min="0" max="1" step="0.05"
+                            value="0.25"
+                            data-tooltip="Adjust opacity of the manifold intrinsic wireframe grid">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Riemann Surface Submenu Panel Staging -->
+    <div id="riemann_surface_panel_staging" class="hidden">
+        <div id="riemann_surface_options_div" class="dependent-settings-block hidden">
+            <div class="viz-settings-grid">
+                <div class="control-group">
+                    <label for="riemann_surface_component_selector">Surface Height</label>
+                    <select id="riemann_surface_component_selector" class="control-select"
+                        data-tooltip="Choose the component of w used as surface height">
+                        <option value="imaginary" selected>Im(w)</option>
+                        <option value="real">Re(w)</option>
+                        <option value="magnitude">|w|</option>
+                        <option value="phase">arg(w)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="riemann_surface_resolution_slider">
+                        Resolution:
+                        <output id="riemann_surface_resolution_value_display">50</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="riemann_surface_resolution_slider" min="5" max="50"
+                            step="1" value="50"
+                            data-tooltip="Geometric detail of the Riemann surface mesh">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="riemann_surface_sheets_slider">
+                        Visible Sheets:
+                        <output id="riemann_surface_sheets_value_display">5</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="riemann_surface_sheets_slider" min="1" max="9" step="2"
+                            value="5" data-tooltip="Number of branch sheets rendered at once">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="riemann_surface_branch_center_slider">
+                        Branch Center k:
+                        <output id="riemann_surface_branch_center_value_display">0</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="riemann_surface_branch_center_slider" min="-20" max="20"
+                            step="1" value="0"
+                            data-tooltip="Move the visible window through the infinite branch family">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="riemann_surface_height_scale_slider">
+                        Height Scale:
+                        <output id="riemann_surface_height_scale_value_display">1.00</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="riemann_surface_height_scale_slider" min="0.15"
+                            max="2.5" step="0.05" value="1.0">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="riemann_surface_height_clip_slider">
+                        Height Clip:
+                        <output id="riemann_surface_height_clip_value_display">8.0</output>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" id="riemann_surface_height_clip_slider" min="0.5" max="40"
+                            step="0.5" value="8.0"
+                            data-tooltip="Symmetric value range mapped into the surface height">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="riemann_surface_wireframe_cb">
+                        <input type="checkbox" id="riemann_surface_wireframe_cb" checked>
+                        <span class="custom-checkbox-visual"></span>
+                        Surface Grid
+                    </label>
+                </div>
+                <div class="control-group">
+                    <label for="riemann_surface_contours_cb"
+                        data-tooltip="Overlay height level contour lines onto the surface">
+                        <input type="checkbox" id="riemann_surface_contours_cb">
+                        <span class="custom-checkbox-visual"></span>
+                        Contour Lines
+                    </label>
+                </div>
+                <div id="riemann_surface_contours_details"
+                    class="contour-controls-panel contour-controls-panel--grid viz-control-span-2 hidden">
+                    <div class="control-group contour-slider-field">
+                        <div class="contour-slider-label">
+                            <label for="riemann_surface_contour_interval_slider">Contour
+                                Interval:</label>
+                            <output id="riemann_surface_contour_interval_value_display">0.50</output>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" id="riemann_surface_contour_interval_slider" min="0.05"
+                                max="3.00" step="0.05" value="0.50">
+                        </div>
+                    </div>
+                    <div class="control-group contour-slider-field">
+                        <div class="contour-slider-label">
+                            <label for="riemann_surface_contour_thickness_slider">Contour
+                                Thickness:</label>
+                            <output id="riemann_surface_contour_thickness_value_display">1.5</output>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" id="riemann_surface_contour_thickness_slider" min="0.5"
+                                max="5.0" step="0.1" value="1.5">
+                        </div>
+                    </div>
+                    <div class="contour-action-row">
+                        <button id="riemann_surface_show_2d_contour_btn" class="contour-2d-toggle-btn"
+                            type="button">
+                            <i data-lucide="image"></i>
+                            <span>Show 2D Contour Plot</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="riemann-surface-actions">
+                <span id="riemann_surface_status" class="riemann-surface-status">GPU surface
+                    ready</span>
+                <button id="riemann_surface_reset_view_btn" type="button">Reset View</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Taylor Series Submenu Panel Staging -->
     <div id="taylor_panel_staging" class="hidden">

@@ -20,6 +20,7 @@ import { refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
 import { TAYLOR_CENTER_PRESET_GROUPS } from '../constants/numerical.js';
 import { updateDynamicPlotting } from './dynamic-plotting-ui.js';
+import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
 
 let menuElement = null;
 let submenuElement = null;
@@ -85,9 +86,27 @@ function getOrCreateSubmenuBridgeElement() {
 
 function restoreStagedPanels() {
     const taylorPanel = document.getElementById('taylor_series_options_detail_div');
-    const staging = document.getElementById('taylor_panel_staging');
-    if (taylorPanel && staging && taylorPanel.parentNode && taylorPanel.parentNode !== staging) {
-        staging.appendChild(taylorPanel);
+    const taylorStaging = document.getElementById('taylor_panel_staging');
+    if (taylorPanel && taylorStaging && taylorPanel.parentNode && taylorPanel.parentNode !== taylorStaging) {
+        taylorStaging.appendChild(taylorPanel);
+    }
+
+    const domainPanel = document.getElementById('domain_coloring_options_div');
+    const domainStaging = document.getElementById('domain_coloring_panel_staging');
+    if (domainPanel && domainStaging && domainPanel.parentNode && domainPanel.parentNode !== domainStaging) {
+        domainStaging.appendChild(domainPanel);
+    }
+
+    const manifoldPanel = document.getElementById('manifold_options_div');
+    const manifoldStaging = document.getElementById('manifold_panel_staging');
+    if (manifoldPanel && manifoldStaging && manifoldPanel.parentNode && manifoldPanel.parentNode !== manifoldStaging) {
+        manifoldStaging.appendChild(manifoldPanel);
+    }
+
+    const riemannPanel = document.getElementById('riemann_surface_options_div');
+    const riemannStaging = document.getElementById('riemann_surface_panel_staging');
+    if (riemannPanel && riemannStaging && riemannPanel.parentNode && riemannPanel.parentNode !== riemannStaging) {
+        riemannStaging.appendChild(riemannPanel);
     }
 }
 
@@ -232,6 +251,44 @@ function getTaylorSubmenuItems() {
     ];
 }
 
+function getManifoldSubmenuItems() {
+    return [
+        {
+            type: 'custom',
+            id: 'manifold_exact_panel',
+            render: (container) => {
+                const panel = document.getElementById('manifold_options_div');
+                if (panel) {
+                    panel.classList.remove('hidden');
+                    container.appendChild(panel);
+                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
+                        panel.addEventListener(evt, e => e.stopPropagation());
+                    });
+                }
+            }
+        }
+    ];
+}
+
+function getRiemannSubmenuItems() {
+    return [
+        {
+            type: 'custom',
+            id: 'riemann_surface_exact_panel',
+            render: (container) => {
+                const panel = document.getElementById('riemann_surface_options_div');
+                if (panel) {
+                    panel.classList.remove('hidden');
+                    container.appendChild(panel);
+                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
+                        panel.addEventListener(evt, e => e.stopPropagation());
+                    });
+                }
+            }
+        }
+    ];
+}
+
 function getVectorFieldSubmenuItems() {
     return [
         {
@@ -285,6 +342,25 @@ function getVectorFieldSubmenuItems() {
     ];
 }
 
+function getDomainColoringSubmenuItems() {
+    return [
+        {
+            type: 'custom',
+            id: 'domain_coloring_exact_panel',
+            render: (container) => {
+                const panel = document.getElementById('domain_coloring_options_div');
+                if (panel) {
+                    panel.classList.remove('hidden');
+                    container.appendChild(panel);
+                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
+                        panel.addEventListener(evt, e => e.stopPropagation());
+                    });
+                }
+            }
+        }
+    ];
+}
+
 function getZPlaneMenuItems() {
     if (Boolean(state.laplaceModeEnabled)) {
         return null;
@@ -301,6 +377,36 @@ function getZPlaneMenuItems() {
             }
         },
         { type: 'divider' },
+        {
+            id: 'domain_coloring_z',
+            label: 'Domain Coloring',
+            type: 'checkbox',
+            checked: Boolean(state.domainColoringEnabled),
+            children: getDomainColoringSubmenuItems(),
+            onClick: () => {
+                state.domainColoringEnabled = !state.domainColoringEnabled;
+                if (state.domainColoringEnabled) {
+                    if (state.manifold3dViewEnabled) {
+                        state.manifold3dViewEnabled = false;
+                        state.manifoldTransformationEnabled = false;
+                        if (context.controls?.enableManifold3DCb) context.controls.enableManifold3DCb.checked = false;
+                        if (context.controls?.enableManifoldTransformationCb) context.controls.enableManifoldTransformationCb.checked = false;
+                        if (context.controls?.manifoldOptionsDiv) context.controls.manifoldOptionsDiv.classList.add('hidden');
+                        syncManifoldTransformationUI();
+                    }
+                    if (state.currentInputShape !== 'empty_grid') {
+                        if (state.currentInputShape === 'video' && state.videoIsPlaying) {
+                            pauseUploadedVideoPlayback();
+                        }
+                        state.currentInputShape = 'empty_grid';
+                        if (context.controls?.inputShapeSelector) context.controls.inputShapeSelector.value = 'empty_grid';
+                    }
+                }
+                syncParameterControlsPanelVisibility();
+                requestDomainRedraw(true);
+                requestUiRedraw();
+            }
+        },
         {
             id: 'analysis_z',
             label: 'Analysis',
@@ -441,11 +547,6 @@ function getWPlaneMenuItems() {
     if (Boolean(state.laplaceModeEnabled)) {
         return null;
     }
-    const isRiemannActive = Boolean(state.riemannSurfaceEnabled || state.riemannSurfaceModeEnabled);
-    const isManifoldActive = Boolean(state.manifold3dViewEnabled || state.manifold3DEnabled);
-    if (isRiemannActive || isManifoldActive) {
-        return null;
-    }
 
     const graphSupported = isGraphViewSupported(state.currentInputShape);
     const fullGridSupported = isFullGridPerspectiveSupported(state.currentInputShape);
@@ -500,6 +601,79 @@ function getWPlaneMenuItems() {
                 syncGridDensityControls({ applyFoldDefault: state.foldSurface3dEnabled });
                 syncParameterControlsPanelVisibility();
                 requestDomainRedraw();
+            }
+        },
+        {
+            id: 'manifold_3d_w',
+            label: '3D Manifolds',
+            type: 'checkbox',
+            checked: Boolean(state.manifold3dViewEnabled),
+            children: getManifoldSubmenuItems(),
+            onClick: () => {
+                state.manifold3dViewEnabled = !state.manifold3dViewEnabled;
+                if (state.manifold3dViewEnabled) {
+                    if (state.domainColoringEnabled) {
+                        state.domainColoringEnabled = false;
+                        syncDomainColoringKeyVisibility();
+                        syncOrbitColoringModeControl();
+                    }
+                    disableFoldSurface3d();
+                    if (state.riemannSurfaceEnabled) {
+                        state.riemannSurfaceEnabled = false;
+                        if (!state.realPlotsEnabled) {
+                            state.show2DContourPlot = false;
+                            const contourCol = document.getElementById('contour_2d_column');
+                            if (contourCol) contourCol.classList.add('hidden');
+                        }
+                    }
+                    state.manifoldTransformationEnabled = false;
+                    state.manifoldTransformationProgressW = 1.0;
+
+                    const defaultShape = getDefaultInputShapeForManifold(state.selectedManifold);
+                    state.currentInputShape = defaultShape;
+                    if (context.controls?.inputShapeSelector) {
+                        context.controls.inputShapeSelector.value = defaultShape;
+                    }
+                    syncGridDensityControls();
+                } else {
+                    state.manifoldTransformationEnabled = false;
+                    syncGridDensityControls();
+                }
+                syncManifoldTransformationUI();
+                updateChainingTitles();
+                syncParameterControlsPanelVisibility();
+                requestDomainRedraw(true);
+                requestUiRedraw();
+            }
+        },
+        {
+            id: 'riemann_surface_w',
+            label: 'Riemann Surface',
+            type: 'checkbox',
+            checked: Boolean(state.riemannSurfaceEnabled),
+            children: getRiemannSubmenuItems(),
+            onClick: () => {
+                state.riemannSurfaceEnabled = !state.riemannSurfaceEnabled;
+                if (state.riemannSurfaceEnabled) {
+                    disableFoldSurface3d();
+                    state.realPlotsEnabled = false;
+                    const realPlotsCol = document.getElementById('real_plots_column');
+                    if (realPlotsCol) realPlotsCol.classList.add('hidden');
+                    const realPlotsCtrl = document.getElementById('real_plots_controls_container');
+                    if (realPlotsCtrl) realPlotsCtrl.classList.add('hidden');
+                    Object.assign(state, { manifold3dViewEnabled: false, manifoldTransformationEnabled: false });
+                    if (state.navigationModeEnabled) setNavigationModeEnabled(false);
+                } else {
+                    if (!state.realPlotsEnabled) {
+                        state.show2DContourPlot = false;
+                        const contourCol = document.getElementById('contour_2d_column');
+                        if (contourCol) contourCol.classList.add('hidden');
+                    }
+                }
+                updateChainingTitles();
+                syncParameterControlsPanelVisibility();
+                requestDomainRedraw(true);
+                requestUiRedraw();
             }
         },
         {

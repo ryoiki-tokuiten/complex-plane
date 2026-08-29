@@ -112,7 +112,7 @@ test('dynamic aggregate expressions contribute branch metadata', () => {
     assert.equal(baseExpressionHasBranches(runtimeState), true);
 });
 
-test('Riemann program signatures keep algebraic parameter edits uniform-backed', () => {
+test('Riemann program signatures track algebraic function dependencies while parameters stay uniform-backed', () => {
     const runtimeState = makeState({
         currentFunction: 'algebraic_chaining',
         algebraicChainingZExpr: 'z',
@@ -138,13 +138,13 @@ test('Riemann program signatures keep algebraic parameter edits uniform-backed',
     runtimeState.algebraicChainingTerms[0].factors[0].func = 'cos';
     runtimeState.algebraicChainingTerms[0].factors[0].chainedFunc = 'exp';
     const afterFunctionEdit = getRiemannSurfaceProgramSignature(runtimeState);
-    assert.equal(afterFunctionEdit, before);
+    assert.notEqual(afterFunctionEdit, before);
 
     runtimeState.algebraicChainingTerms[0].factors[0].log = true;
     runtimeState.algebraicChainingTerms[0].factors[0].reciprocal = true;
     runtimeState.algebraicChainingTerms[0].factors[0].exp = true;
     const afterModifierEdit = getRiemannSurfaceProgramSignature(runtimeState);
-    assert.equal(afterModifierEdit, before);
+    assert.equal(afterModifierEdit, afterFunctionEdit);
 });
 
 test('Riemann shaders specialize their static loop bound to the active chain depth', () => {
