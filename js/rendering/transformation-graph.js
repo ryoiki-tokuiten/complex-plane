@@ -11,6 +11,7 @@ import {
 import { disposeThreeObject, createCanvasTextSprite } from './three-utils.js';
 import { buildLaplaceWinding } from '../analysis/laplace-transform.js';
 import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
+import { CUSTOM_GRID_INPUT_SHAPES } from '../constants/grid-shapes.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -19,7 +20,8 @@ const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_logcartesian',
     'line',
     'circle',
-    'arbitrary'
+    'arbitrary',
+    ...CUSTOM_GRID_INPUT_SHAPES
 ]);
 const GRID_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -730,6 +732,7 @@ function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
         lineIndex,
         state.graphSelectionRevision || 0,
         state.gridDensity,
+        JSON.stringify(state.gridParameters),
         state.a0,
         state.b0,
         state.circleR,

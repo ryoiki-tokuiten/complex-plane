@@ -484,93 +484,133 @@
 
                         <!-- Real Plots Controls -->
                         <div id="real_plots_controls_container" class="hidden nested-control-stack">
-                                <!-- Input Equation Select / Presets -->
-                                <div class="control-row-between control-row-wide">
-                                    <label class="compact-label">u(x,y):</label>
-                                    <select id="real_plots_input_preset" class="control-select compact-control-select">
-                                        <option value="x" selected>x</option>
-                                        <option value="y">y</option>
-                                        <option value="x+y">x + y</option>
-                                        <option value="x-y">x - y</option>
-                                        <option value="x*y">x * y</option>
-                                        <option value="2x+y">2x + y</option>
-                                        <option value="custom">Custom...</option>
-                                    </select>
-                                </div>
-
-                                <!-- Custom Real Input -->
-                                <div id="real_plots_custom_input_container" class="hidden compact-formula-stack">
-                                    <input type="text" id="real_plots_custom_input"
-                                        class="dynamic-formula-input compact-formula-input"
-                                        placeholder="e.g. sin(x)*cos(y)" value="x" spellcheck="false"
-                                        autocomplete="off">
-                                    <div id="real_plots_custom_input_math"
-                                        class="dynamic-math-display compact-formula-preview">
-                                    </div>
-                                </div>
-
-                                <div class="control-row-between control-row-wide">
-                                    <label class="compact-label">v(x,y):</label>
-                                    <select id="real_plots_imag_preset" class="control-select compact-control-select">
-                                        <option value="y">y</option>
-                                        <option value="0" selected>0</option>
-                                        <option value="x">x</option>
-                                        <option value="x+y">x + y</option>
-                                        <option value="x-y">x - y</option>
-                                        <option value="x*y">x * y</option>
-                                        <option value="2x+y">2x + y</option>
-                                        <option value="custom">Custom...</option>
-                                    </select>
-                                </div>
-
-                                <!-- Custom Imag Input -->
-                                <div id="real_plots_custom_imag_container" class="hidden compact-formula-stack">
-                                    <input type="text" id="real_plots_custom_imag"
-                                        class="dynamic-formula-input compact-formula-input"
-                                        placeholder="e.g. cos(x)*sin(y)" value="0" spellcheck="false"
-                                        autocomplete="off">
-                                    <div id="real_plots_custom_imag_math"
-                                        class="dynamic-math-display compact-formula-preview">
-                                    </div>
-                                </div>
-
-                                <div class="control-stack">
-                                    <div class="palette-controls-header">
-                                        <span class="palette-label-row">
-                                            <span>Color Palette:</span>
-                                            <span id="active_real_plots_palette_name"
-                                                class="active-palette-label">Viridis
-                                                Scientific</span>
-                                            <button id="view_real_plots_palette_circle_btn"
-                                                class="view-palette-circle-btn palette-guide-button" type="button"
-                                                data-tooltip="View color guide circle for active palette">
-                                                View Color Circle
-                                            </button>
-                                        </span>
-                                        <div class="control-row">
-                                            <label class="compact-label nowrap-label">Mapped
-                                                To:</label>
-                                            <select id="real_plots_color_mode"
-                                                class="control-select compact-control-select compact-select-wide">
-                                                <option value="height" selected>Height (Value)</option>
-                                                <option value="phase">Phase (Argument)</option>
+                            <!-- Input Equations u(x,y) and v(x,y) side-by-side on the same line -->
+                                <div class="real-plots-uv-grid">
+                                    <div class="real-plots-uv-col">
+                                        <div class="control-row-between">
+                                            <label class="compact-label" for="real_plots_input_preset">u(x,y):</label>
+                                            <select id="real_plots_input_preset" class="control-select compact-control-select">
+                                                <option value="x" selected>x</option>
+                                                <option value="y">y</option>
+                                                <option value="x+y">x + y</option>
+                                                <option value="x-y">x - y</option>
+                                                <option value="x*y">x * y</option>
+                                                <option value="2x+y">2x + y</option>
+                                                <option value="custom">Custom...</option>
                                             </select>
                                         </div>
+                                        <!-- Custom Real Input -->
+                                        <div id="real_plots_custom_input_container" class="hidden compact-formula-stack">
+                                            <input type="text" id="real_plots_custom_input"
+                                                class="dynamic-formula-input compact-formula-input"
+                                                placeholder="e.g. sin(x)*cos(y)" value="x" spellcheck="false"
+                                                autocomplete="off">
+                                            <div id="real_plots_custom_input_math"
+                                                class="dynamic-math-display compact-formula-preview">
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div class="domain-palette-circles" id="real_plots_palette_circles">
-                                        <!-- Circles generated dynamically -->
+
+                                    <div class="real-plots-uv-col">
+                                        <div class="control-row-between">
+                                            <label class="compact-label" for="real_plots_imag_preset">v(x,y):</label>
+                                            <select id="real_plots_imag_preset" class="control-select compact-control-select">
+                                                <option value="y">y</option>
+                                                <option value="0" selected>0</option>
+                                                <option value="x">x</option>
+                                                <option value="x+y">x + y</option>
+                                                <option value="x-y">x - y</option>
+                                                <option value="x*y">x * y</option>
+                                                <option value="2x+y">2x + y</option>
+                                                <option value="custom">Custom...</option>
+                                            </select>
+                                        </div>
+                                        <!-- Custom Imag Input -->
+                                        <div id="real_plots_custom_imag_container" class="hidden compact-formula-stack">
+                                            <input type="text" id="real_plots_custom_imag"
+                                                class="dynamic-formula-input compact-formula-input"
+                                                placeholder="e.g. cos(x)*sin(y)" value="0" spellcheck="false"
+                                                autocomplete="off">
+                                            <div id="real_plots_custom_imag_math"
+                                                class="dynamic-math-display compact-formula-preview">
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div class="control-group">
-                                    <div class="value-row">
-                                        <label for="real_plots_height_scale_slider" class="compact-label">Height
-                                            Scale:</label>
-                                        <output id="real_plots_height_scale_value_display"
-                                            class="accent-value">1.00</output>
+                                <!-- Enhanced Color Palette & 3D Parameters (consistent with Domain Coloring UI) -->
+                                <div class="dependent-settings-block real-plots-palette-panel">
+                                    <div class="viz-settings-grid">
+                                        <div class="domain-palette-selector-container viz-control-span-2">
+                                            <div class="domain-palette-header">
+                                                <span class="domain-palette-selector-label domain-palette-label">
+                                                    <span>Color Palette:</span>
+                                                    <span id="active_real_plots_palette_name" class="active-palette-label">Viridis Scientific</span>
+                                                </span>
+                                                <div class="palette-header-actions">
+                                                    <select id="real_plots_color_mode" class="control-select compact-control-select" data-tooltip="Color mapped to Height (Value) or Phase (Argument)">
+                                                        <option value="height" selected>Height (Value)</option>
+                                                        <option value="phase">Phase (Argument)</option>
+                                                    </select>
+                                                    <button id="view_real_plots_palette_circle_btn" class="view-palette-circle-btn"
+                                                        type="button" data-tooltip="View color guide circle for active palette">
+                                                        View Color Circle
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="domain-palette-circles" id="real_plots_palette_circles">
+                                                <!-- Circles generated dynamically -->
+                                            </div>
+                                        </div>
+
+                                        <div class="control-group">
+                                            <label for="real_plots_brightness_slider" class="compact-text">
+                                                Brightness:
+                                                <output id="real_plots_brightness_value_display">0.50</output>
+                                            </label>
+                                            <div class="slider-container">
+                                                <input type="range" id="real_plots_brightness_slider" name="real_plots_brightness_slider"
+                                                    min="0.1" max="1.5" step="0.05" value="0.5"
+                                                    data-tooltip="Adjust overall brightness of the 3D real surface plot">
+                                            </div>
+                                        </div>
+
+                                        <div class="control-group">
+                                            <label for="real_plots_contrast_slider" class="compact-text">
+                                                Contrast:
+                                                <output id="real_plots_contrast_value_display">1.00</output>
+                                            </label>
+                                            <div class="slider-container">
+                                                <input type="range" id="real_plots_contrast_slider" name="real_plots_contrast_slider"
+                                                    min="0.5" max="2.0" step="0.05" value="1.0"
+                                                    data-tooltip="Adjust color contrast of the 3D real surface plot">
+                                            </div>
+                                        </div>
+
+                                        <div class="control-group">
+                                            <label for="real_plots_saturation_slider" class="compact-text">
+                                                Saturation:
+                                                <output id="real_plots_saturation_value_display">1.00</output>
+                                            </label>
+                                            <div class="slider-container">
+                                                <input type="range" id="real_plots_saturation_slider" name="real_plots_saturation_slider"
+                                                    min="0.0" max="2.0" step="0.05" value="1.0"
+                                                    data-tooltip="Adjust color saturation of the 3D real surface plot">
+                                            </div>
+                                        </div>
+
+                                        <div class="control-group">
+                                            <label for="real_plots_height_scale_slider" class="compact-text">
+                                                Height Scale:
+                                                <output id="real_plots_height_scale_value_display">1.00</output>
+                                            </label>
+                                            <div class="slider-container">
+                                                <input type="range" id="real_plots_height_scale_slider" name="real_plots_height_scale_slider"
+                                                    min="0.15" max="10.0" step="0.05" value="1.0"
+                                                    data-tooltip="Scale the vertical height of the 3D surface plot">
+                                            </div>
+                                        </div>
                                     </div>
-                                    <input type="range" id="real_plots_height_scale_slider" min="0.15" max="10.0"
-                                        step="0.05" value="1.0">
                                 </div>
 
                                 <div class="control-group spaced-control">
@@ -1134,16 +1174,6 @@
                             <span class="viz-feature-section-title">Surface & Projection</span>
                         </div>
                         <div class="viz-toggle-grid">
-                            <label for="enable_conformal_grid_cb" class="viz-toggle-card">
-                                <input type="checkbox" id="enable_conformal_grid_cb"
-                                    data-tooltip="Show matching source circles in z and locally mapped circles in w; spokes reveal the derivative rotation">
-                                <span class="custom-checkbox-visual"></span>
-                                <span class="viz-toggle-card-content">
-                                    <span class="viz-toggle-card-title">Conformal Grid</span>
-                                    <span class="viz-toggle-card-copy">Source circles and rotated, scaled local
-                                        images.</span>
-                                </span>
-                            </label>
                             <label for="enable_domain_coloring_cb" class="viz-toggle-card">
                                 <input type="checkbox" id="enable_domain_coloring_cb"
                                     data-tooltip="Toggle domain coloring visualization (color indicates argument, lightness indicates magnitude)">
@@ -1446,21 +1476,59 @@
                         <h2 class="section-title"><span id="z-plane-title">z-plane (Input:
                                 <code>z = a + ib</code>)</span></h2>
                         <div class="canvas-header-controls">
-                            <select id="input_shape_selector" class="canvas-shape-select"
-                                aria-label="Select input shape"
-                                data-tooltip="Select the input shape/grid to draw on the z-plane">
-                                <option value="empty_grid">Empty</option>
-                                <option value="grid_cartesian" selected>Grid (Cartesian)</option>
-                                <option value="grid_logcartesian">Cartesian-Log</option>
-                                <option value="grid_polar">Polar</option>
-                                <option value="grid_logpolar">Polar-Log</option>
-                                <option value="grid_dots">Dots</option>
-                                <option value="arbitrary">Arbitrary Shape</option>
-                                <option value="line">Lines</option>
-                                <option value="circle">Circle</option>
-                                <option value="media">Media</option>
-                                <option value="navigate">Navigate</option>
-                            </select>
+                            <div id="input_shape_picker" class="input-shape-picker">
+                                <select id="input_shape_selector" hidden aria-hidden="true" tabindex="-1">
+                                    <option value="empty_grid">Empty</option>
+                                    <option value="grid_cartesian" selected>Grid (Cartesian)</option>
+                                    <option value="grid_logcartesian">Cartesian-Log</option>
+                                    <option value="grid_polar">Polar</option>
+                                    <option value="grid_logpolar">Polar-Log</option>
+                                    <option value="grid_dots">Dots</option>
+                                    <option value="arbitrary">Arbitrary Shape</option>
+                                    <option value="line">Lines</option>
+                                    <option value="circle">Circle</option>
+                                    <option value="media">Media</option>
+                                    <option value="navigate">Navigate</option>
+                                    <option value="grid_rectilinear">Rectilinear Grid</option>
+                                    <option value="grid_nonorthogonal">Non-orthogonal Grid</option>
+                                    <option value="grid_triangular">Triangular Grid</option>
+                                    <option value="grid_curvilinear">Curvilinear Grid</option>
+                                    <option value="grid_spiral">Spiral Grid</option>
+                                    <option value="grid_irregular">Irregular-spaced Grid</option>
+                                </select>
+                                <button id="input_shape_picker_toggle" class="canvas-shape-select input-shape-picker-toggle"
+                                    type="button" aria-haspopup="menu" aria-expanded="false"
+                                    data-tooltip="Select the input shape/grid to draw on the z-plane">
+                                    <span data-input-shape-label>Grid (Cartesian)</span>
+                                </button>
+                                <div id="input_shape_menu" class="input-shape-menu" role="menu" aria-label="Input shape">
+                                    <button type="button" role="menuitem" data-input-shape="empty_grid">Empty</button>
+                                    <button type="button" role="menuitem" data-input-shape="grid_cartesian">Grid (Cartesian)</button>
+                                    <button type="button" role="menuitem" data-input-shape="grid_logcartesian">Cartesian-Log</button>
+                                    <button type="button" role="menuitem" data-input-shape="grid_polar">Polar</button>
+                                    <button type="button" role="menuitem" data-input-shape="grid_logpolar">Polar-Log</button>
+                                    <button type="button" role="menuitem" data-input-shape="grid_dots">Dots</button>
+                                    <button type="button" role="menuitem" data-input-shape="arbitrary">Arbitrary Shape</button>
+                                    <button type="button" role="menuitem" data-input-shape="line">Lines</button>
+                                    <button type="button" role="menuitem" data-input-shape="circle">Circle</button>
+                                    <button type="button" role="menuitem" data-input-shape="media">Media</button>
+                                    <button type="button" role="menuitem" data-input-shape="navigate">Navigate</button>
+                                    <div class="input-shape-more-item">
+                                        <button type="button" class="input-shape-more-toggle" aria-haspopup="menu">
+                                            <span>More</span><span aria-hidden="true">‹</span>
+                                        </button>
+                                        <div id="input_shape_more_menu" class="input-shape-more-menu" role="menu"
+                                            aria-label="More grids">
+                                            <button type="button" role="menuitem" data-input-shape="grid_rectilinear">Rectilinear Grid</button>
+                                            <button type="button" role="menuitem" data-input-shape="grid_nonorthogonal">Non-orthogonal Grid</button>
+                                            <button type="button" role="menuitem" data-input-shape="grid_triangular">Triangular Grid</button>
+                                            <button type="button" role="menuitem" data-input-shape="grid_curvilinear">Curvilinear Grid</button>
+                                            <button type="button" role="menuitem" data-input-shape="grid_spiral">Spiral Grid</button>
+                                            <button type="button" role="menuitem" data-input-shape="grid_irregular">Irregular-spaced Grid</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <button id="toggle_fullscreen_z_btn" class="icon-button canvas-icon-button" type="button"
                                 data-tooltip="Toggle fullscreen view for z-plane"
                                 aria-label="Toggle fullscreen view for z-plane">
@@ -1601,6 +1669,156 @@
                                             <option value="1" selected>1x</option>
                                             <option value="2">2x</option>
                                         </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Canvas Grid Tuning Overlay -->
+                        <div id="grid_shape_controls_overlay" class="canvas-grid-controls-overlay hidden"
+                            aria-label="Grid tuning controls" aria-hidden="true">
+                            <div class="canvas-grid-controls-header">
+                                <span data-grid-shape-title>Grid tuning</span>
+                                <span class="canvas-grid-controls-kicker">z-plane</span>
+                            </div>
+
+                            <div id="grid_rectilinear_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
+                                data-grid-shape-group="grid_rectilinear">
+                                <div class="control-group">
+                                    <label for="rectilinear_x_spacing_slider">X spacing:
+                                        <output id="rectilinear_x_spacing_value_display">1.00</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="rectilinear_x_spacing_slider" min="0.45" max="2.5"
+                                            step="0.05" value="1" data-tooltip="Adjust the horizontal cell spacing">
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="rectilinear_y_spacing_slider">Y spacing:
+                                        <output id="rectilinear_y_spacing_value_display">1.00</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="rectilinear_y_spacing_slider" min="0.45" max="2.5"
+                                            step="0.05" value="1" data-tooltip="Adjust the vertical cell spacing">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="grid_nonorthogonal_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
+                                data-grid-shape-group="grid_nonorthogonal">
+                                <div class="control-group">
+                                    <label for="nonorthogonal_angle_slider">Skew angle:
+                                        <output id="nonorthogonal_angle_value_display">28°</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="nonorthogonal_angle_slider" min="8" max="72"
+                                            step="1" value="28" data-tooltip="Adjust the angle between grid families">
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="nonorthogonal_spacing_slider">Cell spacing:
+                                        <output id="nonorthogonal_spacing_value_display">1.00</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="nonorthogonal_spacing_slider" min="0.55" max="2"
+                                            step="0.05" value="1" data-tooltip="Adjust the non-orthogonal cell size">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="grid_triangular_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
+                                data-grid-shape-group="grid_triangular">
+                                <div class="control-group">
+                                    <label for="triangular_size_slider">Triangle size:
+                                        <output id="triangular_size_value_display">1.00</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="triangular_size_slider" min="0.55" max="2"
+                                            step="0.05" value="1" data-tooltip="Adjust the triangular cell size">
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="triangular_rotation_slider">Rotation:
+                                        <output id="triangular_rotation_value_display">0°</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="triangular_rotation_slider" min="-30" max="30"
+                                            step="1" value="0" data-tooltip="Rotate the triangular lattice">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="grid_curvilinear_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
+                                data-grid-shape-group="grid_curvilinear">
+                                <div class="control-group">
+                                    <label for="curvilinear_bend_slider">Arc bend:
+                                        <output id="curvilinear_bend_value_display">0.65</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="curvilinear_bend_slider" min="0.15" max="1"
+                                            step="0.05" value="0.65" data-tooltip="Adjust the curvature of the grid arcs">
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="curvilinear_focus_slider">Focus offset:
+                                        <output id="curvilinear_focus_value_display">0.00</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="curvilinear_focus_slider" min="-1" max="1"
+                                            step="0.05" value="0" data-tooltip="Move the curvilinear focus left or right">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="grid_spiral_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
+                                data-grid-shape-group="grid_spiral">
+                                <div class="control-group">
+                                    <label for="spiral_turns_slider">Turns:
+                                        <output id="spiral_turns_value_display">2.5</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="spiral_turns_slider" min="0.5" max="5" step="0.1"
+                                            value="2.5" data-tooltip="Adjust the number of spiral turns">
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="spiral_tightness_slider">Tightness:
+                                        <output id="spiral_tightness_value_display">0.80</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="spiral_tightness_slider" min="0.2" max="1.5"
+                                            step="0.05" value="0.8" data-tooltip="Adjust how tightly the spiral winds">
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="spiral_arms_slider">Arms:
+                                        <output id="spiral_arms_value_display">2</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="spiral_arms_slider" min="1" max="6" step="1" value="2"
+                                            data-tooltip="Adjust the number of interlaced spiral arms">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="grid_irregular_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
+                                data-grid-shape-group="grid_irregular">
+                                <div class="control-group">
+                                    <label for="irregular_variation_slider">Spacing variation:
+                                        <output id="irregular_variation_value_display">0.35</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="irregular_variation_slider" min="0" max="0.8"
+                                            step="0.05" value="0.35" data-tooltip="Adjust the amount of irregular spacing">
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label for="irregular_clustering_slider">Clustering:
+                                        <output id="irregular_clustering_value_display">0.00</output>
+                                    </label>
+                                    <div class="slider-container">
+                                        <input type="range" id="irregular_clustering_slider" min="-1" max="1"
+                                            step="0.05" value="0" data-tooltip="Bias the spacing toward clustered bands">
                                     </div>
                                 </div>
                             </div>

@@ -643,10 +643,13 @@ function realPlotSurfaceKey() {
     requireVisibleViewport(zPlaneParams, 'Real-plot viewport');
     const xRange = zPlaneParams.currentVisXRange;
     const yRange = zPlaneParams.currentVisYRange;
+    const funcKey = state.algebraicChainingEnabled ? 'algebraic_chaining' : state.currentFunction;
     return [
-        buildMappedTransformProfileKey(state.currentFunction),
+        buildMappedTransformProfileKey(funcKey),
         buildMappedTransformProfileKey('mobius'),
         buildMappedTransformProfileKey('polynomial'),
+        buildMappedTransformProfileKey('algebraic_chaining'),
+        state.algebraicChainingEnabled ? 1 : 0,
         state.chainingEnabled ? 1 : 0,
         state.chainCount,
         state.chainingMode,
@@ -660,6 +663,9 @@ function realPlotSurfaceKey() {
         state.realPlotsImagExpr,
         state.realPlotsOutputComponent,
         state.surfacePalette,
+        state.realPlotsBrightness ?? 0.5,
+        state.realPlotsContrast ?? 1.0,
+        state.realPlotsSaturation ?? 1.0,
         state.realPlotsColorMode,
         state.realPlotsHeightScale,
         xRange[0],
@@ -679,10 +685,16 @@ function resolveRealPlotDefinition(options) {
     const imagExpr = options.imagExpr ?? state.realPlotsImagExpr;
     const inputUPreset = presetType(inputExpr);
     const inputVPreset = presetType(imagExpr);
-    const activeMap = getMappedTransformProfile(state.currentFunction);
+    const funcKey = options.mapOptions?.functionKey ?? (state.algebraicChainingEnabled ? 'algebraic_chaining' : state.currentFunction);
+    const activeMap = getMappedTransformProfile(funcKey);
     return {
         mapOptions: nativeMapOptions(state, {
             ...activeMap.nativeMapOptions,
+            functionKey: funcKey,
+            chainingEnabled: Boolean(state.chainingEnabled),
+            chainCount: state.chainingEnabled ? (state.chainCount || 1) : 1,
+            chainingMode: state.chainingMode || 'recursion',
+            chainSeed: state.chainSeed || { re: 0, im: 0 },
             ...options.mapOptions
         }),
         xRange: options.xRange ?? zPlaneParams.currentVisXRange,
@@ -692,7 +704,11 @@ function resolveRealPlotDefinition(options) {
         inputUProgram: expressionProgram(inputExpr, inputUPreset),
         inputVProgram: expressionProgram(imagExpr, inputVPreset),
         component: outputComponentMode(options.outputComponent ?? state.realPlotsOutputComponent),
-        palette: paletteLutFor(options.palette ?? state.surfacePalette)
+        palette: paletteLutFor(options.palette ?? state.surfacePalette, {
+            brightness: options.brightness ?? state.realPlotsBrightness ?? 0.5,
+            contrast: options.contrast ?? state.realPlotsContrast ?? 1.0,
+            saturation: options.saturation ?? state.realPlotsSaturation ?? 1.0
+        })
     };
 }
 

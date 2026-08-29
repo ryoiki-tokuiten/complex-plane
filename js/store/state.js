@@ -5,6 +5,7 @@ import {
     DEFAULT_CANVAS_WIDTH,
     DEFAULT_CANVAS_HEIGHT
 } from '../constants/rendering.js';
+import { GRID_SHAPE_DEFAULTS } from '../constants/grid-shapes.js';
 
 export const zPlaneInitialRanges = { x: [-3.5, 3.5], y: [-3.0, 3.0] };
 export const wPlaneInitialRanges = { x: [-6.5, 6.5], y: [-6.5, 6.5] };
@@ -76,6 +77,9 @@ const rawState = {
     domainColoringEnabled: false,
     domainColoringKeyVisible: false,
     gridDensity: 15,
+    gridParameters: Object.fromEntries(
+        Object.entries(GRID_SHAPE_DEFAULTS).map(([shape, parameters]) => [shape, { ...parameters }])
+    ),
     riemannSurfaceResolution: 50,
     showZerosPoles: false,
     showCriticalPoints: false,
@@ -242,6 +246,9 @@ const rawState = {
     surfacePalette: 'viridis',
     realPlotsColorMode: 'height',
     realPlotsHeightScale: 1.0,
+    realPlotsBrightness: 0.5,
+    realPlotsContrast: 1.0,
+    realPlotsSaturation: 1.0,
     isRealPlotsFullScreen: false,
     graphViewEnabled: false,
     graphSelectedShape: '',

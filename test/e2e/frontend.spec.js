@@ -251,9 +251,14 @@ test('panels automatically move right or bottom in cascading fashion when anothe
     expect(displacementResult.verticalRes.wTop).toBeGreaterThanOrEqual(672);
 });
 
-test('grid selector order matches specification and custom context menus function', async ({ page }) => {
-    const options = await page.locator('#input_shape_selector option').allInnerTexts();
-    expect(options).toEqual([
+test('grid selector keeps extended grids in its More submenu and custom context menus function', async ({ page }) => {
+    await page.locator('#input_shape_picker_toggle').click();
+    await expect(page.locator('#input_shape_menu')).toBeVisible();
+    await expect(page.locator('#input_shape_picker_toggle > [aria-hidden="true"]')).toHaveCount(0);
+    const mainItems = await page.locator(
+        '#input_shape_menu > button, #input_shape_menu > .input-shape-more-item > button'
+    ).evaluateAll(buttons => buttons.map(button => button.textContent.replace(/\s+/g, ' ').trim()));
+    expect(mainItems).toEqual([
         'Empty',
         'Grid (Cartesian)',
         'Cartesian-Log',
@@ -264,8 +269,60 @@ test('grid selector order matches specification and custom context menus functio
         'Lines',
         'Circle',
         'Media',
-        'Navigate'
+        'Navigate',
+        'More‹'
     ]);
+    const moreItem = page.locator('.input-shape-more-item');
+    const moreMenu = page.locator('#input_shape_more_menu');
+    await moreItem.hover();
+    await expect(moreMenu).toBeVisible();
+    expect(await page.locator('#input_shape_more_menu [data-input-shape]').allInnerTexts()).toEqual([
+        'Rectilinear Grid',
+        'Non-orthogonal Grid',
+        'Triangular Grid',
+        'Curvilinear Grid',
+        'Spiral Grid',
+        'Irregular-spaced Grid'
+    ]);
+    const moreItemBox = await moreItem.boundingBox();
+    const moreMenuBox = await moreMenu.boundingBox();
+    expect(moreItemBox.x - (moreMenuBox.x + moreMenuBox.width)).toBeGreaterThanOrEqual(8);
+    await page.mouse.move(
+        moreMenuBox.x + moreMenuBox.width - 2,
+        moreItemBox.y + moreItemBox.height / 2,
+        { steps: 12 }
+    );
+    await expect(moreMenu).toBeVisible();
+    await page.locator('#input_shape_more_menu [data-input-shape="grid_triangular"]').click();
+    await expect(page.locator('#grid_shape_controls_overlay')).not.toHaveClass(/hidden/);
+    await expect(page.locator('#grid_triangular_controls')).not.toHaveClass(/hidden/);
+    await expect(page.locator('#input_shape_selector')).toHaveValue('grid_triangular');
+    await expect(page.locator('[data-input-shape-label]')).toHaveText('Triangular Grid');
+
+    await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        state.vectorFieldEnabled = true;
+    });
+    await expect(page.locator('#grid_shape_controls_overlay')).toHaveAttribute('data-position', 'bottom-left');
+    const canvasBox = await page.locator('#z_plane_canvas').boundingBox();
+    await page.mouse.move(canvasBox.x + 80, canvasBox.y + 80);
+    await expect(page.locator('#z_plane_probe_info')).toBeVisible();
+    await expect(page.locator('#grid_shape_controls_overlay')).toHaveAttribute('data-position', 'bottom-left');
+
+    await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        state.radialDiscreteStepsEnabled = true;
+    });
+    await expect(page.locator('#grid_shape_controls_overlay')).toHaveAttribute('data-position', 'top-left');
+    const overlaysDoNotOverlap = await page.evaluate(() => {
+        const panel = document.getElementById('grid_shape_controls_overlay').getBoundingClientRect();
+        return ['vector_flow_canvas_overlay', 'radial_discrete_steps_options_div'].every(id => {
+            const rect = document.getElementById(id).getBoundingClientRect();
+            return panel.right <= rect.left || panel.left >= rect.right ||
+                panel.bottom <= rect.top || panel.top >= rect.bottom;
+        });
+    });
+    expect(overlaysDoNotOverlap).toBe(true);
     await expect(page.locator('#ellipse_params_slider_group')).toHaveCount(0);
 
     // 1. Z-plane right click
@@ -283,12 +340,29 @@ test('grid selector order matches specification and custom context menus functio
     await expect(zMenu.locator('.plane-context-menu-item:has-text("Taylor Series")')).toHaveCount(0);
 
     // Hover Analysis and toggle zeroes & poles in submenu
-    await zMenu.locator('.plane-context-menu-item:has-text("Analysis")').hover();
+    const analysisItem = zMenu.locator('.plane-context-menu-item:has-text("Analysis")');
+    await analysisItem.hover();
     const subMenu = page.locator('#plane_context_submenu');
     await expect(subMenu).toBeVisible();
     await expect(subMenu.locator('.plane-context-menu-item:has-text("Show zeroes & poles")')).toBeVisible();
     await expect(subMenu.locator('.plane-context-menu-item:has-text("Show critical points")')).toBeVisible();
     await expect(subMenu.locator('.plane-context-menu-item:has-text("Cauchy Integral")')).toBeVisible();
+    await expect(subMenu.locator('.plane-context-menu-item:has-text("Conformal Grid")')).toBeVisible();
+
+    const analysisBox = await analysisItem.boundingBox();
+    const contextSubmenuBox = await subMenu.boundingBox();
+    const submenuOpensRight = contextSubmenuBox.x > analysisBox.x;
+    const submenuGap = submenuOpensRight
+        ? contextSubmenuBox.x - (analysisBox.x + analysisBox.width)
+        : analysisBox.x - (contextSubmenuBox.x + contextSubmenuBox.width);
+    expect(submenuGap).toBeGreaterThanOrEqual(8);
+    await expect(page.locator('#plane_context_submenu_bridge')).toBeVisible();
+    await page.mouse.move(
+        submenuOpensRight ? contextSubmenuBox.x + 2 : contextSubmenuBox.x + contextSubmenuBox.width - 2,
+        analysisBox.y + analysisBox.height / 2,
+        { steps: 12 }
+    );
+    await expect(subMenu).toBeVisible();
 
     await subMenu.locator('.plane-context-menu-item:has-text("Show zeroes & poles")').click();
     await expect(zMenu).toBeHidden();
@@ -335,6 +409,28 @@ test('grid selector order matches specification and custom context menus functio
     await expect(page.locator('#plane_context_submenu #taylor_series_order_slider')).toBeVisible();
     await expect(page.locator('#plane_context_submenu #taylor_complex_points_ui_container')).toBeVisible();
     await expect(page.locator('#plane_context_submenu #pick_taylor_center_canvas_btn')).toBeVisible();
+});
+
+test('graph submenu actions enable their prerequisites without a parent click', async ({ page }) => {
+    await page.locator('#w_plane_canvas_wrapper').click({ button: 'right' });
+    const graphMenuItem = page.locator('#plane_context_menu .plane-context-menu-item:has-text("View Graph")');
+    await graphMenuItem.hover();
+    const lockLayer = page.locator('#plane_context_submenu #lock_layer_sub');
+    await expect(lockLayer).toBeVisible();
+    await expect(lockLayer).toBeEnabled();
+    await lockLayer.click();
+
+    await expect(page.locator('#graph_column')).toBeVisible();
+    await expect(page.locator('#graph_title_label')).toHaveText('Locked Layer Perspective');
+    const graphState = await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        return {
+            view: state.graphViewEnabled,
+            fullGrid: state.graphFullGridEnabled,
+            locked: state.graphLayerLockEnabled
+        };
+    });
+    expect(graphState).toEqual({ view: true, fullGrid: true, locked: true });
 });
 
 test('full-grid and graph Fourier modes reuse the unified transform hub', async ({ page }) => {

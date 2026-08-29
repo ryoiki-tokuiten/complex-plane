@@ -28,3 +28,22 @@ export function updatePlaneViewportRanges(planeParams) {
     targetRangeY[0] = (origin.y - height) / scale.y;    
     targetRangeY[1] = (origin.y - 0) / scale.y;         
 }
+
+export function setPlaneViewport(planeParams, xRange, yRange) {
+    const xSpan = Math.max(1e-6, xRange[1] - xRange[0]);
+    const ySpan = Math.max(1e-6, yRange[1] - yRange[0]);
+    const scale = Math.min(planeParams.width / xSpan, planeParams.height / ySpan);
+    const centerX = (xRange[0] + xRange[1]) * 0.5;
+    const centerY = (yRange[0] + yRange[1]) * 0.5;
+    const targetXRange = planeParams.currentVisXRange;
+    const targetYRange = planeParams.currentVisYRange;
+
+    targetXRange[0] = xRange[0];
+    targetXRange[1] = xRange[1];
+    targetYRange[0] = yRange[0];
+    targetYRange[1] = yRange[1];
+    planeParams.scale.x = planeParams.scale.y = scale;
+    planeParams.origin.x = planeParams.width * 0.5 - centerX * scale;
+    planeParams.origin.y = planeParams.height * 0.5 + centerY * scale;
+    updatePlaneViewportRanges(planeParams);
+}

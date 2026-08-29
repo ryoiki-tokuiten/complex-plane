@@ -71,10 +71,49 @@ const PALETTE_LUTS = Object.freeze(Object.fromEntries(
     SURFACE_PALETTES.map(palette => [palette.id, createPaletteLut(palette.colors)])
 ));
 
-export function paletteLutFor(name) {
-    const palette = PALETTE_LUTS[name];
-    if (!palette) throw new Error(`Unsupported surface palette: ${name}.`);
-    return palette;
+export function paletteLutFor(name, options = null) {
+    const basePalette = PALETTE_LUTS[name];
+    if (!basePalette) throw new Error(`Unsupported surface palette: ${name}.`);
+    if (!options) return basePalette;
+
+    const brightness = Number.isFinite(options.brightness) ? Math.max(0.1, Math.min(3.0, options.brightness)) : 1.0;
+    const contrast = Number.isFinite(options.contrast) ? Math.max(0.1, Math.min(3.0, options.contrast)) : 1.0;
+    const saturation = Number.isFinite(options.saturation) ? Math.max(0.0, Math.min(3.0, options.saturation)) : 1.0;
+
+    if (brightness === 1.0 && contrast === 1.0 && saturation === 1.0) {
+        return basePalette;
+    }
+
+    const lut = new Float32Array(basePalette.length);
+    for (let i = 0; i < basePalette.length; i += 3) {
+        let r = basePalette[i];
+        let g = basePalette[i + 1];
+        let b = basePalette[i + 2];
+
+        if (saturation !== 1.0) {
+            const gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            r = gray + (r - gray) * saturation;
+            g = gray + (g - gray) * saturation;
+            b = gray + (b - gray) * saturation;
+        }
+
+        if (contrast !== 1.0) {
+            r = (r - 0.5) * contrast + 0.5;
+            g = (g - 0.5) * contrast + 0.5;
+            b = (b - 0.5) * contrast + 0.5;
+        }
+
+        if (brightness !== 1.0) {
+            r *= brightness;
+            g *= brightness;
+            b *= brightness;
+        }
+
+        lut[i] = Math.max(0, Math.min(1, r));
+        lut[i + 1] = Math.max(0, Math.min(1, g));
+        lut[i + 2] = Math.max(0, Math.min(1, b));
+    }
+    return lut;
 }
 
 export function paletteColor(lut, ratio, target, offset) {

@@ -5,8 +5,10 @@ import {
     syncManifoldTransformationUI,
     syncTransformControlPanels,
     syncTaylorControls,
-    syncVectorFlowControls
+    syncVectorFlowControls,
+    fitConformalGridOutputViewport
 } from './ui-updates.js';
+import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
 import { updateChainingTitles, downloadCanvasImage, setupVisualParameters, formatTaylorNumericValue } from '../utils/dom-utils.js';
 import {
     isGraphViewSupported,
@@ -21,8 +23,20 @@ import { updateDynamicPlotting } from './dynamic-plotting-ui.js';
 
 let menuElement = null;
 let submenuElement = null;
+let submenuBridgeElement = null;
 let isMenuOpen = false;
 let submenuCloseTimer = null;
+const SUBMENU_CLOSE_DELAY_MS = 350;
+
+function cancelSubmenuClose() {
+    if (submenuCloseTimer) clearTimeout(submenuCloseTimer);
+    submenuCloseTimer = null;
+}
+
+function scheduleSubmenuClose() {
+    cancelSubmenuClose();
+    submenuCloseTimer = setTimeout(hideSubmenu, SUBMENU_CLOSE_DELAY_MS);
+}
 
 function getOrCreateMenuElement() {
     if (menuElement && document.body.contains(menuElement)) {
@@ -46,24 +60,27 @@ function getOrCreateSubmenuElement() {
     submenuElement.setAttribute('role', 'menu');
     document.body.appendChild(submenuElement);
 
-    submenuElement.addEventListener('mouseenter', () => {
-        if (submenuCloseTimer) {
-            clearTimeout(submenuCloseTimer);
-            submenuCloseTimer = null;
-        }
-    });
-
-    submenuElement.addEventListener('mouseleave', () => {
-        submenuCloseTimer = setTimeout(() => {
-            hideSubmenu();
-        }, 220);
-    });
+    submenuElement.addEventListener('mouseenter', cancelSubmenuClose);
+    submenuElement.addEventListener('mouseleave', scheduleSubmenuClose);
 
     ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
         submenuElement.addEventListener(evt, e => e.stopPropagation());
     });
 
     return submenuElement;
+}
+
+function getOrCreateSubmenuBridgeElement() {
+    if (submenuBridgeElement && document.body.contains(submenuBridgeElement)) {
+        return submenuBridgeElement;
+    }
+    submenuBridgeElement = document.createElement('div');
+    submenuBridgeElement.id = 'plane_context_submenu_bridge';
+    submenuBridgeElement.className = 'plane-context-submenu-bridge hidden';
+    submenuBridgeElement.addEventListener('mouseenter', cancelSubmenuClose);
+    submenuBridgeElement.addEventListener('mouseleave', scheduleSubmenuClose);
+    document.body.appendChild(submenuBridgeElement);
+    return submenuBridgeElement;
 }
 
 function restoreStagedPanels() {
@@ -75,15 +92,13 @@ function restoreStagedPanels() {
 }
 
 function hideSubmenu() {
-    if (submenuCloseTimer) {
-        clearTimeout(submenuCloseTimer);
-        submenuCloseTimer = null;
-    }
+    cancelSubmenuClose();
     restoreStagedPanels();
     if (submenuElement) {
         submenuElement.classList.add('hidden');
         submenuElement.innerHTML = '';
     }
+    submenuBridgeElement?.classList.add('hidden');
 }
 
 export function hidePlaneContextMenu() {
@@ -185,6 +200,17 @@ function toggleLockLayer() {
     syncGridDensityControls();
     syncTransformControlPanels();
     requestUiRedraw();
+}
+
+function ensureGraphViewEnabled() {
+    if (!state.graphViewEnabled) toggleGraphView();
+    return state.graphViewEnabled;
+}
+
+function ensureFullGridEnabled() {
+    if (!ensureGraphViewEnabled()) return false;
+    if (!state.graphFullGridEnabled) toggleFullGrid();
+    return state.graphFullGridEnabled;
 }
 
 function getTaylorSubmenuItems() {
@@ -308,6 +334,26 @@ function getZPlaneMenuItems() {
                     onClick: () => {
                         state.cauchyIntegralModeEnabled = !state.cauchyIntegralModeEnabled;
                         syncParameterControlsPanelVisibility();
+                        requestUiRedraw();
+                    }
+                },
+                {
+                    id: 'conformal_grid',
+                    label: 'Conformal Grid',
+                    type: 'checkbox',
+                    checked: Boolean(state.conformalGridEnabled),
+                    onClick: () => {
+                        state.conformalGridEnabled = !state.conformalGridEnabled;
+                        if (state.conformalGridEnabled) {
+                            if (state.currentInputShape === 'video' && state.videoIsPlaying) {
+                                pauseUploadedVideoPlayback();
+                            }
+                            state.currentInputShape = 'empty_grid';
+                            if (context.controls?.inputShapeSelector) {
+                                context.controls.inputShapeSelector.value = 'empty_grid';
+                            }
+                            fitConformalGridOutputViewport();
+                        }
                         requestUiRedraw();
                     }
                 }
@@ -478,9 +524,9 @@ function getWPlaneMenuItems() {
                     label: 'Full Grid Perspective',
                     type: 'checkbox',
                     checked: Boolean(state.graphFullGridEnabled),
-                    disabled: !state.graphViewEnabled || !fullGridSupported,
+                    disabled: !fullGridSupported,
                     onClick: () => {
-                        toggleFullGrid();
+                        if (ensureGraphViewEnabled()) toggleFullGrid();
                     }
                 },
                 {
@@ -488,9 +534,11 @@ function getWPlaneMenuItems() {
                     label: 'Lock Layer',
                     type: 'checkbox',
                     checked: Boolean(state.graphLayerLockEnabled),
-                    disabled: !state.graphViewEnabled || !state.graphFullGridEnabled,
+                    disabled: !fullGridSupported,
                     onClick: () => {
-                        toggleLockLayer();
+                        if (state.graphLayerLockEnabled || ensureFullGridEnabled()) {
+                            toggleLockLayer();
+                        }
                     }
                 }
             ],
@@ -602,6 +650,18 @@ function renderSubmenu(parentBtn, children) {
 
     sub.style.left = `${subX}px`;
     sub.style.top = `${subY}px`;
+
+    const opensRight = subX >= parentRect.right;
+    const gapLeft = opensRight ? parentRect.right : subX + subRect.width;
+    const gapRight = opensRight ? subX : parentRect.left;
+    const gapTop = Math.min(parentRect.top, subY);
+    const gapBottom = Math.max(parentRect.bottom, subY + subRect.height);
+    const bridge = getOrCreateSubmenuBridgeElement();
+    bridge.style.left = `${gapLeft}px`;
+    bridge.style.top = `${gapTop}px`;
+    bridge.style.width = `${Math.max(0, gapRight - gapLeft)}px`;
+    bridge.style.height = `${Math.max(0, gapBottom - gapTop)}px`;
+    bridge.classList.toggle('hidden', gapRight <= gapLeft);
 }
 
 function renderMenu(items, x, y) {
@@ -668,18 +728,11 @@ function renderMenu(items, x, y) {
             btn._getSubmenuItems = getChildren;
 
             btn.addEventListener('mouseenter', () => {
-                if (submenuCloseTimer) {
-                    clearTimeout(submenuCloseTimer);
-                    submenuCloseTimer = null;
-                }
+                cancelSubmenuClose();
                 renderSubmenu(btn, getChildren());
             });
 
-            btn.addEventListener('mouseleave', () => {
-                submenuCloseTimer = setTimeout(() => {
-                    hideSubmenu();
-                }, 220);
-            });
+            btn.addEventListener('mouseleave', scheduleSubmenuClose);
 
             btn.addEventListener('click', event => {
                 event.stopPropagation();

@@ -452,6 +452,21 @@ main {
     background: color-mix(in srgb, var(--bg-color) 40%, var(--card-bg-color));
 }
 
+.real-plots-uv-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem 1rem;
+    align-items: start;
+    margin-bottom: 0.5rem;
+}
+
+.real-plots-uv-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
 .viz-settings-grid,
 .vector-settings-grid {
     display: grid;
@@ -1064,6 +1079,88 @@ main {
 
     flex-shrink: 0;
 
+}
+
+.input-shape-picker {
+    position: relative;
+    z-index: 20;
+}
+
+.input-shape-picker-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    text-align: left;
+    cursor: pointer;
+}
+
+.input-shape-menu,
+.input-shape-more-menu {
+    position: absolute;
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 220px;
+    padding: 5px;
+    border: 1px solid color-mix(in srgb, var(--accent-purple) 34%, var(--border-color));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--card-bg-color) 94%, black);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.48);
+}
+
+.input-shape-menu {
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 100;
+}
+
+.input-shape-picker.is-open > .input-shape-menu {
+    display: flex;
+}
+
+.input-shape-menu button,
+.input-shape-more-menu button {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-color);
+    font-size: 0.75rem;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.input-shape-menu button:hover,
+.input-shape-menu button:focus-visible,
+.input-shape-menu button.active,
+.input-shape-more-menu button:hover,
+.input-shape-more-menu button:focus-visible,
+.input-shape-more-menu button.active {
+    background: color-mix(in srgb, var(--accent-purple) 18%, transparent);
+    outline: none;
+}
+
+.input-shape-more-item {
+    position: relative;
+}
+
+.input-shape-more-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.input-shape-more-menu {
+    right: calc(100% + 10px);
+    bottom: 0;
+}
+
+.input-shape-more-item:hover > .input-shape-more-menu,
+.input-shape-more-item:focus-within > .input-shape-more-menu,
+.input-shape-more-item.is-open > .input-shape-more-menu {
+    display: flex;
 }
 
 .canvas-header-controls label {
@@ -4860,6 +4957,7 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
 .arbitrary-shape-close-control { margin-top: 0.75rem; }
 
 .domain-palette-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; gap: 0.5rem; }
+.palette-header-actions { display: flex; align-items: center; gap: 0.5rem; }
 .domain-palette-label { justify-content: flex-start; gap: 0.5rem; margin: 0; }
 .auxiliary-surface-column { display: flex; flex-direction: column; }
 .canvas-fill-host { position: relative; display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
@@ -4984,6 +5082,12 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     z-index: 10001;
 }
 
+.plane-context-submenu-bridge {
+    position: fixed;
+    z-index: 10000;
+    background: transparent;
+}
+
 .panel-snap-indicator {
     position: absolute;
     pointer-events: none;
@@ -5103,6 +5207,110 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     cursor: pointer;
 }
 
+/* Canvas Grid Tuning Overlay */
+.canvas-grid-controls-overlay {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 86;
+    width: 245px;
+    height: fit-content;
+    max-width: calc(100% - 16px);
+    max-height: calc(100% - 16px);
+    overflow-y: auto;
+    background: rgba(8, 10, 20, 0.55);
+    backdrop-filter: blur(32px) saturate(180%);
+    -webkit-backdrop-filter: blur(32px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 7px 10px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    pointer-events: auto;
+    font-size: 0.72rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(167, 139, 250, 0.45) transparent;
+}
+
+.canvas-grid-controls-overlay[data-position="bottom-left"] {
+    left: 8px;
+    right: auto;
+}
+
+.canvas-grid-controls-overlay[data-position="top-left"] {
+    top: 8px;
+    left: 8px;
+    right: auto;
+    bottom: auto;
+}
+
+.canvas-grid-controls-overlay.hidden,
+.grid-tuning-group.hidden {
+    display: none !important;
+}
+
+.canvas-grid-controls-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-color, #e2e8f0);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.canvas-grid-controls-kicker {
+    color: var(--text-secondary-color, #94a3b8);
+    font-size: 0.62rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.canvas-grid-controls-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+}
+
+.canvas-grid-controls-overlay .control-group {
+    margin-bottom: 0;
+    gap: 3px;
+}
+
+.canvas-grid-controls-overlay label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1px;
+    color: var(--text-color, #e2e8f0);
+    font-size: 0.69rem;
+    font-weight: 500;
+}
+
+.canvas-grid-controls-overlay label output {
+    color: var(--accent-purple, #a78bfa);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.67rem;
+    font-weight: 600;
+}
+
+.canvas-grid-controls-overlay .slider-container {
+    display: flex;
+    align-items: center;
+}
+
+.canvas-grid-controls-overlay input[type="range"] {
+    width: 100%;
+    height: 4px;
+}
+
 /* Canvas Radial Discrete Steps Overlay */
 .canvas-radial-steps-overlay {
     position: absolute;
@@ -5161,15 +5369,6 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     scrollbar-width: thin;
     scrollbar-color: rgba(167, 139, 250, 0.4) rgba(15, 18, 28, 0.4);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.35);
-}
-
-.plane-context-submenu::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -14px;
-    width: 14px;
 }
 
 .plane-context-submenu::-webkit-scrollbar {
@@ -5453,5 +5652,3 @@ body.vertical-layout #controls_options_section .vector-settings-grid {
     color: #cbd5e1;
     text-align: right;
 }
-
-

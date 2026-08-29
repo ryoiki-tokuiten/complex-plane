@@ -1,7 +1,7 @@
-import { state, context, sliderParamKeys } from '../store/state.js';
+import { state, context, sliderParamKeys, zPlaneParams, wPlaneParams, wPlaneInitialRanges } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { resolveActiveMap } from '../math/active-map.js';
-import { DEFAULT_TAYLOR_SERIES_CENTER, CRITICAL_POINT_EPSILON } from '../constants/numerical.js';
+import { DEFAULT_TAYLOR_SERIES_CENTER, CRITICAL_POINT_EPSILON, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
 import {
     ORBIT_COLORING_MODE_LABELS,
     normalizeOrbitColoringMode
@@ -24,8 +24,39 @@ import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import { isFullGridPerspectiveSupported, isGraphViewSupported } from '../rendering/transformation-graph.js';
 import { getManifold } from '../rendering/manifold-registry.js';
 import { requireFiniteComplex, requireFiniteNumber, finiteComplex } from '../utils/numeric-contracts.js';
+import { syncGridShapeControls } from './grid-shape-controls.js';
+import { generateTissotIndicatrices, selectStableTissotIndicatrices, getTissotViewportBounds } from '../analysis/tissot.js';
+import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
+import { setPlaneViewport } from '../utils/canvas-utils.js';
 
 const { controls = {} } = context;
+
+export function fitConformalGridOutputViewport() {
+    const indicatrices = selectStableTissotIndicatrices(generateTissotIndicatrices(
+        nativeOptionsForActiveMap(resolveActiveMap()),
+        zPlaneParams.currentVisXRange,
+        zPlaneParams.currentVisYRange,
+        state.gridDensity,
+        72
+    ));
+    const bounds = getTissotViewportBounds(indicatrices);
+    if (!bounds) return;
+
+    setPlaneViewport(wPlaneParams, bounds.xRange, bounds.yRange);
+
+    const span = Math.max(
+        bounds.xRange[1] - bounds.xRange[0],
+        bounds.yRange[1] - bounds.yRange[0]
+    );
+    const initialSpan = Math.max(
+        wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0],
+        wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0]
+    );
+    state.wPlaneZoom = Math.min(Math.max(initialSpan / span, MIN_STATE_ZOOM_LEVEL), MAX_STATE_ZOOM_LEVEL);
+    if (controls.wPlaneZoomSlider) {
+        controls.wPlaneZoomSlider.value = String(Math.log10(state.wPlaneZoom));
+    }
+}
 
 const HIDDEN_CLASS = 'hidden';
 const VISUALLY_HIDDEN_CLASS = 'hidden-visually';
@@ -68,6 +99,12 @@ const INPUT_SHAPE_TITLE_SUFFIX = Object.freeze({
     grid_logpolar: ': Log-Polar Grid',
     grid_logcartesian: ': Log-Cartesian Grid',
     grid_dots: ': Dots',
+    grid_rectilinear: ': Rectilinear Grid',
+    grid_nonorthogonal: ': Non-orthogonal Grid',
+    grid_triangular: ': Triangular Grid',
+    grid_curvilinear: ': Curvilinear Grid',
+    grid_spiral: ': Spiral Grid',
+    grid_irregular: ': Irregular-spaced Grid',
     arbitrary: ': Arbitrary Shape',
     media: ': Media',
     image: ': Image',
@@ -429,7 +466,7 @@ function syncFractionalPowerDisplays() {
     setText('fractionalPowerNValueDisplay', rendered ?? '0.50');
 }
 
-function syncComplexParameterControls() {
+export function syncComplexParameterControls() {
     if (state.laplaceModeEnabled) {
         return;
     }
@@ -1478,6 +1515,7 @@ export function updateTitlesAndGlobalUI() {
 
         if (syncTransformModeTitles()) {
             sync2DContourUI();
+            syncGridShapeControls();
             return;
         }
 
@@ -1485,6 +1523,7 @@ export function updateTitlesAndGlobalUI() {
         syncVisualizationOptionControls();
         syncManifoldTransformationUI();
         sync2DContourUI();
+        syncGridShapeControls();
     });
 }
 
@@ -1634,12 +1673,39 @@ export function syncRealPlotsUI() {
         outputCompEl.value = state.realPlotsOutputComponent;
     }
 
+    const brightnessSlider = document.getElementById('real_plots_brightness_slider');
+    const brightnessDisplay = document.getElementById('real_plots_brightness_value_display');
+    if (brightnessSlider && state.realPlotsBrightness !== undefined) {
+        brightnessSlider.value = String(state.realPlotsBrightness);
+        if (brightnessDisplay) {
+            brightnessDisplay.textContent = Number(state.realPlotsBrightness).toFixed(2);
+        }
+    }
+
+    const contrastSlider = document.getElementById('real_plots_contrast_slider');
+    const contrastDisplay = document.getElementById('real_plots_contrast_value_display');
+    if (contrastSlider && state.realPlotsContrast !== undefined) {
+        contrastSlider.value = String(state.realPlotsContrast);
+        if (contrastDisplay) {
+            contrastDisplay.textContent = Number(state.realPlotsContrast).toFixed(2);
+        }
+    }
+
+    const saturationSlider = document.getElementById('real_plots_saturation_slider');
+    const saturationDisplay = document.getElementById('real_plots_saturation_value_display');
+    if (saturationSlider && state.realPlotsSaturation !== undefined) {
+        saturationSlider.value = String(state.realPlotsSaturation);
+        if (saturationDisplay) {
+            saturationDisplay.textContent = Number(state.realPlotsSaturation).toFixed(2);
+        }
+    }
+
     const heightScaleSlider = document.getElementById('real_plots_height_scale_slider');
     const heightScaleDisplay = document.getElementById('real_plots_height_scale_value_display');
     if (heightScaleSlider && state.realPlotsHeightScale !== undefined) {
         heightScaleSlider.value = String(state.realPlotsHeightScale);
         if (heightScaleDisplay) {
-            heightScaleDisplay.textContent = state.realPlotsHeightScale.toFixed(2);
+            heightScaleDisplay.textContent = Number(state.realPlotsHeightScale).toFixed(2);
         }
     }
 

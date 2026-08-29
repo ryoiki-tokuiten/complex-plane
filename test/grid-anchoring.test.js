@@ -97,6 +97,60 @@ test('Dots grid density controls the two-dimensional point count', () => {
     assert.equal(generate('grid_dots', { ...base, gridDensity: 20 })[0].points.length, 441);
 });
 
+test('custom grid families produce finite, styled point sets', () => {
+    const base = {
+        xRange: [-3.5, 3.5],
+        yRange: [-3, 3],
+        gridDensity: 12,
+        curvePoints: 160,
+        currentFunction: 'identity',
+        zetaContinuationEnabled: false
+    };
+    const shapes = [
+        'grid_rectilinear', 'grid_nonorthogonal', 'grid_triangular',
+        'grid_curvilinear', 'grid_spiral', 'grid_irregular'
+    ];
+
+    shapes.forEach(shape => {
+        const pointSets = generate(shape, base);
+        assert.ok(pointSets.length > 0, `${shape} should contain lines`);
+        assert.ok(pointSets.every(set => set.color && set.points.length > 1));
+        assert.ok(pointSets.every(set => set.points.every(point =>
+            Number.isFinite(point.re) && Number.isFinite(point.im)
+        )));
+    });
+});
+
+test('custom grid controls alter their corresponding geometry', () => {
+    const base = {
+        xRange: [-2, 2],
+        yRange: [-2, 2],
+        gridDensity: 10,
+        curvePoints: 120,
+        currentFunction: 'identity',
+        zetaContinuationEnabled: false
+    };
+    const defaultSpiral = generate('grid_spiral', base);
+    const widerSpiral = generate('grid_spiral', {
+        ...base,
+        gridParameters: { spiral: { turns: 4, tightness: 0.8, arms: 2 } }
+    });
+    assert.notDeepEqual(widerSpiral[0].points, defaultSpiral[0].points);
+
+    const defaultIrregular = generate('grid_irregular', base);
+    const uniform = generate('grid_irregular', {
+        ...base,
+        gridParameters: { irregular: { variation: 0, clustering: 0 } }
+    });
+    const defaultSteps = defaultIrregular
+        .filter(set => set.role === 'grid-horizontal')
+        .map(set => set.points[0].im);
+    const uniformSteps = uniform
+        .filter(set => set.role === 'grid-horizontal')
+        .map(set => set.points[0].im);
+    assert.notDeepEqual(defaultSteps, uniformSteps);
+});
+
 test('parametric and drawn arbitrary shapes share the closed point-set contract', () => {
     const parametric = generate('arbitrary', {
         arbitraryShapeMode: 'parametric', arbitraryShapeExpression: 'exp(i*t)',

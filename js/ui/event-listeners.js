@@ -4,7 +4,7 @@ import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
 import { processUploadedImageSource, loadUploadedVideoFile, loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { initPlaneContextMenu, hidePlaneContextMenu } from './plane-context-menu.js';
-import { updatePlaneViewportRanges, mapCanvasToWorldCoords } from '../utils/canvas-utils.js';
+import { updatePlaneViewportRanges, mapCanvasToWorldCoords, setPlaneViewport } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import { clonePlain } from '../utils/clone-utils.js';
 import {
@@ -33,8 +33,15 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, syncVectorFlowControls, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, syncVectorFlowControls, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview, syncComplexParameterControls, fitConformalGridOutputViewport } from './ui-updates.js';
 import { syncGridDensityControls } from './grid-density-controls.js';
+import {
+    bindGridShapePicker,
+    bindGridShapeControlResize,
+    initializeGridShapeControlsFromDOM,
+    setGridShapeParameter
+} from './grid-shape-controls.js';
+import { GRID_SHAPE_PARAMETERS } from '../constants/grid-shapes.js';
 import { buildThreeJSMeshes } from '../rendering/manifold-transformation-animation.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
 import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
@@ -84,13 +91,19 @@ let wCanvas;
 let uiEventListenersBound = false;
 let transformViewportSnapshot = null;
 let algebraicChainingSourceFunction = null;
-let fractalRestoreSnapshot = null;
+let nonFractalSavedState = null;
+const fractalSavedStates = {};
+let lastActiveFractalKey = 'mandelbrot';
 
 const FRACTAL_RESTORE_KEYS = [
     'currentFunction', 'currentFunctionPreset', 'algebraicChainingEnabled', 'chainingEnabled',
     'chainingMode', 'chainSeed', 'chainCount', 'orbitColoringMode', 'domainColoringEnabled',
-    'currentInputShape', 'domainPalette', 'polynomialN', 'polynomialCoeffs',
-    'algebraicChainingTerms'
+    'domainColoringKeyVisible', 'currentInputShape', 'domainPalette', 'polynomialN', 'polynomialCoeffs',
+    'algebraicChainingTerms', 'algebraicChainingZExpr',
+    'realPlotsEnabled', 'realPlotsInputExpr', 'realPlotsImagExpr', 'realPlotsOutputComponent',
+    'realPlotsHeightScale', 'realPlotsBrightness', 'realPlotsContrast', 'realPlotsSaturation',
+    'realPlotsColorMode', 'realPlotsContoursEnabled',
+    'realPlotsContourInterval', 'realPlotsContourThickness'
 ];
 
 const PASSIVE_LISTENER_OPTIONS = Object.freeze({ passive: true });
@@ -271,6 +284,8 @@ const BINDERS = [
     bindVectorFieldControls,
     bindTaylorControls,
     bindRadialAndZetaControls,
+    bindGridShapeControls,
+    bindGridShapePicker,
     bindParticleControls,
     bindLaplaceControls,
     bindChainingControls,
@@ -702,7 +717,12 @@ function disableOutputChaining() {
 function restoreRealPlotsLayout() {
     const paramPanel = $('parameter-controls-panel');
     const algParams = $('algebraic_chaining_params');
+    const algContainer = $('algebraic_chaining_controls_container');
+    const chainParams = $('chaining_params');
     const coreControls = $('core_application_controls');
+    if (algContainer && chainParams && chainParams.parentNode !== algContainer) {
+        algContainer.appendChild(chainParams);
+    }
     if (paramPanel && algParams && coreControls && algParams.parentNode !== paramPanel) {
         paramPanel.insertBefore(algParams, coreControls);
     }
@@ -776,6 +796,14 @@ function syncChainingControlsFromState() {
 function syncAlgebraicControlsFromState() {
     checked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
     display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
+    if (controls.algebraicChainingZInput) {
+        controls.algebraicChainingZInput.value = state.algebraicChainingZExpr || 'z';
+        updateCustomFormulaPreview(
+            controls.algebraicChainingZInput,
+            controls.algebraicChainingZMath,
+            { allowedVariables: ['z'] }
+        );
+    }
 }
 
 function syncDomainControlsFromState() {
@@ -791,22 +819,21 @@ function syncInputShapeControlFromState() {
     if (controls.inputShapeSelector) controls.inputShapeSelector.value = state.currentInputShape;
 }
 
-function captureFractalState() {
+function captureStateSnapshot() {
     return Object.fromEntries(FRACTAL_RESTORE_KEYS.map(key => [key, clonePlain(state[key])]));
 }
 
-function restoreFractalState(nextFunction) {
-    const snapshot = fractalRestoreSnapshot;
+function restoreStateSnapshot(snapshot, nextFunction = null) {
     if (!snapshot) return false;
-
-    fractalRestoreSnapshot = null;
     FRACTAL_RESTORE_KEYS.forEach(key => {
-        if (key !== 'currentFunction' && key !== 'currentFunctionPreset') {
+        if (snapshot[key] !== undefined) {
             state[key] = clonePlain(snapshot[key]);
         }
     });
-    state.currentFunction = nextFunction;
-    state.currentFunctionPreset = null;
+    if (nextFunction) {
+        state.currentFunction = nextFunction;
+        state.currentFunctionPreset = null;
+    }
     syncChainingControlsFromState();
     syncAlgebraicControlsFromState();
     syncDomainControlsFromState();
@@ -814,13 +841,52 @@ function restoreFractalState(nextFunction) {
     return true;
 }
 
+function saveCurrentFractalState() {
+    const activeKey = isFractalPresetKey(state.currentFunctionPreset)
+        ? state.currentFunctionPreset
+        : (isFractalPresetKey(state.currentFunction) ? state.currentFunction : lastActiveFractalKey);
+    if (isFractalPresetKey(activeKey)) {
+        fractalSavedStates[activeKey] = captureStateSnapshot();
+        lastActiveFractalKey = activeKey;
+    }
+}
+
+function restoreNonFractalState(nextFunction = null) {
+    if (!nonFractalSavedState && !isFractalPresetKey(state.currentFunction) && !isFractalPresetKey(state.currentFunctionPreset)) {
+        return false;
+    }
+    saveCurrentFractalState();
+    const snapshot = nonFractalSavedState;
+    nonFractalSavedState = null;
+    if (snapshot) {
+        restoreStateSnapshot(snapshot, nextFunction);
+        return true;
+    }
+    return false;
+}
+
 function activateFractalPreset(key) {
     const leavingTransform = state.laplaceModeEnabled;
     if (state.laplaceModeEnabled) stopLaplaceAnimation();
 
-    if (!fractalRestoreSnapshot) fractalRestoreSnapshot = captureFractalState();
-    const preset = applyFractalPreset(state, key);
-    if (!preset) return false;
+    if (!isFractalPresetKey(state.currentFunctionPreset) && !isFractalPresetKey(state.currentFunction)) {
+        if (!nonFractalSavedState) nonFractalSavedState = captureStateSnapshot();
+    } else {
+        saveCurrentFractalState();
+    }
+
+    lastActiveFractalKey = key;
+
+    if (fractalSavedStates[key]) {
+        restoreStateSnapshot(fractalSavedStates[key]);
+        state.currentFunction = 'algebraic_chaining';
+        state.currentFunctionPreset = key;
+        state.algebraicChainingEnabled = true;
+        state.chainingEnabled = true;
+    } else {
+        const preset = applyFractalPreset(state, key);
+        if (!preset) return false;
+    }
 
     if (leavingTransform) restoreNormalViewports();
     syncChainingControlsFromState();
@@ -835,24 +901,6 @@ function activateFractalPreset(key) {
     return true;
 }
 
-function setPlaneViewport(planeParams, xRange, yRange) {
-    const xSpan = Math.max(1e-6, xRange[1] - xRange[0]);
-    const ySpan = Math.max(1e-6, yRange[1] - yRange[0]);
-    const scale = Math.min(planeParams.width / xSpan, planeParams.height / ySpan);
-    const centerX = (xRange[0] + xRange[1]) * 0.5;
-    const centerY = (yRange[0] + yRange[1]) * 0.5;
-    const targetXRange = planeParams.currentVisXRange;
-    const targetYRange = planeParams.currentVisYRange;
-
-    targetXRange[0] = xRange[0];
-    targetXRange[1] = xRange[1];
-    targetYRange[0] = yRange[0];
-    targetYRange[1] = yRange[1];
-    planeParams.scale.x = planeParams.scale.y = scale;
-    planeParams.origin.x = planeParams.width * 0.5 - centerX * scale;
-    planeParams.origin.y = planeParams.height * 0.5 + centerY * scale;
-    updatePlaneViewportRanges(planeParams);
-}
 
 function copyRange(range) {
     return Array.isArray(range) ? [...range] : null;
@@ -937,8 +985,10 @@ function activateFunctionMode(key) {
     disableRealPlots();
     if (isFractalPresetKey(key) && activateFractalPreset(key)) return;
 
-    const restoringFractalState = Boolean(fractalRestoreSnapshot);
-    if (restoringFractalState) restoreFractalState(key);
+    const restoringFractalState = Boolean(nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset));
+    if (restoringFractalState) {
+        restoreNonFractalState(key);
+    }
 
     const enteringLaplace = key === 'laplace';
     const enteringTransform = enteringLaplace;
@@ -1026,6 +1076,7 @@ function initializeScalarBindings() {
     BASIC_SLIDER_BINDINGS.forEach(({ controlKey, stateKey, parser }) => readSliderState(controlKey, stateKey, parser));
     BASIC_CHECKBOX_BINDINGS.forEach(({ controlKey, stateKey }) => readCheckboxState(controlKey, stateKey));
     BASIC_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => readSelectorState(controlKey, stateKey));
+    initializeGridShapeControlsFromDOM();
     initializeMobiusState();
     initializeNavigationStateFromControls();
 }
@@ -1055,6 +1106,22 @@ function bindBaseParameterControls() {
             controls[`speed${key[0].toUpperCase()}${key.slice(1)}Selector`]
         );
     });
+}
+
+function bindGridShapeControls() {
+    Object.entries(GRID_SHAPE_PARAMETERS).forEach(([shape, definition]) => {
+        definition.controls.forEach(controlDefinition => {
+            bindElementListener($(controlDefinition.controlId), 'input', (_event, slider) => {
+                setGridShapeParameter(
+                    shape,
+                    controlDefinition.key,
+                    parseControlValue(slider, parseFloat)
+                );
+                requestDomainRedraw(true);
+            });
+        });
+    });
+    bindGridShapeControlResize();
 }
 
 function bindMobiusControls() {
@@ -1094,6 +1161,9 @@ function bindFunctionButtons() {
             state.laplaceModeEnabled = false;
             restoreNormalViewports();
         }
+        if (nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
+            restoreNonFractalState();
+        }
         if (state.algebraicChainingEnabled) {
             disableAlgebraicChaining();
         }
@@ -1115,12 +1185,15 @@ function bindFunctionButtons() {
             state.laplaceModeEnabled = false;
             restoreNormalViewports();
         }
+        if (nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
+            restoreNonFractalState();
+        }
 
         const currentFunction = state.currentFunction === 'algebraic_chaining'
             ? (algebraicChainingSourceFunction || state.algebraicChainingTerms?.[0]?.factors?.[0]?.func || 'cos')
             : state.currentFunction;
 
-        if (currentFunction !== 'algebraic_chaining') {
+        if (currentFunction !== 'algebraic_chaining' && (!state.algebraicChainingTerms || state.algebraicChainingTerms.length === 0)) {
             algebraicChainingSourceFunction = currentFunction;
             mutateState('algebraicChainingTerms', terms => {
                 const firstFactor = terms?.[0]?.factors?.[0];
@@ -1157,10 +1230,12 @@ function bindFunctionButtons() {
             state.laplaceModeEnabled = false;
             restoreNormalViewports();
         }
-        if (state.algebraicChainingEnabled) {
+        if (state.algebraicChainingEnabled && !isFractalPresetKey(state.currentFunctionPreset)) {
             disableAlgebraicChaining();
         }
-        const fractalKey = isFractalPresetKey(state.currentFunction) ? state.currentFunction : 'mandelbrot';
+        const fractalKey = isFractalPresetKey(state.currentFunctionPreset)
+            ? state.currentFunctionPreset
+            : (isFractalPresetKey(state.currentFunction) ? state.currentFunction : lastActiveFractalKey || 'mandelbrot');
         activateFunctionMode(fractalKey);
         updateCategoryNavState('fractals');
     });
@@ -1176,10 +1251,8 @@ function bindFunctionButtons() {
         disableGraphView();
         disableRiemannSurface();
 
-        if (fractalRestoreSnapshot || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
-            restoreFractalState('cos');
-            disableAlgebraicChaining();
-            disableOutputChaining();
+        if (nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
+            restoreNonFractalState();
         }
 
         state.realPlotsEnabled = true;
@@ -1191,10 +1264,8 @@ function bindFunctionButtons() {
 
         const rpContainer = controls.realPlotsControlsContainer;
         const algParams = $('algebraic_chaining_params');
-        const chainParams = $('chaining_params');
-        if (rpContainer && algParams && chainParams) {
+        if (rpContainer && algParams && algParams.parentNode !== rpContainer) {
             rpContainer.appendChild(algParams);
-            rpContainer.appendChild(chainParams);
         }
 
         hidden(controls.realPlotsControlsContainer, false);
@@ -1322,32 +1393,6 @@ function bindDerivativeControls() {
     });
 }
 
-function fitConformalGridOutputViewport() {
-    const indicatrices = selectStableTissotIndicatrices(generateTissotIndicatrices(
-        nativeOptionsForActiveMap(resolveActiveMap()),
-        zPlaneParams.currentVisXRange,
-        zPlaneParams.currentVisYRange,
-        state.gridDensity,
-        72
-    ));
-    const bounds = getTissotViewportBounds(indicatrices);
-    if (!bounds) return;
-
-    setPlaneViewport(wPlaneParams, bounds.xRange, bounds.yRange);
-
-    const span = Math.max(
-        bounds.xRange[1] - bounds.xRange[0],
-        bounds.yRange[1] - bounds.yRange[0]
-    );
-    const initialSpan = Math.max(
-        wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0],
-        wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0]
-    );
-    state.wPlaneZoom = clamp(initialSpan / span, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
-    if (controls.wPlaneZoomSlider) {
-        controls.wPlaneZoomSlider.value = String(Math.log10(state.wPlaneZoom));
-    }
-}
 
 function bindConformalGridControls() {
     bindCheckbox('enableConformalGridCb', 'conformalGridEnabled', () => {
@@ -2174,7 +2219,7 @@ function bindCanvasInteractions() {
     bindGenericPlaneInteractions(controls.laplaceComCanvas, laplaceComPlaneParams, requestUiRedraw);
     bindGenericPlaneInteractions(controls.laplaceSpectrumCanvas, laplaceSpectrumPlaneParams, requestUiRedraw);
 
-    ['z_plane_shape_controls_overlay', 'radial_discrete_steps_options_div'].forEach(id => {
+    ['z_plane_shape_controls_overlay', 'grid_shape_controls_overlay', 'radial_discrete_steps_options_div'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'pointerdown', 'touchstart'].forEach(evtName => {
@@ -2675,6 +2720,7 @@ function bindChainingControls() {
     bindSlider('chainCountSlider', 'chainCount', parseInteger, value => {
         if (controls.chainCountValueDisplay) controls.chainCountValueDisplay.textContent = value;
         updateChainingColumns(state.chainingEnabled ? value : 1);
+        requestUiRedraw();
     });
 
     bindElementListener(controls.enableChainingCb, 'change', event => {
@@ -3028,10 +3074,8 @@ function bindRealPlotsControls() {
         if (val) {
             disableGraphView();
             disableRiemannSurface();
-            if (fractalRestoreSnapshot || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
-                restoreFractalState('cos');
-                disableAlgebraicChaining();
-                disableOutputChaining();
+            if (nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
+                restoreNonFractalState();
             }
             if (state.currentFunction === 'laplace' || isFractalPresetKey(state.currentFunction) || !state.currentFunction) {
                 state.currentFunction = 'cos';
@@ -3041,10 +3085,8 @@ function bindRealPlotsControls() {
             hidden(controls.laplaceSpecificControls, true);
             const rpContainer = controls.realPlotsControlsContainer;
             const algParams = $('algebraic_chaining_params');
-            const chainParams = $('chaining_params');
-            if (rpContainer && algParams && chainParams) {
+            if (rpContainer && algParams && algParams.parentNode !== rpContainer) {
                 rpContainer.appendChild(algParams);
-                rpContainer.appendChild(chainParams);
             }
             hidden(controls.algebraicChainingParams, false);
             display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
@@ -3077,14 +3119,33 @@ function bindRealPlotsControls() {
     bindSelector('realPlotsOutputComponent', 'realPlotsOutputComponent', requestUiRedraw);
     bindSelector('realPlotsColorMode', 'realPlotsColorMode', requestUiRedraw);
 
+    bindSlider('realPlotsBrightnessSlider', 'realPlotsBrightness', parseFloat, (val) => {
+        if (controls.realPlotsBrightnessValueDisplay) {
+            controls.realPlotsBrightnessValueDisplay.textContent = val.toFixed(2);
+        }
+        requestUiRedraw();
+    });
+
+    bindSlider('realPlotsContrastSlider', 'realPlotsContrast', parseFloat, (val) => {
+        if (controls.realPlotsContrastValueDisplay) {
+            controls.realPlotsContrastValueDisplay.textContent = val.toFixed(2);
+        }
+        requestUiRedraw();
+    });
+
+    bindSlider('realPlotsSaturationSlider', 'realPlotsSaturation', parseFloat, (val) => {
+        if (controls.realPlotsSaturationValueDisplay) {
+            controls.realPlotsSaturationValueDisplay.textContent = val.toFixed(2);
+        }
+        requestUiRedraw();
+    });
+
     bindSlider('realPlotsHeightScaleSlider', 'realPlotsHeightScale', parseFloat, (val) => {
         if (controls.realPlotsHeightScaleValueDisplay) {
             controls.realPlotsHeightScaleValueDisplay.textContent = val.toFixed(2);
         }
         requestUiRedraw();
     });
-
-
 
     bindControlListener('toggleFullscreenRealPlotsBtn', 'click', toggleRealPlotsFullscreen);
 }

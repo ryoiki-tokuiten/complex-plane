@@ -140,6 +140,7 @@ const planarKeyTrackers = new WeakMap();
 const zFlowKeyTracker = { values: [], cursor: 0, changed: true, key: null };
 const PLANAR_STATE_DEPENDENCIES = Object.freeze([
     'currentFunction', 'mapPresentation', 'currentInputShape', 'gridDensity',
+    'gridParameters',
     'a0', 'b0', 'circleR', 'themeId',
     'arbitraryShapeMode', 'arbitraryShapeExpression', 'arbitraryShapeTMin', 'arbitraryShapeTMax',
     'arbitraryShapeClosed', 'arbitraryShapePoints',
