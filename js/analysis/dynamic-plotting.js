@@ -269,10 +269,6 @@ function parameterEnvironment() {
     return environment;
 }
 
-function parameterNames() {
-    return Object.keys(parameterEnvironment());
-}
-
 function termBindings() {
     const term = dynamicConfig().term;
     if (!term || typeof term !== 'object') throw new Error('Dynamic plotting requires a term.');

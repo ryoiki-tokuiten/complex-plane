@@ -1,5 +1,4 @@
 /** @jsxImportSource preact */
-import { signal } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
 import { getStateSignal, state } from '../../store/state.js';
 import { requestDomainRedraw, requestUiRedraw } from '../../rendering/redraw-scheduler.js';
@@ -7,9 +6,7 @@ import { persistThemePreferences } from '../../ui/theme-manager.js';
 import { refreshPanelEdgeHandles } from '../../ui/panel-layout-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
 
-import { isThemeModalOpen, openThemeModal, closeThemeModal } from '../theme-state.js';
-
-export { openThemeModal, closeThemeModal };
+import { isThemeModalOpen, closeThemeModal } from '../theme-state.js';
 
 function refreshLayout() {
     window.dispatchEvent(new Event('resize'));

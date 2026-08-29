@@ -21,7 +21,6 @@ import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
 import { compileExpression, createExpressionMathML } from '../math/expression/index.js';
 import { createFormulaFragment } from './dom-components.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
-import { isFullGridPerspectiveSupported, isGraphViewSupported } from '../rendering/transformation-graph.js';
 import { getManifold } from '../rendering/manifold-registry.js';
 import { requireFiniteComplex, requireFiniteNumber, finiteComplex } from '../utils/numeric-contracts.js';
 import { syncGridShapeControls } from './grid-shape-controls.js';
@@ -53,9 +52,6 @@ export function fitConformalGridOutputViewport() {
         wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0]
     );
     state.wPlaneZoom = Math.min(Math.max(initialSpan / span, MIN_STATE_ZOOM_LEVEL), MAX_STATE_ZOOM_LEVEL);
-    if (controls.wPlaneZoomSlider) {
-        controls.wPlaneZoomSlider.value = String(Math.log10(state.wPlaneZoom));
-    }
 }
 
 const HIDDEN_CLASS = 'hidden';
@@ -156,8 +152,6 @@ const NORMAL_MODE_VALUE_BINDINGS = Object.freeze([
     { display: 'gridDensityValueDisplay', key: 'gridDensity' },
     { display: 'riemannSurfaceResolutionValueDisplay', key: 'riemannSurfaceResolution' },
     { display: 'neighborhoodSizeValueDisplay', key: 'probeNeighborhoodSize', digits: 2 },
-    { display: 'zPlaneZoomValueDisplay', get: () => formatZoomValue(state.zPlaneZoom) },
-    { display: 'wPlaneZoomValueDisplay', get: () => formatZoomValue(state.wPlaneZoom) },
     { display: 'vectorFieldScaleValueDisplay', key: 'vectorFieldScale', digits: 2 },
     { display: 'vectorArrowThicknessValueDisplay', key: 'vectorArrowThickness', digits: 1, companion: 'vectorArrowThicknessSlider' },
     { display: 'vectorArrowHeadSizeValueDisplay', key: 'vectorArrowHeadSize', digits: 1, companion: 'vectorArrowHeadSizeSlider' },
@@ -201,9 +195,6 @@ const RIEMANN_VIEW_VALUE_BINDINGS = Object.freeze([
     { display: 'riemannSurfaceBranchCenterValueDisplay', key: 'riemannSurfaceBranchCenter' },
     { display: 'riemannSurfaceHeightScaleValueDisplay', key: 'riemannSurfaceHeightScale', digits: 2 },
     { display: 'gridSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
-    { display: 'mediaSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
-    { display: 'imageSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
-    { display: 'videoSurface3DHeightScaleValueDisplay', key: 'foldSurfaceHeightScale', digits: 2 },
     { display: 'riemannSurfaceHeightClipValueDisplay', key: 'riemannSurfaceHeightClip', digits: 1 }
 ]);
 
@@ -340,11 +331,6 @@ function isPanning(panState) {
 function fractionalPowerExponent() {
     const n = typeof state.fractionalPowerN === 'number' ? state.fractionalPowerN : 0.5;
     return Number((n || 0.5).toFixed(2));
-}
-
-function syncDisclosure(checkboxKey, contentKey, enabled) {
-    setChecked(checkboxKey, enabled);
-    setHidden(contentKey, !enabled);
 }
 
 function syncDelegates() {
@@ -484,10 +470,7 @@ export function syncComplexParameterControls() {
     const isLine = shape === 'line';
     const isCircle = shape === 'circle';
     const isMedia = shape === 'media' || shape === 'image' || shape === 'video';
-    const isImage = shape === 'image';
-    const isVideo = shape === 'video';
     const isGrid = isFoldableInputShape(shape);
-    const showFoldControl = isGrid || isMedia;
     const isArbitrary = shape === 'arbitrary';
     const showCommonParams = isLine || isCircle;
     const showMediaCenterParams = isMedia;
@@ -530,8 +513,6 @@ export function syncComplexParameterControls() {
     setText('continuationStatus', continuationText);
     setHidden('mediaUploadControls', !isMedia);
     setHidden('mediaVideoControls', !isMedia || !runtime.media.video);
-    setHidden('imageUploadControls', !isImage);
-    setHidden('videoUploadControls', !isVideo);
     setHidden('arbitraryShapeControls', !isArbitrary);
     setActive('arbitraryShapeParametricModeBtn', state.arbitraryShapeMode === 'parametric');
     setActive('arbitraryShapeDrawModeBtn', state.arbitraryShapeMode === 'draw');
@@ -545,13 +526,7 @@ export function syncComplexParameterControls() {
     setText('arbitraryShapeDrawStatus', drawnPointCount > 1
         ? `${drawnPointCount} sampled points. Drag again to append another stroke.`
         : 'Drag anywhere on the z-plane. New strokes are appended.');
-    setHidden('gridSurface3DControl', !showFoldControl);
-    setHidden('gridSurface3DOptions', !isGrid || !state.foldSurface3dEnabled);
-    setHidden('mediaSurface3DOptions', !isMedia || !state.foldSurface3dEnabled);
-    setHidden('imageSurface3DOptions', !isImage || !state.foldSurface3dEnabled);
-    setHidden('videoSurface3DOptions', !isVideo || !state.foldSurface3dEnabled);
-    setChecked('gridSurface3DCb', state.foldSurface3dEnabled);
-    const isFoldActive = Boolean(state.foldSurface3dEnabled && (isGrid || isMedia || isImage || isVideo || isFoldableInputShape(shape)));
+    const isFoldActive = Boolean(state.foldSurface3dEnabled && (isGrid || isMedia));
     setHidden('w_plane_folds_overlay', !isFoldActive);
 
     syncShapeSpecificParameterGroups(shape, showShapeSpecificSliders);
@@ -581,8 +556,6 @@ function syncNormalModeDisplays() {
     }
 
     syncValueBindings(NORMAL_MODE_VALUE_BINDINGS);
-    setValue('zPlaneZoomSlider', Math.log10(state.zPlaneZoom || 1));
-    setValue('wPlaneZoomSlider', Math.log10(state.wPlaneZoom || 1));
 }
 
 export function syncTaylorControls() {
@@ -664,19 +637,9 @@ function syncRiemannAndTransformDisplays() {
 }
 
 function syncGraphControls() {
-    const fullGridSupported = isFullGridPerspectiveSupported();
     const isPolar = state.currentInputShape === 'grid_polar' || state.currentInputShape === 'grid_logpolar';
     const graphActive = state.graphViewEnabled;
 
-    setHidden('fullGridPerspectiveControl', !fullGridSupported || !graphActive);
-    if (controls.enableGraphViewCb) controls.enableGraphViewCb.disabled = !isGraphViewSupported();
-    setActive('viewFullGridPerspectiveBtn', state.graphFullGridEnabled);
-    setChecked('viewFullGridPerspectiveBtn', state.graphFullGridEnabled);
-    setChecked('enableGraphViewCb', state.graphViewEnabled);
-    setHidden('graphFocusBoxToggle', !state.graphFullGridEnabled);
-    setChecked('enableGraphFocusBoxCb', state.graphFocusBoxEnabled);
-    setHidden('graphLayerLockToggle', !state.graphFullGridEnabled);
-    setChecked('enableGraphLayerLockCb', state.graphLayerLockEnabled);
     setHidden('graphGridFamilySelector', !state.graphFullGridEnabled);
     setValue('graphGridFamilySelector', state.graphGridFamily);
     setHidden('graphFourierToggle', !graphActive || state.graphLayerLockEnabled);
@@ -752,12 +715,6 @@ export function formatProbeValue(v) {
     return absV >= 0.001 && absV < 1e6
         ? v.toFixed(3)
         : v.toExponential(3);
-}
-
-export function formatZoomValue(v) {
-    if (typeof v !== 'number' || Number.isNaN(v)) return '1.00';
-    if (v >= 1e6 || v < 0.01) return v.toExponential(2);
-    return v.toFixed(2);
 }
 
 export function formatProbeComplex(re, im) {
@@ -1238,7 +1195,6 @@ function syncRiemannSurfaceControls() {
         !state.manifold3dViewEnabled || state.riemannSurfaceEnabled
     );
     setHidden('riemannSurfaceOptionsDiv', !state.riemannSurfaceEnabled);
-    setChecked('enableRiemannSurfaceCb', state.riemannSurfaceEnabled);
     setValue('riemannSurfaceComponentSelector', state.riemannSurfaceComponent);
     setChecked('riemannSurfaceWireframeCb', state.riemannSurfaceWireframe);
     setChecked('riemannSurfaceContoursCb', state.contoursEnabled);
@@ -1619,11 +1575,6 @@ export function syncManifoldTransformationUI() {
     const selector = document.getElementById('manifold_shape_selector');
     if (selector && selector.value !== state.selectedManifold) {
         selector.value = state.selectedManifold || 'sphere';
-    }
-
-    const manifoldCb = document.getElementById('enable_manifold_3d_cb');
-    if (manifoldCb && manifoldCb.checked !== state.manifold3dViewEnabled) {
-        manifoldCb.checked = state.manifold3dViewEnabled;
     }
 
     const transCb = document.getElementById('enable_manifold_transformation_cb');

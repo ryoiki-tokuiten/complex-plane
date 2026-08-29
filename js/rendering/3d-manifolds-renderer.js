@@ -9,8 +9,7 @@ import { buildNativeFoldPreimageMarkers } from '../native/complex-engine.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import {
     getRasterDisplayDimensions,
-    getRasterOpacityForShape,
-    isRasterInputShape
+    getRasterOpacityForShape
 } from '../utils/raster-media.js';
 
 const COLOR_BACKGROUND = 0x07070d;

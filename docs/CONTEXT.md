@@ -18,6 +18,5 @@ One-line definitions of key architectural and mathematical domain nouns used thr
 - **Laplace Surface**: A 3D terrain plot of magnitude $|F(s)|$ over the complex frequency s-plane $s = \sigma + i\omega$, indicating poles, zeros, and Region of Convergence (ROC).
 - **3b1b Winding Visualization**: A rotational spectral animation wrapping a signal $f(t)$ around the origin at varying frequencies $\omega$ to visually locate Fourier/Laplace centroids.
 - **Active Map**: The runtime dispatch pipeline that resolves and evaluates single, chained, or derivative complex functions.
-- **Native WASM Engine**: The compiled C arithmetic core (`complex_engine.wasm`, ABI v2) providing vectorized SIMD numerical evaluations.
+- **Native WASM Engine**: The compiled C arithmetic core (`complex_engine.wasm`, ABI v3) providing vectorized SIMD numerical evaluations.
 - **Redraw Scheduler**: The requestAnimationFrame batching controller that coalesces rapid parameter changes into stable 60fps render frames.
-- **Perturbation Arithmetic**: High-precision fractal calculation technique computing pixel differences $\delta_n$ relative to a single high-precision reference orbit $Z_n$.

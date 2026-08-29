@@ -62,7 +62,6 @@ export function applyTheme(themeId, { preserveGridColors = false } = {}) {
     root.style.setProperty('--accent-purple', theme.colors.accent);
     root.style.setProperty('--accent-purple-dark', theme.colors.accent);
     root.style.setProperty('--glow-color', theme.colors.accentGlow);
-    root.style.setProperty('--accent-pink', theme.colors.gridSec);
 
     if (!preserveGridColors) {
         state.gridColor1 = theme.colors.gridPri;

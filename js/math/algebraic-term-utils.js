@@ -1,4 +1,4 @@
-import { getStateSignal, mutateState } from '../store/state.js';
+import { mutateState } from '../store/state.js';
 import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
 import { syncParameterControlsPanelVisibility, updateTitlesAndGlobalUI } from '../ui/ui-updates.js';
 

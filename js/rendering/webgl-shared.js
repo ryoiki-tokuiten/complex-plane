@@ -125,20 +125,6 @@ bool evaluateBasicFuncShared(float fId, vec2 z, vec2 mA, vec2 mB, vec2 mC, vec2 
 `;
 };
 
-function createWebGLShaderShared(gl, shaderType, source) {
-    if (gl.isContextLost()) throw new Error('Cannot compile a shader after WebGL context loss.');
-    const shader = gl.createShader(shaderType);
-    if (!shader) throw new Error('WebGL failed to allocate a shader.');
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        const detail = gl.getShaderInfoLog(shader) || 'No compiler diagnostic was provided.';
-        gl.deleteShader(shader);
-        throw new Error(`WebGL shader compile error: ${detail}`);
-    }
-    return shader;
-}
-
 export function createWebGLProgramShared(gl, vertexSource, fragmentSource) {
     if (gl.isContextLost()) throw new Error('Cannot link a program after WebGL context loss.');
 

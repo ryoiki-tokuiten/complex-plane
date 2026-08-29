@@ -3,16 +3,6 @@ import assert from 'node:assert/strict';
 
 import {
     AbstractManifold,
-    SphereManifold,
-    CylinderManifold,
-    TorusManifold,
-    HelicoidManifold,
-    CatenoidManifold,
-    EnneperManifold,
-    BonnetManifold,
-    KleinBottleManifold,
-    PseudosphereManifold,
-    ScherkManifold,
     getManifold,
     getAllManifolds,
     DEFAULT_MANIFOLD_ID

@@ -23,7 +23,6 @@ import {
     getRasterSizeForShape,
     getRasterAspectRatioForShape,
     getRasterOpacityForShape,
-    getRasterVersionTokenForShape,
     isRasterInputShape
 } from '../utils/raster-media.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
@@ -66,8 +65,7 @@ import {
 } from '../analysis/dynamic-plotting.js';
 import {
     drawDynamicWPlane,
-    drawDynamicZPlane,
-    getDynamicManifoldSceneData
+    drawDynamicZPlane
 } from './draw-dynamic-plotting.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices } from '../analysis/tissot.js';
 import { baseExpressionHasBranches } from '../analysis/riemann-surface.js';
@@ -1191,78 +1189,6 @@ function prepareThreeWRenderer() {
         requestUiRedraw();
     };
     return renderer;
-}
-
-function renderThreeWPlane(map, stageIndex) {
-    const threeRenderer = prepareThreeWRenderer();
-
-    threeRenderer.setManifoldMode();
-    const manifoldChanged = threeRenderer.setManifold(state.selectedManifold);
-    const transformChanged = threeRenderer.setTransform(map);
-
-    if (isRasterInputShape(state.currentInputShape)) {
-        threeRenderer.lastGridConfigKey = null;
-        const source = getRasterSourceForShape(state.currentInputShape);
-        if (source) {
-            const rasterConfigKey = [
-                map.signature,
-                state.currentInputShape,
-                state.a0,
-                state.b0,
-                getRasterSizeForShape(state.currentInputShape),
-                getRasterAspectRatioForShape(state.currentInputShape),
-                getRasterVersionTokenForShape(state.currentInputShape),
-                state.selectedManifold
-            ].join('|');
-
-            if (threeRenderer.lastRasterConfigKey !== rasterConfigKey) {
-                threeRenderer.lastRasterConfigKey = rasterConfigKey;
-                threeRenderer.buildRasterManifold(source, state.currentInputShape, 1.0);
-            }
-        }
-    } else {
-        threeRenderer.lastRasterConfigKey = null;
-        const gridConfigObj = buildInputShapeGeometryConfig(zPlaneParams, {
-            currentFunction: state.currentFunction,
-            zetaContinuationEnabled: state.zetaContinuationEnabled,
-            gridDensity: state.gridDensity
-        });
-        const gridConfigKey = `${map.signature}:${JSON.stringify(gridConfigObj)}:${state.selectedManifold}`;
-
-        // Skip rebuilding heavy 3D geometries continuously during 2D canvas drag-panning.
-        // The pointerup redraw will rebuild any stale geometry.
-        if (threeRenderer.lastGridConfigKey !== gridConfigKey
-            && !runtime.interaction.panZ.isPanning
-            && !runtime.interaction.panW.isPanning) {
-            threeRenderer.lastGridConfigKey = gridConfigKey;
-
-            const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
-                currentFunction: state.currentFunction,
-                zetaContinuationEnabled: state.zetaContinuationEnabled,
-                curvePoints: 1000,
-                gridDensity: state.gridDensity
-            });
-
-            threeRenderer.buildGridFromPointSets(wPointSets, 1.0);
-        }
-    }
-
-    const geometryChanged = threeRenderer.updateGeometry(1.0);
-    const overlayChanged = threeRenderer.setDynamicOverlay(
-        getDynamicManifoldSceneData({ transform: map.evaluate, stageIndex }),
-        `${stageIndex}:${getDynamicPlottingCacheKey()}`
-    );
-
-    let probeChanged = false;
-    if (state.probeActive && state.probeZ) {
-        probeChanged = threeRenderer.updateProbe(state.probeZ);
-    } else {
-        probeChanged = threeRenderer.updateProbe(null);
-    }
-
-    if (manifoldChanged || transformChanged || geometryChanged || overlayChanged || probeChanged) {
-        threeRenderer.render();
-    }
 }
 
 function renderThreeWRasterSurface(map) {

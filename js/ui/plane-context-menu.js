@@ -9,7 +9,7 @@ import {
     fitConformalGridOutputViewport
 } from './ui-updates.js';
 import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
-import { updateChainingTitles, downloadCanvasImage, setupVisualParameters, formatTaylorNumericValue } from '../utils/dom-utils.js';
+import { updateChainingTitles, downloadCanvasImage, setupVisualParameters } from '../utils/dom-utils.js';
 import {
     isGraphViewSupported,
     isFullGridPerspectiveSupported,
@@ -18,7 +18,6 @@ import {
 import { syncGridDensityControls } from './grid-density-controls.js';
 import { refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
-import { TAYLOR_CENTER_PRESET_GROUPS } from '../constants/numerical.js';
 import { updateDynamicPlotting } from './dynamic-plotting-ui.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
 
@@ -389,7 +388,6 @@ function getZPlaneMenuItems() {
                     if (state.manifold3dViewEnabled) {
                         state.manifold3dViewEnabled = false;
                         state.manifoldTransformationEnabled = false;
-                        if (context.controls?.enableManifold3DCb) context.controls.enableManifold3DCb.checked = false;
                         if (context.controls?.enableManifoldTransformationCb) context.controls.enableManifoldTransformationCb.checked = false;
                         if (context.controls?.manifoldOptionsDiv) context.controls.manifoldOptionsDiv.classList.add('hidden');
                         syncManifoldTransformationUI();
@@ -584,6 +582,21 @@ function getWPlaneMenuItems() {
             onClick: () => {
                 state.taylorSeriesEnabled = !state.taylorSeriesEnabled;
                 requestDomainRedraw(true);
+            }
+        },
+        {
+            id: 'inverse_preimage_explorer_w',
+            label: 'Inverse / Preimage Explorer',
+            type: 'checkbox',
+            checked: Boolean(state.preimageExplorerEnabled),
+            onClick: () => {
+                state.preimageExplorerEnabled = !state.preimageExplorerEnabled;
+                if (!state.preimageExplorerEnabled) {
+                    state.preimageTarget = null;
+                    state.preimageRoots = [];
+                    state.preimageStatus = '';
+                }
+                requestUiRedraw();
             }
         },
         {

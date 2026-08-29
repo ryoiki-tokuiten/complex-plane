@@ -2,17 +2,17 @@
 
 _**This file is the living source of truth for the complex-plane architecture.** The interactive isometric atlas and SYSTEM.md are generated synchronously from this single dataset._
 
-_Question status: **2 open · 1 routed · 12 resolved**._
+_Question status: **2 open · 1 routed · 11 resolved**._
 
 ## One paragraph
 
-The Complex Function Analysis platform is a zero-backend, client-side web application for interactive exploration, mapping, and calculus of complex-valued functions $w = f(z)$. The system couples an AST expression compiler and WebAssembly C arithmetic core (ABI v2) to a hybrid multi-canvas renderer (Canvas 2D, WebGL shader warpers, and Three.js 3D scenes). It supports domain coloring, Cauchy contour integrals, Riemann sphere stereographic projections, vector streamline advection, Laplace s-plane surfaces, and 3Blue1Brown-style spectral winding visualizers.
+The Complex Function Analysis platform is a zero-backend, client-side web application for interactive exploration, mapping, and calculus of complex-valued functions $w = f(z)$. The system couples an AST expression compiler and WebAssembly C arithmetic core (ABI v3) to a hybrid multi-canvas renderer (Canvas 2D, WebGL shader warpers, and Three.js 3D scenes). It supports domain coloring, Cauchy contour integrals, Riemann sphere stereographic projections, vector streamline advection, Laplace s-plane surfaces, and 3Blue1Brown-style spectral winding visualizers.
 
 ## Decisions locked
 
 | Axis | Decision | ADR |
 |---|---|---|
-| Compute Architecture | Compile performance-critical math to **WebAssembly C core (ABI v2)** with linear memory buffers, falling back to JS AST compilation for dynamic user expressions. | [ADR-001] Native WASM Execution Bridge |
+| Compute Architecture | Compile performance-critical math to **WebAssembly C core (ABI v3)** with linear memory buffers, falling back to JS AST compilation for dynamic user expressions. | [ADR-001] Native WASM Execution Bridge |
 | Rendering Strategy | Adopt a **hybrid multi-tier canvas pipeline**: Canvas 2D for lightweight responsive grids/overlays, WebGL texture meshes for image warping, and Three.js for 3D Riemann spheres and Laplace surfaces. | [ADR-002] Multi-Context Hybrid Rendering |
 | State Reactivity | Manage application parameters through **Preact Signals (`@preact/signals`)** and a centralized event bus, decoupled from DOM elements via a bidirectional sync controller. | [ADR-003] Preact Signal Observable Store |
 | Frame Scheduling | Implement a **coalescing RAF redraw scheduler** (`redraw-scheduler.js`) with dirty-flag caching to batch rapid updates. | [ADR-004] RequestAnimationFrame Redraw Scheduler |
@@ -47,8 +47,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 6. **6. Domain Coloring & Texture Warping** — Native worker tiles and GPU texture meshes provide two separate dense-visualization paths. _(adds DC, WG)_
 7. **7. 3D Geometry & Riemann Sheets** — Multi-valued functions and stereographic projections expand into 3D Riemann spheres and multi-sheet surfaces. _(adds T3, BC)_
 8. **8. Spectral Transforms & 3b1b Winders** — The Laplace transform hub unrolls into winding frequency animations, an exact Fourier slice at σ = 0, and 3D s-plane convergence surfaces. _(adds TF, 3B)_
-9. **9. Deep Fractals & Perturbation** — Dedicated deep-zoom perturbation algorithms and WebGPU compute explore infinite fractal boundaries. _(adds MB)_
-10. **10. The Whole System** — All 18 structures unified in one explorable interactive architecture diagram.
+9. **9. The Whole System** — All 22 structures unified in one explorable interactive architecture diagram.
 
 ## Structures
 
@@ -191,11 +190,11 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 #### CE · Native WASM Engine
 
-**In one line.** WebAssembly C core (ABI v2) computing complex arithmetic, transcendental functions, and series.
+**In one line.** WebAssembly C core (ABI v3) computing complex arithmetic, transcendental functions, and series.
 
 **What it does.** The compiled C calculation engine for point evaluations, complex polynomials, Riemann Zeta analytic continuation, Bessel functions, gamma functions, and Durand-Kerner polynomial root-finding.
 
-**How it's built.** Built from `native/src/` into `native/build/complex_engine.wasm` (ABI v2). Loaded via `js/native/complex-engine.js` with direct linear memory buffer access.
+**How it's built.** Built from `native/src/` into `native/build/complex_engine.wasm` (ABI v3). Loaded via `js/native/complex-engine.js` with direct linear memory buffer access.
 
 **Steps in execution.**
 
@@ -206,7 +205,7 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 **Questions.**
 
-- ~~**Q-CE1** What happens when ABI version mismatches?~~ ✓ Throws explicit fatal error if wasm.ce_abi_version() !== 2 (2026-01-15).
+- ~~**Q-CE1** What happens when ABI version mismatches?~~ ✓ Throws explicit fatal error if wasm.ce_abi_version() !== 3 (2026-01-15).
 - **Q-CE2** Can we enable WebAssembly SIMD-128 instructions in production builds?
 
 #### AM · Active Map Engine
@@ -445,25 +444,6 @@ The Complex Function Analysis platform is a zero-backend, client-side web applic
 
 ### 6. Subsystems & Presets
 
-#### MB · Mandelbrot Perturbation
-
-**In one line.** Deep perturbation fractal engine with arbitrary-precision fixed-point math and WebGPU acceleration.
-
-**What it does.** A dedicated subsystem for extreme deep-zoom Mandelbrot fractals ($10^{-100}$ scale) using perturbation series expansion around reference points and arbitrary-precision fixed-point arithmetic (`fxp.mjs`), with WebGPU compute pipelines.
-
-**How it's built.** Located in `bertbaron_mandelbrot/` (`fxp.mjs`, `mandelbrotPerturbation.mjs`, `mandelbrotWebGPU.mjs`). Employs multi-worker parallel tiling and WebGPU compute shaders.
-
-**Steps in execution.**
-
-1. **Reference Orbit** — Calculates high-precision reference orbit $Z_n$ via arbitrary-precision float.
-2. **Perturbation Delta** — Computes pixel delta iterations $\delta_{n+1} = 2 Z_n \delta_n + \delta_n^2 + \Delta c$ in standard floats.
-3. **Worker Tile Pool** — Dispatches square tiles across multi-worker thread pool or WebGPU.
-4. **Palette Blit** — Maps iteration counts to custom cyclic palette.
-
-**Questions.**
-
-- ~~**Q-MB1** Is WebGPU automatically used when available?~~ ✓ Detects navigator.gpu and falls back to Web Workers when unsupported (2026-01-25).
-
 ## Flows (representative packets)
 
 Payload shapes represent the real runtime contracts and state objects passed across modules.
@@ -521,14 +501,13 @@ Reference by ID. ✓ resolved · → routed · otherwise open.
 - **Q-ST1** (ST) → _State history deep dive_ (How are undo/redo states recorded?)
 - ~~**Q-RS1**~~ (RS) ✓ The application renderer configures a 90ms delay and a 240ms max-wait ceiling.
 - ~~**Q-EX1**~~ (EX) ✓ Supports z, c, time t, and indexed constants a0..an (2026-01-29).
-- ~~**Q-CE1**~~ (CE) ✓ Throws explicit fatal error if wasm.ce_abi_version() !== 2 (2026-01-15).
+- ~~**Q-CE1**~~ (CE) ✓ Throws explicit fatal error if wasm.ce_abi_version() !== 3 (2026-01-15).
 - **Q-CE2** (CE) Can we enable WebAssembly SIMD-128 instructions in production builds?
 - ~~**Q-AM1**~~ (AM) ✓ Evaluates sequentially: stage 0 output becomes stage 1 input up to chainCount - 1 (2026-02-01).
 - ~~**Q-FD1**~~ (FD) ✓ Distance-factor clustering merges candidates within viewport-scaled epsilon (2026-01-30).
 - ~~**Q-CA1**~~ (CA) ✓ Winding number is computed per topological region using ray casting (2026-02-08).
 - ~~**Q-TF1**~~ (TF) ✓ Rendered as high-peak singular columns in Three.js |F(s)| heightfield (2026-02-12).
 - ~~**Q-BC1**~~ (BC) ✓ Constructs exactly 3 interlocking Riemann sheets with smooth phase boundary transitions (2026-02-14).
-- ~~**Q-MB1**~~ (MB) ✓ Detects navigator.gpu and falls back to Web Workers when unsupported (2026-01-25).
 
 ## What the platform gives vs what we own
 
@@ -553,7 +532,7 @@ complex-plane/
   │   │   ├── active-map.js        # Active mapping pipeline dispatcher
   │   │   └── expression/          # Parser, evaluator, mathml, glsl compilers
   │   ├── native/                  # WebAssembly bridge and C engine glue
-  │   │   ├── complex-engine.js    # WASM memory bridge & ABI v2 exports
+  │   │   ├── complex-engine.js    # WASM memory bridge & ABI v3 exports
   │   │   ├── map-runtime.js       # Runtime evaluator dispatcher
   │   │   └── domain-engine.js     # Native domain coloring buffer manager
   │   ├── analysis/                # Mathematical analysis algorithms
@@ -579,7 +558,6 @@ complex-plane/
   ├── native/                      # C source code for complex_engine.wasm
   │   ├── src/                     # Core complex arithmetic, roots, series
   │   └── build/complex_engine.wasm # Compiled WASM binary
-  ├── bertbaron_mandelbrot/        # Deep perturbation fractal subsystem
   └── docs/                        # System Atlas, SYSTEM.md, CONTEXT.md
 ```
 

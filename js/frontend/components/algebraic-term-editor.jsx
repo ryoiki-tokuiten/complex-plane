@@ -18,12 +18,8 @@ const SYMBOLS = new Map([
 ]);
 
 import {
-    createAlgebraicFactor,
-    createAlgebraicTerm,
-    appendAlgebraicTerm
+    createAlgebraicFactor
 } from '../../math/algebraic-term-utils.js';
-
-export { createAlgebraicFactor, createAlgebraicTerm, appendAlgebraicTerm };
 
 function redraw(commit = false) {
     if (commit) {

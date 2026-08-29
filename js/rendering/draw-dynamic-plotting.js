@@ -308,57 +308,6 @@ export function drawDynamicWPlane(ctx, planeParams, transform, stageIndex = 0) {
     }
 }
 
-export function getDynamicManifoldSceneData(options = {}) {
-    if (!state.dynamicPlotting?.enabled) return null;
-
-    const stageIndex = options.stageIndex === undefined
-        ? 0
-        : requireInteger(options.stageIndex, 'Dynamic manifold stage');
-    const transform = options.transform;
-    const aggregateActive = isDynamicAggregateActive();
-    const result = getDynamicPlotResult({
-        transform: aggregateActive ? undefined : transform,
-        stageIndex
-    });
-    if (!result) return null;
-
-    const points = [];
-    let path = [];
-    let finalPoint = null;
-
-    if (aggregateActive) {
-        if (stageIndex === 0 && displayConfig().showTermPoints) {
-            points.push(...result.visibleSamples.map(sample => sample.termValue).filter(isFiniteComplex));
-        }
-        if (stageIndex === 0 && displayConfig().showPartialPath) {
-            path = result.visibleSamples.map(partialValue).filter(isFiniteComplex);
-        }
-
-        const s = result.aggregateParameter;
-        const stageValue = typeof transform === 'function'
-            ? transform(s.re, s.im)
-            : result.reduction.finalValue;
-        finalPoint = isFiniteComplex(stageValue) ? stageValue : null;
-    } else {
-        if (displayConfig().showTermPoints) {
-            points.push(...result.visibleSamples.map(sample => sample.termValue).filter(isFiniteComplex));
-        }
-        if (displayConfig().showPartialPath && result.reduction.kind !== 'none') {
-            path = result.visibleSamples.map(partialValue).filter(isFiniteComplex);
-            finalPoint = [...path].reverse().find(isFiniteComplex) || null;
-        }
-    }
-
-    return {
-        points,
-        path,
-        finalPoint,
-        pointSize: pointRadius()
-    };
-}
-
-export const getDynamicSphereSceneData = getDynamicManifoldSceneData;
-
 export function findNearestDynamicSample(worldPoint, plane = 'z', options = {}) {
     if (!state.dynamicPlotting?.enabled || !isFiniteComplex(worldPoint)) return null;
 

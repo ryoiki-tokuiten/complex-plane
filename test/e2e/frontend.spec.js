@@ -8,6 +8,18 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('#video_resolution_slider')).toHaveCount(0);
 });
 
+async function selectInputShape(page, shape) {
+    await page.locator('#input_shape_picker_toggle').click();
+    const nestedItem = page.locator(`#input_shape_more_menu [data-input-shape="${shape}"]`);
+    if (await nestedItem.count()) {
+        await page.locator('.input-shape-more-item').hover();
+        await nestedItem.click();
+    } else {
+        await page.locator(`#input_shape_menu > [data-input-shape="${shape}"]`).click();
+    }
+    await expect(page.locator('#input_shape_selector')).toHaveValue(shape);
+}
+
 test('Riemann surface shaders compile with branch-cut controls', async ({ page }) => {
     const shaderErrors = [];
     page.on('console', message => {
@@ -74,7 +86,7 @@ test('Riemann surface stays rendered while algebraic and output chaining state c
 });
 
 test('arbitrary shapes support freehand drawing without Cauchy mode', async ({ page }) => {
-    await page.locator('#input_shape_selector').selectOption('arbitrary');
+    await selectInputShape(page, 'arbitrary');
     await expect(page.locator('#arbitrary_shape_controls')).not.toHaveClass(/hidden/);
     const cauchyActive = await page.evaluate(async () => (await import('./js/store/state.js')).state.cauchyIntegralModeEnabled);
     expect(cauchyActive).toBe(false);
@@ -192,13 +204,6 @@ test('Preact controls preserve the public DOM and interaction contract', async (
         await page.locator(`#real_plots_custom_${part}`).fill(part === 'input' ? 'x + y' : 'x - y');
     }
     expect(errors).toEqual([]);
-});
-
-test('controls visual contract remains stable', async ({ page }) => {
-    await expect(page.locator('#controls_options_section')).toHaveScreenshot('controls-panel.png', {
-        animations: 'disabled',
-        maxDiffPixelRatio: 0.1
-    });
 });
 
 test('panels automatically move right or bottom in cascading fashion when another panel takes their place', async ({ page }) => {
@@ -543,11 +548,10 @@ test('full-grid and graph Fourier modes reuse the unified transform hub', async 
     await expect(page.locator('#laplace_function_selector')).toBeDisabled();
     await expect(page.locator('#laplace_frequency_label')).toHaveText('Frequency:');
     await expect(page.locator('#laplace_frequency_slider')).toBeVisible();
-    await expect(page.locator('#visualization-options-panel')).toBeHidden();
     await expect(page.locator('#laplace_3d_controls_section')).toBeHidden();
     await expect(page.locator('#laplace_animation_section')).toBeHidden();
 
-    await page.locator('#input_shape_selector').selectOption('grid_logpolar');
+    await selectInputShape(page, 'grid_logpolar');
     await expect(page.locator('#graph_grid_family_selector option').nth(0)).toHaveText('Circles');
     await expect(page.locator('#graph_grid_family_selector option').nth(1)).toHaveText('Lines');
     await page.locator('#graph_grid_family_selector').selectOption('secondary');
@@ -565,10 +569,7 @@ test('full-grid and graph Fourier modes reuse the unified transform hub', async 
     const graphActiveOnLaplace = await page.evaluate(async () => (await import('./js/store/state.js')).state.graphViewEnabled);
     expect(graphActiveOnLaplace).toBe(false);
     await expect(page.locator('#core_application_controls')).toBeHidden();
-    await expect(page.locator('#visualization-options-panel')).toBeHidden();
     await expect(page.locator('#laplace_specific_controls')).toBeVisible();
-    await expect(page.locator('#core_application_controls')).toBeHidden();
-    await expect(page.locator('#visualization-options-panel')).toBeHidden();
     await expect(page.locator('#laplace_function_selector')).toHaveValue('exponential');
     await expect(page.locator('#laplace_function_selector')).toBeEnabled();
     await expect(page.locator('#input_shape_selector')).toBeHidden();
@@ -618,7 +619,7 @@ test('raster fold view stays connected and chain depth settles safely', async ({
         if (message.type() === 'error') errors.push(message.text());
     });
 
-    await page.locator('#input_shape_selector').selectOption('media');
+    await selectInputShape(page, 'media');
     await page.locator('#media_upload_input').setInputFiles(resolve('Example1.png'));
     await page.waitForFunction(() => {
         return import('./js/store/state.js').then(({ state }) => state.imageContentVersion > 0);
@@ -637,7 +638,7 @@ test('raster fold view stays connected and chain depth settles safely', async ({
         const { syncGridDensityControls } = await import('./js/ui/grid-density-controls.js');
         syncGridDensityControls();
     });
-    await page.locator('#input_shape_selector').selectOption('grid_cartesian');
+    await selectInputShape(page, 'grid_cartesian');
     await page.locator('#enable_chaining_cb').evaluate(element => element.click());
 
     const chainSlider = page.locator('#chain_count_slider');

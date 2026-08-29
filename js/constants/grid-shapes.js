@@ -196,7 +196,3 @@ export const GRID_SHAPE_DEFAULTS = Object.freeze(
         ])
     )
 );
-
-export function isCustomGridInputShape(shape) {
-    return CUSTOM_GRID_INPUT_SHAPE_SET.has(shape);
-}

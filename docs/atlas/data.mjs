@@ -7,12 +7,12 @@ export const META = {
   sourcePath: 'docs/atlas/data.mjs',
   buildCmd: 'node docs/atlas/build.mjs',
   stats: [
-    { k: 'Engine', v: 'WASM (ABI v2) + WebGL + Three.js' },
+    { k: 'Engine', v: 'WASM (ABI v3) + WebGL + Three.js' },
     { k: 'UI Stack', v: 'Preact + Signals + Vanilla JS' },
     { k: 'Arch', v: 'Full Client-Side Zero Backend' }
   ],
   intro: `_**This file is the living source of truth for the complex-plane architecture.** The interactive isometric atlas and SYSTEM.md are generated synchronously from this single dataset._`,
-  onePara: `The Complex Function Analysis platform is a zero-backend, client-side web application for interactive exploration, mapping, and calculus of complex-valued functions $w = f(z)$. The system couples an AST expression compiler and WebAssembly C arithmetic core (ABI v2) to a hybrid multi-canvas renderer (Canvas 2D, WebGL shader warpers, and Three.js 3D scenes). It supports domain coloring, Cauchy contour integrals, Riemann sphere stereographic projections, vector streamline advection, Laplace s-plane surfaces, and 3Blue1Brown-style spectral winding visualizers.`,
+  onePara: `The Complex Function Analysis platform is a zero-backend, client-side web application for interactive exploration, mapping, and calculus of complex-valued functions $w = f(z)$. The system couples an AST expression compiler and WebAssembly C arithmetic core (ABI v3) to a hybrid multi-canvas renderer (Canvas 2D, WebGL shader warpers, and Three.js 3D scenes). It supports domain coloring, Cauchy contour integrals, Riemann sphere stereographic projections, vector streamline advection, Laplace s-plane surfaces, and 3Blue1Brown-style spectral winding visualizers.`,
   costModel: [
     '### Runtime Performance Model',
     '- **Planar Evaluation:** Ordinary planar geometry can use native point and line evaluators; timing is not recorded here.',
@@ -43,7 +43,7 @@ export const META = {
   │   │   ├── active-map.js        # Active mapping pipeline dispatcher
   │   │   └── expression/          # Parser, evaluator, mathml, glsl compilers
   │   ├── native/                  # WebAssembly bridge and C engine glue
-  │   │   ├── complex-engine.js    # WASM memory bridge & ABI v2 exports
+  │   │   ├── complex-engine.js    # WASM memory bridge & ABI v3 exports
   │   │   ├── map-runtime.js       # Runtime evaluator dispatcher
   │   │   └── domain-engine.js     # Native domain coloring buffer manager
   │   ├── analysis/                # Mathematical analysis algorithms
@@ -69,14 +69,13 @@ export const META = {
   ├── native/                      # C source code for complex_engine.wasm
   │   ├── src/                     # Core complex arithmetic, roots, series
   │   └── build/complex_engine.wasm # Compiled WASM binary
-  ├── bertbaron_mandelbrot/        # Deep perturbation fractal subsystem
   └── docs/                        # System Atlas, SYSTEM.md, CONTEXT.md`
 };
 
 export const DECISIONS = [
   {
     axis: 'Compute Architecture',
-    decision: 'Compile performance-critical math to **WebAssembly C core (ABI v2)** with linear memory buffers, falling back to JS AST compilation for dynamic user expressions.',
+    decision: 'Compile performance-critical math to **WebAssembly C core (ABI v3)** with linear memory buffers, falling back to JS AST compilation for dynamic user expressions.',
     adr: '[ADR-001] Native WASM Execution Bridge'
   },
   {
@@ -308,9 +307,9 @@ export const NODES = [
     d: 3.0,
     h: 64,
     kind: 'tall',
-    one: 'WebAssembly C core (ABI v2) computing complex arithmetic, transcendental functions, and series.',
+    one: 'WebAssembly C core (ABI v3) computing complex arithmetic, transcendental functions, and series.',
     what: 'The compiled C calculation engine for point evaluations, complex polynomials, Riemann Zeta analytic continuation, Bessel functions, gamma functions, and Durand-Kerner polynomial root-finding.',
-    how: 'Built from `native/src/` into `native/build/complex_engine.wasm` (ABI v2). Loaded via `js/native/complex-engine.js` with direct linear memory buffer access.',
+    how: 'Built from `native/src/` into `native/build/complex_engine.wasm` (ABI v3). Loaded via `js/native/complex-engine.js` with direct linear memory buffer access.',
     steps: [
       ['Memory Alloc', 'Allocates input, output, and validity buffers in WASM linear memory.'],
       ['Configure Map', 'Populates C `MapConfig` struct with active function parameters.'],
@@ -318,7 +317,7 @@ export const NODES = [
       ['Read Results', 'Copies output complex values and validity flags into JavaScript values.']
     ],
     cond: [
-      { q: 'What happens when ABI version mismatches?', r: 'Throws explicit fatal error if wasm.ce_abi_version() !== 2 (2026-01-15).' },
+      { q: 'What happens when ABI version mismatches?', r: 'Throws explicit fatal error if wasm.ce_abi_version() !== 3 (2026-01-15).' },
       'Can we enable WebAssembly SIMD-128 instructions in production builds?'
     ]
   },
@@ -659,32 +658,6 @@ export const NODES = [
     cond: []
   },
 
-  // Group 6: Subsystems & Presets
-  {
-    id: 'MB',
-    code: 'MB',
-    name: 'Mandelbrot Perturbation',
-    short: 'PERTURBATION',
-    group: 'sub',
-    gx: 1.0,
-    gy: 10.5,
-    w: 2.5,
-    d: 2.5,
-    h: 32,
-    kind: 'box',
-    one: 'Deep perturbation fractal engine with arbitrary-precision fixed-point math and WebGPU acceleration.',
-    what: 'A dedicated subsystem for extreme deep-zoom Mandelbrot fractals ($10^{-100}$ scale) using perturbation series expansion around reference points and arbitrary-precision fixed-point arithmetic (`fxp.mjs`), with WebGPU compute pipelines.',
-    how: 'Located in `bertbaron_mandelbrot/` (`fxp.mjs`, `mandelbrotPerturbation.mjs`, `mandelbrotWebGPU.mjs`). Employs multi-worker parallel tiling and WebGPU compute shaders.',
-    steps: [
-      ['Reference Orbit', 'Calculates high-precision reference orbit $Z_n$ via arbitrary-precision float.'],
-      ['Perturbation Delta', 'Computes pixel delta iterations $\\delta_{n+1} = 2 Z_n \\delta_n + \\delta_n^2 + \\Delta c$ in standard floats.'],
-      ['Worker Tile Pool', 'Dispatches square tiles across multi-worker thread pool or WebGPU.'],
-      ['Palette Blit', 'Maps iteration counts to custom cyclic palette.']
-    ],
-    cond: [
-      { q: 'Is WebGPU automatically used when available?', r: 'Detects navigator.gpu and falls back to Web Workers when unsupported (2026-01-25).' }
-    ]
-  }
 ];
 
 export const FLOWS = [
@@ -768,7 +741,7 @@ export const CH = [
     title: '3. The Native WASM Core',
     reveal: ['EX', 'CE'],
     lede: `Custom expressions parse to ASTs and evaluate through the WebAssembly C core.`,
-    story: `<p>Equations entered by the user are parsed into an AST by the <b>Expression Compiler</b> and evaluated through the <mark>Native WASM Engine</mark> (ABI v2). The bridge allocates linear-memory buffers, calls native exports, and copies results back into JavaScript values.</p>`,
+    story: `<p>Equations entered by the user are parsed into an AST by the <b>Expression Compiler</b> and evaluated through the <mark>Native WASM Engine</mark> (ABI v3). The bridge allocates linear-memory buffers, calls native exports, and copies results back into JavaScript values.</p>`,
     flow: [
       ['U', 'EX', 'parse formula', { expr: 'sin(z) + z^2' }],
       ['EX', 'CE', 'compiled struct', { terms: 2 }],
@@ -840,22 +813,10 @@ export const CH = [
     ]
   },
   {
-    id: 'fractal_subs',
-    title: '9. Deep Fractals & Perturbation',
-    reveal: ['MB'],
-    lede: `Dedicated deep-zoom perturbation algorithms and WebGPU compute explore infinite fractal boundaries.`,
-    story: `<p>The <b>Mandelbrot Perturbation</b> subsystem uses arbitrary-precision fixed-point math (<code>fxp.mjs</code>) and <mark>WebGPU compute pipelines</mark> to explore deep fractal depths ($10^{-100}$) without precision breakdown.</p>`,
-    flow: [
-      ['U', 'MB', 'deep zoom target', { depth: '1e-45' }],
-      ['MB', 'WG', 'compute perturbation', { gpu: true }],
-      ['WG', 'AR', 'present tile', { tileId: 12 }]
-    ]
-  },
-  {
     id: 'whole_system',
-    title: '10. The Whole System',
+    title: '9. The Whole System',
     reveal: [],
-    lede: `All 18 structures unified in one explorable interactive architecture diagram.`,
+    lede: `All 22 structures unified in one explorable interactive architecture diagram.`,
     story: `<p>Choose which data flow runs using the picker at the bottom left. Hover any box for a quick summary; click to pin; double click or press <mark>→</mark> to go inside and inspect execution steps. Click any moving data packet to inspect its live JSON payload.</p>`,
     flow: null
   }
@@ -869,7 +830,7 @@ export const HOW_HTML = `<div class="eyebrow">Complex Function Analysis · Archi
 
 <h3 class="sec">Engine Architecture</h3>
 <ul>
-  <li><b>WASM C Core:</b> Compiled C library (<code>complex_engine.wasm</code>, ABI v2) providing native complex arithmetic, Durand-Kerner polynomial root-finding, and Riemann Zeta reflection continuations.</li>
+  <li><b>WASM C Core:</b> Compiled C library (<code>complex_engine.wasm</code>, ABI v3) providing native complex arithmetic, Durand-Kerner polynomial root-finding, and Riemann Zeta reflection continuations.</li>
   <li><b>Multi-Context Rendering:</b> Canvas 2D for interactive grids and vector streamlines, WebGL for image deformation meshes, and Three.js for stereographic Riemann spheres and 3D Laplace $|F(s)|$ heightfields.</li>
   <li><b>Reactive State Bridge:</b> Top-level Preact Signals wrapped in an observable store, with explicit nested mutations and a redraw scheduler for canvas invalidation.</li>
   <li><b>Worker Thread Domain Coloring:</b> Dedicated workers render native phase-magnitude tiles and transfer RGBA buffers back for canvas staging.</li>

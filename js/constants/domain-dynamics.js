@@ -26,11 +26,6 @@ export function isFiniteDomainDynamicsValue(re, im) {
         Math.abs(im) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE;
 }
 
-export function domainDynamicsChainBailsOut(re, im) {
-    return !(Math.abs(re) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
-        !(Math.abs(im) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE);
-}
-
 export function domainDynamicsLogMagnitude(re, im) {
     return Math.log1p(Math.hypot(re, im));
 }

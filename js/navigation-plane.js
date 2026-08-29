@@ -6,8 +6,7 @@ import { getChainedTransformFunction } from './native/map-runtime.js';
 import { updatePlaneViewportRanges } from './utils/canvas-utils.js';
 import { drawImageWithWebGL } from './rendering/draw-image-webgl.js';
 import { drawPlanarTransformedLine, drawComplexLineSetOnPlane } from './rendering/draw-planar.js';
-import { setupVisualParameters } from './utils/dom-utils.js';
-import { requireFiniteNumber, isFiniteComplex } from './utils/numeric-contracts.js';
+import { isFiniteComplex } from './utils/numeric-contracts.js';
 
 const { controls } = context;
 
@@ -59,45 +58,20 @@ function isNavigationFormTarget(target) {
     return !!(target && target.closest && target.closest('input, select, textarea, button, [contenteditable="true"]'));
 }
 
-function readNavigationControlValue(controlKey, parser = parseFloat) {
-    const control = controls[controlKey];
-    if (!control) throw new Error(`Missing navigation control: ${controlKey}.`);
-    const value = parser(control.value);
-    return requireFiniteNumber(value, `Navigation control ${controlKey}`);
-}
-
 export function initializeNavigationStateFromControls() {
-    state.navigationSize = controls.navigationSizeSlider ? readNavigationControlValue('navigationSizeSlider') : (state.navigationSize || 0.55);
-    state.navigationOpacity = controls.navigationOpacitySlider ? readNavigationControlValue('navigationOpacitySlider') : (state.navigationOpacity || 0.9);
-    state.navigationSpeed = controls.navigationSpeedSlider ? readNavigationControlValue('navigationSpeedSlider') : (state.navigationSpeed || 1.1);
-    state.navigationTrailLength = controls.navigationTrailLengthSlider ? readNavigationControlValue(
-        'navigationTrailLengthSlider',
-        value => parseInt(value, 10)
-    ) : (state.navigationTrailLength || 0);
-    state.navigationModeEnabled = controls.enableNavigationModeCb ? controls.enableNavigationModeCb.checked : Boolean(state.navigationModeEnabled);
+    state.navigationSize ||= 0.55;
+    state.navigationOpacity ||= 0.9;
+    state.navigationSpeed ||= 1.1;
+    state.navigationTrailLength ||= 0;
     syncNavigationControls();
 }
 
 export function syncNavigationControls() {
     const inSpecialMode = state.laplaceModeEnabled;
-    if (controls.navigationParams) {
-        controls.navigationParams.classList.toggle('hidden', inSpecialMode);
-    }
-    if (controls.enableNavigationModeCb) {
-        controls.enableNavigationModeCb.checked = state.navigationModeEnabled && !inSpecialMode;
-        controls.enableNavigationModeCb.disabled = inSpecialMode;
-    }
-    if (controls.navigationControlsContainer) {
-        controls.navigationControlsContainer.classList.toggle('hidden', !state.navigationModeEnabled || inSpecialMode);
-    }
     const keyhintOverlay = document.getElementById('navigation_keyhint_overlay');
     if (keyhintOverlay) {
         keyhintOverlay.classList.toggle('hidden', !state.navigationModeEnabled || inSpecialMode);
     }
-    if (controls.navigationSizeValueDisplay) controls.navigationSizeValueDisplay.textContent = state.navigationSize.toFixed(2);
-    if (controls.navigationOpacityValueDisplay) controls.navigationOpacityValueDisplay.textContent = state.navigationOpacity.toFixed(2);
-    if (controls.navigationSpeedValueDisplay) controls.navigationSpeedValueDisplay.textContent = state.navigationSpeed.toFixed(2);
-    if (controls.navigationTrailLengthValueDisplay) controls.navigationTrailLengthValueDisplay.textContent = state.navigationTrailLength;
 }
 
 export function setNavigationModeEnabled(enabled) {
@@ -111,7 +85,6 @@ export function setNavigationModeEnabled(enabled) {
     if (enabled) {
         state.manifold3dViewEnabled = false;
         state.manifoldTransformationEnabled = false;
-        if (controls.enableManifold3DCb) controls.enableManifold3DCb.checked = false;
         if (controls.enableManifoldTransformationCb) controls.enableManifoldTransformationCb.checked = false;
         followNavigationViewports();
     } else {
@@ -120,15 +93,6 @@ export function setNavigationModeEnabled(enabled) {
     }
 
     syncNavigationControls();
-}
-
-export function resetNavigationVehicle() {
-    runtime.navigation.position = { re: 0, im: 0 };
-    runtime.navigation.heading = 0;
-    runtime.navigation.trail = [];
-    setupVisualParameters(true, true);
-    followNavigationViewports();
-    eventBus.emit('redraw:domain', true);
 }
 
 function getNavigationInputVector() {

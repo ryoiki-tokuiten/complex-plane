@@ -75,14 +75,6 @@ function formatCoord(value) {
     return text.endsWith('.00') ? text.slice(0, -3) : text;
 }
 
-function coordinate(value, min, max, span, label) {
-    const range = max - min;
-    if (![value, min, max, span].every(Number.isFinite) || range <= 0) {
-        throw new Error(`${label} coordinates require finite increasing bounds.`);
-    }
-    return ((value - (min + max) * 0.5) / range) * span;
-}
-
 function normalizeArray(value, Type, label) {
     if (!(value instanceof Type)) {
         throw new Error(`${label} must be a ${Type.name}.`);

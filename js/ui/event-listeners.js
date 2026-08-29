@@ -1,8 +1,8 @@
-import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, wPlaneInitialRanges, laplaceComPlaneParams, laplaceSpectrumPlaneParams, sliderParamKeys } from '../store/state.js';
+import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, laplaceComPlaneParams, laplaceSpectrumPlaneParams, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { eventBus } from '../store/events.js';
 import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
-import { processUploadedImageSource, loadUploadedVideoFile, loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
+import { loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
 import { initPlaneContextMenu, hidePlaneContextMenu } from './plane-context-menu.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords, setPlaneViewport } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
@@ -19,21 +19,13 @@ import {
 import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
 import {
     updateDomainPaletteCirclePanel,
-    updateSurfacePaletteCirclePanel,
-    drawDomainPaletteCircle,
-    drawSurfacePaletteCircle
+    updateSurfacePaletteCirclePanel
 } from '../rendering/draw-palette-preview.js';
-export {
-    updateDomainPaletteCirclePanel,
-    updateSurfacePaletteCirclePanel,
-    drawDomainPaletteCircle,
-    drawSurfacePaletteCircle
-};
 import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, syncVectorFlowControls, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview, syncComplexParameterControls, fitConformalGridOutputViewport, syncCanvasZoomControlsUI } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview, syncComplexParameterControls, syncCanvasZoomControlsUI } from './ui-updates.js';
 import { syncGridDensityControls } from './grid-density-controls.js';
 import {
     bindGridShapePicker,
@@ -44,18 +36,17 @@ import {
 import { GRID_SHAPE_PARAMETERS } from '../constants/grid-shapes.js';
 import { buildThreeJSMeshes } from '../rendering/manifold-transformation-animation.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
-import { setNavigationModeEnabled, followNavigationViewports, resetNavigationVehicle, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
+import { setNavigationModeEnabled, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
 import { toggleAnimation } from './animation.js';
 import { initializePolynomialCoeffs } from './polynomial-ui.js';
 import { resizeScalarSurface } from '../rendering/real-plots-renderer.js';
-import { applyTheme, domainPalettes, surfacePalettes, loadThemePreferences, persistThemePreferences } from './theme-manager.js';
+import { applyTheme, loadThemePreferences } from './theme-manager.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
 import { initPanelLayoutManager, refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import {
     initializeDynamicPlottingUI,
     syncDynamicPlottingUI
 } from './dynamic-plotting-ui.js';
-import { domainColorForValue } from '../rendering/domain-coloring.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { compileExpression } from '../math/expression/index.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
@@ -66,11 +57,6 @@ import {
     resizeTransformationGraphRenderer,
     selectGraphInputFromCanvasPoint
 } from '../rendering/transformation-graph.js';
-import {
-    generateTissotIndicatrices,
-    selectStableTissotIndicatrices,
-    getTissotViewportBounds
-} from '../analysis/tissot.js';
 import { disposeRealPlotsRenderer, disposeScalarSurface, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../math/algebraic-term-utils.js';
 import { openThemeModal } from '../frontend/theme-state.js';
@@ -83,6 +69,7 @@ import {
     nativeMapOptions
 } from '../native/complex-engine.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
+import { getRiemannSurfaceCanvas, resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
 
 const { controls = {} } = context;
 
@@ -173,11 +160,7 @@ const BASIC_SLIDER_BINDINGS = [
     ['particleMaxLifetimeSlider', 'particleMaxLifetime', parseInteger],
     ['mediaSizeSlider', 'mediaSize'],
     ['mediaOpacitySlider', 'mediaOpacity'],
-    ['imageSizeSlider', 'imageSize'],
-    ['imageOpacitySlider', 'imageOpacity'],
     ['videoFpsSlider', 'videoProcessingFps', parseInteger],
-    ['videoSizeSlider', 'videoSize'],
-    ['videoOpacitySlider', 'videoOpacity'],
     ['laplaceAnimationSpeedSlider', 'laplaceAnimationSpeed'],
     ['laplaceFrequencySlider', 'laplaceFrequency'],
     ['laplaceDampingSlider', 'laplaceDamping'],
@@ -191,22 +174,11 @@ const BASIC_SLIDER_BINDINGS = [
     ['riemannSurfaceBranchCenterSlider', 'riemannSurfaceBranchCenter', parseInteger],
     ['riemannSurfaceHeightScaleSlider', 'riemannSurfaceHeightScale'],
     ['gridSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
-    ['mediaSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
-    ['imageSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
-    ['videoSurface3DHeightScaleSlider', 'foldSurfaceHeightScale'],
     ['riemannSurfaceHeightClipSlider', 'riemannSurfaceHeightClip']
 ].map(([controlKey, stateKey, parser = parseFloat]) => ({ controlKey, stateKey, parser }));
 
 const BASIC_CHECKBOX_BINDINGS = [
-    ['showZerosPolesCb', 'showZerosPoles'],
-    ['showCriticalPointsCb', 'showCriticalPoints'],
-    ['enableCauchyIntegralModeCb', 'cauchyIntegralModeEnabled'],
-    ['enableVectorFieldCb', 'vectorFieldEnabled'],
-    ['enableStreamlineFlowCb', 'streamlineFlowEnabled'],
-    ['enableRadialDiscreteStepsCb', 'radialDiscreteStepsEnabled'],
-    ['enableManifold3DCb', 'manifold3dViewEnabled'],
     ['enableManifoldTransformationCb', 'manifoldTransformationEnabled'],
-    ['enableTaylorSeriesCb', 'taylorSeriesEnabled'],
     ['laplaceShowRocCb', 'laplaceShowROC'],
     ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
     ['laplaceShowFourierLineCb', 'laplaceShowFourierLine'],
@@ -218,9 +190,6 @@ const BASIC_CHECKBOX_BINDINGS = [
     ['laplaceSyncWindingVectorCb', 'laplaceSyncWindingVector'],
     ['laplaceShowBarriersCb', 'laplaceShowBarriers'],
     ['laplaceAnimationLoopCb', 'laplaceAnimationLoop'],
-    ['enableParticleAnimationCb', 'particleAnimationEnabled'],
-    ['enableDomainColoringCb', 'domainColoringEnabled'],
-    ['enableRiemannSurfaceCb', 'riemannSurfaceEnabled'],
     ['riemannSurfaceWireframeCb', 'riemannSurfaceWireframe'],
     ['arbitraryShapeClosedCb', 'arbitraryShapeClosed']
 ].map(([controlKey, stateKey]) => ({ controlKey, stateKey }));
@@ -238,9 +207,8 @@ const SPECIAL_SLIDERS = new Set([
     'vectorFieldScaleSlider', 'vectorArrowThicknessSlider', 'vectorArrowHeadSizeSlider',
     'streamlineStepSizeSlider', 'streamlineMaxLengthSlider', 'streamlineThicknessSlider',
     'streamlineSeedDensityFactorSlider', 'particleDensitySlider', 'particleSpeedSlider',
-    'particleMaxLifetimeSlider', 'imageSizeSlider', 'imageOpacitySlider',
-    'videoFpsSlider', 'videoSizeSlider', 'videoOpacitySlider',
-    'zPlaneZoomSlider', 'wPlaneZoomSlider', 'taylorSeriesOrderSlider',
+    'particleMaxLifetimeSlider', 'videoFpsSlider',
+    'taylorSeriesOrderSlider',
     'radialDiscreteStepsCountSlider', 'laplaceAnimationSpeedSlider', 'laplaceAnimationTimeSlider',
     'laplaceFrequencySlider', 'laplaceDampingSlider', 'laplaceAmplitudeSlider',
     'laplaceTimeWindowSlider', 'laplaceSamplesSlider',
@@ -250,14 +218,10 @@ const SPECIAL_SLIDERS = new Set([
 ]);
 
 const SPECIAL_CHECKBOXES = new Set([
-    'enableVectorFieldCb', 'enableStreamlineFlowCb',
-    'enableRadialDiscreteStepsCb', 'enableManifold3DCb', 'enableRiemannSurfaceCb',
-    'enableTaylorSeriesCb',
     'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
     'laplaceShowFourierLineCb', 'laplaceHideIntegralEvaluationCb', 'laplaceHide3DSurfaceCb',
     'laplaceShowSpectrumCb', 'laplaceShowComCb', 'laplaceShowFourier3DCb', 'laplaceSyncWindingVectorCb', 'laplaceShowBarriersCb', 'laplaceContoursCb',
-    'laplaceAnimationLoopCb', 'enableParticleAnimationCb',
-    'enableDomainColoringCb', 'enableCauchyIntegralModeCb'
+    'laplaceAnimationLoopCb'
 ]);
 
 const SPECIAL_SELECTORS = new Set([
@@ -276,8 +240,6 @@ const BINDERS = [
     bindImageControls,
     bindVideoControls,
     bindPolynomialControls,
-    bindDerivativeControls,
-    bindConformalGridControls,
     bindDomainColoringControls,
     bindViewControls,
     bindNavigationControls,
@@ -304,29 +266,7 @@ const BINDERS = [
     initPanelLayoutManager
 ];
 
-function syncPreimageCheckboxes(value) {
-    for (const key of ['gridPreimageExplorerCb', 'mediaPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
-        if (controls[key]) controls[key].checked = value;
-    }
-}
-
 function bindRequestedExplorerControls() {
-    for (const key of ['gridPreimageExplorerCb', 'mediaPreimageExplorerCb', 'imagePreimageExplorerCb', 'videoPreimageExplorerCb']) {
-        bindControlListener(key, 'change', (_event, checkbox) => {
-            state.preimageExplorerEnabled = checkbox.checked;
-            if (!checkbox.checked) {
-                state.preimageTarget = null;
-                state.preimageRoots = [];
-                state.preimageStatus = '';
-            }
-            syncPreimageCheckboxes(checkbox.checked);
-            requestUiRedraw();
-        });
-    }
-    bindCheckbox('enableCauchyIntegralModeCb', 'cauchyIntegralModeEnabled', (_event, enabled) => {
-        syncParameterControlsPanelVisibility();
-        requestUiRedraw();
-    });
     const setArbitraryShapeMode = mode => {
         state.arbitraryShapeMode = mode === 'draw' ? 'draw' : 'parametric';
         syncParameterControlsPanelVisibility();
@@ -548,52 +488,6 @@ function bindSelector(controlKey, stateKey, customCallback = null) {
     });
 }
 
-function bindFormulaInput({
-    controlKey,
-    displayKey,
-    stateKey,
-    allowedVariables = ['z'],
-    defaultValue = 'z',
-    onCommit = () => requestDomainRedraw(true)
-}) {
-    let commitTimer = null;
-
-    const commit = () => {
-        if (commitTimer) {
-            clearTimeout(commitTimer);
-            commitTimer = null;
-        }
-        const inputEl = controls[controlKey];
-        const displayEl = controls[displayKey];
-        const raw = String(inputEl?.value ?? '').trim();
-        const effective = raw === '' ? defaultValue : raw;
-        let valid = false;
-        try {
-            compileExpression(effective, { allowedVariables });
-            valid = true;
-        } catch {
-            valid = false;
-        }
-        updateCustomFormulaPreview(inputEl, displayEl, { allowedVariables });
-        if (valid && state[stateKey] !== effective) {
-            state[stateKey] = effective;
-            onCommit();
-        }
-    };
-
-    bindControlListener(controlKey, 'input', () => {
-        const inputEl = controls[controlKey];
-        const displayEl = controls[displayKey];
-        updateCustomFormulaPreview(inputEl, displayEl, { allowedVariables });
-        if (commitTimer) clearTimeout(commitTimer);
-        commitTimer = setTimeout(commit, 300);
-    });
-
-    bindControlListener(controlKey, 'change', () => {
-        commit();
-    });
-}
-
 function bindSimpleControlRemainder() {
     BASIC_SLIDER_BINDINGS
         .filter(({ controlKey }) => !SPECIAL_SLIDERS.has(controlKey))
@@ -764,9 +658,6 @@ function disableGraphView() {
     state.graphFourierEnabled = false;
     state.graphTraceEnabled = false;
     state.graphSelectedShape = '';
-    checked('enableGraphViewCb', false);
-    checked('viewFullGridPerspectiveBtn', false);
-    checked('enableGraphLayerLockCb', false);
     checked('enableGraphFourierCb', false);
     checked('enableGraphTraceCb', false);
     syncGridDensityControls();
@@ -807,7 +698,6 @@ function syncAlgebraicControlsFromState() {
 }
 
 function syncDomainControlsFromState() {
-    checked('enableDomainColoringCb', state.domainColoringEnabled);
     checked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
     hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
     syncDomainColoringKeyVisibility();
@@ -939,8 +829,6 @@ function restoreNormalViewports() {
 
     state.zPlaneZoom = snapshot.zZoom;
     state.wPlaneZoom = snapshot.wZoom;
-    if (controls.zPlaneZoomSlider) controls.zPlaneZoomSlider.value = String(Math.log10(snapshot.zZoom || 1));
-    if (controls.wPlaneZoomSlider) controls.wPlaneZoomSlider.value = String(Math.log10(snapshot.wZoom || 1));
 }
 
 function fitTransformViewports() {
@@ -977,8 +865,6 @@ function fitTransformViewports() {
 
     state.zPlaneZoom = 1;
     state.wPlaneZoom = 1;
-    if (controls.zPlaneZoomSlider) controls.zPlaneZoomSlider.value = '0';
-    if (controls.wPlaneZoomSlider) controls.wPlaneZoomSlider.value = '0';
 }
 
 function activateFunctionMode(key) {
@@ -1032,27 +918,6 @@ function activateFunctionMode(key) {
     setActiveFunctionButton(key);
     if (state.dynamicPlotting?.enabled) syncDynamicPlottingUI();
     requestDomainRedraw(true);
-}
-
-function readImageFile(file, callback) {
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = event => {
-        const img = new Image();
-        img.onload = () => callback(img);
-        img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-}
-
-function processUploadedImage(img) {
-    if (processUploadedImageSource(img)) {
-        requestDomainRedraw(true);
-        if (state.manifold3dViewEnabled || state.manifoldTransformationEnabled) {
-            buildThreeJSMeshes();
-        }
-    }
 }
 
 function complexState(key) {
@@ -1300,11 +1165,6 @@ function bindImageControls() {
         if (file) loadUploadedMediaFile(file);
     });
 
-    bindControlListener('imageUploadInput', 'change', event => {
-        const file = firstFile(event);
-        if (file) loadUploadedMediaFile(file);
-    });
-
     bindSlider('mediaSizeSlider', 'mediaSize', parseFloat, () => {
         state.imageSize = state.mediaSize;
         state.videoSize = state.mediaSize;
@@ -1315,16 +1175,9 @@ function bindImageControls() {
         state.videoOpacity = state.mediaOpacity;
         requestDomainRedraw(true);
     });
-    bindSlider('imageSizeSlider', 'imageSize', parseFloat, () => requestDomainRedraw(true));
-    bindSlider('imageOpacitySlider', 'imageOpacity', parseFloat, () => requestDomainRedraw(true));
 }
 
 function bindVideoControls() {
-    bindControlListener('videoUploadInput', 'change', event => {
-        const file = firstFile(event);
-        if (file) loadUploadedMediaFile(file);
-    });
-
     bindControlListener('videoPlayPauseBtn', 'click', () => toggleUploadedVideoPlayback());
 
     bindSlider('videoFpsSlider', 'videoProcessingFps', parseInteger, () => {
@@ -1332,35 +1185,9 @@ function bindVideoControls() {
         if (state.videoIsPlaying && isRasterInputShape(state.currentInputShape)) startVideoProcessingLoop();
         requestUiRedraw();
     });
-    bindSlider('videoSizeSlider', 'videoSize', parseFloat, () => requestDomainRedraw(true));
-    bindSlider('videoOpacitySlider', 'videoOpacity', parseFloat, () => requestDomainRedraw(true));
 }
 
 function bindDomainColoringControls() {
-    bindCheckbox('enableDomainColoringCb', 'domainColoringEnabled', () => {
-        if (state.domainColoringEnabled) {
-            if (state.manifold3dViewEnabled) {
-                state.manifold3dViewEnabled = false;
-                state.manifoldTransformationEnabled = false;
-                checked('enableManifold3DCb', false);
-                checked('enableManifoldTransformationCb', false);
-                hidden(controls.manifoldOptionsDiv, true);
-                syncManifoldTransformationUI();
-            }
-            if (state.currentInputShape !== 'empty_grid') {
-                if (state.currentInputShape === 'video' && state.videoIsPlaying) {
-                    pauseUploadedVideoPlayback();
-                }
-                state.currentInputShape = 'empty_grid';
-                if (controls.inputShapeSelector) controls.inputShapeSelector.value = 'empty_grid';
-            }
-        }
-        hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
-        syncDomainColoringKeyVisibility();
-        syncOrbitColoringModeControl();
-        requestDomainRedraw(true);
-    });
-
     bindCheckbox('showDomainColoringKeyCb', 'domainColoringKeyVisible', () => {
         syncDomainColoringKeyVisibility();
         requestUiRedraw();
@@ -1380,37 +1207,8 @@ function bindDomainColoringControls() {
         .forEach(key => bindSlider(`${key}Slider`, key, parseFloat, () => requestDomainRedraw(true)));
 }
 
-function bindDerivativeControls() {
-    if (controls.enableDerivativeCb) {
-        controls.enableDerivativeCb.checked = state.mapPresentation === 'derivative';
-    }
-
-    bindElementListener(controls.enableDerivativeCb, 'change', event => {
-        state.mapPresentation = event.target.checked ? 'derivative' : 'function';
-        syncManifoldTransformationUI();
-        updateChainingTitles();
-        requestDomainRedraw(true);
-    });
-}
-
-
-function bindConformalGridControls() {
-    bindCheckbox('enableConformalGridCb', 'conformalGridEnabled', () => {
-        if (state.conformalGridEnabled) {
-            if (state.currentInputShape === 'video' && state.videoIsPlaying) {
-                pauseUploadedVideoPlayback();
-            }
-            state.currentInputShape = 'empty_grid';
-            if (controls.inputShapeSelector) controls.inputShapeSelector.value = 'empty_grid';
-            fitConformalGridOutputViewport();
-        }
-        requestUiRedraw();
-    });
-}
-
 function disableRiemannSurface() {
     state.riemannSurfaceEnabled = false;
-    checked('enableRiemannSurfaceCb', false);
     hidden(controls.riemannSurfaceOptionsDiv, true);
     if (!state.realPlotsEnabled) {
         state.show2DContourPlot = false;
@@ -1419,53 +1217,15 @@ function disableRiemannSurface() {
 }
 
 function syncFoldSurfaceControls() {
-    checked('gridSurface3DCb', state.foldSurface3dEnabled);
     const isFoldActive = Boolean(
         state.foldSurface3dEnabled &&
         (isFoldableInputShape(state.currentInputShape) || isRasterInputShape(state.currentInputShape))
     );
     hidden(controls.wPlaneFoldsOverlay, !isFoldActive);
-    hidden(
-        controls.gridSurface3DOptions,
-        !state.foldSurface3dEnabled || !isFoldableInputShape(state.currentInputShape)
-    );
-    hidden(
-        controls.imageSurface3DOptions,
-        !state.foldSurface3dEnabled || state.currentInputShape !== 'image'
-    );
-    hidden(
-        controls.videoSurface3DOptions,
-        !state.foldSurface3dEnabled || state.currentInputShape !== 'video'
-    );
 }
 
 function syncGridFoldDensity(useFoldDefault = false) {
     syncGridDensityControls({ applyFoldDefault: useFoldDefault });
-}
-
-function enableFoldSurface3d() {
-    disableRiemannSurface();
-    if (state.navigationModeEnabled) setNavigationModeEnabled(false);
-    Object.assign(state, {
-        manifold3dViewEnabled: false,
-        manifoldTransformationEnabled: false
-    });
-    [
-        'enableManifold3DCb',
-        'enableManifoldTransformationCb'
-    ].forEach(key => checked(key, false));
-    hidden(controls.manifoldOptionsDiv, true);
-    syncManifoldTransformationUI();
-    updateChainingTitles();
-}
-
-function bindFoldSurfaceControl(controlKey) {
-    bindCheckbox(controlKey, 'foldSurface3dEnabled', () => {
-        if (state.foldSurface3dEnabled) enableFoldSurface3d();
-        syncGridFoldDensity(controlKey === 'gridSurface3DCb' && state.foldSurface3dEnabled);
-        syncFoldSurfaceControls();
-        requestDomainRedraw(true);
-    });
 }
 
 function disableFoldSurface3d() {
@@ -1515,41 +1275,7 @@ function bindCanvasZoomControls() {
 }
 
 function bindViewControls() {
-    bindFoldSurfaceControl('gridSurface3DCb');
     bindCanvasZoomControls();
-
-    const onManifold3dToggled = () => {
-        if (state.manifold3dViewEnabled) {
-            if (state.domainColoringEnabled) {
-                state.domainColoringEnabled = false;
-                checked('enableDomainColoringCb', false);
-                hidden(controls.domainColoringOptionsDiv, true);
-                syncDomainColoringKeyVisibility();
-                syncOrbitColoringModeControl();
-            }
-            disableFoldSurface3d();
-            if (state.riemannSurfaceEnabled) disableRiemannSurface();
-            state.manifoldTransformationEnabled = false;
-            checked('enableManifoldTransformationCb', false);
-            state.manifoldTransformationProgressW = 1.0;
-
-            const defaultShape = getDefaultInputShapeForManifold(state.selectedManifold);
-            state.currentInputShape = defaultShape;
-            if (controls.inputShapeSelector) {
-                controls.inputShapeSelector.value = defaultShape;
-            }
-            syncGridDensityControls();
-        } else {
-            state.manifoldTransformationEnabled = false;
-            checked('enableManifoldTransformationCb', false);
-            syncGridDensityControls();
-        }
-        hidden(controls.manifoldOptionsDiv, !state.manifold3dViewEnabled);
-        syncManifoldTransformationUI();
-        updateChainingTitles();
-        requestDomainRedraw(true);
-    };
-    bindCheckbox('enableManifold3DCb', 'manifold3dViewEnabled', onManifold3dToggled);
 
     bindSelector('manifoldShapeSelector', 'selectedManifold', () => {
         if (!isRasterInputShape(state.currentInputShape)) {
@@ -1572,7 +1298,6 @@ function bindViewControls() {
         if (state.manifoldTransformationEnabled) {
             if (state.domainColoringEnabled) {
                 state.domainColoringEnabled = false;
-                checked('enableDomainColoringCb', false);
                 hidden(controls.domainColoringOptionsDiv, true);
                 syncDomainColoringKeyVisibility();
                 syncOrbitColoringModeControl();
@@ -1580,7 +1305,6 @@ function bindViewControls() {
             disableFoldSurface3d();
             if (!state.manifold3dViewEnabled) {
                 state.manifold3dViewEnabled = true;
-                checked('enableManifold3DCb', true);
                 hidden(controls.manifoldOptionsDiv, false);
             }
             if (state.riemannSurfaceEnabled) {
@@ -1601,45 +1325,10 @@ function bindViewControls() {
     };
     bindCheckbox('enableManifoldTransformationCb', 'manifoldTransformationEnabled', onTransformationToggled);
 
-    bindCheckbox('enableRiemannSurfaceCb', 'riemannSurfaceEnabled', () => {
-        if (state.riemannSurfaceEnabled) {
-            disableFoldSurface3d();
-            disableRealPlots();
-            Object.assign(state, { manifold3dViewEnabled: false, manifoldTransformationEnabled: false });
-            ['enableManifold3DCb', 'enableManifoldTransformationCb'].forEach(key => checked(key, false));
-            if (state.navigationModeEnabled) setNavigationModeEnabled(false);
-        }
-
-        hidden(controls.riemannSurfaceOptionsDiv, !state.riemannSurfaceEnabled);
-        hidden(controls.manifoldOptionsDiv, true);
-        updateChainingTitles();
-        requestDomainRedraw(true);
-    });
-
     bindControlListener('riemannSurfaceResetViewBtn', 'click', () => resetRiemannSurfaceViews());
 }
 
 function bindNavigationControls() {
-    bindControlListener('enableNavigationModeCb', 'change', (_event, checkbox) => {
-        setNavigationModeEnabled(checkbox.checked);
-        if (state.navigationModeEnabled) disableFoldSurface3d();
-        requestDomainRedraw(true);
-    });
-
-    bindSlider('navigationSizeSlider', 'navigationSize', parseFloat, () => {
-        const shifted = followNavigationViewports();
-        requestDomainRedraw(Boolean(shifted && state.domainColoringEnabled));
-    });
-    bindSlider('navigationOpacitySlider', 'navigationOpacity', parseFloat, () => requestDomainRedraw(false));
-    bindSlider('navigationSpeedSlider', 'navigationSpeed', parseFloat, () => requestDomainRedraw(false));
-    bindSlider('navigationTrailLengthSlider', 'navigationTrailLength', parseInteger, () => {
-        if (runtime.navigation.trail.length > state.navigationTrailLength) {
-            runtime.navigation.trail.splice(0, runtime.navigation.trail.length - state.navigationTrailLength);
-        }
-        requestDomainRedraw(false);
-    });
-
-    bindControlListener('navigationResetBtn', 'click', () => resetNavigationVehicle());
     bindElementListener(document, 'keydown', event => setNavigationKey(event, true));
     bindElementListener(document, 'keyup', event => setNavigationKey(event, false));
     bindElementListener(window, 'blur', () => {
@@ -1661,11 +1350,6 @@ function bindVectorFieldControls() {
 }
 
 function bindTaylorControls() {
-    bindCheckbox('enableTaylorSeriesCb', 'taylorSeriesEnabled', () => {
-        hidden(controls.taylorSeriesOptionsDetailDiv, !state.taylorSeriesEnabled);
-        requestUiRedraw();
-    });
-
     bindSlider('taylorSeriesOrderSlider', 'taylorSeriesOrder', parseInteger);
 
     const pickBtn = document.getElementById('pick_taylor_center_canvas_btn');
@@ -1699,7 +1383,6 @@ function bindPolynomialControls() {
 }
 
 function bindRadialAndZetaControls() {
-    bindCheckbox('enableRadialDiscreteStepsCb', 'radialDiscreteStepsEnabled');
     bindSlider('radialDiscreteStepsCountSlider', 'radialDiscreteStepsCount', parseInteger);
     bindControlListener('toggleZetaContinuationBtn', 'click', () => {
         state.zetaContinuationEnabled = !state.zetaContinuationEnabled;
@@ -2979,59 +2662,8 @@ function bindPalettePanel(viewButtonId, closeButtonId, panelId, updatePanel) {
 function bindGraphControls() {
     checked('enableGraphTraceCb', state.graphTraceEnabled);
     checked('enableGraphFourierCb', state.graphFourierEnabled);
-    checked('enableGraphFocusBoxCb', state.graphFocusBoxEnabled);
-    checked('enableGraphLayerLockCb', state.graphLayerLockEnabled);
-
-    bindCheckbox('enableGraphViewCb', 'graphViewEnabled', (_event, enabled) => {
-        if (state.laplaceModeEnabled || !enabled) {
-            disableGraphView();
-        } else {
-            disableRealPlots();
-            state.graphFullGridEnabled = false;
-            state.graphSelectedShape = '';
-        }
-
-        syncGridDensityControls();
-        requestUiRedraw();
-    });
-
-    bindCheckbox('viewFullGridPerspectiveBtn', 'graphFullGridEnabled', (_event, enabled) => {
-        if (!state.graphViewEnabled || !isFullGridPerspectiveSupported(state.currentInputShape)
-            || state.laplaceModeEnabled) {
-            state.graphFullGridEnabled = false;
-            checked('viewFullGridPerspectiveBtn', false);
-            return;
-        }
-
-        if (enabled) {
-            state.graphGridFamily = 'primary';
-            state.graphSelectedShape = '';
-            if (controls.graphGridFamilySelector) controls.graphGridFamilySelector.value = 'primary';
-        } else {
-            state.graphLayerLockEnabled = false;
-            checked('enableGraphLayerLockCb', false);
-            syncGridDensityControls();
-        }
-        updateModePanels();
-        requestUiRedraw();
-    });
-
     bindSelector('graphGridFamilySelector', 'graphGridFamily', () => {
         state.graphSelectedShape = '';
-        requestUiRedraw();
-    });
-    bindCheckbox('enableGraphFocusBoxCb', 'graphFocusBoxEnabled', () => requestUiRedraw());
-    bindCheckbox('enableGraphLayerLockCb', 'graphLayerLockEnabled', (_event, enabled) => {
-        if (enabled) {
-            state.graphTraceEnabled = false;
-            state.graphFourierEnabled = false;
-            checked('enableGraphTraceCb', false);
-            checked('enableGraphFourierCb', false);
-        }
-        state.graphSelectedShape = '';
-        state.graphSelectionRevision = (state.graphSelectionRevision || 0) + 1;
-        syncGridDensityControls();
-        updateModePanels();
         requestUiRedraw();
     });
     bindCheckbox('enableGraphFourierCb', 'graphFourierEnabled', (_event, enabled) => {

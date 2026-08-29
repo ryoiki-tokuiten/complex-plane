@@ -591,7 +591,6 @@ function requirePlanarRenderOptions(options) {
 }
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 
 function writeCString(value, allocations) {
     const bytes = textEncoder.encode(String(value));
@@ -601,13 +600,6 @@ function writeCString(value, allocations) {
     target.set(bytes);
     target[bytes.length] = 0;
     return pointer;
-}
-
-function readCString(pointer, capacity) {
-    const bytes = new Uint8Array(wasm.memory.buffer, pointer, capacity);
-    const end = bytes.indexOf(0);
-    if (end < 0) throw new Error('Native precision result was not terminated.');
-    return textDecoder.decode(bytes.subarray(0, end));
 }
 
 function writeComplex(view, offset, value, defaultRe, defaultIm) {

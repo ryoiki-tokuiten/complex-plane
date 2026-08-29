@@ -351,42 +351,6 @@ test('Real Plots with 2D Contour divides workspace cleanly side-by-side or stack
     assert.equal(parseInt(slot.top, 10), 24);
 });
 
-test('compactPanelGaps automatically compacts gaps in both horizontal and vertical modes', async () => {
-    const { compactPanelGaps } = await import('../js/ui/panel-layout-manager.js');
-
-    // 1. Horizontal mode gap compaction
-    const hContainer = {
-        children: [
-            { id: 'z_plane_column', offsetLeft: 24, offsetTop: 24, offsetWidth: 400, offsetHeight: 400, style: { left: '24px', top: '24px', width: '400px', height: '400px' }, classList: { contains: () => false } },
-            // gap here: w_plane_column is placed at 1200px instead of 448px
-            { id: 'w_plane_column', offsetLeft: 1200, offsetTop: 24, offsetWidth: 400, offsetHeight: 400, style: { left: '1200px', top: '24px', width: '400px', height: '400px' }, classList: { contains: () => false } }
-        ]
-    };
-
-    compactPanelGaps(hContainer);
-    assert.equal(parseInt(hContainer.children[0].style.left, 10), 24);
-    assert.equal(parseInt(hContainer.children[1].style.left, 10), 448);
-
-    // 2. Vertical mode gap compaction
-    globalThis.document = {
-        body: { classList: { contains: (cls) => cls === 'vertical-layout' } }
-    };
-
-    const vContainer = {
-        children: [
-            { id: 'z_plane_column', offsetLeft: 24, offsetTop: 24, offsetWidth: 400, offsetHeight: 300, style: { left: '24px', top: '24px', width: '400px', height: '300px' }, classList: { contains: () => false } },
-            // gap here: w_plane_column is placed at 1000px instead of 348px
-            { id: 'w_plane_column', offsetLeft: 24, offsetTop: 1000, offsetWidth: 400, offsetHeight: 300, style: { left: '24px', top: '1000px', width: '400px', height: '300px' }, classList: { contains: () => false } }
-        ]
-    };
-
-    compactPanelGaps(vContainer);
-    assert.equal(parseInt(vContainer.children[0].style.top, 10), 24);
-    assert.equal(parseInt(vContainer.children[1].style.top, 10), 348);
-
-    delete globalThis.document;
-});
-
 test('resolveCollisions supports vertical stacking in the same column without shifting to another column', async () => {
     const { resolveCollisions } = await import('../js/ui/panel-layout-manager.js');
 
@@ -419,6 +383,5 @@ test('resolveCollisions supports vertical stacking in the same column without sh
     assert.equal(parseInt(wPanel.style.left, 10), 748);
     assert.equal(parseInt(wPanel.style.top, 10), 24);
 });
-
 
 

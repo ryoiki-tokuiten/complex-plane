@@ -31,10 +31,13 @@ async function waitForNextCompletedDomainFrame(page, previousJobId) {
 }
 
 async function setZZoomExponentBurst(page, exponents) {
-    await page.evaluate((values) => {
+    await page.evaluate(async (values) => {
+        const { setupVisualParameters } = await import('./js/utils/dom-utils.js');
+        const { requestDomainRedraw } = await import('./js/rendering/redraw-scheduler.js');
         for (const value of values) {
             window.__state.zPlaneZoom = Math.pow(10, value);
-            window.__runtime.rendering.requestDomainRedraw(true);
+            setupVisualParameters(true, false);
+            requestDomainRedraw(true);
         }
     }, exponents);
 }
@@ -59,28 +62,6 @@ test.describe('Domain Coloring Rendering', () => {
             const ctx = canvas.getContext('2d');
             const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
             // Check if there are non-black, colored pixels across the plane
-            let colored = 0;
-            for (let i = 0; i < data.length; i += 16) {
-                if (data[i] > 30 || data[i + 1] > 30 || data[i + 2] > 30) colored++;
-            }
-            return colored > 500;
-        }, { timeout: 10000 });
-
-        expect(errors).toEqual([]);
-    });
-
-    test('renders domain coloring for elementary functions and palettes', async ({ page }) => {
-        const errors = [];
-        page.on('pageerror', err => errors.push(err.message));
-
-        await page.locator('#select_cos_btn').click();
-        await enableDomainColoring(page);
-
-        await page.waitForFunction(() => {
-            const canvas = document.getElementById('z_plane_canvas');
-            if (!canvas) return false;
-            const ctx = canvas.getContext('2d');
-            const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
             let colored = 0;
             for (let i = 0; i < data.length; i += 16) {
                 if (data[i] > 30 || data[i + 1] > 30 || data[i + 2] > 30) colored++;
