@@ -60,11 +60,10 @@ export function setupDOMReferences() {
     
     const requiredControls = [
         'zPlaneCanvas', 'wPlaneCanvas',
-        'inputShapeSelector', 'gridDensitySlider',
-        'functionControlsPanel', 'visualizationOptionsPanel',
+        'inputShapeSelector',
+        'functionControlsPanel',
         'commonParamsSliders',
-        'shapeParamsSliders', 'mobiusParamsSliders', 'polynomialParamsSliders',
-        'zPlaneZoomSlider', 'wPlaneZoomSlider'
+        'shapeParamsSliders', 'mobiusParamsSliders', 'polynomialParamsSliders'
     ];
 
     const missingControls = requiredControls.filter(key => !controls[key]);
@@ -148,8 +147,8 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
             const baseScaleZ = Math.min(zPlaneParams.width / initialXSpanZ, zPlaneParams.height / initialYSpanZ);
             const scaleZ = baseScaleZ * (state.zPlaneZoom || 1);
             zPlaneParams.scale.x = zPlaneParams.scale.y = scaleZ; 
-            zPlaneParams.origin.x = (zPlaneParams.width / 2) - zWorldCenterX * scaleZ;
-            zPlaneParams.origin.y = (zPlaneParams.height / 2) + zWorldCenterY * scaleZ; 
+            zPlaneParams.origin.x = (zPlaneParams.width * 0.5) - zWorldCenterX * scaleZ;
+            zPlaneParams.origin.y = (zPlaneParams.height * 0.5) + zWorldCenterY * scaleZ; 
             updatePlaneViewportRanges(zPlaneParams);
         }
     }
@@ -166,8 +165,8 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
             const baseScaleW = Math.min(wPlaneParams.width / initialXSpanW, wPlaneParams.height / initialYSpanW);
             const scaleW = baseScaleW * (state.wPlaneZoom || 1);
             wPlaneParams.scale.x = wPlaneParams.scale.y = scaleW;
-            wPlaneParams.origin.x = (wPlaneParams.width / 2) - wWorldCenterX * scaleW;
-            wPlaneParams.origin.y = (wPlaneParams.height / 2) + wWorldCenterY * scaleW;
+            wPlaneParams.origin.x = (wPlaneParams.width * 0.5) - wWorldCenterX * scaleW;
+            wPlaneParams.origin.y = (wPlaneParams.height * 0.5) + wWorldCenterY * scaleW;
             updatePlaneViewportRanges(wPlaneParams);
         }
     }
@@ -181,8 +180,8 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
             const baseScaleP = Math.min(p.width / initialXSpanW, p.height / initialYSpanW);
             const scaleP = baseScaleP * (state.wPlaneZoom || 1);
             p.scale.x = p.scale.y = scaleP;
-            p.origin.x = (p.width / 2) - wWorldCenterX * scaleP;
-            p.origin.y = (p.height / 2) + wWorldCenterY * scaleP;
+            p.origin.x = (p.width * 0.5) - wWorldCenterX * scaleP;
+            p.origin.y = (p.height * 0.5) + wWorldCenterY * scaleP;
             updatePlaneViewportRanges(p);
         }
     }

@@ -2,7 +2,7 @@
 import { signal } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
 import { getStateSignal, state } from '../../store/state.js';
-import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
+import { requestDomainRedraw, requestUiRedraw } from '../../rendering/redraw-scheduler.js';
 import { persistThemePreferences } from '../../ui/theme-manager.js';
 import { refreshPanelEdgeHandles } from '../../ui/panel-layout-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
@@ -35,8 +35,53 @@ function GridColor({ index, stateKey }) {
     );
 }
 
+function GridDensityControl() {
+    const density = getStateSignal('gridDensity').value ?? 15;
+    return (
+        <div class="control-group theme-modal-slider-group">
+            <label for="grid_density_slider" class="theme-slider-label">
+                <span>Grid Density:</span>
+                <output id="grid_density_value_display" class="theme-slider-output">{density}</output>
+            </label>
+            <div class="slider-container theme-slider-container">
+                <input type="range" id="grid_density_slider" name="grid_density_slider"
+                    min="5" max="50" step="1" value={density}
+                    data-tooltip="Number of lines in the z-plane input grid"
+                    onInput={event => {
+                        const val = parseInt(event.currentTarget.value, 10);
+                        state.gridDensity = val;
+                        requestDomainRedraw(true);
+                    }} />
+            </div>
+        </div>
+    );
+}
+
+function ProbeNeighborhoodControl() {
+    const size = getStateSignal('probeNeighborhoodSize').value ?? 0.2;
+    return (
+        <div class="control-group theme-modal-slider-group">
+            <label for="neighborhood_size_slider" class="theme-slider-label">
+                <span>Probe (r<sub>local</sub>):</span>
+                <output id="neighborhood_size_value_display" class="theme-slider-output">{Number(size).toFixed(2)}</output>
+            </label>
+            <div class="slider-container theme-slider-container">
+                <input type="range" id="neighborhood_size_slider" name="neighborhood_size_slider"
+                    min="0.05" max="0.5" step="0.01" value={size}
+                    data-tooltip="Probe radius (r_local) for f'(z) and local properties"
+                    onInput={event => {
+                        const val = parseFloat(event.currentTarget.value);
+                        state.probeNeighborhoodSize = val;
+                        requestUiRedraw();
+                    }} />
+            </div>
+        </div>
+    );
+}
+
 export function ThemeModal() {
     const vertical = getStateSignal('verticalLayoutEnabled').value;
+    const canvasZoomControls = getStateSignal('canvasZoomControlsEnabled').value;
     const layoutApplied = useRef(false);
 
     useEffect(() => {
@@ -52,6 +97,13 @@ export function ThemeModal() {
         return needsRefresh ? refreshLayout() : undefined;
     }, [vertical]);
 
+    useEffect(() => {
+        document.body.classList.toggle('canvas-zoom-controls-enabled', Boolean(canvasZoomControls));
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('complex_canvasZoomControlsEnabled', String(Boolean(canvasZoomControls)));
+        }
+    }, [canvasZoomControls]);
+
     const close = closeThemeModal;
     return (
         <div id="theme_modal" class={isThemeModalOpen.value ? '' : 'hidden'}>
@@ -60,12 +112,19 @@ export function ThemeModal() {
                 <button id="close_theme_modal_btn" class="theme-modal-close-btn" aria-label="Close theme modal"
                     onClick={close}><i data-lucide="x" /></button>
                 <div class="theme-modal-header">
-                    <h2>Themes</h2>
-                    <p>Select application theme, accent colors, and styling.</p>
+                    <h2>Themes & Display</h2>
+                    <p>Select application theme, accent colors, layout, and visualization controls.</p>
                 </div>
                 <div class="theme-list-container" id="theme_list_container"><ThemeOptions /></div>
+
                 <div class="theme-modal-section">
-                    <h3>Layout Settings</h3>
+                    <div class="theme-modal-sliders-row">
+                        <GridDensityControl />
+                        <ProbeNeighborhoodControl />
+                    </div>
+                </div>
+
+                <div class="theme-modal-section">
                     <div class="control-group theme-modal-control-group">
                         <label for="enable_vertical_layout_cb" class="slider-label"
                             data-tooltip="Switch to vertical layout: panels on left, planes on right">
@@ -77,7 +136,19 @@ export function ThemeModal() {
                             Enable Vertical Layout
                         </label>
                     </div>
+                    <div class="control-group theme-modal-control-group">
+                        <label for="enable_canvas_zoom_controls_cb" class="slider-label"
+                            data-tooltip="Show smooth zoom (+ / -) controls on the bottom-right corner of canvases">
+                            <input type="checkbox" id="enable_canvas_zoom_controls_cb"
+                                checked={Boolean(canvasZoomControls)} onChange={event => {
+                                    state.canvasZoomControlsEnabled = event.currentTarget.checked;
+                                }} />
+                            <span class="custom-checkbox-visual" />
+                            Enable On-Canvas Zoom (+ / -)
+                        </label>
+                    </div>
                 </div>
+
                 <div class="theme-modal-section">
                     <h3>Custom Grid Colors</h3>
                     <div class="grid-color-pickers-container">

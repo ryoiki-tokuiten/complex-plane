@@ -183,6 +183,7 @@ test('sheet-aware algebraic expressions use the active cut helpers', () => {
     assert.match(source, /pointTouchesActiveBranchCut/);
     assert.match(source, /dynamicComplexPowOnSheet\(z, vec2\(0\.5, 0\.0\), branchIndex, branchCutWidth\)/);
     assert.match(source, /dynamicLnOnSheet\(z, branchIndex, branchCutWidth\)/);
+    assert.match(source, /abs\(fId - 1\.0\) < 0\.5/);
 });
 
 test('Riemann surface grid topology is cached and index-safe', () => {

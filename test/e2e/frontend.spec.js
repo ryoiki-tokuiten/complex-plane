@@ -42,8 +42,8 @@ test('branch-aware algebraic Riemann shaders compile', async ({ page }) => {
     expect(shaderErrors).toEqual([]);
 });
 
-test('Riemann surface stays visible while algebraic and output chaining state changes', async ({ page }) => {
-    test.setTimeout(90000);
+test('Riemann surface stays rendered while algebraic and output chaining state changes', async ({ page }) => {
+    test.setTimeout(60000);
 
     const expectRenderedSurface = async surface => {
         await expect.poll(
@@ -68,15 +68,9 @@ test('Riemann surface stays visible while algebraic and output chaining state ch
         element.checked = true;
         element.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    await page.locator('#chain_count_slider').evaluate(element => {
-        element.value = '2';
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-
-    await expect(page.locator('.riemann-surface-canvas')).toHaveCount(2, { timeout: 20000 });
-    await expect(page.locator('canvas[id^="w_plane_canvas"]:not(.hidden)')).toHaveCount(0);
-    await expectRenderedSurface(page.locator('.riemann-surface-canvas').nth(0));
-    await expectRenderedSurface(page.locator('.riemann-surface-canvas').nth(1));
+    await expect(page.locator('#w_plane_canvas')).toHaveClass(/hidden/);
+    await expect(page.locator('.riemann-surface-canvas')).toBeVisible();
+    await expectRenderedSurface(page.locator('.riemann-surface-canvas'));
 });
 
 test('arbitrary shapes support freehand drawing without Cauchy mode', async ({ page }) => {

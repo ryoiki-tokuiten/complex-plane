@@ -226,7 +226,8 @@ function control(key) {
 }
 
 function resolveControl(target) {
-    return typeof target === 'string' ? control(target) : target;
+    if (!target) return null;
+    return typeof target === 'string' ? (controls?.[target] ?? document.getElementById(target) ?? null) : target;
 }
 
 function runUiTransaction(_name, action) {
@@ -617,7 +618,6 @@ export function syncVectorFlowControls() {
 export function syncTransformControlPanels() {
     const transformHubActive = state.laplaceModeEnabled || state.graphFourierEnabled;
     setHidden('coreApplicationControls', state.laplaceModeEnabled);
-    setHidden('visualizationOptionsPanel', transformHubActive);
     setHidden('laplaceSpecificControls', !transformHubActive);
     setHidden('inputShapeSelector', state.laplaceModeEnabled);
 }
@@ -1497,21 +1497,39 @@ function syncFunctionEquationCard() {
     `;
 }
 
+export function syncCanvasZoomControlsUI() {
+    const isEnabled = Boolean(state.canvasZoomControlsEnabled);
+    const isRiemann = Boolean(state.riemannSurfaceEnabled);
+    const isFold = Boolean(state.foldSurface3dEnabled);
+    const isManifoldZ = Boolean(state.manifoldTransformationEnabled);
+    const isManifoldW = Boolean(state.manifold3dViewEnabled);
+    const isGraph = Boolean(state.graphViewEnabled);
+    const isLaplace = Boolean(state.laplaceModeEnabled);
+
+    const zZoomVisible = isEnabled && !isRiemann && !isFold && !isManifoldZ && !isGraph && !isLaplace;
+    const wZoomVisible = isEnabled && !isRiemann && !isFold && !isManifoldW && !isGraph && !isLaplace;
+    const realPlotsZoomVisible = isEnabled && Boolean(state.realPlotsEnabled);
+
+    setHidden('z_plane_zoom_controls', !zZoomVisible);
+    setHidden('w_plane_zoom_controls', !wZoomVisible);
+    setHidden('real_plots_zoom_controls', !realPlotsZoomVisible);
+}
+
 function syncVisualizationOptionControls() {
-    const transformHubActive = state.laplaceModeEnabled || state.graphFourierEnabled;
-    setHidden('visualizationOptionsPanel', transformHubActive);
     setDisabled('inputShapeSelector', state.laplaceModeEnabled);
     syncRiemannSurfaceControls();
     syncDomainColoringControls();
     setHidden('radialDiscreteStepsOptionsDiv', !state.radialDiscreteStepsEnabled);
     syncZetaControls();
     syncFunctionEquationCard();
+    syncCanvasZoomControlsUI();
 }
 
 export function updateTitlesAndGlobalUI() {
     runUiTransaction('updateTitlesAndGlobalUI', () => {
         updateSliderLabelsAndDisplay();
         updateProbeInfo();
+        syncCanvasZoomControlsUI();
 
         if (syncTransformModeTitles()) {
             sync2DContourUI();

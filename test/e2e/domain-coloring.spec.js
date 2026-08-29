@@ -31,10 +31,10 @@ async function waitForNextCompletedDomainFrame(page, previousJobId) {
 }
 
 async function setZZoomExponentBurst(page, exponents) {
-    await page.locator('#z_plane_zoom_slider').evaluate((slider, values) => {
+    await page.evaluate((values) => {
         for (const value of values) {
-            slider.value = String(value);
-            slider.dispatchEvent(new Event('input', { bubbles: true }));
+            window.__state.zPlaneZoom = Math.pow(10, value);
+            window.__runtime.rendering.requestDomainRedraw(true);
         }
     }, exponents);
 }

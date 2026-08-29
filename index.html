@@ -32,21 +32,23 @@
                                 <div id="function-controls-panel" class="controls-panel">
                     <!-- Top Category Navigation Buttons -->
                     <div class="panel-category-nav">
-                        <button id="toggle_complex_functions_btn" class="category-nav-btn active" type="button" data-tooltip="Standard Complex Functions">
-                            <span>Complex Functions</span>
-                        </button>
-                        <button id="select_custom_complex_btn" class="category-nav-btn" type="button" data-tooltip="Build a custom complex function via algebraic chaining">
-                            <span>Custom Complex Function</span>
-                        </button>
-                        <button id="toggle_fractals_btn" class="category-nav-btn" type="button" data-tooltip="Fractals">
-                            <span>Fractals</span>
-                        </button>
-                        <button id="select_real_plots_btn" class="category-nav-btn" type="button" data-tooltip="Render 3D real surface plots">
-                            <span>Real Plots</span>
-                        </button>
-                        <button id="select_laplace_btn" class="category-nav-btn" type="button" data-tooltip="Open the Laplace transform hub">
-                            <span>Laplace</span>
-                        </button>
+                        <div class="category-nav-btn-group">
+                            <button id="toggle_complex_functions_btn" class="category-nav-btn active" type="button" data-tooltip="Standard Complex Functions">
+                                <span>Complex Functions</span>
+                            </button>
+                            <button id="select_custom_complex_btn" class="category-nav-btn" type="button" data-tooltip="Build a custom complex function via algebraic chaining">
+                                <span>Custom Complex Function</span>
+                            </button>
+                            <button id="toggle_fractals_btn" class="category-nav-btn" type="button" data-tooltip="Fractals">
+                                <span>Fractals</span>
+                            </button>
+                            <button id="select_real_plots_btn" class="category-nav-btn" type="button" data-tooltip="Render 3D real surface plots">
+                                <span>Real Plots</span>
+                            </button>
+                            <button id="select_laplace_btn" class="category-nav-btn" type="button" data-tooltip="Open the Laplace transform hub">
+                                <span>Laplace</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Collapsible Complex Functions Grid (Expanded by default) -->
@@ -1083,92 +1085,38 @@
                                 </div>
                             </div>
                         </div>
-                        </div>
                     </div>
                 </div>
+            </div>
 
-                <div id="visualization-options-panel" class="controls-panel">
-                    <div class="controls-panel-header">
-                        <span class="controls-panel-name">Visualization</span>
-                        <div class="controls-panel-header-actions">
-                            <button id="reset_workspace_layout_btn" class="icon-button top-controls-toggle-btn"
-                                type="button" data-tooltip="Reset workspace layout (Normal & Laplace)"
-                                aria-label="Reset workspace layout">
-                                <span aria-hidden="true" class="centered-row">
-                                    <i data-lucide="rotate-ccw"></i>
-                                </span>
-                                <span class="hidden-visually">Reset layout</span>
-                            </button>
-                            <button id="theme_selector_btn" class="icon-button top-controls-toggle-btn" type="button"
-                                data-tooltip="Select application theme" aria-label="Select application theme">
-                                <span aria-hidden="true" class="centered-row">
-                                    <i data-lucide="palette"></i>
-                                </span>
-                                <span class="hidden-visually">Select theme</span>
-                            </button>
-                            <button id="toggle_top_controls_btn" class="icon-button top-controls-toggle-btn"
-                                type="button" data-tooltip="Minimize top half panels"
-                                aria-label="Minimize top half panels">
-                                <span class="top-controls-minimize-icon" aria-hidden="true">
-                                    <i data-lucide="minimize-2"></i>
-                                </span>
-                                <span class="top-controls-maximize-icon" aria-hidden="true">
-                                    <i data-lucide="maximize-2"></i>
-                                </span>
-                                <span class="hidden-visually">Toggle top controls</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="controls-panel-divider"></div>
-                    <div class="slider-row">
-                        <div class="control-group">
-                            <label for="grid_density_slider">
-                                Grid Density:
-                                <output id="grid_density_value_display">15</output>
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="grid_density_slider" name="grid_density_slider" min="5" max="50"
-                                    step="1" value="15" data-tooltip="Number of lines in the z-plane input grid">
-                            </div>
-                        </div>
-                        <div class="control-group"> <!-- Probe (r_local) -->
-                            <label for="neighborhood_size_slider">
-                                Probe (r<sub>local</sub>):
-                                <output id="neighborhood_size_value_display">0.2</output>
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="neighborhood_size_slider" name="neighborhood_size_slider"
-                                    min="0.05" max="0.5" step="0.01" value="0.2"
-                                    data-tooltip="Probe radius (r_local) for f'(z) and local properties">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="slider-row">
-                        <div class="control-group">
-                            <label for="z_plane_zoom_slider">
-                                Z-Plane Zoom:
-                                <output id="z_plane_zoom_value_display">1.00</output>x
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="z_plane_zoom_slider" name="z_plane_zoom_slider" min="-3"
-                                    max="125" step="any" value="0"
-                                    data-tooltip="Zoom level for the z-plane view (log scale)">
-                            </div>
-                        </div>
-                        <div class="control-group"> <!-- W-Plane Zoom -->
-                            <label for="w_plane_zoom_slider">
-                                W-Plane Zoom:
-                                <output id="w_plane_zoom_value_display">1.00</output>x
-                            </label>
-                            <div class="slider-container">
-                                <input type="range" id="w_plane_zoom_slider" name="w_plane_zoom_slider" min="-3"
-                                    max="125" step="any" value="0"
-                                    data-tooltip="Zoom level for the w-plane view (log scale)">
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <!-- Panel Actions (Top right in horizontal mode, bottom physical footer in vertical mode) -->
+            <div id="controls_sidebar_footer" class="controls-panel-header-actions">
+                <button id="reset_workspace_layout_btn" class="icon-button top-controls-toggle-btn"
+                    type="button" data-tooltip="Reset workspace layout (Normal & Laplace)"
+                    aria-label="Reset workspace layout">
+                    <span aria-hidden="true" class="centered-row">
+                        <i data-lucide="rotate-ccw"></i>
+                    </span>
+                    <span class="hidden-visually">Reset layout</span>
+                </button>
+                <button id="theme_selector_btn" class="icon-button top-controls-toggle-btn" type="button"
+                    data-tooltip="Select application theme" aria-label="Select application theme">
+                    <span aria-hidden="true" class="centered-row">
+                        <i data-lucide="palette"></i>
+                    </span>
+                    <span class="hidden-visually">Select theme</span>
+                </button>
+                <button id="toggle_top_controls_btn" class="icon-button top-controls-toggle-btn"
+                    type="button" data-tooltip="Minimize top half panels"
+                    aria-label="Minimize top half panels">
+                    <span class="top-controls-minimize-icon" aria-hidden="true">
+                        <i data-lucide="minimize-2"></i>
+                    </span>
+                    <span class="top-controls-maximize-icon" aria-hidden="true">
+                        <i data-lucide="maximize-2"></i>
+                    </span>
+                    <span class="hidden-visually">Toggle top controls</span>
+                </button>
             </div>
         </section>
 
@@ -1621,6 +1569,17 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- On-Canvas Zoom Controls -->
+                        <div id="z_plane_zoom_controls" class="canvas-zoom-controls" aria-label="Z-plane zoom controls">
+                            <button id="zoom_in_z_btn" class="canvas-zoom-btn" type="button" data-tooltip="Zoom in (z-plane)" aria-label="Zoom in z-plane">
+                                <i data-lucide="plus" aria-hidden="true"></i>
+                            </button>
+                            <div class="canvas-zoom-btn-divider"></div>
+                            <button id="zoom_out_z_btn" class="canvas-zoom-btn" type="button" data-tooltip="Zoom out (z-plane)" aria-label="Zoom out z-plane">
+                                <i data-lucide="minus" aria-hidden="true"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div id="w_plane_column" class="plane-column">
@@ -1691,6 +1650,17 @@
                             </div>
                         </div>
                         <div id="cauchy_integral_results_info" class="cauchy-info-overlay hidden analysis-copy"></div>
+
+                        <!-- On-Canvas Zoom Controls -->
+                        <div id="w_plane_zoom_controls" class="canvas-zoom-controls" aria-label="W-plane zoom controls">
+                            <button id="zoom_in_w_btn" class="canvas-zoom-btn" type="button" data-tooltip="Zoom in (w-plane)" aria-label="Zoom in w-plane">
+                                <i data-lucide="plus" aria-hidden="true"></i>
+                            </button>
+                            <div class="canvas-zoom-btn-divider"></div>
+                            <button id="zoom_out_w_btn" class="canvas-zoom-btn" type="button" data-tooltip="Zoom out (w-plane)" aria-label="Zoom out w-plane">
+                                <i data-lucide="minus" aria-hidden="true"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div id="laplace_spectrum_column" class="hidden auxiliary-surface-column">
@@ -1838,6 +1808,16 @@
                     <div class="flex-relative-host">
                         <div id="real_plots_container" class="fill-relative">
                             <div id="real_plots_3d_container" class="fill-container"></div>
+                            <!-- On-Canvas Zoom Controls -->
+                            <div id="real_plots_zoom_controls" class="canvas-zoom-controls" aria-label="Real plots zoom controls">
+                                <button id="zoom_in_real_plots_btn" class="canvas-zoom-btn" type="button" data-tooltip="Zoom in (Real Plot)" aria-label="Zoom in real plot">
+                                    <i data-lucide="plus" aria-hidden="true"></i>
+                                </button>
+                                <div class="canvas-zoom-btn-divider"></div>
+                                <button id="zoom_out_real_plots_btn" class="canvas-zoom-btn" type="button" data-tooltip="Zoom out (Real Plot)" aria-label="Zoom out real plot">
+                                    <i data-lucide="minus" aria-hidden="true"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

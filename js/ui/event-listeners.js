@@ -33,7 +33,7 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, syncVectorFlowControls, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview, syncComplexParameterControls, fitConformalGridOutputViewport } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, syncVectorFlowControls, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview, syncComplexParameterControls, fitConformalGridOutputViewport, syncCanvasZoomControlsUI } from './ui-updates.js';
 import { syncGridDensityControls } from './grid-density-controls.js';
 import {
     bindGridShapePicker,
@@ -1474,16 +1474,49 @@ function disableFoldSurface3d() {
     syncFoldSurfaceControls();
 }
 
+export function smoothZoomPlane(planeType, factor, steps = 10) {
+    const isW = planeType === 'w';
+    const isRealPlots = planeType === 'real_plots';
+    const ctx = isW ? canvasInteractionContexts.w : canvasInteractionContexts.z;
+    if (!ctx?.canvas || !ctx?.params) return;
+
+    const pos = { x: ctx.canvas.width * 0.5, y: ctx.canvas.height * 0.5 };
+    const stepFactor = Math.pow(factor, 1 / steps);
+    let remaining = steps;
+
+    function frame() {
+        if (remaining-- <= 0) return;
+        zoomPlaneAt(ctx, pos, stepFactor);
+        if (isRealPlots) requestScheduledUiRedraw();
+        if (remaining > 0) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+}
+
+function bindCanvasZoomControls() {
+    const ZOOM_FACTOR = 1.35;
+    const bindBtn = (id, planeType, factor) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                smoothZoomPlane(planeType, factor);
+            });
+        }
+    };
+
+    bindBtn('zoom_in_z_btn', 'z', ZOOM_FACTOR);
+    bindBtn('zoom_out_z_btn', 'z', 1 / ZOOM_FACTOR);
+    bindBtn('zoom_in_w_btn', 'w', ZOOM_FACTOR);
+    bindBtn('zoom_out_w_btn', 'w', 1 / ZOOM_FACTOR);
+    bindBtn('zoom_in_real_plots_btn', 'real_plots', ZOOM_FACTOR);
+    bindBtn('zoom_out_real_plots_btn', 'real_plots', 1 / ZOOM_FACTOR);
+}
+
 function bindViewControls() {
     bindFoldSurfaceControl('gridSurface3DCb');
-
-    [
-        ['zPlaneZoomSlider', 'zPlaneZoom', [true, false]],
-        ['wPlaneZoomSlider', 'wPlaneZoom', [false, true]]
-    ].forEach(([controlKey, stateKey, args]) => bindSlider(controlKey, stateKey, (val) => Math.pow(10, parseFloat(val)), () => {
-        setupVisualParameters(...args);
-        requestDomainRedraw(true);
-    }));
+    bindCanvasZoomControls();
 
     const onManifold3dToggled = () => {
         if (state.manifold3dViewEnabled) {
@@ -2681,6 +2714,14 @@ export function setupEventListeners() {
     subscribeState(() => syncLaplacePlayPauseButton(), 'laplaceAnimationPlaying');
     subscribeState(() => updateDomainPaletteCirclePanel(), 'domainPalette');
     subscribeState(() => updateSurfacePaletteCirclePanel(), 'surfacePalette');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'canvasZoomControlsEnabled');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'manifold3dViewEnabled');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'manifoldTransformationEnabled');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'riemannSurfaceEnabled');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'foldSurface3dEnabled');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'graphViewEnabled');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'laplaceModeEnabled');
+    subscribeState(() => syncCanvasZoomControlsUI(), 'realPlotsEnabled');
     BINDERS.forEach(fn => fn());
 
     initPlaneContextMenu();

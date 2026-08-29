@@ -97,6 +97,7 @@ const rawState = {
     manifoldTransformationSpeedW: 1.0,
     zPlaneZoom: 1.0,
     wPlaneZoom: 1.0,
+    canvasZoomControlsEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('complex_canvasZoomControlsEnabled') === 'true' : false,
     zeros: [],
     poles: [],
     criticalPoints: [],
