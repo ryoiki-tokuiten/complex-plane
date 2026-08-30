@@ -3,7 +3,7 @@ import { isFoldableInputShape } from '../rendering/shape-generators.js';
 
 const { controls } = context;
 
-export const GRID_DENSITY_LIMITS = Object.freeze({
+const GRID_DENSITY_LIMITS = Object.freeze({
     standard: 50,
     extended: 250,
     foldDefault: 100,
@@ -11,7 +11,7 @@ export const GRID_DENSITY_LIMITS = Object.freeze({
     dotsDefault: 250
 });
 
-export function isExtendedGridDensityNeeded(source = state) {
+function isExtendedGridDensityNeeded(source = state) {
     return Boolean(
         (source.foldSurface3dEnabled && isFoldableInputShape(source.currentInputShape)) ||
         source.currentInputShape === 'grid_dots' ||

@@ -389,11 +389,7 @@ class WorkerNativeDomainDynamicsBackend {
         this.queue = [];
         this.queueIndex = 0;
         this.remainingTiles = 0;
-        this.workers.forEach(entry => {
-            entry.busy = false;
-            entry.jobId = 0;
-            entry.worker.postMessage({ type: 'cancel', jobId: job.id });
-        });
+        this.cancelWorkers(job.id);
         const previous = runtime.rendering.domainDynamicsStats;
         runtime.rendering.domainDynamicsStats = Object.freeze({
             ...previous,
@@ -401,6 +397,14 @@ class WorkerNativeDomainDynamicsBackend {
             cancelledJobs: previous.cancelledJobs + 1
         });
         return true;
+    }
+
+    cancelWorkers(jobId) {
+        this.workers.forEach(entry => {
+            entry.busy = false;
+            entry.jobId = 0;
+            entry.worker.postMessage({ type: 'cancel', jobId });
+        });
     }
 
     ensureWorkers() {
@@ -528,11 +532,7 @@ class WorkerNativeDomainDynamicsBackend {
             setDomainProcessing(false);
             this.queue = [];
             this.queueIndex = 0;
-            this.workers.forEach(entry => {
-                entry.busy = false;
-                entry.jobId = 0;
-                entry.worker.postMessage({ type: 'cancel', jobId: job.id });
-            });
+            this.cancelWorkers(job.id);
             const previous = runtime.rendering.domainDynamicsStats;
             runtime.rendering.domainDynamicsStats = Object.freeze({
                 ...previous,

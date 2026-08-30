@@ -2,7 +2,6 @@ import { state, context, subscribeState } from '../store/state.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
     cancelPlanarDomainDynamics,
-    matchesPlanarDomainViewport,
     renderPlanarDomainDynamics
 } from './domain-dynamics.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
@@ -57,7 +56,7 @@ subscribeState(({ value }) => {
     if (!value) cancelPlanarDomainDynamics();
 }, 'domainColoringEnabled');
 
-export function domainMagnitudeLightness(logMod, cycles) {
+function domainMagnitudeLightness(logMod, cycles) {
     if (Number.isNaN(logMod)) throw new Error('Domain-color log magnitude must be a number.');
     const detail = requireFiniteNumber(cycles, 'Domain-color lightness detail');
     if (detail <= 0.0001) return 0.5;
@@ -78,10 +77,7 @@ export function renderPlanarDomainColoring(tCtx, pP) {
     renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot);
 }
 
-export { matchesPlanarDomainViewport };
-
-
-export function getPaletteColor(paletteId, h) {
+function getPaletteColor(paletteId, h) {
     const stops = getDomainPaletteStops(paletteId);
     const n = stops.length;
     const val = h * (n - 1);
@@ -98,7 +94,7 @@ export function getPaletteColor(paletteId, h) {
     ];
 }
 
-export function applyLightnessAndSaturation(rgb, L, S) {
+function applyLightnessAndSaturation(rgb, L, S) {
     let r = rgb[0];
     let g = rgb[1];
     let b = rgb[2];

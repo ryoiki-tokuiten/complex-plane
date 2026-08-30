@@ -41,5 +41,3 @@ export function createSafeMarkupFragment(markup) {
     parsed.body.childNodes.forEach(node => appendSafeNode(node, fragment));
     return fragment;
 }
-
-export const createFormulaFragment = createSafeMarkupFragment;

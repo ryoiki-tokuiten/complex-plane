@@ -10,7 +10,7 @@ import { requireVisibleViewport } from '../utils/viewport.js';
  * Shared canvas primitives used across planar and transform renderers.
  */
 
-export function getCanvasPlaneRanges(params) {
+function getCanvasPlaneRanges(params) {
     requireVisibleViewport(params, 'Canvas plane');
     return {
         xRange: params.currentVisXRange,
@@ -99,7 +99,7 @@ function drawGridLines(ctx, params, stepX, stepY, verticalColor, horizontalColor
     ctx.restore();
 }
 
-export function calculateGridStep(span, targetCount = 10) {
+function calculateGridStep(span, targetCount = 10) {
     span = requireFiniteNumber(span, 'Grid span');
     targetCount = requireFiniteNumber(targetCount, 'Grid target count');
     if (span <= 0 || targetCount <= 0) throw new Error('Grid span and target count must be positive.');
@@ -190,7 +190,7 @@ export function drawGrid(ctx, params, options = {}) {
     }
 }
 
-export function normalizeAxesOptions(labelOrOptions, maybeYLabel) {
+function normalizeAxesOptions(labelOrOptions, maybeYLabel) {
     if (typeof labelOrOptions === 'string' || typeof maybeYLabel === 'string') {
         return {
             xLabel: labelOrOptions || 'Re',

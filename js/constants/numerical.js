@@ -1,7 +1,7 @@
 // js/constants/numerical.js
 
 export const TWO_PI = 2 * Math.PI;
-export const PI = TWO_PI / 2;
+const PI = TWO_PI / 2;
 
 export const NUM_POINTS_CURVE = 1600;
 export const MAX_POLY_DEGREE = 10;
@@ -24,7 +24,7 @@ export const RESIDUE_CALC_EPSILON_RADIUS = 0.02;
 export const RESIDUE_BOUNDARY_CHECK_FACTOR = 1.5;
 export const PROBE_CROSSHAIR_SIZE_FACTOR = 3.5;
 export const DEFAULT_TAYLOR_SERIES_CENTER = Object.freeze({ re: 0, im: 0 });
-export const TAYLOR_CENTER_PRESET_GROUPS = Object.freeze([
+const TAYLOR_CENTER_PRESET_GROUPS = Object.freeze([
     Object.freeze({
         label: 'Real Axis',
         presets: Object.freeze([

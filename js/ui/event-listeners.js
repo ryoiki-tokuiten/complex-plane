@@ -435,7 +435,7 @@ function requestUiRedraw() {
     scheduleRedraw(false, false);
 }
 
-export function requestDomainRedraw(markDomainDirty = false) {
+function requestDomainRedraw(markDomainDirty = false) {
     scheduleRedraw(markDomainDirty, isDomainPalettePanelOpen());
 }
 
@@ -443,7 +443,7 @@ function requestAlgebraicRedraw() {
     requestDomainRedraw(true);
 }
 
-export function updateCategoryNavState(activeCategory) {
+function updateCategoryNavState(activeCategory) {
     const complexBtn = document.getElementById('toggle_complex_functions_btn');
     const customBtn = document.getElementById('select_custom_complex_btn');
     const fractalsBtn = document.getElementById('toggle_fractals_btn');
@@ -462,7 +462,7 @@ export function updateCategoryNavState(activeCategory) {
     if (fractalsGrid) fractalsGrid.classList.toggle('hidden', activeCategory !== 'fractals');
 }
 
-export function setActiveFunctionButton(activeKey) {
+function setActiveFunctionButton(activeKey) {
     Object.entries(controls.funcButtons || {}).forEach(([key, button]) => {
         if (!button) return;
         const active = key === activeKey;
@@ -531,6 +531,14 @@ function disableRealPlots() {
     disposeRealPlotsRenderer();
     restoreNormalPlaneLayout();
     refreshPlanesAfterLayoutChange();
+}
+
+function disableLaplaceMode() {
+    if (!state.laplaceModeEnabled) return;
+    stopLaplaceAnimation();
+    disposeScalarSurface('laplace_3d_container');
+    state.laplaceModeEnabled = false;
+    restoreNormalViewports();
 }
 
 function disableGraphView() {
@@ -873,12 +881,7 @@ function bindFunctionButtons() {
         if (state.realPlotsEnabled) {
             disableRealPlots();
         }
-        if (state.laplaceModeEnabled) {
-            stopLaplaceAnimation();
-            disposeScalarSurface('laplace_3d_container');
-            state.laplaceModeEnabled = false;
-            restoreNormalViewports();
-        }
+        disableLaplaceMode();
         if (nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
             restoreNonFractalState();
         }
@@ -897,12 +900,7 @@ function bindFunctionButtons() {
         if (state.realPlotsEnabled) {
             disableRealPlots();
         }
-        if (state.laplaceModeEnabled) {
-            stopLaplaceAnimation();
-            disposeScalarSurface('laplace_3d_container');
-            state.laplaceModeEnabled = false;
-            restoreNormalViewports();
-        }
+        disableLaplaceMode();
         if (nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
             restoreNonFractalState();
         }
@@ -942,12 +940,7 @@ function bindFunctionButtons() {
         if (state.realPlotsEnabled) {
             disableRealPlots();
         }
-        if (state.laplaceModeEnabled) {
-            stopLaplaceAnimation();
-            disposeScalarSurface('laplace_3d_container');
-            state.laplaceModeEnabled = false;
-            restoreNormalViewports();
-        }
+        disableLaplaceMode();
         if (state.algebraicChainingEnabled && !isFractalPresetKey(state.currentFunctionPreset)) {
             disableAlgebraicChaining();
         }
@@ -960,12 +953,7 @@ function bindFunctionButtons() {
 
     // 4. Category Nav: Real Plots button
     bindControlListener('selectRealPlotsBtn', 'click', () => {
-        if (state.laplaceModeEnabled) {
-            stopLaplaceAnimation();
-            disposeScalarSurface('laplace_3d_container');
-            state.laplaceModeEnabled = false;
-            restoreNormalViewports();
-        }
+        disableLaplaceMode();
         disableGraphView();
         disableRiemannSurface();
 
@@ -1063,7 +1051,7 @@ function disableFoldSurface3d() {
     syncFoldSurfaceControls();
 }
 
-export function smoothZoomPlane(planeType, factor, steps = 10) {
+function smoothZoomPlane(planeType, factor, steps = 10) {
     const isW = planeType === 'w';
     const isRealPlots = planeType === 'real_plots';
     const ctx = isW ? canvasInteractionContexts.w : canvasInteractionContexts.z;

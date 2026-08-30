@@ -123,5 +123,3 @@ export function paletteColor(lut, ratio, target, offset) {
     target[offset + 1] = lut[index + 1];
     target[offset + 2] = lut[index + 2];
 }
-
-export { PALETTE_LUT_SIZE };

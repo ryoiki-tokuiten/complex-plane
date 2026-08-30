@@ -7,7 +7,7 @@ import {
     evaluateNativePoints,
     nativeMapOptions
 } from './complex-engine.js';
-import { requireFiniteComplex, finiteComplex } from '../utils/numeric-contracts.js';
+import { requireFiniteComplex, isFiniteComplex } from '../utils/numeric-contracts.js';
 
 const INVALID = Object.freeze({ re: NaN, im: NaN });
 const CONSTANT_STENCIL = Object.freeze([
@@ -51,7 +51,7 @@ function evaluateMap(options, point) {
 function nativeTransform(functionKey) {
     const transform = (re, im, context = null) => {
         const point = asPoint(re, im);
-        if (!finiteComplex(point)) return { ...INVALID };
+        if (!isFiniteComplex(point)) return { ...INVALID };
         const options = nativeMapOptions(state, {
             functionKey,
             chainingEnabled: false,
@@ -76,13 +76,13 @@ export const transformFunctions = Object.freeze(Object.fromEntries([
     'polynomial', 'algebraic_chaining'
 ].map(key => [key, nativeTransform(key)])));
 
-export function mappedTransformNumberKey(value) {
+function mappedTransformNumberKey(value) {
     if (!Number.isFinite(value)) throw new Error(`Native map profile requires a finite number: ${value}.`);
     return value.toFixed(12);
 }
 
-export function mappedTransformComplexKey(value) {
-    if (!finiteComplex(value)) throw new Error('Native map profile requires a finite complex value.');
+function mappedTransformComplexKey(value) {
+    if (!isFiniteComplex(value)) throw new Error('Native map profile requires a finite complex value.');
     return `${mappedTransformNumberKey(value.re)},${mappedTransformNumberKey(value.im)}`;
 }
 
@@ -175,7 +175,7 @@ function mapMetadata(transform, functionKey) {
 }
 
 function constantCluster(values) {
-    const samples = values.filter(finiteComplex);
+    const samples = values.filter(isFiniteComplex);
     if (samples.length < 9) return null;
     let best = null;
     let bestCount = 0;
@@ -234,7 +234,7 @@ export function setActiveTransformProvider(provider) {
     chainedCache.clear();
 }
 
-export function getTaylorContourRadius(center) {
+function getTaylorContourRadius(center) {
     const configured = Number.isFinite(state.taylorSeriesConvergenceRadius)
         ? state.taylorSeriesConvergenceRadius
         : null;
@@ -243,7 +243,7 @@ export function getTaylorContourRadius(center) {
     return Math.max(0.25, Math.min(1.25, Math.max(1, Math.abs(point.re), Math.abs(point.im)) * 0.35));
 }
 
-export function toTaylorCacheNumber(value) {
+function toTaylorCacheNumber(value) {
     return Number.isFinite(value) ? value.toFixed(9) : `${value}`;
 }
 
@@ -392,7 +392,7 @@ export function updateTaylorSeriesCenterAndRadius() {
     let nearestDistanceSq = Infinity;
     if (!Array.isArray(state.poles)) throw new Error('Taylor analysis requires a poles array.');
     for (const pole of state.poles) {
-        if (!finiteComplex(pole)) continue;
+        if (!isFiniteComplex(pole)) continue;
         const dx = pole.re - center.re;
         const dy = pole.im - center.im;
         nearestDistanceSq = Math.min(nearestDistanceSq, dx * dx + dy * dy);

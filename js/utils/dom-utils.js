@@ -81,7 +81,7 @@ export function setupDOMReferences() {
     context.wPlaneThreeContainersList = wPlaneThreeContainersList;
 }
 
-export function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen = false) {
+function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen = false) {
     let newWidth, newHeight;
     if (isFullscreen) {
         const container = canvasElement.parentElement; 

@@ -12,7 +12,7 @@ let laplaceLastFrameTime = 0;
 /**
  * Start animating the Laplace winding visualization
  */
-export function startLaplaceAnimation() {
+function startLaplaceAnimation() {
     if (laplaceAnimationHandle) {
         return; // Already running
     }

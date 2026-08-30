@@ -418,7 +418,7 @@ const CUSTOM_GRID_GENERATORS = Object.freeze({
     grid_irregular: generateIrregularGrid
 });
 
-export function getVisiblePlaneRanges(planeParams) {
+function getVisiblePlaneRanges(planeParams) {
     const params = requireVisibleViewport(planeParams, 'Input-shape viewport');
     return {
         xRange: params.currentVisXRange,

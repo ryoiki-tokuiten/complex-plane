@@ -146,7 +146,7 @@ export function resolveCollisions(activePanel, container) {
     savePanelLayout(container);
 }
 
-export function calculateSnapTarget(panel, container, rawLeft, rawTop) {
+function calculateSnapTarget(panel, container, rawLeft, rawTop) {
     if (!container || !panel) return null;
     const siblings = [...container.children].filter(
         c => c !== panel && !c.classList.contains('hidden') && !c.classList.contains('workspace-bounds-extender') && !c.classList.contains('panel-snap-indicator') && Boolean(c.id)
@@ -160,7 +160,7 @@ export function calculateSnapTarget(panel, container, rawLeft, rawTop) {
     return (snapX !== rawLeft || snapY !== rawTop) ? { left: snapX, top: snapY, width: pW, height: pH } : null;
 }
 
-export function updateSnapIndicator(container, target) {
+function updateSnapIndicator(container, target) {
     let ind = container?.querySelector('#panel_snap_indicator');
     if (!ind && container) {
         ind = document.createElement('div');
@@ -176,11 +176,11 @@ export function updateSnapIndicator(container, target) {
     }
 }
 
-export function hideSnapIndicator(container) {
+function hideSnapIndicator(container) {
     updateSnapIndicator(container, null);
 }
 
-export function savePanelLayout(container) {
+function savePanelLayout(container) {
     if (!container) return;
     const panels = [...container.children].filter(el => 
         el.classList.contains('plane-column') || 
@@ -207,13 +207,13 @@ export function savePanelLayout(container) {
     } catch (e) {}
 }
 
-export function getCurrentLayoutMode() {
+function getCurrentLayoutMode() {
     if (state?.laplaceModeEnabled) return 'laplace';
     if (state?.realPlotsEnabled) return 'real_plots';
     return 'normal';
 }
 
-export function getLayoutStorageKey() {
+function getLayoutStorageKey() {
     const isVertical = typeof document !== 'undefined' && (
         document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
     );
@@ -579,7 +579,7 @@ export function findNextAvailableSlot(container, panel, targetWidth, targetHeigh
     }
 }
 
-export function initializeDefaultPanelPositions(container) {
+function initializeDefaultPanelPositions(container) {
     if (!container) {
         container = document.querySelector('.canvas-row.two-column-layout');
     }

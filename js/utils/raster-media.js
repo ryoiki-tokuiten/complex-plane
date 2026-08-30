@@ -13,12 +13,12 @@ export function getMediaSource() {
     return runtime.media.video || runtime.media.image;
 }
 
-export function getMediaAspectRatio() {
+function getMediaAspectRatio() {
     const aspectRatio = state.mediaAspectRatio;
     return Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1;
 }
 
-export function getRasterSourceDimensions(source) {
+function getRasterSourceDimensions(source) {
     if (!source) {
         return { width: 0, height: 0, aspectRatio: 1 };
     }
@@ -75,7 +75,7 @@ export function getActiveMediaRaster() {
 
 
 
-export function processUploadedImageSource(img) {
+function processUploadedImageSource(img) {
     if (!img) {
         return false;
     }
@@ -87,7 +87,7 @@ export function processUploadedImageSource(img) {
     return true;
 }
 
-export function processUploadedVideoFrame(force = false) {
+function processUploadedVideoFrame(force = false) {
     const video = runtime.media.video;
     if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         return false;
@@ -106,7 +106,7 @@ export function processUploadedVideoFrame(force = false) {
     return true;
 }
 
-export function formatMediaClockTime(totalSeconds) {
+function formatMediaClockTime(totalSeconds) {
     if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
         return '--:--';
     }
@@ -123,7 +123,7 @@ export function formatMediaClockTime(totalSeconds) {
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function buildVideoStatusText() {
+function buildVideoStatusText() {
     if (!runtime.media.video) {
         return state.videoStatusMessage || 'No video loaded.';
     }
@@ -150,14 +150,14 @@ export function syncVideoPlaybackUI() {
     }
 }
 
-export function stopVideoProcessingLoop() {
+function stopVideoProcessingLoop() {
     if (runtime.media.processingFrame) {
         cancelAnimationFrame(runtime.media.processingFrame);
         runtime.media.processingFrame = null;
     }
 }
 
-export function runVideoProcessingLoop(now) {
+function runVideoProcessingLoop(now) {
     runtime.media.processingFrame = null;
 
     if (!runtime.media.video || !state.videoIsPlaying || !isMediaInputShape()) {
@@ -210,7 +210,7 @@ export function pauseUploadedVideoPlayback() {
     requestRedrawAll();
 }
 
-export function startUploadedVideoPlayback() {
+function startUploadedVideoPlayback() {
     const video = runtime.media.video;
     if (!video) {
         syncVideoPlaybackUI();
@@ -251,7 +251,7 @@ export function toggleUploadedVideoPlayback() {
     startUploadedVideoPlayback();
 }
 
-export function cleanupUploadedVideo() {
+function cleanupUploadedVideo() {
     const previousVideo = runtime.media.video;
     const previousUrl = runtime.media.videoUrl;
 
@@ -279,7 +279,7 @@ export function cleanupUploadedVideo() {
     syncVideoPlaybackUI();
 }
 
-export function loadUploadedVideoFile(file) {
+function loadUploadedVideoFile(file) {
     cleanupUploadedVideo();
 
     if (!file) {

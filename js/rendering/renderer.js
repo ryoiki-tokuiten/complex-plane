@@ -55,7 +55,8 @@ import {
 import { requestRedrawAll, requestUiRedraw } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
-import { matchesPlanarDomainViewport, renderPlanarDomainColoring } from './domain-coloring.js';
+import { renderPlanarDomainColoring } from './domain-coloring.js';
+import { matchesPlanarDomainViewport } from './domain-dynamics.js';
 import { updateWindingNumberDisplay } from '../analysis/cauchy.js';
 import {
     getDynamicPlottingCacheKey

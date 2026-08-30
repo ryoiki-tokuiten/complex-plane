@@ -2244,7 +2244,7 @@ export function buildNativeLaplaceWinding(signal, sigma, omega, progress = 1) {
     });
 }
 
-export const NATIVE_LAPLACE_FUNCTION_IDS = Object.freeze({
+const NATIVE_LAPLACE_FUNCTION_IDS = Object.freeze({
     step: 0,
     exponential: 1,
     sine: 2,

@@ -43,7 +43,7 @@ export function initializeTooltips() {
     });
 }
 
-export function moveTooltip(pageX, pageY) {
+function moveTooltip(pageX, pageY) {
     if (!globalTooltipElement) return;
 
     let x = pageX + 15; 

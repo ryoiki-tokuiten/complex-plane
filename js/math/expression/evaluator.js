@@ -145,11 +145,6 @@ export function compileExpression(source, options = {}) {
     return evaluator;
 }
 
-export function finiteComplex(value) {
-    const complex = asComplex(value);
-    return Number.isFinite(complex.re) && Number.isFinite(complex.im);
-}
-
 export function asComplex(value) {
     if (value && typeof value === 'object' && typeof value.re === 'number' && typeof value.im === 'number') return value;
     if (typeof value === 'number') return { re: value, im: 0 };

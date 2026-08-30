@@ -74,7 +74,7 @@ function isIndexLike(symbol) {
     return code === 110 || code === 107 || code === 109 || code === 114;
 }
 
-export function normalizeSequenceBinding(binding, symbol = binding?.symbol) {
+function normalizeSequenceBinding(binding, symbol = binding?.symbol) {
     const normalized = normalizedSymbol(symbol ?? binding?.symbol);
     const indexLike = isIndexLike(normalized);
     if (binding !== undefined && (!binding || typeof binding !== 'object' || Array.isArray(binding))) {
@@ -116,7 +116,7 @@ export function normalizeSequenceBinding(binding, symbol = binding?.symbol) {
     };
 }
 
-export function getBindableExpressionSymbols(source, parameterNames = []) {
+function getBindableExpressionSymbols(source, parameterNames = []) {
     if (typeof source !== 'string') throw new Error('Bindable expression source must be a string.');
     if (!Array.isArray(parameterNames)) throw new Error('Expression parameter names must be an array.');
     const input = source;

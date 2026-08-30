@@ -20,7 +20,7 @@ export const ORBIT_COLORING_MODE_LABELS = Object.freeze({
     hybrid: 'Hybrid'
 });
 
-export const ORBIT_COLORING_MODE_IDS = Object.freeze({
+const ORBIT_COLORING_MODE_IDS = Object.freeze({
     value: 0,
     escape: 1,
     attractor: 2,

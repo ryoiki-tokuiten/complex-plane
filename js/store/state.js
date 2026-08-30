@@ -30,8 +30,8 @@ export const wPlaneParams = {
     preciseViewport: null
 };
 
-export const laplaceComInitialRanges = { x: [0, 8], y: [-1.2, 1.2] };
-export const laplaceSpectrumInitialRanges = { x: [-0.5, 16.5], y: [0, 1.5] };
+const laplaceComInitialRanges = { x: [0, 8], y: [-1.2, 1.2] };
+const laplaceSpectrumInitialRanges = { x: [-0.5, 16.5], y: [0, 1.5] };
 
 export const laplaceComPlaneParams = {
     width: DEFAULT_CANVAS_WIDTH,

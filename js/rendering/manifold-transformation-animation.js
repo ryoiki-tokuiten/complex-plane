@@ -406,7 +406,7 @@ export function stopManifoldTransformationAnimation() {
     syncManifoldTransformationPlayPauseButton();
 }
 
-export function toggleManifoldTransformationAnimationZ() {
+function toggleManifoldTransformationAnimationZ() {
     state.manifoldTransformationPlayingZ = !state.manifoldTransformationPlayingZ;
     syncManifoldTransformationPlayPauseButton();
     if (state.manifoldTransformationPlayingZ || state.manifoldTransformationPlayingW) {
@@ -414,7 +414,7 @@ export function toggleManifoldTransformationAnimationZ() {
     }
 }
 
-export function toggleManifoldTransformationAnimationW() {
+function toggleManifoldTransformationAnimationW() {
     state.manifoldTransformationPlayingW = !state.manifoldTransformationPlayingW;
     syncManifoldTransformationPlayPauseButton();
     if (state.manifoldTransformationPlayingZ || state.manifoldTransformationPlayingW) {

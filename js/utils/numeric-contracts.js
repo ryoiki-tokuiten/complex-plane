@@ -26,5 +26,3 @@ export function isFiniteComplex(value) {
            typeof value?.im === 'number' && Number.isFinite(value.im);
 }
 
-export const finiteComplex = isFiniteComplex;
-

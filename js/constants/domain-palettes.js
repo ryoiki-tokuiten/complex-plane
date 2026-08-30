@@ -181,7 +181,7 @@ function freezePalette(palette) {
     });
 }
 
-export const DOMAIN_PALETTES = Object.freeze(RAW_DOMAIN_PALETTES.map(freezePalette));
+const DOMAIN_PALETTES = Object.freeze(RAW_DOMAIN_PALETTES.map(freezePalette));
 
 export const domainPalettes = Object.freeze(DOMAIN_PALETTES.map(palette => Object.freeze({
     id: palette.id,
@@ -194,7 +194,7 @@ export const DOMAIN_PALETTE_IDS = Object.freeze(Object.fromEntries(
     DOMAIN_PALETTES.map(palette => [palette.id, palette.shaderId])
 ));
 
-export function getDomainPalette(id) {
+function getDomainPalette(id) {
     const palette = DOMAIN_PALETTES.find(candidate => candidate.id === id);
     if (!palette) throw new Error(`Unknown domain palette: ${id}`);
     return palette;

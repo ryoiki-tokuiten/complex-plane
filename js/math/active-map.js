@@ -2,7 +2,7 @@ import { state } from '../store/state.js';
 import { evaluateNativePoints } from '../native/complex-engine.js';
 import { resolveNativeMapOptions } from '../native/map-runtime.js';
 
-export const MAP_PRESENTATION = Object.freeze({
+const MAP_PRESENTATION = Object.freeze({
     function: 'function',
     derivative: 'derivative'
 });
@@ -33,7 +33,7 @@ function sourceSignature() {
     });
 }
 
-export function getFinalMapStageIndex(runtimeState = state) {
+function getFinalMapStageIndex(runtimeState = state) {
     if (!runtimeState || typeof runtimeState.chainingEnabled !== 'boolean') {
         throw new Error('Native map state requires an explicit chainingEnabled flag.');
     }

@@ -7,7 +7,7 @@ function isIntegerLike(value) {
     return Number.isFinite(value) && Math.abs(value - Math.round(value)) < 1e-9;
 }
 
-export function isMultivaluedFunction(functionKey, runtimeState) {
+function isMultivaluedFunction(functionKey, runtimeState) {
     if (!MULTIVALUED_FUNCTIONS.has(functionKey)) return false;
     if (functionKey === 'power') {
         const exponent = requireFiniteNumber(runtimeState?.fractionalPowerN, 'Fractional-power exponent');

@@ -810,7 +810,7 @@ function renderMenu(items, x, y) {
     menu.style.top = `${posY}px`;
 }
 
-export function handlePlaneContextMenu(event, planeType) {
+function handlePlaneContextMenu(event, planeType) {
     event.preventDefault();
     event.stopPropagation();
 

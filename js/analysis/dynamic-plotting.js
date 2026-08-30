@@ -1,9 +1,6 @@
 import { context, state, mutateState } from '../store/state.js';
 import { setActiveTransformProvider, transformFunctions } from '../native/map-runtime.js';
-import {
-    asComplex,
-    finiteComplex
-} from '../math/expression/index.js';
+import { asComplex } from '../math/expression/index.js';
 import {
     compileNativeDynamicAggregate,
     evaluateNativeDynamic,
@@ -16,7 +13,7 @@ import {
     generateSequenceBindingSeries,
     synchronizeSequenceBindings
 } from './sequence-bindings.js';
-import { requireFiniteComplex, requireInteger } from '../utils/numeric-contracts.js';
+import { isFiniteComplex, requireFiniteComplex, requireInteger } from '../utils/numeric-contracts.js';
 import { clonePlain } from '../utils/clone-utils.js';
 
 const RESULT_CACHE_LIMIT = 24;
@@ -386,7 +383,7 @@ function evaluateSamples(selectedFunction, aggregateParameter, limit = null) {
         if (!reductionStatus) throw new Error(`Unknown native reduction status at index ${index}.`);
         const point = evaluated.pointValues[index];
         const term = evaluated.termValues[index];
-        const valid = !errorCode && finiteComplex(point) && finiteComplex(term);
+        const valid = !errorCode && isFiniteComplex(point) && isFiniteComplex(term);
         const partialValue = evaluated.partialValues[index];
         let partial = null;
         if (reductionKind === 'sum') partial = { value: partialValue };
@@ -573,7 +570,7 @@ export function getDynamicPlotResult(options = {}) {
     };
 }
 
-export function createDynamicAggregateTransform(selectedFunction) {
+function createDynamicAggregateTransform(selectedFunction) {
     const source = getSource();
     const count = visibleCount(source.records.length);
     const bindings = termBindings();
@@ -701,7 +698,7 @@ export function applyDynamicPlottingPreset(presetId) {
 }
 
 export function formatDynamicValue(value, digits = 6) {
-    if (!finiteComplex(value)) return 'undefined';
+    if (!isFiniteComplex(value)) return 'undefined';
     const normalize = number => Number((Math.abs(number) < 1e-12 ? 0 : number).toFixed(digits));
     const re = normalize(value.re);
     const im = normalize(value.im);

@@ -39,7 +39,16 @@ export class AbstractManifold {
      * @returns {{X: number, Y: number, Z: number}} Interpolated 3D point
      */
     morph(u, v, t) {
-        throw new Error(`Manifold '${this.id}' must implement morph(u, v, t)`);
+        if (t <= 0.0001) return { X: u, Y: 0, Z: v };
+        if (t >= 0.9999) return this.project(u, v);
+
+        const eased = (1 - Math.cos(Math.PI * t)) / 2;
+        const target = this.project(u, v);
+        return {
+            X: (1 - eased) * u + eased * target.X,
+            Y: eased * target.Y,
+            Z: (1 - eased) * v + eased * target.Z
+        };
     }
 
     /**
@@ -58,7 +67,7 @@ export class AbstractManifold {
 }
 
 // 1. Riemann Sphere (S²) - Conformal Stereographic Folding
-export class SphereManifold extends AbstractManifold {
+class SphereManifold extends AbstractManifold {
     constructor() {
         super(
             'sphere',
@@ -119,7 +128,7 @@ export class SphereManifold extends AbstractManifold {
 }
 
 // 2. Log-Cylinder - Cylindrical Axis Rolling
-export class CylinderManifold extends AbstractManifold {
+class CylinderManifold extends AbstractManifold {
     constructor() {
         super(
             'cylinder',
@@ -166,7 +175,7 @@ export class CylinderManifold extends AbstractManifold {
 }
 
 // 3. Complex Torus (T²) - Two-Stage Double Periodic Lattice Rolling
-export class TorusManifold extends AbstractManifold {
+class TorusManifold extends AbstractManifold {
     constructor() {
         super(
             'torus',
@@ -227,7 +236,7 @@ export class TorusManifold extends AbstractManifold {
 }
 
 // 4. Riemann Helicoid - Vertical Branch Screw Unrolling
-export class HelicoidManifold extends AbstractManifold {
+class HelicoidManifold extends AbstractManifold {
     constructor() {
         super(
             'helicoid',
@@ -274,7 +283,7 @@ export class HelicoidManifold extends AbstractManifold {
 }
 
 // 5. Catenoid Minimal Surface
-export class CatenoidManifold extends AbstractManifold {
+class CatenoidManifold extends AbstractManifold {
     constructor() {
         super(
             'catenoid',
@@ -297,24 +306,6 @@ export class CatenoidManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
-        const target = this.project(u, v);
-
-        return {
-            X: (1 - t_e) * u + t_e * target.X,
-            Y: t_e * target.Y,
-            Z: (1 - t_e) * v + t_e * target.Z
-        };
-    }
-
     getDomainPoint(uNorm, vNorm) {
         const x = (uNorm * 2 - 1) * Math.PI * this.c;
         const y = (vNorm * 2 - 1) * 3.0 * this.c;
@@ -323,7 +314,7 @@ export class CatenoidManifold extends AbstractManifold {
 }
 
 // 6. Enneper Minimal Surface
-export class EnneperManifold extends AbstractManifold {
+class EnneperManifold extends AbstractManifold {
     constructor() {
         super(
             'enneper',
@@ -349,24 +340,6 @@ export class EnneperManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
-        const target = this.project(u, v);
-
-        return {
-            X: (1 - t_e) * u + t_e * target.X,
-            Y: t_e * target.Y,
-            Z: (1 - t_e) * v + t_e * target.Z
-        };
-    }
-
     getDomainPoint(uNorm, vNorm) {
         const x = (uNorm * 2 - 1) * 3.5;
         const y = (vNorm * 2 - 1) * 3.5;
@@ -375,7 +348,7 @@ export class EnneperManifold extends AbstractManifold {
 }
 
 // 7. Bonnet Isometric Family
-export class BonnetManifold extends AbstractManifold {
+class BonnetManifold extends AbstractManifold {
     constructor() {
         super(
             'bonnet',
@@ -435,7 +408,7 @@ export class BonnetManifold extends AbstractManifold {
 }
 
 // 8. Klein Bottle (Figure-8 Immersion)
-export class KleinBottleManifold extends AbstractManifold {
+class KleinBottleManifold extends AbstractManifold {
     constructor() {
         super(
             'klein_bottle',
@@ -461,24 +434,6 @@ export class KleinBottleManifold extends AbstractManifold {
         return { X, Y, Z };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
-        const target = this.project(u, v);
-
-        return {
-            X: (1 - t_e) * u + t_e * target.X,
-            Y: t_e * target.Y,
-            Z: (1 - t_e) * v + t_e * target.Z
-        };
-    }
-
     getDomainPoint(uNorm, vNorm) {
         const x = (uNorm * 2 - 1) * Math.PI;
         const y = (vNorm * 2 - 1) * Math.PI;
@@ -487,7 +442,7 @@ export class KleinBottleManifold extends AbstractManifold {
 }
 
 // 9. Beltrami Pseudosphere (Hyperbolic Geometry H²)
-export class PseudosphereManifold extends AbstractManifold {
+class PseudosphereManifold extends AbstractManifold {
     constructor() {
         super(
             'pseudosphere',
@@ -511,24 +466,6 @@ export class PseudosphereManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
-        const target = this.project(u, v);
-
-        return {
-            X: (1 - t_e) * u + t_e * target.X,
-            Y: t_e * target.Y,
-            Z: (1 - t_e) * v + t_e * target.Z
-        };
-    }
-
     getDomainPoint(uNorm, vNorm) {
         const x = (uNorm * 2 - 1) * Math.PI;
         const y = (vNorm * 2 - 1) * 3.5;
@@ -537,7 +474,7 @@ export class PseudosphereManifold extends AbstractManifold {
 }
 
 // 10. Scherk Minimal Surface
-export class ScherkManifold extends AbstractManifold {
+class ScherkManifold extends AbstractManifold {
     constructor() {
         super(
             'scherk',

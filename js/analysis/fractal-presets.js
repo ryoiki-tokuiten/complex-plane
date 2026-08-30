@@ -20,7 +20,7 @@ function term(coeff, factors) {
     return { coeff, factors };
 }
 
-export const FRACTAL_PRESETS = Object.freeze({
+const FRACTAL_PRESETS = Object.freeze({
     mandelbrot: Object.freeze({
         label: 'Mandelbrot',
         chainMode: 'zero_seed',

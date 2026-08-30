@@ -159,7 +159,7 @@ function readIdentifierToken(source, start) {
     };
 }
 
-export function tokenizeExpression(source) {
+function tokenizeExpression(source) {
     const input = String(source ?? '');
     const length = input.length;
     if (length > EXPRESSION_LIMITS.sourceLength) {

@@ -142,7 +142,7 @@ function getDecomposedFrequencies() {
     return freqs.slice(0, count);
 }
 
-export class Fourier3DPipelineRenderer {
+class Fourier3DPipelineRenderer {
     constructor(container) {
         this.container = container;
         Object.assign(this, createOrthographicSceneHost(container, {

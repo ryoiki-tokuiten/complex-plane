@@ -12,7 +12,7 @@ const TAYLOR_Y_AXIS_ROLES = new Set([
     'line-horizontal'
 ]);
 
-export function getTaylorPointSetColor(pointSet, axisColorX, axisColorY) {
+function getTaylorPointSetColor(pointSet, axisColorX, axisColorY) {
     return TAYLOR_Y_AXIS_ROLES.has(pointSet.role) ? axisColorY : axisColorX;
 }
 

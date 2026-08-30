@@ -535,7 +535,7 @@ export function drawLaplaceComGraph(ctx, comSweep = state.laplaceComSweep, plane
     ctx.restore();
 }
 
-export function drawPolesAndZerosOverlay(ctx, planeParams) {
+function drawPolesAndZerosOverlay(ctx, planeParams) {
     const showPolesZeros = state.laplaceShowPolesZeros !== false;
     const showROC = state.laplaceShowROC !== false;
     if ((!showPolesZeros && !showROC) || (!state.laplacePoles && !state.laplaceZeros && !state.laplaceROC)) return;

@@ -28,7 +28,7 @@ function rectanglesOverlap(first, second) {
         first.top < second.bottom && first.bottom > second.top;
 }
 
-export function positionGridShapeControls() {
+function positionGridShapeControls() {
     const panel = element('grid_shape_controls_overlay');
     const wrapper = element('z_plane_canvas_wrapper');
     if (!panel || !wrapper || panel.classList.contains('hidden')) return;

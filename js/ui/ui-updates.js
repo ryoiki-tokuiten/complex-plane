@@ -15,14 +15,14 @@ import {
     getVisibleBranchIndices,
     baseExpressionHasBranches
 } from '../analysis/riemann-surface.js';
-import { domainPalettes } from './theme-manager.js';
+import { domainPalettes } from '../constants/domain-palettes.js';
 import { startManifoldTransformationAnimation, stopManifoldTransformationAnimation, syncManifoldTransformationPlayPauseButton, initThreeJSRenderers, syncManifoldSliders, disposeThreeJSRenderers } from '../rendering/manifold-transformation-animation.js';
 import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
 import { compileExpression, createExpressionMathML } from '../math/expression/index.js';
-import { createFormulaFragment } from './dom-components.js';
+import { createSafeMarkupFragment } from './dom-components.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import { getManifold } from '../rendering/manifold-registry.js';
-import { requireFiniteComplex, requireFiniteNumber, finiteComplex } from '../utils/numeric-contracts.js';
+import { requireFiniteComplex, requireFiniteNumber, isFiniteComplex } from '../utils/numeric-contracts.js';
 import { syncGridShapeControls } from './grid-shape-controls.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices, getTissotViewportBounds } from '../analysis/tissot.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
@@ -228,7 +228,7 @@ function setText(key, value) {
 function setHtml(key, html) {
     const node = control(key);
     if (node) {
-        node.replaceChildren(createFormulaFragment(html));
+        node.replaceChildren(createSafeMarkupFragment(html));
     }
 }
 
@@ -521,7 +521,7 @@ function syncNormalModeDisplays() {
     syncValueBindings(NORMAL_MODE_VALUE_BINDINGS);
 }
 
-export function syncTaylorControls() {
+function syncTaylorControls() {
     const detailDiv = document.getElementById('taylor_series_options_detail_div');
     if (detailDiv && detailDiv.parentElement?.id !== 'plane_context_submenu') {
         setHidden('taylorSeriesOptionsDetailDiv', !state.taylorSeriesEnabled);
@@ -541,7 +541,7 @@ export function syncTaylorControls() {
     syncTaylorSeriesCenterStatus();
 }
 
-export function syncVectorFlowControls() {
+function syncVectorFlowControls() {
     const isAnyActive = Boolean(state.vectorFieldEnabled || state.streamlineFlowEnabled || state.particleAnimationEnabled);
     setHidden('vectorFlowCanvasOverlay', !isAnyActive);
     setHidden('vectorFieldOptionsDiv', !state.vectorFieldEnabled);
@@ -624,7 +624,7 @@ function syncGraphControls() {
     if (!graphActive) setHidden('graphColumn', true);
 }
 
-export function updateSliderLabelsAndDisplay() {
+function updateSliderLabelsAndDisplay() {
     syncGridDensityControls();
     syncComplexParameterControls();
     syncNormalModeDisplays();
@@ -636,11 +636,11 @@ export function updateSliderLabelsAndDisplay() {
     syncDelegates();
 }
 
-export function getTaylorDisplayCenter() {
+function getTaylorDisplayCenter() {
     return state.taylorSeriesCustomCenter || state.taylorSeriesCenter || DEFAULT_TAYLOR_SERIES_CENTER;
 }
 
-export function formatTaylorCenterStatusText(center) {
+function formatTaylorCenterStatusText(center) {
     const preset = findTaylorCenterPreset(center.re, center.im);
     if (preset) {
         return `z0 = ${preset.label}`;
@@ -652,7 +652,7 @@ export function formatTaylorCenterStatusText(center) {
     return `z0 = ${re} ${sign} ${imMagnitude}i`;
 }
 
-export function syncTaylorSeriesCenterStatus() {
+function syncTaylorSeriesCenterStatus() {
     if (!control('taylorSeriesCenterStatus')) {
         return;
     }
@@ -660,7 +660,7 @@ export function syncTaylorSeriesCenterStatus() {
     setText('taylorSeriesCenterStatus', formatTaylorCenterStatusText(getTaylorDisplayCenter()));
 }
 
-export function formatProbeValue(v) {
+function formatProbeValue(v) {
     if (v === 0) {
         return '0';
     }
@@ -679,7 +679,7 @@ export function formatProbeValue(v) {
         : v.toExponential(3);
 }
 
-export function formatProbeComplex(re, im) {
+function formatProbeComplex(re, im) {
     const reStr = formatProbeValue(re);
     const imAbs = Math.abs(im);
     const imSign = im >= 0 ? '+' : '-';
@@ -703,7 +703,7 @@ function derivativeProbeHtml() {
     const activeMap = resolveActiveMap();
     const derivativeLabel = activeMap.presentation === 'derivative' ? "f''(z)" : "f'(z)";
     const deriv = activeMap.derivative(state.probeZ.re, state.probeZ.im);
-    if (!finiteComplex(deriv)) {
+    if (!isFiniteComplex(deriv)) {
         return `${derivativeLabel} calculation failed.<br>Conformality: Unknown<br>`;
     }
 
@@ -727,7 +727,7 @@ function transformedProbeHtml() {
         ? transform(state.probeZ.re, state.probeZ.im)
         : null;
 
-    if (!finiteComplex(pW)) {
+    if (!isFiniteComplex(pW)) {
         return [
             '<strong class="probe-output-error">Output unavailable at this point</strong>',
             'The map reaches a pole or diverges to ∞, so no finite <em>w</em> can be plotted.',
@@ -746,7 +746,7 @@ export function updateProbeInfo() {
         && !state.laplaceModeEnabled
         && !isPanning(runtime.interaction.panZ)
         && !isPanning(runtime.interaction.panW)
-        && finiteComplex(state.probeZ);
+        && isFiniteComplex(state.probeZ);
 
     if (!probeCanRender) return hideProbeInfo();
     showProbeInfo(
@@ -1078,7 +1078,7 @@ function syncPrimaryPlaneTitles() {
 
             label.replaceChildren(
                 document.createTextNode(`Real Plot (3D Surface): ${displayFormula}, where ${model.hasOutputChain ? 'w' : 'f(z)'} = `),
-                createFormulaFragment(model.fND),
+                createSafeMarkupFragment(model.fND),
                 document.createTextNode(`, z = ${zinText}`)
             );
         }
@@ -1412,7 +1412,7 @@ function syncFunctionEquationCard() {
     `;
 }
 
-export function syncCanvasZoomControlsUI() {
+function syncCanvasZoomControlsUI() {
     const isEnabled = Boolean(state.canvasZoomControlsEnabled);
     const isRiemann = Boolean(state.riemannSurfaceEnabled);
     const isFold = Boolean(state.foldSurface3dEnabled);
@@ -1454,7 +1454,7 @@ export function updateTitlesAndGlobalUI() {
     syncGridShapeControls();
 }
 
-export function updateDomainColoringKey() {
+function updateDomainColoringKey() {
     const keyDiv = control('domainColoringKey');
     if (!keyDiv) {
         return;
@@ -1493,7 +1493,7 @@ export function updateDomainColoringKey() {
     keyDiv.replaceChildren(content);
 }
 
-export function syncManifoldTransformationUI() {
+function syncManifoldTransformationUI() {
     const isManifoldActive = Boolean(state.manifold3dViewEnabled);
     const isTransformActive = Boolean(state.manifoldTransformationEnabled && isManifoldActive);
 
@@ -1534,7 +1534,7 @@ function syncRealPlotExpression(part) {
     updateCustomFormulaPreview(input, control(`realPlotsCustom${part}Math`));
 }
 
-export function syncRealPlotsUI() {
+function syncRealPlotsUI() {
     ['Input', 'Imag'].forEach(syncRealPlotExpression);
     setValue('realPlotsColorMode', state.realPlotsColorMode);
     setValue('realPlotsOutputComponent', state.realPlotsOutputComponent);
@@ -1563,7 +1563,7 @@ export function updateCustomFormulaPreview(inputEl, displayEl, options = {}) {
     }
 }
 
-export function sync2DContourUI() {
+function sync2DContourUI() {
     const hasSurface = state.realPlotsEnabled || state.riemannSurfaceEnabled || state.laplaceModeEnabled;
     if (!hasSurface) state.show2DContourPlot = false;
     const showContour = state.show2DContourPlot && hasSurface;

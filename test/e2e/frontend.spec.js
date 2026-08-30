@@ -223,7 +223,7 @@ test('Preact controls preserve the public DOM and interaction contract', async (
     await page.locator('#select_real_plots_btn').click();
     await expect(page.locator('#real_plots_controls_container')).not.toHaveClass(/hidden/);
     await expect(page.locator('#core_application_controls')).toHaveClass(/hidden/);
-    await expect(page.locator('#algebraic_chaining_params')).toHaveClass(/hidden/);
+    await expect(page.locator('#algebraic_chaining_params')).not.toHaveClass(/hidden/);
     await expect(page.locator('#real_plots_contours_cb')).toHaveCount(0);
     for (const part of ['input', 'imag']) {
         await page.locator(`#real_plots_${part}_preset`).selectOption('custom');

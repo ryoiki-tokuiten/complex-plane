@@ -150,7 +150,7 @@ function strokeComplexArrayOnPlane(ctx, planeParams, points) {
     for (let i = 0, length = points.length; i < length; i++) {
         const point = points[i];
 
-        if (!isRenderableComplexPoint(point)) {
+        if (!isFiniteComplex(point)) {
             pathOpen = strokeOpenPath(ctx, pathOpen);
             continue;
         }
@@ -270,7 +270,7 @@ function buildPath2DFromComplexArray(PathCtor, planeParams, points) {
     for (let i = 0, length = points.length; i < length; i++) {
         const point = points[i];
 
-        if (!isRenderableComplexPoint(point)) {
+        if (!isFiniteComplex(point)) {
             pathOpen = false;
             continue;
         }
@@ -397,7 +397,7 @@ function setOptionalCanvasState(ctx, options) {
 }
 
 function toCanvasPoint(point, planeParams) {
-    return isRenderableComplexPoint(point)
+    return isFiniteComplex(point)
         ? mapToCanvasCoords(point.re, point.im, planeParams)
         : null;
 }
@@ -423,7 +423,7 @@ function drawCircleMarker(ctx, canvasPoint, radius, fillStyle, strokeStyle, line
 }
 
 function drawWorldCircle(ctx, planeParams, center, radius, segments) {
-    if (!isRenderableComplexPoint(center) || !isFiniteNumber(radius)) {
+    if (!isFiniteComplex(center) || !isFiniteNumber(radius)) {
         return;
     }
 
@@ -451,7 +451,7 @@ function drawWorldCircle(ctx, planeParams, center, radius, segments) {
 }
 
 function isWithinComplexLimit(point, limit) {
-    return isRenderableComplexPoint(point) &&
+    return isFiniteComplex(point) &&
         Math.abs(point.re) <= limit &&
         Math.abs(point.im) <= limit;
 }
@@ -810,8 +810,8 @@ function getProbeCrosshairEndpoints(center, radius) {
 }
 
 function drawProbeSegment(ctx, planeParams, startWorld, endWorld, color) {
-    const startIsValid = isRenderableComplexPoint(startWorld);
-    const endIsValid = isRenderableComplexPoint(endWorld);
+    const startIsValid = isFiniteComplex(startWorld);
+    const endIsValid = isFiniteComplex(endWorld);
 
     if (!startIsValid || !endIsValid) {
         return;
@@ -900,8 +900,6 @@ function getArrowColorFromComponents(re, im, brightness) {
     const rgb = hslToRgb(hue, 0.85, lightness);
     return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 }
-
-export const isRenderableComplexPoint = isFiniteComplex;
 
 export function drawComplexLineSetOnPlane(ctx, planeParams, points) {
     if (Array.isArray(points)) strokeComplexArrayOnPlane(ctx, planeParams, points);
@@ -1013,7 +1011,7 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
     });
 }
 
-export function drawRadialDiscreteSteps(ctx, planeParams, currentFunctionKey, stepsCount) {
+function drawRadialDiscreteSteps(ctx, planeParams, currentFunctionKey, stepsCount) {
     const generatedPointSets = generateRadialDiscreteStepPointSets(currentFunctionKey, stepsCount);
     const radialPointSets = [];
 
@@ -1233,8 +1231,8 @@ export function updateAndDrawParticles(ctx, planeParams, state, map, timestamp =
     });
 }
 
-export function drawConformalityProbeSegments(ctx, planeParams, center_world) {
-    if (!isRenderableComplexPoint(center_world)) {
+function drawConformalityProbeSegments(ctx, planeParams, center_world) {
+    if (!isFiniteComplex(center_world)) {
         return;
     }
 
@@ -1249,7 +1247,7 @@ export function drawConformalityProbeSegments(ctx, planeParams, center_world) {
 }
 
 export function drawPlanarProbe(ctx, planeParams) {
-    if (!isRenderableComplexPoint(appState.probeZ)) {
+    if (!isFiniteComplex(appState.probeZ)) {
         return;
     }
 
@@ -1270,7 +1268,7 @@ export function drawPlanarProbe(ctx, planeParams) {
     });
 }
 
-export function getPlanarTransformRenderLimit(planeParams) {
+function getPlanarTransformRenderLimit(planeParams) {
     const xRange = getPlaneXRanges(planeParams);
     const yRange = getPlaneYRanges(planeParams);
 
@@ -1283,8 +1281,8 @@ export function getPlanarTransformRenderLimit(planeParams) {
     ) * 10;
 }
 
-export function drawConstantMappedPoint(ctx, planeParams, w, col) {
-    if (!isRenderableComplexPoint(w)) {
+function drawConstantMappedPoint(ctx, planeParams, w, col) {
+    if (!isFiniteComplex(w)) {
         return;
     }
 
@@ -1352,7 +1350,7 @@ export function getPointSetEndpoints(pointSet) {
         : null;
 }
 
-export function drawFunctionFociOverlay(ctx, planeParams) {
+function drawFunctionFociOverlay(ctx, planeParams) {
     if (appState.currentFunction !== 'cos' && appState.currentFunction !== 'sin') {
         return;
     }
@@ -1375,12 +1373,12 @@ export function drawFunctionFociOverlay(ctx, planeParams) {
     });
 }
 
-export function shouldDrawPlanarFunctionFociOverlay() {
+function shouldDrawPlanarFunctionFociOverlay() {
     return appState.currentInputShape === 'line' &&
         (appState.currentFunction === 'cos' || appState.currentFunction === 'sin');
 }
 
-export function shouldDrawPlanarInputRadialOverlay() {
+function shouldDrawPlanarInputRadialOverlay() {
     return appState.radialDiscreteStepsEnabled;
 }
 
@@ -1508,7 +1506,7 @@ export function drawPlanarTransformedProbe(ctx, planeParams, map) {
         const mapped = evaluateNativePoints(nativeOptionsForActiveMap(map), sourcePoints).values;
         const probeWorldPoint = mapped[0];
 
-        if (isRenderableComplexPoint(probeWorldPoint)) {
+        if (isFiniteComplex(probeWorldPoint)) {
             const probeCanvasPoint = mapToCanvasCoords(probeWorldPoint.re, probeWorldPoint.im, planeParams);
             drawCircleMarker(ctx, probeCanvasPoint, PROBE_MARKER_RADIUS, COLOR_PROBE_MARKER);
         }

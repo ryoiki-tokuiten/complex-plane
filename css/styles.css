@@ -590,12 +590,6 @@ main {
     color: color-mix(in srgb, var(--accent-purple) 56%, var(--text-secondary-color));
 }
 
-.panel-inline-copy {
-    font-size: 0.8rem;
-    line-height: 1.45;
-    color: var(--text-secondary-color);
-}
-
 .image-upload-panel {
     display: flex;
     flex-direction: column;
@@ -4513,11 +4507,6 @@ body.vertical-layout #controls_options_section .viz-settings-grid {
     transform: translateX(-50%);
 }
 
-.palette-guide-tick.is-start { left: 0; transform: none; }
-.palette-guide-tick.is-near-start { left: 2.5%; }
-.palette-guide-tick.is-quarter { left: 25%; }
-.palette-guide-tick.is-middle { left: 50%; }
-.palette-guide-tick.is-end { right: 0; transform: none; }
 .theme-modal-section {
     margin-top: 1.5rem;
     padding-top: 1rem;
@@ -4904,12 +4893,11 @@ body.vertical-layout #controls_options_section .viz-settings-grid {
 }
 
 /* Canvas Shape Controls Overlay (Circle & Line) */
-.canvas-shape-controls-overlay {
+.canvas-shape-controls-overlay,
+.canvas-radial-steps-overlay {
     position: absolute;
     bottom: 8px;
-    right: 8px;
     z-index: 85;
-    width: 245px;
     max-width: calc(100% - 16px);
     background: rgba(8, 10, 20, 0.55);
     backdrop-filter: blur(32px) saturate(180%);
@@ -4918,11 +4906,16 @@ body.vertical-layout #controls_options_section .viz-settings-grid {
     border-radius: 10px;
     padding: 6px 10px;
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    pointer-events: auto;
+    font-size: 0.72rem;
+}
+
+.canvas-shape-controls-overlay {
+    right: 8px;
+    width: 245px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    pointer-events: auto;
-    font-size: 0.72rem;
 }
 
 .canvas-shape-controls-group {
@@ -5096,21 +5089,8 @@ body.vertical-layout #controls_options_section .viz-settings-grid {
 
 /* Canvas Radial Discrete Steps Overlay */
 .canvas-radial-steps-overlay {
-    position: absolute;
-    bottom: 8px;
     left: 8px;
-    z-index: 85;
     width: 205px;
-    max-width: calc(100% - 16px);
-    background: rgba(8, 10, 20, 0.55);
-    backdrop-filter: blur(32px) saturate(180%);
-    -webkit-backdrop-filter: blur(32px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 10px;
-    padding: 6px 10px;
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    pointer-events: auto;
-    font-size: 0.72rem;
 }
 
 /* Plane Context Submenu Rich Controls & Taylor Series Panel */

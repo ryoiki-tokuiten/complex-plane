@@ -1,10 +1,11 @@
 import { state } from '../store/state.js';
 import { domainColorForValue } from './domain-coloring.js';
-import { domainPalettes, surfacePalettes } from '../ui/theme-manager.js';
+import { domainPalettes } from '../constants/domain-palettes.js';
+import { SURFACE_PALETTES } from '../constants/surface-palettes.js';
 import { DOMAIN_COLOR_LOG_MAGNITUDE_MAX, DOMAIN_COLOR_LOG_MAGNITUDE_MIN } from '../constants/domain-dynamics.js';
 const $ = id => typeof id === 'string' ? document.getElementById(id) : id;
 
-export function drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner) {
+function drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner) {
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)';
     const textColor = style.getPropertyValue('--text-color') || '#FAFAFA';
@@ -36,7 +37,7 @@ export function drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner) {
     ctx.restore();
 }
 
-export function drawDomainPaletteCircle(canvas, paletteId) {
+function drawDomainPaletteCircle(canvas, paletteId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const { width: w, height: h } = canvas;
@@ -73,7 +74,7 @@ export function drawDomainPaletteCircle(canvas, paletteId) {
     drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner);
 }
 
-export function drawAmplitudeStrip(canvas, paletteId) {
+function drawAmplitudeStrip(canvas, paletteId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const { width: w, height: h } = canvas;
@@ -109,14 +110,14 @@ export function drawAmplitudeStrip(canvas, paletteId) {
     ctx.restore();
 }
 
-export function drawSurfacePaletteCircle(canvas, paletteId) {
+function drawSurfacePaletteCircle(canvas, paletteId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const { width: w, height: h } = canvas;
     ctx.clearRect(0, 0, w, h);
 
     const cx = w / 2, cy = h / 2, rOuter = 130, rInner = 95;
-    const palette = surfacePalettes.find(p => p.id === paletteId) || surfacePalettes.find(p => p.id === 'viridis');
+    const palette = SURFACE_PALETTES.find(p => p.id === paletteId) || SURFACE_PALETTES.find(p => p.id === 'viridis');
     if (!palette) return;
 
     const colors = palette.colors.split(',').map(c => c.trim());
@@ -132,13 +133,13 @@ export function drawSurfacePaletteCircle(canvas, paletteId) {
     drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner);
 }
 
-export function drawSurfaceAmplitudeStrip(canvas, paletteId) {
+function drawSurfaceAmplitudeStrip(canvas, paletteId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const { width: w, height: h } = canvas;
     ctx.clearRect(0, 0, w, h);
 
-    const palette = surfacePalettes.find(p => p.id === paletteId) || surfacePalettes.find(p => p.id === 'viridis');
+    const palette = SURFACE_PALETTES.find(p => p.id === paletteId) || SURFACE_PALETTES.find(p => p.id === 'viridis');
     if (!palette) return;
 
     const colors = palette.colors.split(',').map(c => c.trim());
@@ -157,7 +158,7 @@ export function updateDomainPaletteCirclePanel() {
 }
 
 export function updateSurfacePaletteCirclePanel() {
-    const activePalette = surfacePalettes.find(p => p.id === state.surfacePalette) || surfacePalettes.find(p => p.id === 'viridis');
+    const activePalette = SURFACE_PALETTES.find(p => p.id === state.surfacePalette) || SURFACE_PALETTES.find(p => p.id === 'viridis');
     const title = $('real_plots_palette_circle_title');
     if (title && activePalette) title.textContent = activePalette.name;
     drawSurfacePaletteCircle($('real_plots_palette_circle_canvas'), state.surfacePalette);

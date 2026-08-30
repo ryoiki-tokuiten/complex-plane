@@ -200,7 +200,7 @@ function centerPlaneOnNavigationPoint(planeParams, point, panState) {
     return shifted;
 }
 
-export function followNavigationViewports() {
+function followNavigationViewports() {
     let shifted = centerPlaneOnNavigationPoint(zPlaneParams, runtime.navigation.position, runtime.interaction.panZ);
 
     const transformFunc = getChainedTransformFunction(state.currentFunction);

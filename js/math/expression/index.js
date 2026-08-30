@@ -2,16 +2,13 @@ export {
     EXPRESSION_LIMITS,
     ExpressionSyntaxError,
     collectExpressionDependencies,
-    parseExpression,
-    tokenizeExpression,
-    walkExpression
+    parseExpression
 } from './parser.js';
 
 export {
     ExpressionEvaluationError,
     asComplex,
-    compileExpression,
-    finiteComplex
+    compileExpression
 } from './evaluator.js';
 
 export {

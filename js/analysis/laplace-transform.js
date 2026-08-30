@@ -15,7 +15,7 @@ import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.
  * Every other signal still uses the same sampled Laplace integral and surface
  * machinery; it simply has no analytic feature markers to report.
  */
-export const ANALYTICAL_LAPLACE_FUNCTIONS = Object.freeze(new Set([
+const ANALYTICAL_LAPLACE_FUNCTIONS = Object.freeze(new Set([
     'step', 'exponential', 'sine', 'cosine', 'damped_sine', 'damped_cosine',
     'ramp', 'impulse', 'exponential_sine', 'underdamped',
     'critically_damped', 'overdamped'

@@ -1,8 +1,4 @@
 import { state } from '../store/state.js';
-import { domainPalettes } from '../constants/domain-palettes.js';
-import { SURFACE_PALETTES } from '../constants/surface-palettes.js';
-
-export { domainPalettes };
 
 // Curated & Locked UI Themes
 export const themes = [
@@ -68,5 +64,3 @@ export function applyTheme(themeId, { preserveGridColors = false } = {}) {
         state.gridColor2 = theme.colors.gridSec;
     }
 }
-
-export const surfacePalettes = SURFACE_PALETTES;

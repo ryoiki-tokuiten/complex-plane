@@ -505,7 +505,7 @@ function selectEvenly(items, maximum) {
     );
 }
 
-export function pointSetMatchesGridFamily(
+function pointSetMatchesGridFamily(
     pointSet,
     shape = state.currentInputShape,
     family = state.graphGridFamily

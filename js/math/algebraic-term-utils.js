@@ -10,7 +10,7 @@ export const createAlgebraicFactor = (func = 'cos') => ({
     exp: false
 });
 
-export const createAlgebraicTerm = () => ({
+const createAlgebraicTerm = () => ({
     coeff: { re: 1, im: 0 },
     factors: [createAlgebraicFactor()]
 });
