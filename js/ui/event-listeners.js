@@ -1,8 +1,7 @@
 import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, laplaceComPlaneParams, laplaceSpectrumPlaneParams, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import { eventBus } from '../store/events.js';
-import { setupVisualParameters, updateChainingColumns, updateChainingTitles } from '../utils/dom-utils.js';
-import { loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getRasterSourceForShape, isRasterInputShape } from '../utils/raster-media.js';
+import { setupVisualParameters, updateChainingColumns } from '../utils/dom-utils.js';
+import { loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getMediaSource, isMediaInputShape } from '../utils/raster-media.js';
 import { initPlaneContextMenu, hidePlaneContextMenu } from './plane-context-menu.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords, setPlaneViewport } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
@@ -25,7 +24,7 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, syncTaylorControls, syncTaylorSeriesCenterStatus, updateDomainColoringKey, syncParameterControlsPanelVisibility, syncManifoldTransformationUI, syncTransformControlPanels, updateCustomFormulaPreview, syncComplexParameterControls, syncCanvasZoomControlsUI } from './ui-updates.js';
+import { syncLaplacePlayPauseButton, updateCustomFormulaPreview, syncComplexParameterControls } from './ui-updates.js';
 import { syncGridDensityControls } from './grid-density-controls.js';
 import {
     bindGridShapePicker,
@@ -34,7 +33,6 @@ import {
     setGridShapeParameter
 } from './grid-shape-controls.js';
 import { GRID_SHAPE_PARAMETERS } from '../constants/grid-shapes.js';
-import { buildThreeJSMeshes } from '../rendering/manifold-transformation-animation.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
 import { setNavigationModeEnabled, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
 import { toggleAnimation } from './animation.js';
@@ -70,6 +68,9 @@ import {
 } from '../native/complex-engine.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
 import { getRiemannSurfaceCanvas, resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
+import { findNearestDynamicSample, formatDynamicSampleTooltip } from '../rendering/draw-dynamic-plotting.js';
+import { drawFourier3DPipeline } from '../rendering/fourier-3d-pipeline.js';
+import { showDynamicTooltip, hideDynamicTooltip } from './tooltip.js';
 
 const { controls = {} } = context;
 
@@ -89,8 +90,7 @@ const FRACTAL_RESTORE_KEYS = [
     'algebraicChainingTerms', 'algebraicChainingZExpr',
     'realPlotsEnabled', 'realPlotsInputExpr', 'realPlotsImagExpr', 'realPlotsOutputComponent',
     'realPlotsHeightScale', 'realPlotsBrightness', 'realPlotsContrast', 'realPlotsSaturation',
-    'realPlotsColorMode', 'realPlotsContoursEnabled',
-    'realPlotsContourInterval', 'realPlotsContourThickness'
+    'realPlotsColorMode'
 ];
 
 const PASSIVE_LISTENER_OPTIONS = Object.freeze({ passive: true });
@@ -136,40 +136,16 @@ const MOBIUS_PARAMS = ['A', 'B', 'C', 'D'];
 
 const DOMAIN_DIRTY_STATE_KEYS = new Set([
     'a0', 'b0', 'circleR',
-    'mediaSize', 'mediaOpacity', 'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity', 'vectorFieldScale',
+    'mediaSize', 'mediaOpacity', 'mediaAspectRatio', 'mediaVersion', 'vectorFieldScale',
     'zPlaneZoom', 'wPlaneZoom', 'fractionalPowerN', 'manifoldSurfaceOpacity', 'manifoldGridOpacity'
 ]);
 
-const BASIC_SLIDER_BINDINGS = [
+const SIMPLE_SLIDER_BINDINGS = [
     ['gridDensitySlider', 'gridDensity', parseInteger],
     ['riemannSurfaceResolutionSlider', 'riemannSurfaceResolution', parseInteger],
     ['neighborhoodSizeSlider', 'probeNeighborhoodSize'],
-    ['vectorFieldScaleSlider', 'vectorFieldScale'],
-    ['vectorArrowThicknessSlider', 'vectorArrowThickness'],
-    ['vectorArrowHeadSizeSlider', 'vectorArrowHeadSize'],
-    ['streamlineStepSizeSlider', 'streamlineStepSize'],
-    ['streamlineMaxLengthSlider', 'streamlineMaxLength', parseInteger],
-    ['streamlineThicknessSlider', 'streamlineThickness'],
-    ['streamlineSeedDensityFactorSlider', 'streamlineSeedDensityFactor'],
-    ['radialDiscreteStepsCountSlider', 'radialDiscreteStepsCount', parseInteger],
     ['manifoldSurfaceOpacitySlider', 'manifoldSurfaceOpacity'],
     ['manifoldGridOpacitySlider', 'manifoldGridOpacity'],
-    ['taylorSeriesOrderSlider', 'taylorSeriesOrder', parseInteger],
-    ['particleDensitySlider', 'particleDensity', parseInteger],
-    ['particleSpeedSlider', 'particleSpeed'],
-    ['particleMaxLifetimeSlider', 'particleMaxLifetime', parseInteger],
-    ['mediaSizeSlider', 'mediaSize'],
-    ['mediaOpacitySlider', 'mediaOpacity'],
-    ['videoFpsSlider', 'videoProcessingFps', parseInteger],
-    ['laplaceAnimationSpeedSlider', 'laplaceAnimationSpeed'],
-    ['laplaceFrequencySlider', 'laplaceFrequency'],
-    ['laplaceDampingSlider', 'laplaceDamping'],
-    ['laplaceAmplitudeSlider', 'laplaceAmplitude'],
-    ['laplaceTimeWindowSlider', 'laplaceTimeWindow'],
-    ['laplaceSamplesSlider', 'laplaceSamples', parseInteger],
-    ['laplaceSigmaSlider', 'laplaceSigma'],
-    ['laplaceOmegaSlider', 'laplaceOmega'],
-    ['laplaceClipHeightSlider', 'laplaceClipHeight'],
     ['riemannSurfaceSheetsSlider', 'riemannSurfaceSheets', parseInteger],
     ['riemannSurfaceBranchCenterSlider', 'riemannSurfaceBranchCenter', parseInteger],
     ['riemannSurfaceHeightScaleSlider', 'riemannSurfaceHeightScale'],
@@ -177,59 +153,15 @@ const BASIC_SLIDER_BINDINGS = [
     ['riemannSurfaceHeightClipSlider', 'riemannSurfaceHeightClip']
 ].map(([controlKey, stateKey, parser = parseFloat]) => ({ controlKey, stateKey, parser }));
 
-const BASIC_CHECKBOX_BINDINGS = [
-    ['enableManifoldTransformationCb', 'manifoldTransformationEnabled'],
-    ['laplaceShowRocCb', 'laplaceShowROC'],
-    ['laplaceShowPolesZerosCb', 'laplaceShowPolesZeros'],
-    ['laplaceShowFourierLineCb', 'laplaceShowFourierLine'],
-    ['laplaceHideIntegralEvaluationCb', 'laplaceHideIntegralEvaluation'],
-    ['laplaceHide3DSurfaceCb', 'laplaceHide3DSurface'],
-    ['laplaceShowSpectrumCb', 'laplaceShowSpectrum'],
-    ['laplaceShowComCb', 'laplaceShowComGraph'],
-    ['laplaceShowFourier3DCb', 'laplaceShowFourier3D'],
-    ['laplaceSyncWindingVectorCb', 'laplaceSyncWindingVector'],
-    ['laplaceShowBarriersCb', 'laplaceShowBarriers'],
-    ['laplaceAnimationLoopCb', 'laplaceAnimationLoop'],
+const SIMPLE_CHECKBOX_BINDINGS = [
     ['riemannSurfaceWireframeCb', 'riemannSurfaceWireframe'],
     ['arbitraryShapeClosedCb', 'arbitraryShapeClosed']
 ].map(([controlKey, stateKey]) => ({ controlKey, stateKey }));
 
-const BASIC_SELECTOR_BINDINGS = [
-    ['inputShapeSelector', 'currentInputShape'],
-    ['laplaceFunctionSelector', 'laplaceFunction'],
-    ['laplaceVizModeSelector', 'laplaceVizMode'],
+const SIMPLE_SELECTOR_BINDINGS = [
     ['laplaceComComponentSelector', 'laplaceComComponent'],
-    ['riemannSurfaceComponentSelector', 'riemannSurfaceComponent'],
-    ['manifoldShapeSelector', 'selectedManifold']
+    ['riemannSurfaceComponentSelector', 'riemannSurfaceComponent']
 ].map(([controlKey, stateKey]) => ({ controlKey, stateKey }));
-
-const SPECIAL_SLIDERS = new Set([
-    'vectorFieldScaleSlider', 'vectorArrowThicknessSlider', 'vectorArrowHeadSizeSlider',
-    'streamlineStepSizeSlider', 'streamlineMaxLengthSlider', 'streamlineThicknessSlider',
-    'streamlineSeedDensityFactorSlider', 'particleDensitySlider', 'particleSpeedSlider',
-    'particleMaxLifetimeSlider', 'videoFpsSlider',
-    'taylorSeriesOrderSlider',
-    'radialDiscreteStepsCountSlider', 'laplaceAnimationSpeedSlider', 'laplaceAnimationTimeSlider',
-    'laplaceFrequencySlider', 'laplaceDampingSlider', 'laplaceAmplitudeSlider',
-    'laplaceTimeWindowSlider', 'laplaceSamplesSlider',
-    'laplaceSigmaSlider',
-    'laplaceOmegaSlider', 'laplaceClipHeightSlider',
-    'laplaceFourier3DCountSlider'
-]);
-
-const SPECIAL_CHECKBOXES = new Set([
-    'laplaceShowRocCb', 'laplaceShowPolesZerosCb',
-    'laplaceShowFourierLineCb', 'laplaceHideIntegralEvaluationCb', 'laplaceHide3DSurfaceCb',
-    'laplaceShowSpectrumCb', 'laplaceShowComCb', 'laplaceShowFourier3DCb', 'laplaceSyncWindingVectorCb', 'laplaceShowBarriersCb', 'laplaceContoursCb',
-    'laplaceAnimationLoopCb'
-]);
-
-const SPECIAL_SELECTORS = new Set([
-    'inputShapeSelector',
-    'laplaceFunctionSelector',
-    'laplaceVizModeSelector',
-    'manifoldShapeSelector'
-]);
 
 const BINDERS = [
     bindBaseParameterControls,
@@ -269,7 +201,6 @@ const BINDERS = [
 function bindRequestedExplorerControls() {
     const setArbitraryShapeMode = mode => {
         state.arbitraryShapeMode = mode === 'draw' ? 'draw' : 'parametric';
-        syncParameterControlsPanelVisibility();
         requestUiRedraw();
     };
     bindControlListener('arbitraryShapeParametricModeBtn', 'click', () => setArbitraryShapeMode('parametric'));
@@ -297,7 +228,6 @@ function bindRequestedExplorerControls() {
         state.branchCutType = selector.value;
         state.branchDrawMode = null;
         resetContinuationForCutChange();
-        syncParameterControlsPanelVisibility();
         requestUiRedraw();
     });
     bindControlListener('branchCutAngleSlider', 'input', (_event, slider) => {
@@ -387,27 +317,11 @@ function checked(controlKey, value) {
 }
 
 function setOrbitColoringMode(mode) {
-    const normalized = normalizeOrbitColoringMode(mode);
-    state.orbitColoringMode = normalized;
-    if (controls.orbitColoringModeSelect) controls.orbitColoringModeSelect.value = normalized;
+    state.orbitColoringMode = normalizeOrbitColoringMode(mode);
 }
 
 function resetOrbitColoringMode() {
     setOrbitColoringMode(ORBIT_COLORING_MODES.value);
-}
-
-function syncOrbitColoringModeControl() {
-    const normalized = normalizeOrbitColoringMode(state.orbitColoringMode);
-    state.orbitColoringMode = normalized;
-    if (controls.orbitColoringModeSelect) controls.orbitColoringModeSelect.value = normalized;
-    hidden(controls.orbitColoringModeGroup, !(state.domainColoringEnabled && state.chainingEnabled));
-}
-
-function syncDomainColoringKeyVisibility() {
-    hidden(
-        controls.domainColoringKey,
-        !state.domainColoringEnabled || !state.domainColoringKeyVisible
-    );
 }
 
 function parseControlValue(control, parser = parseFloat) {
@@ -489,17 +403,9 @@ function bindSelector(controlKey, stateKey, customCallback = null) {
 }
 
 function bindSimpleControlRemainder() {
-    BASIC_SLIDER_BINDINGS
-        .filter(({ controlKey }) => !SPECIAL_SLIDERS.has(controlKey))
-        .forEach(({ controlKey, stateKey, parser }) => bindSlider(controlKey, stateKey, parser));
-
-    BASIC_CHECKBOX_BINDINGS
-        .filter(({ controlKey }) => !SPECIAL_CHECKBOXES.has(controlKey))
-        .forEach(({ controlKey, stateKey }) => bindCheckbox(controlKey, stateKey));
-
-    BASIC_SELECTOR_BINDINGS
-        .filter(({ controlKey }) => !SPECIAL_SELECTORS.has(controlKey))
-        .forEach(({ controlKey, stateKey }) => bindSelector(controlKey, stateKey));
+    SIMPLE_SLIDER_BINDINGS.forEach(({ controlKey, stateKey, parser }) => bindSlider(controlKey, stateKey, parser));
+    SIMPLE_CHECKBOX_BINDINGS.forEach(({ controlKey, stateKey }) => bindCheckbox(controlKey, stateKey));
+    SIMPLE_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => bindSelector(controlKey, stateKey));
 }
 
 function isDomainPalettePanelOpen() {
@@ -579,9 +485,6 @@ export function setActiveFunctionButton(activeKey) {
 }
 
 function updateModePanels() {
-    syncTransformControlPanels();
-    syncLaplacePlayPauseButton();
-    syncParameterControlsPanelVisibility();
     refreshPanelEdgeHandles(true);
 }
 
@@ -593,34 +496,16 @@ function disableAlgebraicChaining() {
 
     state.algebraicChainingEnabled = false;
     algebraicChainingSourceFunction = null;
-    checked('enableAlgebraicChainingCb', false);
-    hidden(controls.algebraicChainingParams, true);
-    display(controls.algebraicChainingControlsContainer, false);
 }
 
 function disableOutputChaining() {
     if (!state.chainingEnabled) return;
 
     state.chainingEnabled = false;
-    checked('enableChainingCb', false);
-    display(controls.chainingControlsContainer, false);
-    display(controls.chainSeedControl, false);
     updateChainingColumns(1);
 }
 
-function restoreRealPlotsLayout() {
-    const paramPanel = $('parameter-controls-panel');
-    const algParams = $('algebraic_chaining_params');
-    const algContainer = $('algebraic_chaining_controls_container');
-    const chainParams = $('chaining_params');
-    const coreControls = $('core_application_controls');
-    if (algContainer && chainParams && chainParams.parentNode !== algContainer) {
-        algContainer.appendChild(chainParams);
-    }
-    if (paramPanel && algParams && coreControls && algParams.parentNode !== paramPanel) {
-        paramPanel.insertBefore(algParams, coreControls);
-    }
-
+function restoreNormalPlaneLayout() {
     hidden(controls.zPlaneColumn, false);
     hidden(controls.wPlaneColumn, false);
 }
@@ -637,17 +522,14 @@ function refreshPlanesAfterLayoutChange() {
 }
 
 function disableRealPlots() {
+    hidden(controls.realPlotsControlsContainer, true);
     if (!state.realPlotsEnabled) return;
     state.realPlotsEnabled = false;
-    checked('enableRealPlotsCb', false);
-    hidden(controls.realPlotsControlsContainer, true);
-    hidden(controls.realPlotsColumn, true);
     if (!state.riemannSurfaceEnabled) {
         state.show2DContourPlot = false;
-        hidden(controls.contour2DColumn, true);
     }
     disposeRealPlotsRenderer();
-    restoreRealPlotsLayout();
+    restoreNormalPlaneLayout();
     refreshPlanesAfterLayoutChange();
 }
 
@@ -658,10 +540,6 @@ function disableGraphView() {
     state.graphFourierEnabled = false;
     state.graphTraceEnabled = false;
     state.graphSelectedShape = '';
-    checked('enableGraphFourierCb', false);
-    checked('enableGraphTraceCb', false);
-    syncGridDensityControls();
-
     if (state.isGraphFullScreen && controls.toggleFullscreenGraphBtn) {
         controls.toggleFullscreenGraphBtn.click();
     }
@@ -674,19 +552,10 @@ function disableGraphView() {
 
 function syncChainingControlsFromState() {
     if (state.chainingMode !== 'zero_seed') state.chainingMode = 'recursion';
-    checked('enableChainingCb', state.chainingEnabled);
-    display(controls.chainingControlsContainer, state.chainingEnabled);
-    display(controls.chainSeedControl, state.chainingEnabled && state.chainingMode === 'zero_seed');
-    if (controls.chainModeSelector) controls.chainModeSelector.value = state.chainingMode;
-    if (controls.chainCountSlider) controls.chainCountSlider.value = state.chainCount;
-    if (controls.chainCountValueDisplay) controls.chainCountValueDisplay.textContent = state.chainCount;
     updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
-    updateChainingTitles();
 }
 
 function syncAlgebraicControlsFromState() {
-    checked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
-    display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
     if (controls.algebraicChainingZInput) {
         controls.algebraicChainingZInput.value = state.algebraicChainingZExpr || 'z';
         updateCustomFormulaPreview(
@@ -695,18 +564,6 @@ function syncAlgebraicControlsFromState() {
             { allowedVariables: ['z'] }
         );
     }
-}
-
-function syncDomainControlsFromState() {
-    checked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
-    hidden(controls.domainColoringOptionsDiv, !state.domainColoringEnabled);
-    syncDomainColoringKeyVisibility();
-    syncOrbitColoringModeControl();
-    updateDomainColoringKey();
-}
-
-function syncInputShapeControlFromState() {
-    if (controls.inputShapeSelector) controls.inputShapeSelector.value = state.currentInputShape;
 }
 
 function captureStateSnapshot() {
@@ -726,8 +583,6 @@ function restoreStateSnapshot(snapshot, nextFunction = null) {
     }
     syncChainingControlsFromState();
     syncAlgebraicControlsFromState();
-    syncDomainControlsFromState();
-    syncInputShapeControlFromState();
     return true;
 }
 
@@ -781,11 +636,9 @@ function activateFractalPreset(key) {
     if (leavingTransform) restoreNormalViewports();
     syncChainingControlsFromState();
     syncAlgebraicControlsFromState();
-    syncDomainControlsFromState();
-    syncInputShapeControlFromState();
+    display(controls.algebraicChainingControlsContainer, true);
     updateModePanels();
     setActiveFunctionButton(key);
-    syncParameterControlsPanelVisibility();
     if (state.dynamicPlotting?.enabled) syncDynamicPlottingUI();
     requestDomainRedraw(true);
     return true;
@@ -884,7 +737,7 @@ function activateFunctionMode(key) {
         stopLaplaceAnimation();
         disposeScalarSurface('laplace_3d_container');
     }
-    if (enteringTransform && state.currentInputShape === 'video') pauseUploadedVideoPlayback();
+    if (enteringTransform && isMediaInputShape() && runtime.media.video) pauseUploadedVideoPlayback();
 
     if (enteringTransform) snapshotNormalViewports();
 
@@ -938,9 +791,9 @@ function initializeMobiusState() {
 
 function initializeScalarBindings() {
     sliderParamKeys.forEach(key => readSliderState(`${key}Slider`, key));
-    BASIC_SLIDER_BINDINGS.forEach(({ controlKey, stateKey, parser }) => readSliderState(controlKey, stateKey, parser));
-    BASIC_CHECKBOX_BINDINGS.forEach(({ controlKey, stateKey }) => readCheckboxState(controlKey, stateKey));
-    BASIC_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => readSelectorState(controlKey, stateKey));
+    SIMPLE_SLIDER_BINDINGS.forEach(({ controlKey, stateKey, parser }) => readSliderState(controlKey, stateKey, parser));
+    SIMPLE_CHECKBOX_BINDINGS.forEach(({ controlKey, stateKey }) => readCheckboxState(controlKey, stateKey));
+    SIMPLE_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => readSelectorState(controlKey, stateKey));
     initializeGridShapeControlsFromDOM();
     initializeMobiusState();
     initializeNavigationStateFromControls();
@@ -1121,16 +974,10 @@ function bindFunctionButtons() {
         }
 
         state.realPlotsEnabled = true;
-        checked('enableRealPlotsCb', true);
+        state.show2DContourPlot = false;
 
         if (state.currentFunction === 'laplace' || isFractalPresetKey(state.currentFunction) || !state.currentFunction) {
             state.currentFunction = 'cos';
-        }
-
-        const rpContainer = controls.realPlotsControlsContainer;
-        const algParams = $('algebraic_chaining_params');
-        if (rpContainer && algParams && algParams.parentNode !== rpContainer) {
-            rpContainer.appendChild(algParams);
         }
 
         hidden(controls.realPlotsControlsContainer, false);
@@ -1139,9 +986,6 @@ function bindFunctionButtons() {
         hidden(controls.wPlaneColumn, true);
         hidden(controls.laplaceSpecificControls, true);
         hidden(controls.coreApplicationControls, true);
-        hidden(controls.algebraicChainingParams, false);
-        display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
-        checked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
 
         updateCategoryNavState('real_plots');
         refreshPlanesAfterLayoutChange();
@@ -1165,16 +1009,8 @@ function bindImageControls() {
         if (file) loadUploadedMediaFile(file);
     });
 
-    bindSlider('mediaSizeSlider', 'mediaSize', parseFloat, () => {
-        state.imageSize = state.mediaSize;
-        state.videoSize = state.mediaSize;
-        requestDomainRedraw(true);
-    });
-    bindSlider('mediaOpacitySlider', 'mediaOpacity', parseFloat, () => {
-        state.imageOpacity = state.mediaOpacity;
-        state.videoOpacity = state.mediaOpacity;
-        requestDomainRedraw(true);
-    });
+    bindSlider('mediaSizeSlider', 'mediaSize', parseFloat, () => requestDomainRedraw(true));
+    bindSlider('mediaOpacitySlider', 'mediaOpacity', parseFloat, () => requestDomainRedraw(true));
 }
 
 function bindVideoControls() {
@@ -1182,23 +1018,16 @@ function bindVideoControls() {
 
     bindSlider('videoFpsSlider', 'videoProcessingFps', parseInteger, () => {
         syncVideoPlaybackUI();
-        if (state.videoIsPlaying && isRasterInputShape(state.currentInputShape)) startVideoProcessingLoop();
+        if (state.videoIsPlaying && isMediaInputShape()) startVideoProcessingLoop();
         requestUiRedraw();
     });
 }
 
 function bindDomainColoringControls() {
-    bindCheckbox('showDomainColoringKeyCb', 'domainColoringKeyVisible', () => {
-        syncDomainColoringKeyVisibility();
-        requestUiRedraw();
-    });
-    checked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
-
-    syncOrbitColoringModeControl();
+    bindCheckbox('showDomainColoringKeyCb', 'domainColoringKeyVisible');
     bindElementListener(controls.orbitColoringModeSelect, 'change', event => {
         setOrbitColoringMode(event.target.value);
         state.currentFunctionPreset = null;
-        updateDomainColoringKey();
         requestDomainRedraw(true);
     });
 
@@ -1219,7 +1048,7 @@ function disableRiemannSurface() {
 function syncFoldSurfaceControls() {
     const isFoldActive = Boolean(
         state.foldSurface3dEnabled &&
-        (isFoldableInputShape(state.currentInputShape) || isRasterInputShape(state.currentInputShape))
+        (isFoldableInputShape(state.currentInputShape) || isMediaInputShape())
     );
     hidden(controls.wPlaneFoldsOverlay, !isFoldActive);
 }
@@ -1278,19 +1107,10 @@ function bindViewControls() {
     bindCanvasZoomControls();
 
     bindSelector('manifoldShapeSelector', 'selectedManifold', () => {
-        if (!isRasterInputShape(state.currentInputShape)) {
+        if (!isMediaInputShape()) {
             const defaultShape = getDefaultInputShapeForManifold(state.selectedManifold);
             state.currentInputShape = defaultShape;
-            if (controls.inputShapeSelector) {
-                controls.inputShapeSelector.value = defaultShape;
-            }
         }
-        syncGridDensityControls();
-        if (state.manifold3dViewEnabled || state.manifoldTransformationEnabled) {
-            buildThreeJSMeshes();
-        }
-        syncManifoldTransformationUI();
-        updateChainingTitles();
         requestDomainRedraw(true);
     });
 
@@ -1298,14 +1118,10 @@ function bindViewControls() {
         if (state.manifoldTransformationEnabled) {
             if (state.domainColoringEnabled) {
                 state.domainColoringEnabled = false;
-                hidden(controls.domainColoringOptionsDiv, true);
-                syncDomainColoringKeyVisibility();
-                syncOrbitColoringModeControl();
             }
             disableFoldSurface3d();
             if (!state.manifold3dViewEnabled) {
                 state.manifold3dViewEnabled = true;
-                hidden(controls.manifoldOptionsDiv, false);
             }
             if (state.riemannSurfaceEnabled) {
                 disableRiemannSurface();
@@ -1319,8 +1135,6 @@ function bindViewControls() {
             state.manifoldTransformationPlayingW = false;
             state.manifoldTransformationProgressW = 1.0;
         }
-        syncManifoldTransformationUI();
-        updateChainingTitles();
         requestDomainRedraw(true);
     };
     bindCheckbox('enableManifoldTransformationCb', 'manifoldTransformationEnabled', onTransformationToggled);
@@ -1362,7 +1176,6 @@ function bindTaylorControls() {
             } else {
                 hidePlaneContextMenu();
             }
-            syncTaylorControls();
             requestUiRedraw();
         });
     }
@@ -1503,7 +1316,7 @@ function invalidateCanvasRect(ctx) {
     if (ctx) ctx.hasFreshRect = false;
 }
 
-function invalidateAllCanvasRects() {
+export function invalidateAllCanvasRects() {
     Object.values(canvasInteractionContexts).forEach(invalidateCanvasRect);
 }
 
@@ -1527,19 +1340,44 @@ function canvasPosition(ctx, pointer) {
     return ctx.pos;
 }
 
-export function getCachedCanvasEventPosition(canvas, event, out = { x: 0, y: 0 }) {
-    if (!canvas || !event) return null;
+function nearestPoint(points, world, tolerance) {
+    return points.find(point =>
+        Math.abs(point.re - world.re) < tolerance &&
+        Math.abs(point.im - world.im) < tolerance
+    );
+}
 
-    const ctx = canvasContextByElement.get(canvas);
-    const rect = ctx
-        ? canvasRect(ctx)
-        : typeof canvas.getBoundingClientRect === 'function'
-            ? canvas.getBoundingClientRect()
-            : EMPTY_RECT;
+function updateCanvasTooltip(ctx, event) {
+    const world = mapCanvasToWorldCoords(ctx.pos.x, ctx.pos.y, ctx.params);
+    const point = { re: world.x, im: world.y };
+    const worldSpan = ctx.params.currentVisXRange[1] - ctx.params.currentVisXRange[0];
+    const tolerance = worldSpan / ctx.params.width * 5;
+    const sample = findNearestDynamicSample(point, ctx.planeType, {
+        worldSpan,
+        pixelWidth: ctx.params.width,
+        tolerance: tolerance * 2
+    });
+    let content = sample ? formatDynamicSampleTooltip(sample) : null;
 
-    out.x = event.clientX - (rect.left || 0);
-    out.y = event.clientY - (rect.top || 0);
-    return out;
+    if (!content && ctx.isZ && state.showZerosPoles) {
+        const pole = nearestPoint(state.poles, point, tolerance);
+        if (pole) {
+            content = `<b>Singularity</b><br>z = ${pole.re.toFixed(3)} + ${pole.im.toFixed(3)}i<br>Type: ${pole.type}`;
+            if (pole.type === 'pole' && pole.order) content += `<br>Order: ${pole.order}`;
+            if (Number.isFinite(pole.residue?.re) && Number.isFinite(pole.residue?.im)) {
+                content += `<br>Residue: ${pole.residue.re.toFixed(3)} + ${pole.residue.im.toFixed(3)}i`;
+            }
+        }
+        const zero = !content && nearestPoint(state.zeros, point, tolerance);
+        if (zero) content = `<b>Zero</b><br>z = ${zero.re.toFixed(3)} + ${zero.im.toFixed(3)}i`;
+    }
+    if (!content && ctx.isZ && state.showCriticalPoints) {
+        const critical = nearestPoint(state.criticalPoints, point, tolerance);
+        if (critical) content = `<b>Critical Point</b><br>z = ${critical.re.toFixed(3)} + ${critical.im.toFixed(3)}i`;
+    }
+
+    if (content) showDynamicTooltip(content, event.pageX, event.pageY);
+    else hideDynamicTooltip();
 }
 
 function canvasPositionInsideCanvas(ctx, pos) {
@@ -1690,7 +1528,6 @@ function handleCanvasDown(ctx, event) {
     if (state.taylorSeriesCanvasClickCenterEnabled) {
         const pos = canvasPosition(ctx, ctx.pendingMove);
         const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
-        mutateState('taylorSeriesCustomCenter', v => Object.assign(v, { re: world.x, im: world.y }));
         state.taylorSeriesCustomCenter = { re: world.x, im: world.y };
         state.taylorSeriesCustomCenterEnabled = true;
         state.taylorSeriesEnabled = true;
@@ -1701,8 +1538,6 @@ function handleCanvasDown(ctx, event) {
             isZ: ctx.isZ
         };
         ctx.hasDragged = false;
-        syncTaylorControls();
-        syncTaylorSeriesCenterStatus();
         requestDomainRedraw(true);
         requestUiRedraw();
         return;
@@ -1841,75 +1676,73 @@ function handleCanvasWheel(ctx, event) {
     flushCanvasWheel(ctx);
 }
 
-export function bindGenericPlaneInteractions(canvas, planeParams, onRedraw) {
-    if (!canvas || !planeParams) return;
-
-    let isPanning = false;
-    let startX = 0;
-    let startY = 0;
-    let startXRange = [...planeParams.currentVisXRange];
-    let startYRange = [...planeParams.currentVisYRange];
+function bindViewportInteractions(canvas, { getViewport, setViewport, scaleZoom, onRedraw }) {
+    if (!canvas) return;
+    let drag = null;
 
     canvas.addEventListener('mousedown', event => {
         if (event.button !== 0) return;
-        isPanning = true;
-        startX = event.clientX;
-        startY = event.clientY;
-        startXRange = [...planeParams.currentVisXRange];
-        startYRange = [...planeParams.currentVisYRange];
+        const { xRange, yRange } = getViewport();
+        drag = { x: event.clientX, y: event.clientY, xRange: [...xRange], yRange: [...yRange] };
     }, PASSIVE_LISTENER_OPTIONS);
 
     bindElementListener(window, 'mousemove', event => {
-        if (!isPanning) return;
+        if (!drag) return;
         const rect = canvas.getBoundingClientRect();
-        const width = Math.max(1, rect.width);
-        const height = Math.max(1, rect.height);
-        const dx = event.clientX - startX;
-        const dy = event.clientY - startY;
-        const xSpan = startXRange[1] - startXRange[0];
-        const ySpan = startYRange[1] - startYRange[0];
-        const shiftX = -dx * (xSpan / width);
-        const shiftY = dy * (ySpan / height);
-
-        planeParams.currentVisXRange = [startXRange[0] + shiftX, startXRange[1] + shiftX];
-        planeParams.currentVisYRange = [startYRange[0] + shiftY, startYRange[1] + shiftY];
-        planeParams.scale.x = planeParams.width / (planeParams.currentVisXRange[1] - planeParams.currentVisXRange[0]);
-        planeParams.scale.y = planeParams.height / (planeParams.currentVisYRange[1] - planeParams.currentVisYRange[0]);
-        planeParams.origin.x = -planeParams.currentVisXRange[0] * planeParams.scale.x;
-        planeParams.origin.y = planeParams.currentVisYRange[1] * planeParams.scale.y;
+        const xSpan = drag.xRange[1] - drag.xRange[0];
+        const ySpan = drag.yRange[1] - drag.yRange[0];
+        const shiftX = -(event.clientX - drag.x) * xSpan / Math.max(1, rect.width);
+        const shiftY = (event.clientY - drag.y) * ySpan / Math.max(1, rect.height);
+        setViewport(
+            [drag.xRange[0] + shiftX, drag.xRange[1] + shiftX],
+            [drag.yRange[0] + shiftY, drag.yRange[1] + shiftY],
+            getViewport().zoom
+        );
         onRedraw();
     }, PASSIVE_LISTENER_OPTIONS);
 
-    bindElementListener(window, 'mouseup', () => {
-        isPanning = false;
-    }, PASSIVE_LISTENER_OPTIONS);
+    bindElementListener(window, 'mouseup', () => { drag = null; }, PASSIVE_LISTENER_OPTIONS);
 
     canvas.addEventListener('wheel', event => {
         event.preventDefault();
+        const current = getViewport();
         const rect = canvas.getBoundingClientRect();
         const width = Math.max(1, rect.width);
         const height = Math.max(1, rect.height);
         const px = clamp(event.clientX - rect.left, 0, width);
         const py = clamp(event.clientY - rect.top, 0, height);
-        const xRange = planeParams.currentVisXRange;
-        const yRange = planeParams.currentVisYRange;
-        const xSpan = xRange[1] - xRange[0];
-        const ySpan = yRange[1] - yRange[0];
-        const u = xRange[0] + (px / width) * xSpan;
-        const v = yRange[1] - (py / height) * ySpan;
-        const factor = event.deltaY < 0 ? 0.85 : 1.15;
-        const newXSpan = xSpan * factor;
-        const newYSpan = ySpan * factor;
-        const newX0 = u - (px / width) * newXSpan;
-        const newY1 = v + (py / height) * newYSpan;
-        planeParams.currentVisXRange = [newX0, newX0 + newXSpan];
-        planeParams.currentVisYRange = [newY1 - newYSpan, newY1];
-        planeParams.scale.x = planeParams.width / newXSpan;
-        planeParams.scale.y = planeParams.height / newYSpan;
-        planeParams.origin.x = -newX0 * planeParams.scale.x;
-        planeParams.origin.y = newY1 * planeParams.scale.y;
+        const xSpan = current.xRange[1] - current.xRange[0];
+        const ySpan = current.yRange[1] - current.yRange[0];
+        const anchorX = current.xRange[0] + px / width * xSpan;
+        const anchorY = current.yRange[1] - py / height * ySpan;
+        const { factor, zoom = current.zoom } = scaleZoom(current, event.deltaY);
+        const nextXSpan = xSpan * factor;
+        const nextYSpan = ySpan * factor;
+        const xMin = anchorX - px / width * nextXSpan;
+        const yMax = anchorY + py / height * nextYSpan;
+        setViewport([xMin, xMin + nextXSpan], [yMax - nextYSpan, yMax], zoom);
         onRedraw();
     }, ACTIVE_LISTENER_OPTIONS);
+}
+
+export function bindGenericPlaneInteractions(canvas, planeParams, onRedraw) {
+    if (!planeParams) return;
+    bindViewportInteractions(canvas, {
+        getViewport: () => ({
+            xRange: planeParams.currentVisXRange,
+            yRange: planeParams.currentVisYRange
+        }),
+        setViewport(xRange, yRange) {
+            planeParams.currentVisXRange = xRange;
+            planeParams.currentVisYRange = yRange;
+            planeParams.scale.x = planeParams.width / (xRange[1] - xRange[0]);
+            planeParams.scale.y = planeParams.height / (yRange[1] - yRange[0]);
+            planeParams.origin.x = -xRange[0] * planeParams.scale.x;
+            planeParams.origin.y = yRange[1] * planeParams.scale.y;
+        },
+        scaleZoom: (_current, deltaY) => ({ factor: deltaY < 0 ? 0.85 : 1.15 }),
+        onRedraw
+    });
 }
 
 function bindCanvasInteractions() {
@@ -1949,98 +1782,29 @@ function bindCanvasInteractions() {
 
 function bindContourCanvasInteractions() {
     const contourCanvas = document.getElementById('contour_2d_canvas');
-    if (!contourCanvas) return;
-
-    const viewport = () => state.laplaceModeEnabled
-        ? {
-            xRange: state.laplaceSurface.sigmaRange,
-            yRange: state.laplaceSurface.omegaRange,
-            zoom: state.laplaceSurface.viewportZoom ?? 1
-        }
-        : {
-            xRange: zPlaneParams.currentVisXRange,
-            yRange: zPlaneParams.currentVisYRange,
-            zoom: state.zPlaneZoom
-    };
-    const updateViewport = (xRange, yRange, zoom) => {
-        if (state.laplaceModeEnabled) {
-            setLaplaceSurfaceViewport(xRange, yRange, zoom);
-            return;
-        }
-        zPlaneParams.currentVisXRange = xRange;
-        zPlaneParams.currentVisYRange = yRange;
-        state.zPlaneZoom = zoom;
-        zPlaneParams.scale.x = zPlaneParams.width / (xRange[1] - xRange[0]);
-        zPlaneParams.scale.y = zPlaneParams.height / (yRange[1] - yRange[0]);
-        zPlaneParams.origin.x = -xRange[0] * zPlaneParams.scale.x;
-        zPlaneParams.origin.y = yRange[1] * zPlaneParams.scale.y;
-    };
-
-    let isPanning = false;
-    let startX = 0;
-    let startY = 0;
-    let startXRange = [-3.5, 3.5];
-    let startYRange = [-3.5, 3.5];
-
-    contourCanvas.addEventListener('mousedown', event => {
-        if (event.button !== 0) return;
-        const current = viewport();
-        isPanning = true;
-        startX = event.clientX;
-        startY = event.clientY;
-        startXRange = [...current.xRange];
-        startYRange = [...current.yRange];
-    }, PASSIVE_LISTENER_OPTIONS);
-
-    bindElementListener(window, 'mousemove', event => {
-        if (!isPanning) return;
-        const rect = contourCanvas.getBoundingClientRect();
-        const width = Math.max(1, rect.width);
-        const height = Math.max(1, rect.height);
-        const dx = event.clientX - startX;
-        const dy = event.clientY - startY;
-        const xSpan = startXRange[1] - startXRange[0];
-        const ySpan = startYRange[1] - startYRange[0];
-        const shiftX = -dx * (xSpan / width);
-        const shiftY = dy * (ySpan / height);
-        const current = viewport();
-        updateViewport(
-            [startXRange[0] + shiftX, startXRange[1] + shiftX],
-            [startYRange[0] + shiftY, startYRange[1] + shiftY],
-            current.zoom
-        );
-        requestDomainRedraw(true);
-    }, PASSIVE_LISTENER_OPTIONS);
-
-    bindElementListener(window, 'mouseup', () => {
-        isPanning = false;
-    }, PASSIVE_LISTENER_OPTIONS);
-
-    contourCanvas.addEventListener('wheel', event => {
-        event.preventDefault();
-        const current = viewport();
-        const rect = contourCanvas.getBoundingClientRect();
-        const width = Math.max(1, rect.width);
-        const height = Math.max(1, rect.height);
-        const px = clamp(event.clientX - rect.left, 0, width);
-        const py = clamp(event.clientY - rect.top, 0, height);
-        const xRange = current.xRange;
-        const yRange = current.yRange;
-        const xSpan = xRange[1] - xRange[0];
-        const ySpan = yRange[1] - yRange[0];
-        const u = xRange[0] + (px / width) * xSpan;
-        const v = yRange[1] - (py / height) * ySpan;
-        const requestedFactor = event.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
-        const oldZoom = requireFiniteNumber(current.zoom, 'Contour zoom');
-        const nextZoom = clamp(oldZoom * requestedFactor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
-        const appliedFactor = nextZoom / oldZoom;
-        const newXSpan = xSpan / appliedFactor;
-        const newYSpan = ySpan / appliedFactor;
-        const newX0 = u - (px / width) * newXSpan;
-        const newY1 = v + (py / height) * newYSpan;
-        updateViewport([newX0, newX0 + newXSpan], [newY1 - newYSpan, newY1], nextZoom);
-        requestDomainRedraw(true);
-    }, ACTIVE_LISTENER_OPTIONS);
+    const getViewport = () => state.laplaceModeEnabled
+        ? { xRange: state.laplaceSurface.sigmaRange, yRange: state.laplaceSurface.omegaRange, zoom: state.laplaceSurface.viewportZoom ?? 1 }
+        : { xRange: zPlaneParams.currentVisXRange, yRange: zPlaneParams.currentVisYRange, zoom: state.zPlaneZoom };
+    bindViewportInteractions(contourCanvas, {
+        getViewport,
+        setViewport(xRange, yRange, zoom) {
+            if (state.laplaceModeEnabled) return setLaplaceSurfaceViewport(xRange, yRange, zoom);
+            zPlaneParams.currentVisXRange = xRange;
+            zPlaneParams.currentVisYRange = yRange;
+            state.zPlaneZoom = zoom;
+            zPlaneParams.scale.x = zPlaneParams.width / (xRange[1] - xRange[0]);
+            zPlaneParams.scale.y = zPlaneParams.height / (yRange[1] - yRange[0]);
+            zPlaneParams.origin.x = -xRange[0] * zPlaneParams.scale.x;
+            zPlaneParams.origin.y = yRange[1] * zPlaneParams.scale.y;
+        },
+        scaleZoom(current, deltaY) {
+            const oldZoom = requireFiniteNumber(current.zoom, 'Contour zoom');
+            const requested = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
+            const zoom = clamp(oldZoom * requested, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
+            return { factor: oldZoom / zoom, zoom };
+        },
+        onRedraw: () => requestDomainRedraw(true)
+    });
 }
 
 function bindCanvasRectInvalidation() {
@@ -2059,7 +1823,6 @@ function bindCanvasRectInvalidation() {
             handleLayoutRefresh();
         }
     }, PASSIVE_LISTENER_OPTIONS);
-    eventBus.on('layout:canvas', invalidateAllCanvasRects);
 }
 
 function contextForCanvasEvent(event) {
@@ -2068,7 +1831,9 @@ function contextForCanvasEvent(event) {
 
 function onCanvasMouseMove(event) {
     const ctx = contextForCanvasEvent(event);
-    if (ctx) scheduleCanvasMove(ctx, event);
+    if (!ctx) return;
+    scheduleCanvasMove(ctx, event);
+    updateCanvasTooltip(ctx, event);
 }
 
 function onCanvasMouseDown(event) {
@@ -2086,6 +1851,7 @@ function onCanvasMouseLeave(event) {
     if (!ctx) return;
     handleCanvasLeave(ctx);
     invalidateCanvasRect(ctx);
+    hideDynamicTooltip();
 }
 
 function onCanvasWheel(event) {
@@ -2106,7 +1872,6 @@ function onCanvasClick(event) {
     const pos = canvasPosition(ctx, ctx.pendingMove);
     if (state.taylorSeriesCanvasClickCenterEnabled) {
         const target = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
-        mutateState('taylorSeriesCustomCenter', v => Object.assign(v, { re: target.x, im: target.y }));
         state.taylorSeriesCustomCenter = { re: target.x, im: target.y };
         state.taylorSeriesCustomCenterEnabled = true;
         state.taylorSeriesEnabled = true;
@@ -2116,8 +1881,6 @@ function onCanvasClick(event) {
             world: target,
             isZ: ctx.isZ
         };
-        syncTaylorControls();
-        syncTaylorSeriesCenterStatus();
         requestDomainRedraw(true);
         requestUiRedraw();
         return;
@@ -2247,13 +2010,44 @@ function toggleFullscreenPanel({ container, column, stateKey, closeButton, onRes
     });
 }
 
+function bindFullscreenPanelToggle(buttonKey, options) {
+    bindControlListener(buttonKey, 'click', () => toggleFullscreenPanel({
+        ...options,
+        closeButton: controls[buttonKey]
+    }));
+}
+
 function bindFullscreenControls() {
     bindControlListener('toggleFullscreenZBtn', 'click', () => handleFullScreenToggle('z'));
     bindControlListener('toggleFullscreenWBtn', 'click', () => handleFullScreenToggle('w', 0));
-    bindControlListener('toggleFullscreenLaplace3DBtn', 'click', toggleLaplace3DFullscreen);
-    bindControlListener('toggleFullscreenLaplaceComBtn', 'click', toggleLaplaceComFullscreen);
-    bindControlListener('toggleFullscreenLaplaceSpectrumBtn', 'click', toggleLaplaceSpectrumFullscreen);
-    bindControlListener('toggleFullscreenFourier3DBtn', 'click', toggleFourier3DFullscreen);
+    bindFullscreenPanelToggle('toggleFullscreenLaplace3DBtn', {
+        container: controls.laplace3DContainer,
+        column: controls.laplace3DColumn,
+        stateKey: 'isLaplace3DFullScreen',
+        onResize: () => resizeScalarSurface(controls.laplace3DContainer)
+    });
+    const resizeLaplaceCanvas = () => {
+        setupVisualParameters(false, false);
+        requestUiRedraw();
+    };
+    bindFullscreenPanelToggle('toggleFullscreenLaplaceComBtn', {
+        container: controls.laplaceComCanvas?.parentElement,
+        column: controls.laplaceComColumn,
+        stateKey: 'isLaplaceComFullScreen',
+        onResize: resizeLaplaceCanvas
+    });
+    bindFullscreenPanelToggle('toggleFullscreenLaplaceSpectrumBtn', {
+        container: controls.laplaceSpectrumCanvas?.parentElement,
+        column: controls.laplaceSpectrumColumn,
+        stateKey: 'isLaplaceSpectrumFullScreen',
+        onResize: resizeLaplaceCanvas
+    });
+    bindFullscreenPanelToggle('toggleFullscreenFourier3DBtn', {
+        container: controls.fourier3DContainer,
+        column: controls.fourier3DColumn,
+        stateKey: 'isFourier3DFullScreen',
+        onResize: drawFourier3DPipeline
+    });
 
     // Event delegation for dynamic chained w-plane fullscreen buttons
     bindElementListener(document, 'click', event => {
@@ -2284,58 +2078,6 @@ function bindFullscreenControls() {
         }
         if (state.isGraphFullScreen && controls.toggleFullscreenGraphBtn) {
             controls.toggleFullscreenGraphBtn.click();
-        }
-    });
-}
-
-function toggleLaplace3DFullscreen() {
-    const container = controls.laplace3DContainer;
-    toggleFullscreenPanel({
-        container,
-        column: controls.laplace3DColumn,
-        stateKey: 'isLaplace3DFullScreen',
-        closeButton: controls.toggleFullscreenLaplace3DBtn,
-        onResize: () => resizeScalarSurface(container)
-    });
-}
-
-function toggleLaplaceComFullscreen() {
-    const container = controls.laplaceComCanvas?.parentElement;
-    toggleFullscreenPanel({
-        container,
-        column: controls.laplaceComColumn,
-        stateKey: 'isLaplaceComFullScreen',
-        closeButton: controls.toggleFullscreenLaplaceComBtn,
-        onResize: () => {
-            setupVisualParameters(false, false);
-            requestUiRedraw();
-        }
-    });
-}
-
-function toggleLaplaceSpectrumFullscreen() {
-    const container = controls.laplaceSpectrumCanvas?.parentElement;
-    toggleFullscreenPanel({
-        container,
-        column: controls.laplaceSpectrumColumn,
-        stateKey: 'isLaplaceSpectrumFullScreen',
-        closeButton: controls.toggleFullscreenLaplaceSpectrumBtn,
-        onResize: () => {
-            setupVisualParameters(false, false);
-            requestUiRedraw();
-        }
-    });
-}
-
-function toggleFourier3DFullscreen() {
-    const container = controls.fourier3DContainer;
-    toggleFullscreenPanel({
-        container,
-        column: controls.fourier3DColumn,
-        stateKey: 'isFourier3DFullScreen',
-        closeButton: controls.toggleFullscreenFourier3DBtn,
-        onResize: () => {
-            drawFourier3DPipeline();
         }
     });
 }
@@ -2394,17 +2136,8 @@ export function setupEventListeners() {
     if (uiEventListenersBound) return;
     uiEventListenersBound = true;
 
-    subscribeState(() => syncLaplacePlayPauseButton(), 'laplaceAnimationPlaying');
     subscribeState(() => updateDomainPaletteCirclePanel(), 'domainPalette');
     subscribeState(() => updateSurfacePaletteCirclePanel(), 'surfacePalette');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'canvasZoomControlsEnabled');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'manifold3dViewEnabled');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'manifoldTransformationEnabled');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'riemannSurfaceEnabled');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'foldSurface3dEnabled');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'graphViewEnabled');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'laplaceModeEnabled');
-    subscribeState(() => syncCanvasZoomControlsUI(), 'realPlotsEnabled');
     BINDERS.forEach(fn => fn());
 
     initPlaneContextMenu();
@@ -2419,9 +2152,9 @@ function bindChainingControls() {
         } else if (state.navigationModeEnabled) {
             setNavigationModeEnabled(false);
         }
-        if (!isRasterInputShape(value) && state.videoIsPlaying) {
+        if (!isMediaInputShape(value) && state.videoIsPlaying) {
             pauseUploadedVideoPlayback();
-        } else if (isRasterInputShape(value) && runtime.media.video && state.videoIsPlaying) {
+        } else if (isMediaInputShape(value) && runtime.media.video && state.videoIsPlaying) {
             startVideoProcessingLoop();
         }
         if (state.graphFullGridEnabled && !isFullGridPerspectiveSupported(value)) {
@@ -2435,9 +2168,6 @@ function bindChainingControls() {
         }
         if (canvasInteractionContexts.z) canvasInteractionContexts.z.drawingArbitraryShape = false;
         syncGridFoldDensity(state.foldSurface3dEnabled && isFoldableInputShape(value));
-        if (state.manifold3dViewEnabled || state.manifoldTransformationEnabled) {
-            buildThreeJSMeshes();
-        }
         requestDomainRedraw(true);
     });
 
@@ -2450,20 +2180,13 @@ function bindChainingControls() {
     bindElementListener(controls.enableChainingCb, 'change', event => {
         state.chainingEnabled = event.target.checked;
         state.currentFunctionPreset = null;
-        display(controls.chainingControlsContainer, state.chainingEnabled);
-        display(controls.chainSeedControl, state.chainingEnabled && state.chainingMode === 'zero_seed');
-        syncOrbitColoringModeControl();
         updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
-        syncParameterControlsPanelVisibility();
         requestUiRedraw();
     });
 
     bindElementListener(controls.chainModeSelector, 'change', event => {
         state.chainingMode = event.target.value === 'zero_seed' ? 'zero_seed' : 'recursion';
         state.currentFunctionPreset = null;
-        display(controls.chainSeedControl, state.chainingEnabled && state.chainingMode === 'zero_seed');
-        syncOrbitColoringModeControl();
-        updateChainingTitles();
         requestUiRedraw();
     });
 }
@@ -2494,7 +2217,7 @@ function fullscreenTarget(planeType, index = 0) {
         state.manifold3dViewEnabled ||
         (state.foldSurface3dEnabled && (
             isFoldableInputShape(state.currentInputShape) ||
-            (isRasterInputShape(state.currentInputShape) && getRasterSourceForShape(state.currentInputShape))
+            (isMediaInputShape() && getMediaSource())
         ))
     );
 
@@ -2587,11 +2310,6 @@ function bindAlgebraicChainingControls() {
 
             state.algebraicChainingEnabled = enabled;
             state.currentFunctionPreset = null;
-            if (state.realPlotsEnabled) {
-                hidden(controls.algebraicChainingParams, false);
-            } else {
-                hidden(controls.algebraicChainingParams, !enabled);
-            }
             display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
 
             state.currentFunction = enabled ? 'algebraic_chaining' : (algebraicChainingSourceFunction || 'cos');
@@ -2602,7 +2320,6 @@ function bindAlgebraicChainingControls() {
             }
             if (!enabled) algebraicChainingSourceFunction = null;
 
-            syncParameterControlsPanelVisibility();
             requestAlgebraicRedraw();
         });
     }
@@ -2660,8 +2377,6 @@ function bindPalettePanel(viewButtonId, closeButtonId, panelId, updatePanel) {
 }
 
 function bindGraphControls() {
-    checked('enableGraphTraceCb', state.graphTraceEnabled);
-    checked('enableGraphFourierCb', state.graphFourierEnabled);
     bindSelector('graphGridFamilySelector', 'graphGridFamily', () => {
         state.graphSelectedShape = '';
         requestUiRedraw();
@@ -2669,7 +2384,6 @@ function bindGraphControls() {
     bindCheckbox('enableGraphFourierCb', 'graphFourierEnabled', (_event, enabled) => {
         if (!state.graphViewEnabled || state.laplaceModeEnabled) {
             state.graphFourierEnabled = false;
-            checked('enableGraphFourierCb', false);
         } else {
             state.graphFourierEnabled = enabled;
         }
@@ -2678,15 +2392,10 @@ function bindGraphControls() {
     });
 
     bindCheckbox('enableGraphTraceCb', 'graphTraceEnabled', () => requestUiRedraw());
-    bindControlListener('toggleFullscreenGraphBtn', 'click', toggleGraphFullscreen);
-}
-
-function toggleGraphFullscreen() {
-    toggleFullscreenPanel({
+    bindFullscreenPanelToggle('toggleFullscreenGraphBtn', {
         container: controls.graphContainer,
         column: controls.graphColumn,
         stateKey: 'isGraphFullScreen',
-        closeButton: controls.toggleFullscreenGraphBtn,
         onResize: () => {
             resizeTransformationGraphRenderer();
             requestUiRedraw();
@@ -2740,42 +2449,6 @@ function bindRealPlotsExpressionControls({ preset, input, expressionKey, customK
 }
 
 function bindRealPlotsControls() {
-    bindCheckbox('enableRealPlotsCb', 'realPlotsEnabled', (_event, val) => {
-        hidden(controls.realPlotsControlsContainer, !val);
-        hidden(controls.realPlotsColumn, !val);
-
-        if (val) {
-            disableGraphView();
-            disableRiemannSurface();
-            if (nonFractalSavedState || isFractalPresetKey(state.currentFunction) || isFractalPresetKey(state.currentFunctionPreset)) {
-                restoreNonFractalState();
-            }
-            if (state.currentFunction === 'laplace' || isFractalPresetKey(state.currentFunction) || !state.currentFunction) {
-                state.currentFunction = 'cos';
-            }
-            hidden(controls.zPlaneColumn, true);
-            hidden(controls.wPlaneColumn, true);
-            hidden(controls.laplaceSpecificControls, true);
-            const rpContainer = controls.realPlotsControlsContainer;
-            const algParams = $('algebraic_chaining_params');
-            if (rpContainer && algParams && algParams.parentNode !== rpContainer) {
-                rpContainer.appendChild(algParams);
-            }
-            hidden(controls.algebraicChainingParams, false);
-            display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
-            checked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
-            hidden(controls.coreApplicationControls, true);
-            updateCategoryNavState('real_plots');
-        } else {
-            restoreRealPlotsLayout();
-            disposeRealPlotsRenderer();
-            hidden(controls.coreApplicationControls, false);
-            updateCategoryNavState('complex_functions');
-            setActiveFunctionButton(state.currentFunction || 'cos');
-        }
-        refreshPlanesAfterLayoutChange();
-    });
-
     bindRealPlotsExpressionControls({
         preset: 'realPlotsInputPreset',
         input: 'realPlotsCustomInput',
@@ -2792,56 +2465,13 @@ function bindRealPlotsControls() {
     bindSelector('realPlotsOutputComponent', 'realPlotsOutputComponent', requestUiRedraw);
     bindSelector('realPlotsColorMode', 'realPlotsColorMode', requestUiRedraw);
 
-    bindSlider('realPlotsBrightnessSlider', 'realPlotsBrightness', parseFloat, (val) => {
-        if (controls.realPlotsBrightnessValueDisplay) {
-            controls.realPlotsBrightnessValueDisplay.textContent = val.toFixed(2);
-        }
-        requestUiRedraw();
-    });
-
-    bindSlider('realPlotsContrastSlider', 'realPlotsContrast', parseFloat, (val) => {
-        if (controls.realPlotsContrastValueDisplay) {
-            controls.realPlotsContrastValueDisplay.textContent = val.toFixed(2);
-        }
-        requestUiRedraw();
-    });
-
-    bindSlider('realPlotsSaturationSlider', 'realPlotsSaturation', parseFloat, (val) => {
-        if (controls.realPlotsSaturationValueDisplay) {
-            controls.realPlotsSaturationValueDisplay.textContent = val.toFixed(2);
-        }
-        requestUiRedraw();
-    });
-
-    bindSlider('realPlotsHeightScaleSlider', 'realPlotsHeightScale', parseFloat, (val) => {
-        if (controls.realPlotsHeightScaleValueDisplay) {
-            controls.realPlotsHeightScaleValueDisplay.textContent = val.toFixed(2);
-        }
-        requestUiRedraw();
-    });
-
-    bindControlListener('toggleFullscreenRealPlotsBtn', 'click', toggleRealPlotsFullscreen);
-}
-
-function toggleRealPlotsFullscreen() {
-    toggleFullscreenPanel({
+    ['Brightness', 'Contrast', 'Saturation', 'HeightScale'].forEach(name =>
+        bindSlider(`realPlots${name}Slider`, `realPlots${name}`)
+    );
+    bindFullscreenPanelToggle('toggleFullscreenRealPlotsBtn', {
         container: controls.realPlotsContainer,
         column: controls.realPlotsColumn,
         stateKey: 'isRealPlotsFullScreen',
-        closeButton: controls.toggleFullscreenRealPlotsBtn,
-        onResize: () => {
-            setupVisualParameters(false, false);
-            requestUiRedraw();
-        }
-    });
-}
-
-function toggleContour2DFullscreen() {
-    toggleFullscreenPanel({
-        container: controls.contour2DCanvas,
-        column: controls.contour2DColumn,
-        stateKey: 'isContour2DFullScreen',
-        closeButton: controls.toggleFullscreenContour2DBtn,
         onResize: () => {
             setupVisualParameters(false, false);
             requestUiRedraw();
@@ -2850,7 +2480,7 @@ function toggleContour2DFullscreen() {
 }
 
 function bindContourControls() {
-    ['riemannSurface', 'realPlots', 'laplace'].forEach(prefix => {
+    ['riemannSurface', 'laplace'].forEach(prefix => {
         bindCheckbox(`${prefix}ContoursCb`, 'contoursEnabled', requestUiRedraw);
         bindSlider(`${prefix}ContourIntervalSlider`, 'contourInterval', parseFloat, requestUiRedraw);
         bindSlider(`${prefix}ContourThicknessSlider`, 'contourThickness', parseFloat, requestUiRedraw);
@@ -2859,5 +2489,13 @@ function bindContourControls() {
             requestUiRedraw();
         });
     });
-    bindControlListener('toggleFullscreenContour2DBtn', 'click', toggleContour2DFullscreen);
+    bindFullscreenPanelToggle('toggleFullscreenContour2DBtn', {
+        container: controls.contour2DCanvas,
+        column: controls.contour2DColumn,
+        stateKey: 'isContour2DFullScreen',
+        onResize: () => {
+            setupVisualParameters(false, false);
+            requestUiRedraw();
+        }
+    });
 }

@@ -7,14 +7,14 @@ import { updateTitlesAndGlobalUI } from '../../ui/ui-updates.js';
 const NON_UI_STATE_KEYS = new Set([
     'criticalPoints', 'criticalValues', 'dynamicPlotting', 'laplaceSpectrum',
     'fullscreenWIndex', 'graphSelectedLineIndex',
-    'graphSelectedShape', 'graphSelectionRevision', 'imageContentVersion',
+    'graphSelectedShape', 'graphSelectionRevision', 'mediaVersion',
     'isContour2DFullScreen', 'isGraphFullScreen', 'isLaplace3DFullScreen',
     'isRealPlotsFullScreen',
     'isWFullScreen', 'isZFullScreen', 'laplaceAnimationTime', 'laplaceCurrentValue',
     'laplacePoles', 'laplaceROC', 'laplaceSurface', 'laplaceTimeDomainSignal',
     'laplaceZeros', 'poles', 'polynomialCoeffs', 'probeZ',
     'manifoldTransformationProgressW',
-    'manifoldTransformationProgressZ', 'videoFrameVersion', 'zeros'
+    'manifoldTransformationProgressZ', 'zeros'
 ]);
 
 const UI_STATE_KEYS = Object.freeze(Object.keys(state).filter(key => !NON_UI_STATE_KEYS.has(key)));

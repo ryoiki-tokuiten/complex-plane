@@ -1,6 +1,6 @@
 import { state as appState, zPlaneParams } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import { eventBus } from '../store/events.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
 import {
     COLOR_PROBE_MARKER, COLOR_PROBE_NEIGHBORHOOD, COLOR_TEXT_ON_CANVAS,
     COLOR_CAUCHY_CONTOUR_Z, COLOR_CAUCHY_CONTOUR_W,
@@ -22,10 +22,8 @@ import {
 import {
     traceStreamlines, getStreamlineColorByMagnitude
 } from '../analysis/streamline.js';
-import {
-    isRasterInputShape
-} from '../utils/raster-media.js';
-import { drawImageWithWebGL } from './draw-image-webgl.js';
+import { getActiveMediaRaster, isMediaInputShape } from '../utils/raster-media.js';
+import { drawRasterWithWebGL } from './draw-image-webgl.js';
 import {
     generateCurrentInputShapePointSets,
     generateRadialDiscreteStepPointSets
@@ -735,7 +733,7 @@ function scheduleStreamlineProgressRedraw() {
     streamlineProgressState.redrawScheduled = true;
     const request = () => {
         streamlineProgressState.redrawScheduled = false;
-        eventBus.emit('redraw:all');
+        requestUiRedraw();
     };
 
     if (typeof setTimeout === 'function') {
@@ -1131,8 +1129,8 @@ export function drawStreamlinesOnZPlane(ctx, planeParams, state, map, options = 
 export function drawPlanarInputShape(ctx, planeParams) {
     const inputShape = appState.currentInputShape;
 
-    if (isRasterInputShape(inputShape)) {
-        drawImageWithWebGL(ctx, planeParams, false);
+    if (isMediaInputShape(inputShape)) {
+        drawRasterWithWebGL(ctx, planeParams, false, null, getActiveMediaRaster());
         return;
     }
 
@@ -1427,8 +1425,8 @@ export function drawPlanarTransformedShape(ctx, planeParams, map, options = {}) 
     let geometryRendered = true;
 
     if (includeGeometry) {
-        if (isRasterInputShape(inputShape)) {
-            geometryRendered = drawImageWithWebGL(ctx, planeParams, true, map);
+        if (isMediaInputShape(inputShape)) {
+            geometryRendered = drawRasterWithWebGL(ctx, planeParams, true, map, getActiveMediaRaster());
         } else {
             const pointSets = renderJob.pointSets;
             const startIndex = clamp(Math.floor(options.startIndex === undefined
@@ -1465,7 +1463,7 @@ export function createPlanarTransformedShapeRenderJob(map) {
     if (typeof map?.evaluate !== 'function') throw new Error('Planar render jobs require an active native map.');
     const tf = map.evaluate;
     const inputShape = appState.currentInputShape;
-    const generatedPointSets = isRasterInputShape(inputShape)
+    const generatedPointSets = isMediaInputShape(inputShape)
         ? null
         : generateCurrentInputShapePointSets(zPlaneParams, {
             currentFunction: appState.currentFunction,

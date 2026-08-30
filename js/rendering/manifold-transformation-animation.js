@@ -3,7 +3,7 @@ import { ThreeManifoldsRenderer } from './3d-manifolds-renderer.js';
 import { generateCurrentInputShapePointSets } from './shape-generators.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { getManifold } from './manifold-registry.js';
-import { isRasterInputShape, getRasterSourceForShape } from '../utils/raster-media.js';
+import { getMediaSource, isMediaInputShape } from '../utils/raster-media.js';
 
 const ANIMATION_DURATION = 4.0;
 const BOUNCE_PAUSE_TIME = 1.0;
@@ -79,9 +79,8 @@ class PlaneController {
             progress: null,
             playing: null,
             speed: null,
-            manifoldId: null,
-            mapSignature: null,
-            map: null
+            map: null,
+            buildInputs: []
         };
 
         this.boundSliderInput = null;
@@ -90,12 +89,10 @@ class PlaneController {
     }
 
     init() {
-        if (!this.renderer) {
-            const container = document.getElementById(this.config.containerId);
-            if (container) {
-                this.renderer = new ThreeManifoldsRenderer(container, this.id);
-            }
-        }
+        if (this.renderer) return;
+        const container = document.getElementById(this.config.containerId);
+        if (!container) return;
+        this.renderer = new ThreeManifoldsRenderer(container, this.id);
         this.bindEvents();
     }
 
@@ -159,13 +156,11 @@ class PlaneController {
         }
     }
 
-    build() {
+    build(map = this.id === 'w' ? resolveActiveMap() : null) {
         if (!this.renderer) return;
-        this.cache.map = this.id === 'w' ? resolveActiveMap() : null;
-        this.cache.mapSignature = this.cache.map?.signature || 'source';
-        this.cache.manifoldId = state.selectedManifold;
+        this.cache.map = map;
 
-        this.renderer.setTransform(this.cache.map);
+        this.renderer.setTransform(map);
         this.renderer.setManifold(state.selectedManifold);
 
         let initialProgress = state[this.config.progressKey] ?? 0;
@@ -173,10 +168,10 @@ class PlaneController {
             initialProgress = 1.0;
         }
 
-        if (isRasterInputShape(state.currentInputShape)) {
-            const source = getRasterSourceForShape(state.currentInputShape);
+        if (isMediaInputShape()) {
+            const source = getMediaSource();
             if (source) {
-                this.renderer.buildRasterManifold(source, state.currentInputShape, initialProgress);
+                this.renderer.buildRasterManifold(source, initialProgress);
                 this.syncLabels();
                 this.syncSpeedUI();
                 return;
@@ -262,7 +257,6 @@ class PlaneController {
     syncUI() {
         const currentProgress = state[this.config.progressKey];
         const currentPlaying = state[this.config.playingKey];
-        const currentManifold = state.selectedManifold;
         const currentSpeed = state[this.config.speedKey];
 
         if (currentProgress !== this.cache.progress) {
@@ -285,22 +279,21 @@ class PlaneController {
             this.cache.speed = currentSpeed;
         }
 
-        const currentInputShape = state.currentInputShape;
-        const currentFunction = state.currentFunction;
-        const currentA0 = state.a0;
-        const currentB0 = state.b0;
-
-        if (currentManifold !== this.cache.manifoldId ||
-            currentInputShape !== this.cache.inputShape ||
-            currentFunction !== this.cache.functionKey ||
-            currentA0 !== this.cache.a0 ||
-            currentB0 !== this.cache.b0) {
-            this.cache.manifoldId = currentManifold;
-            this.cache.inputShape = currentInputShape;
-            this.cache.functionKey = currentFunction;
-            this.cache.a0 = currentA0;
-            this.cache.b0 = currentB0;
-            this.build();
+        const map = this.id === 'w' ? resolveActiveMap() : null;
+        const buildInputs = [
+            state.selectedManifold, state.currentInputShape, state.currentFunction,
+            state.zetaContinuationEnabled, state.gridDensity, state.gridParameters,
+            state.a0, state.b0, state.circleR,
+            state.arbitraryShapeMode, state.arbitraryShapeExpression,
+            state.arbitraryShapeTMin, state.arbitraryShapeTMax,
+            state.arbitraryShapeClosed, state.arbitraryShapePoints,
+            state.gridColor1, state.gridColor2,
+            state.mediaSize, state.mediaAspectRatio, state.mediaVersion,
+            map?.signature
+        ];
+        if (buildInputs.some((value, index) => value !== this.cache.buildInputs[index])) {
+            this.cache.buildInputs = buildInputs;
+            this.build(map);
         }
     }
 
@@ -338,6 +331,7 @@ class PlaneController {
         this.ui.formula = null;
         this.ui.label = null;
         this.ui.speedGroup = null;
+        this.cache.buildInputs = [];
     }
 }
 
@@ -347,10 +341,6 @@ let lastFrameTime = 0;
 
 export function initThreeJSRenderers() {
     for (let i = 0; i < controllers.length; i++) controllers[i].init();
-}
-
-export function buildThreeJSMeshes() {
-    for (let i = 0; i < controllers.length; i++) controllers[i].build();
 }
 
 export function startManifoldTransformationAnimation() {
@@ -377,7 +367,7 @@ export function startManifoldTransformationAnimation() {
             }
         }
 
-        if (state.currentInputShape === 'video' && state.videoIsPlaying) {
+        if (isMediaInputShape() && state.videoIsPlaying) {
             isAnyPlaneMoving = true;
         }
 

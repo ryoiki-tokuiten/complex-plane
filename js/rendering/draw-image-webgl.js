@@ -1,12 +1,5 @@
 import { state } from '../store/state.js';
 import { createWebGLProgramShared } from './webgl-shared.js';
-import {
-    getRasterSourceForShape,
-    getRasterVersionTokenForShape,
-    getRasterDisplayDimensions,
-    getRasterOpacityForShape,
-    isRasterInputShape
-} from '../utils/raster-media.js';
 import { buildNativeImageMesh, nativeMapOptions } from '../native/complex-engine.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
@@ -206,15 +199,15 @@ function buildNativeRasterMesh({
     });
 }
 
-export function buildRasterSurfaceMesh(planeParams, map = null) {
-    const sourceSize = getRasterDisplayDimensions(state.currentInputShape);
+export function buildRasterSurfaceMesh(planeParams, map, raster) {
+    const sourceSize = raster.size;
     if (!(sourceSize.width > 0) || !(sourceSize.height > 0)) {
         throw new Error('Native raster rendering requires positive media dimensions.');
     }
     const bounds = viewBounds(planeParams);
     const mesh = buildNativeRasterMesh({
         bounds,
-        sourceCenter: { re: state.a0, im: state.b0 },
+        sourceCenter: raster.center,
         sourceSize,
         mapOptions: rasterMapOptions(map, true, null),
         pixelWidth: planeParams.width,
@@ -226,20 +219,19 @@ export function buildRasterSurfaceMesh(planeParams, map = null) {
     return {
         ...mesh,
         bounds,
-        sourceCenter: { re: state.a0, im: state.b0 },
+        sourceCenter: raster.center,
         sourceSize
     };
 }
 
-function meshKey(planeParams, map, isWPlane, width, height) {
+function meshKey(planeParams, map, isWPlane, width, height, raster) {
     const bounds = viewBounds(planeParams);
-    const sourceSize = getRasterDisplayDimensions(state.currentInputShape);
+    const sourceSize = raster.size;
     const precise = planeParams.preciseViewport;
     return [
-        state.currentInputShape,
         isWPlane ? map.signature : 'identity',
         isWPlane ? getImageRenderStage(map) : 0,
-        state.a0, state.b0,
+        raster.center.re, raster.center.im,
         precise?.centerRe ?? bounds.x0,
         precise?.centerIm ?? bounds.x1,
         precise?.zoomPower ?? bounds.y0,
@@ -266,14 +258,13 @@ function uploadMesh(active, mesh, key) {
     }
 }
 
-function ensureMesh(active, planeParams, map, isWPlane, width, height) {
-    const key = meshKey(planeParams, map, isWPlane, width, height);
+function ensureMesh(active, planeParams, map, isWPlane, width, height, raster) {
+    const key = meshKey(planeParams, map, isWPlane, width, height, raster);
     if (active.meshKey === key && active.mesh) return;
-    const sourceSize = getRasterDisplayDimensions(state.currentInputShape);
     const mesh = buildNativeRasterMesh({
         bounds: viewBounds(planeParams),
-        sourceCenter: { re: state.a0, im: state.b0 },
-        sourceSize,
+        sourceCenter: raster.center,
+        sourceSize: raster.size,
         mapOptions: rasterMapOptions(map, isWPlane),
         preciseViewport: planeParams.preciseViewport,
         pixelWidth: width,
@@ -303,27 +294,19 @@ function bindGeometry(active) {
     } else active.vao.bind(active.geometryVao);
 }
 
-function uploadTexture(active, shape, source) {
-    const token = getRasterVersionTokenForShape(shape);
-    if (active.uploadedSource === source && active.uploadedSourceToken === token) return;
+function uploadTexture(active, raster) {
+    if (active.uploadedSource === raster.source && active.uploadedSourceToken === raster.token) return;
     const gl = active.gl;
     gl.bindTexture(gl.TEXTURE_2D, active.texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-    active.uploadedSource = source;
-    active.uploadedSourceToken = token;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, raster.source);
+    active.uploadedSource = raster.source;
+    active.uploadedSourceToken = raster.token;
 }
 
-function rasterSource() {
-    const shape = state.currentInputShape;
-    const source = getRasterSourceForShape(shape);
-    if (!isRasterInputShape(shape) || !source) return null;
-    if (shape === 'video' && (source.readyState < 2 || !source.videoWidth || !source.videoHeight)) return null;
-    return { shape, source };
-}
-
-export function drawImageWithWebGL(targetCtx, planeParams, isWPlane, map = null) {
-    const raster = rasterSource();
+export function drawRasterWithWebGL(targetCtx, planeParams, isWPlane, map, raster) {
     if (!raster) return false;
+    if (typeof HTMLVideoElement !== 'undefined' && raster.source instanceof HTMLVideoElement &&
+        (raster.source.readyState < 2 || !raster.source.videoWidth || !raster.source.videoHeight)) return false;
     if (!targetCtx?.canvas || typeof targetCtx.drawImage !== 'function') {
         throw new Error('Native raster rendering requires a drawable 2D target context.');
     }
@@ -334,8 +317,8 @@ export function drawImageWithWebGL(targetCtx, planeParams, isWPlane, map = null)
     if (active.canvas.width !== width) active.canvas.width = width;
     if (active.canvas.height !== height) active.canvas.height = height;
 
-    uploadTexture(active, raster.shape, raster.source);
-    ensureMesh(active, planeParams, map, Boolean(isWPlane), width, height);
+    uploadTexture(active, raster);
+    ensureMesh(active, planeParams, map, Boolean(isWPlane), width, height, raster);
 
     const gl = active.gl;
     gl.viewport(0, 0, width, height);
@@ -348,7 +331,7 @@ export function drawImageWithWebGL(targetCtx, planeParams, isWPlane, map = null)
     gl.useProgram(active.program);
     bindGeometry(active);
     gl.uniform1i(active.locations.texture, 0);
-    gl.uniform1f(active.locations.opacity, getRasterOpacityForShape(raster.shape));
+    gl.uniform1f(active.locations.opacity, raster.opacity);
     gl.uniform1f(active.locations.alphaCutoff, DEFAULT_ALPHA_CUTOFF);
     if (active.indexCount) gl.drawElements(gl.TRIANGLES, active.indexCount, gl.UNSIGNED_SHORT, 0);
     active.vao.bind(null);

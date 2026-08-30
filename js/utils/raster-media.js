@@ -1,51 +1,21 @@
 import { state, context } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import { eventBus } from '../store/events.js';
+import { requestDomainRedraw, requestRedrawAll } from '../rendering/redraw-scheduler.js';
 const { controls } = context;
 
-function requestDomainRedraw() {
-    eventBus.emit('redraw:domain');
-}
-function requestRedrawAll() {
-    eventBus.emit('redraw:all');
-}
-
-const RASTER_INPUT_SHAPES = new Set(['media', 'image', 'video']);
 const RASTER_MEDIA_TIME_EPSILON = 1e-4;
 
-export function isRasterInputShape(shape = state.currentInputShape) {
-    return RASTER_INPUT_SHAPES.has(shape);
+export function isMediaInputShape(shape = state.currentInputShape) {
+    return shape === 'media';
 }
 
-export function getRasterSourceForShape(shape = state.currentInputShape) {
-    if (shape === 'video') return runtime.media.video;
-    if (shape === 'image') return runtime.media.image;
+export function getMediaSource() {
     return runtime.media.video || runtime.media.image;
 }
 
-export function getRasterSizeForShape(shape = state.currentInputShape) {
-    if (shape === 'video') return state.videoSize ?? 2.0;
-    if (shape === 'image') return state.imageSize ?? 2.0;
-    return state.mediaSize ?? state.imageSize ?? state.videoSize ?? 2.0;
-}
-
-export function getRasterOpacityForShape(shape = state.currentInputShape) {
-    if (shape === 'video') return state.videoOpacity ?? 1.0;
-    if (shape === 'image') return state.imageOpacity ?? 1.0;
-    return state.mediaOpacity ?? state.imageOpacity ?? state.videoOpacity ?? 1.0;
-}
-
-export function getRasterAspectRatioForShape(shape = state.currentInputShape) {
-    const aspectRatio = (shape === 'video' || (shape === 'media' && runtime.media.video))
-        ? state.videoAspectRatio
-        : state.imageAspectRatio;
+export function getMediaAspectRatio() {
+    const aspectRatio = state.mediaAspectRatio;
     return Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1;
-}
-
-export function getRasterVersionTokenForShape(shape = state.currentInputShape) {
-    return (shape === 'video' || (shape === 'media' && runtime.media.video))
-        ? state.videoFrameVersion
-        : state.imageContentVersion;
 }
 
 export function getRasterSourceDimensions(source) {
@@ -73,9 +43,8 @@ export function getRasterSourceDimensions(source) {
     };
 }
 
-export function getRasterDisplayDimensions(shape = state.currentInputShape) {
-    const size = Math.max(0.1, getRasterSizeForShape(shape) || 2.0);
-    const aspectRatio = getRasterAspectRatioForShape(shape);
+export function getMediaDisplayDimensions(size = state.mediaSize, aspectRatio = getMediaAspectRatio()) {
+    size = Math.max(0.1, size);
 
     if (aspectRatio >= 1) {
         return {
@@ -90,6 +59,18 @@ export function getRasterDisplayDimensions(shape = state.currentInputShape) {
     };
 }
 
+export function getActiveMediaRaster() {
+    const source = getMediaSource();
+    if (!source || !isMediaInputShape()) return null;
+    return {
+        source,
+        token: state.mediaVersion,
+        center: { re: state.a0, im: state.b0 },
+        size: getMediaDisplayDimensions(),
+        opacity: state.mediaOpacity
+    };
+}
+
 
 
 
@@ -101,8 +82,8 @@ export function processUploadedImageSource(img) {
 
     runtime.media.image = img;
     const { aspectRatio } = getRasterSourceDimensions(img);
-    state.imageAspectRatio = aspectRatio;
-    state.imageContentVersion += 1;
+    state.mediaAspectRatio = aspectRatio;
+    state.mediaVersion += 1;
     return true;
 }
 
@@ -118,11 +99,8 @@ export function processUploadedVideoFrame(force = false) {
     }
 
     const { aspectRatio } = getRasterSourceDimensions(video);
-    state.videoAspectRatio = aspectRatio;
-
-
-
-    state.videoFrameVersion += 1;
+    state.mediaAspectRatio = aspectRatio;
+    state.mediaVersion += 1;
     runtime.media.lastProcessedMediaTime = currentTime;
     syncVideoPlaybackUI();
     return true;
@@ -182,7 +160,7 @@ export function stopVideoProcessingLoop() {
 export function runVideoProcessingLoop(now) {
     runtime.media.processingFrame = null;
 
-    if (!runtime.media.video || !state.videoIsPlaying || !isRasterInputShape(state.currentInputShape)) {
+    if (!runtime.media.video || !state.videoIsPlaying || !isMediaInputShape()) {
         syncVideoPlaybackUI();
         return;
     }
@@ -206,7 +184,7 @@ export function runVideoProcessingLoop(now) {
 export function startVideoProcessingLoop() {
     stopVideoProcessingLoop();
 
-    if (!runtime.media.video || !state.videoIsPlaying || !isRasterInputShape(state.currentInputShape)) {
+    if (!runtime.media.video || !state.videoIsPlaying || !isMediaInputShape()) {
         syncVideoPlaybackUI();
         return;
     }
@@ -245,7 +223,7 @@ export function startUploadedVideoPlayback() {
     return video.play().then(() => {
         state.videoIsPlaying = true;
         state.videoStatusMessage = 'Playing';
-        if (isRasterInputShape(state.currentInputShape)) {
+        if (isMediaInputShape()) {
             startVideoProcessingLoop();
         } else {
             stopVideoProcessingLoop();
@@ -280,8 +258,8 @@ export function cleanupUploadedVideo() {
     runtime.media.video = null;
     runtime.media.videoUrl = '';
     state.videoIsPlaying = false;
-    state.videoAspectRatio = 1.0;
-    state.videoFrameVersion += 1;
+    state.mediaAspectRatio = 1.0;
+    state.mediaVersion += 1;
     runtime.media.lastProcessedWallTime = 0;
     runtime.media.lastProcessedMediaTime = -1;
     state.videoStatusMessage = 'No video loaded.';
@@ -332,7 +310,7 @@ export function loadUploadedVideoFile(file) {
 
         requestRedrawAll();
 
-        if (isRasterInputShape(state.currentInputShape)) {
+        if (isMediaInputShape()) {
             startUploadedVideoPlayback();
         }
     };
@@ -344,7 +322,7 @@ export function loadUploadedVideoFile(file) {
         }
         state.videoIsPlaying = true;
         state.videoStatusMessage = 'Playing';
-        if (isRasterInputShape(state.currentInputShape)) {
+        if (isMediaInputShape()) {
             startVideoProcessingLoop();
         }
         syncVideoPlaybackUI();
@@ -378,11 +356,9 @@ export function loadUploadedMediaFile(file) {
     if (!file) return;
     const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|ogg|m4v|avi|mkv)$/i.test(file.name);
     if (isVideo) {
-        runtime.media.activeType = 'video';
         runtime.media.image = null;
         loadUploadedVideoFile(file);
     } else {
-        runtime.media.activeType = 'image';
         cleanupUploadedVideo();
         const img = new Image();
         const objectUrl = URL.createObjectURL(file);

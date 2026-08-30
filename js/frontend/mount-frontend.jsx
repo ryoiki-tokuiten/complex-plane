@@ -18,6 +18,7 @@ import {
     DomainPaletteOptions,
     SurfacePaletteOptions
 } from './components/theme-and-palette-options.jsx';
+import { GridShapeControls } from './components/grid-shape-controls.jsx';
 
 const ISLANDS = [
     ['polynomial_coeffs_container', PolynomialCoefficients],
@@ -56,4 +57,8 @@ export function mountFrontend() {
         if (container) render(<PaletteGuide type={type} />, container);
     });
     window.lucide?.createIcons?.();
+}
+
+export function mountFrontendControls() {
+    render(<GridShapeControls />, document.getElementById('grid_shape_controls_groups'));
 }

@@ -2,7 +2,6 @@
   "name": "complex-function-analysis",
   "version": "1.0.0",
   "description": "![Example](./Example1.png)",
-  "main": "index.js",
   "type": "module",
   "scripts": {
     "predev": "node scripts/ensure-wasm.mjs",
@@ -10,12 +9,11 @@
     "prebuild": "node scripts/ensure-wasm.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test test/*.test.js",
+    "test": "node --import ./test/setup.js --test test/*.test.js",
     "test:e2e": "playwright test",
-    "benchmark": "node --expose-gc test/benchmarks/index.js",
-    "benchmark:smoke": "BENCH_PROFILE=smoke node --expose-gc test/benchmarks/index.js",
-    "build:wasm": "node scripts/ensure-wasm.mjs --force",
-    "build:atlas": "node docs/atlas/build.mjs"
+    "benchmark": "node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
+    "benchmark:smoke": "BENCH_PROFILE=smoke node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
+    "build:wasm": "node scripts/ensure-wasm.mjs --force"
   },
   "repository": {
     "type": "git",

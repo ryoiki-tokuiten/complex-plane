@@ -74,7 +74,7 @@ function cauchyAnalysisKey(isZPlanar) {
 }
 
 function publishCauchyResult(key, { text = null, html = null, hidden = false } = {}) {
-    const element = controls.cauchy_integral_results_info;
+    const element = controls.cauchyIntegralResultsInfo;
     if (!element) return;
 
     const elementChanged = cauchyDisplayCache.element !== element;
@@ -129,7 +129,7 @@ export function resolveCauchyContour(state, { planeParams = null, curvePoints = 
 }
 
 export function performCauchyAnalysis() {
-    if (!controls.cauchy_integral_results_info) return;
+    if (!controls.cauchyIntegralResultsInfo) return;
     const isZPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
     const analysisKey = cauchyAnalysisKey(isZPlanar);
     const active = state.cauchyIntegralModeEnabled && isZPlanar;

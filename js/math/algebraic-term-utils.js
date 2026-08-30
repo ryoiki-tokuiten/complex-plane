@@ -1,6 +1,5 @@
 import { mutateState } from '../store/state.js';
 import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
-import { syncParameterControlsPanelVisibility, updateTitlesAndGlobalUI } from '../ui/ui-updates.js';
 
 export const createAlgebraicFactor = (func = 'cos') => ({
     func,
@@ -16,19 +15,11 @@ export const createAlgebraicTerm = () => ({
     factors: [createAlgebraicFactor()]
 });
 
-function redraw(commit = false) {
-    if (commit) {
-        updateTitlesAndGlobalUI();
-        syncParameterControlsPanelVisibility();
-    }
+function mutate(mutator, path) {
+    mutateState('algebraicChainingTerms', mutator, path);
     requestDomainRedraw();
 }
 
-function mutate(mutator, path, commit = false) {
-    mutateState('algebraicChainingTerms', mutator, path);
-    redraw(commit);
-}
-
 export function appendAlgebraicTerm() {
-    mutate(terms => terms.push(createAlgebraicTerm()), 'algebraicChainingTerms', true);
+    mutate(terms => terms.push(createAlgebraicTerm()), 'algebraicChainingTerms');
 }

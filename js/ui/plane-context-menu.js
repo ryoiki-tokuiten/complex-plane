@@ -1,15 +1,10 @@
 import { state, context } from '../store/state.js';
-import { eventBus } from '../store/events.js';
+import { requestDomainRedraw, requestUiRedraw } from '../rendering/redraw-scheduler.js';
 import {
-    syncParameterControlsPanelVisibility,
-    syncManifoldTransformationUI,
-    syncTransformControlPanels,
-    syncTaylorControls,
-    syncVectorFlowControls,
     fitConformalGridOutputViewport
 } from './ui-updates.js';
 import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
-import { updateChainingTitles, downloadCanvasImage, setupVisualParameters } from '../utils/dom-utils.js';
+import { downloadCanvasImage, setupVisualParameters } from '../utils/dom-utils.js';
 import {
     isGraphViewSupported,
     isFullGridPerspectiveSupported,
@@ -27,6 +22,70 @@ let submenuBridgeElement = null;
 let isMenuOpen = false;
 let submenuCloseTimer = null;
 const SUBMENU_CLOSE_DELAY_MS = 350;
+const PROPAGATION_EVENTS = [
+    'pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup',
+    'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'
+];
+const STAGED_PANELS = {
+    taylor: ['taylor_series_options_detail_div', 'taylor_panel_staging', 'taylor_series_exact_panel'],
+    domain: ['domain_coloring_options_div', 'domain_coloring_panel_staging', 'domain_coloring_exact_panel'],
+    manifold: ['manifold_options_div', 'manifold_panel_staging', 'manifold_exact_panel'],
+    riemann: ['riemann_surface_options_div', 'riemann_surface_panel_staging', 'riemann_surface_exact_panel']
+};
+const propagationBoundaries = new WeakSet();
+const CHECK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+const DOWNLOAD_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+const SUBMENU_ARROW = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+
+function bindPropagationBoundary(element) {
+    if (!element || propagationBoundaries.has(element)) return;
+    PROPAGATION_EVENTS.forEach(type => element.addEventListener(type, event => event.stopPropagation()));
+    propagationBoundaries.add(element);
+}
+
+function appendDivider(container) {
+    const divider = document.createElement('div');
+    divider.className = 'plane-context-menu-divider';
+    container.appendChild(divider);
+}
+
+function setMenuItemChecked(button, checked) {
+    button.setAttribute('aria-checked', String(Boolean(checked)));
+    button.classList.toggle('checked', Boolean(checked));
+    const mark = button.querySelector('.plane-context-menu-check');
+    if (mark) mark.innerHTML = checked ? CHECK_ICON : '';
+}
+
+function createMenuItem(item, topLevel = false) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'plane-context-menu-item';
+    if (!topLevel && item.id) button.id = item.id;
+    if (item.disabled) {
+        button.classList.add('disabled');
+        button.disabled = true;
+    }
+
+    if (item.type === 'checkbox') {
+        button.setAttribute('role', 'menuitemcheckbox');
+        const mark = document.createElement('span');
+        mark.className = 'plane-context-menu-check';
+        button.appendChild(mark);
+        setMenuItemChecked(button, item.checked);
+    } else if (topLevel) {
+        button.setAttribute('role', 'menuitem');
+        const icon = document.createElement('span');
+        icon.className = 'plane-context-menu-icon';
+        if (item.icon === 'download') icon.innerHTML = DOWNLOAD_ICON;
+        button.appendChild(icon);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'plane-context-menu-label';
+    label.textContent = item.label;
+    button.appendChild(label);
+    return button;
+}
 
 function cancelSubmenuClose() {
     if (submenuCloseTimer) clearTimeout(submenuCloseTimer);
@@ -63,9 +122,7 @@ function getOrCreateSubmenuElement() {
     submenuElement.addEventListener('mouseenter', cancelSubmenuClose);
     submenuElement.addEventListener('mouseleave', scheduleSubmenuClose);
 
-    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
-        submenuElement.addEventListener(evt, e => e.stopPropagation());
-    });
+    bindPropagationBoundary(submenuElement);
 
     return submenuElement;
 }
@@ -84,29 +141,26 @@ function getOrCreateSubmenuBridgeElement() {
 }
 
 function restoreStagedPanels() {
-    const taylorPanel = document.getElementById('taylor_series_options_detail_div');
-    const taylorStaging = document.getElementById('taylor_panel_staging');
-    if (taylorPanel && taylorStaging && taylorPanel.parentNode && taylorPanel.parentNode !== taylorStaging) {
-        taylorStaging.appendChild(taylorPanel);
-    }
+    Object.values(STAGED_PANELS).forEach(([panelId, stagingId]) => {
+        const panel = document.getElementById(panelId);
+        const staging = document.getElementById(stagingId);
+        if (panel?.parentNode && staging && panel.parentNode !== staging) staging.appendChild(panel);
+    });
+}
 
-    const domainPanel = document.getElementById('domain_coloring_options_div');
-    const domainStaging = document.getElementById('domain_coloring_panel_staging');
-    if (domainPanel && domainStaging && domainPanel.parentNode && domainPanel.parentNode !== domainStaging) {
-        domainStaging.appendChild(domainPanel);
-    }
-
-    const manifoldPanel = document.getElementById('manifold_options_div');
-    const manifoldStaging = document.getElementById('manifold_panel_staging');
-    if (manifoldPanel && manifoldStaging && manifoldPanel.parentNode && manifoldPanel.parentNode !== manifoldStaging) {
-        manifoldStaging.appendChild(manifoldPanel);
-    }
-
-    const riemannPanel = document.getElementById('riemann_surface_options_div');
-    const riemannStaging = document.getElementById('riemann_surface_panel_staging');
-    if (riemannPanel && riemannStaging && riemannPanel.parentNode && riemannPanel.parentNode !== riemannStaging) {
-        riemannStaging.appendChild(riemannPanel);
-    }
+function stagedPanelSubmenu(name) {
+    const [panelId, , itemId] = STAGED_PANELS[name];
+    return [{
+        type: 'custom',
+        id: itemId,
+        render(container) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            panel.classList.remove('hidden');
+            container.appendChild(panel);
+            bindPropagationBoundary(panel);
+        }
+    }];
 }
 
 function hideSubmenu() {
@@ -127,25 +181,14 @@ export function hidePlaneContextMenu() {
     isMenuOpen = false;
 }
 
-function requestDomainRedraw(fullRedraw = false) {
-    eventBus.emit('redraw:domain', fullRedraw);
-}
-
-function requestUiRedraw() {
-    eventBus.emit('redraw:ui');
-}
-
 function enableFoldSurface3d() {
     state.riemannSurfaceEnabled = false;
     state.manifold3dViewEnabled = false;
     state.manifoldTransformationEnabled = false;
-    syncManifoldTransformationUI();
-    updateChainingTitles();
 }
 
 function disableFoldSurface3d() {
     state.foldSurface3dEnabled = false;
-    syncGridDensityControls();
 }
 
 function toggleGraphView() {
@@ -174,9 +217,6 @@ function toggleGraphView() {
     }
     refreshPanelEdgeHandles(true);
     setupVisualParameters(false, false);
-    syncGridDensityControls();
-    syncParameterControlsPanelVisibility();
-    syncTransformControlPanels();
     requestUiRedraw();
     requestAnimationFrame(() => {
         setupVisualParameters(false, false);
@@ -201,8 +241,6 @@ function toggleFullGrid() {
         state.graphLayerLockEnabled = false;
         state.graphSelectedShape = '';
     }
-    syncGridDensityControls();
-    syncTransformControlPanels();
     requestUiRedraw();
 }
 
@@ -215,8 +253,6 @@ function toggleLockLayer() {
     }
     state.graphSelectedShape = '';
     state.graphSelectionRevision = (state.graphSelectionRevision || 0) + 1;
-    syncGridDensityControls();
-    syncTransformControlPanels();
     requestUiRedraw();
 }
 
@@ -229,63 +265,6 @@ function ensureFullGridEnabled() {
     if (!ensureGraphViewEnabled()) return false;
     if (!state.graphFullGridEnabled) toggleFullGrid();
     return state.graphFullGridEnabled;
-}
-
-function getTaylorSubmenuItems() {
-    return [
-        {
-            type: 'custom',
-            id: 'taylor_series_exact_panel',
-            render: (container) => {
-                const panel = document.getElementById('taylor_series_options_detail_div');
-                if (panel) {
-                    panel.classList.remove('hidden');
-                    container.appendChild(panel);
-                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
-                        panel.addEventListener(evt, e => e.stopPropagation());
-                    });
-                }
-            }
-        }
-    ];
-}
-
-function getManifoldSubmenuItems() {
-    return [
-        {
-            type: 'custom',
-            id: 'manifold_exact_panel',
-            render: (container) => {
-                const panel = document.getElementById('manifold_options_div');
-                if (panel) {
-                    panel.classList.remove('hidden');
-                    container.appendChild(panel);
-                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
-                        panel.addEventListener(evt, e => e.stopPropagation());
-                    });
-                }
-            }
-        }
-    ];
-}
-
-function getRiemannSubmenuItems() {
-    return [
-        {
-            type: 'custom',
-            id: 'riemann_surface_exact_panel',
-            render: (container) => {
-                const panel = document.getElementById('riemann_surface_options_div');
-                if (panel) {
-                    panel.classList.remove('hidden');
-                    container.appendChild(panel);
-                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
-                        panel.addEventListener(evt, e => e.stopPropagation());
-                    });
-                }
-            }
-        }
-    ];
 }
 
 function getVectorFieldSubmenuItems() {
@@ -301,7 +280,6 @@ function getVectorFieldSubmenuItems() {
                 if (state.vectorFieldEnabled) {
                     state.streamlineFlowEnabled = false;
                 }
-                syncVectorFlowControls();
                 requestDomainRedraw(true);
                 requestUiRedraw();
             }
@@ -317,7 +295,6 @@ function getVectorFieldSubmenuItems() {
                 if (state.streamlineFlowEnabled) {
                     state.vectorFieldEnabled = false;
                 }
-                syncVectorFlowControls();
                 requestDomainRedraw(true);
                 requestUiRedraw();
             }
@@ -333,28 +310,8 @@ function getVectorFieldSubmenuItems() {
                 if (state.particleAnimationEnabled && !state.vectorFieldEnabled && !state.streamlineFlowEnabled) {
                     state.vectorFieldEnabled = true;
                 }
-                syncVectorFlowControls();
                 requestDomainRedraw(true);
                 requestUiRedraw();
-            }
-        }
-    ];
-}
-
-function getDomainColoringSubmenuItems() {
-    return [
-        {
-            type: 'custom',
-            id: 'domain_coloring_exact_panel',
-            render: (container) => {
-                const panel = document.getElementById('domain_coloring_options_div');
-                if (panel) {
-                    panel.classList.remove('hidden');
-                    container.appendChild(panel);
-                    ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
-                        panel.addEventListener(evt, e => e.stopPropagation());
-                    });
-                }
             }
         }
     ];
@@ -370,10 +327,7 @@ function getZPlaneMenuItems() {
             label: 'Download Image',
             icon: 'download',
             type: 'action',
-            onClick: () => {
-                const canvas = context.zCanvas || document.getElementById('z_plane_canvas');
-                downloadCanvasImage(canvas, 'z-plane.png');
-            }
+            onClick: () => downloadCanvasImage(context.zCanvas, 'z-plane.png')
         },
         { type: 'divider' },
         {
@@ -381,26 +335,21 @@ function getZPlaneMenuItems() {
             label: 'Domain Coloring',
             type: 'checkbox',
             checked: Boolean(state.domainColoringEnabled),
-            children: getDomainColoringSubmenuItems(),
+            children: stagedPanelSubmenu('domain'),
             onClick: () => {
                 state.domainColoringEnabled = !state.domainColoringEnabled;
                 if (state.domainColoringEnabled) {
                     if (state.manifold3dViewEnabled) {
                         state.manifold3dViewEnabled = false;
                         state.manifoldTransformationEnabled = false;
-                        if (context.controls?.enableManifoldTransformationCb) context.controls.enableManifoldTransformationCb.checked = false;
-                        if (context.controls?.manifoldOptionsDiv) context.controls.manifoldOptionsDiv.classList.add('hidden');
-                        syncManifoldTransformationUI();
                     }
                     if (state.currentInputShape !== 'empty_grid') {
-                        if (state.currentInputShape === 'video' && state.videoIsPlaying) {
+                        if (state.currentInputShape === 'media' && state.videoIsPlaying) {
                             pauseUploadedVideoPlayback();
                         }
                         state.currentInputShape = 'empty_grid';
-                        if (context.controls?.inputShapeSelector) context.controls.inputShapeSelector.value = 'empty_grid';
                     }
                 }
-                syncParameterControlsPanelVisibility();
                 requestDomainRedraw(true);
                 requestUiRedraw();
             }
@@ -437,7 +386,6 @@ function getZPlaneMenuItems() {
                     checked: Boolean(state.cauchyIntegralModeEnabled),
                     onClick: () => {
                         state.cauchyIntegralModeEnabled = !state.cauchyIntegralModeEnabled;
-                        syncParameterControlsPanelVisibility();
                         requestUiRedraw();
                     }
                 },
@@ -449,7 +397,7 @@ function getZPlaneMenuItems() {
                     onClick: () => {
                         state.conformalGridEnabled = !state.conformalGridEnabled;
                         if (state.conformalGridEnabled) {
-                            if (state.currentInputShape === 'video' && state.videoIsPlaying) {
+                            if (state.currentInputShape === 'media' && state.videoIsPlaying) {
                                 pauseUploadedVideoPlayback();
                             }
                             state.currentInputShape = 'empty_grid';
@@ -473,8 +421,6 @@ function getZPlaneMenuItems() {
             checked: state.mapPresentation === 'derivative',
             onClick: () => {
                 state.mapPresentation = state.mapPresentation === 'derivative' ? 'function' : 'derivative';
-                syncManifoldTransformationUI();
-                updateChainingTitles();
                 requestDomainRedraw();
             }
         });
@@ -483,7 +429,7 @@ function getZPlaneMenuItems() {
             label: 'Taylor Series',
             type: 'checkbox',
             checked: Boolean(state.taylorSeriesEnabled),
-            children: getTaylorSubmenuItems(),
+            children: stagedPanelSubmenu('taylor'),
             onClick: () => {
                 state.taylorSeriesEnabled = !state.taylorSeriesEnabled;
                 requestDomainRedraw(true);
@@ -507,7 +453,6 @@ function getZPlaneMenuItems() {
                 state.vectorFieldEnabled = true;
                 state.streamlineFlowEnabled = false;
             }
-            syncVectorFlowControls();
             requestDomainRedraw(true);
             requestUiRedraw();
         }
@@ -555,10 +500,7 @@ function getWPlaneMenuItems() {
             label: 'Download Image',
             icon: 'download',
             type: 'action',
-            onClick: () => {
-                const canvas = context.wCanvas || document.getElementById('w_plane_canvas');
-                downloadCanvasImage(canvas, 'w-plane.png');
-            }
+            onClick: () => downloadCanvasImage(context.wCanvas, 'w-plane.png')
         },
         { type: 'divider' },
         {
@@ -568,8 +510,6 @@ function getWPlaneMenuItems() {
             checked: state.mapPresentation === 'derivative',
             onClick: () => {
                 state.mapPresentation = state.mapPresentation === 'derivative' ? 'function' : 'derivative';
-                syncManifoldTransformationUI();
-                updateChainingTitles();
                 requestDomainRedraw();
             }
         },
@@ -578,7 +518,7 @@ function getWPlaneMenuItems() {
             label: 'Taylor Series',
             type: 'checkbox',
             checked: Boolean(state.taylorSeriesEnabled),
-            children: getTaylorSubmenuItems(),
+            children: stagedPanelSubmenu('taylor'),
             onClick: () => {
                 state.taylorSeriesEnabled = !state.taylorSeriesEnabled;
                 requestDomainRedraw(true);
@@ -612,7 +552,6 @@ function getWPlaneMenuItems() {
                     disableFoldSurface3d();
                 }
                 syncGridDensityControls({ applyFoldDefault: state.foldSurface3dEnabled });
-                syncParameterControlsPanelVisibility();
                 requestDomainRedraw();
             }
         },
@@ -621,40 +560,24 @@ function getWPlaneMenuItems() {
             label: '3D Manifolds',
             type: 'checkbox',
             checked: Boolean(state.manifold3dViewEnabled),
-            children: getManifoldSubmenuItems(),
+            children: stagedPanelSubmenu('manifold'),
             onClick: () => {
                 state.manifold3dViewEnabled = !state.manifold3dViewEnabled;
                 if (state.manifold3dViewEnabled) {
-                    if (state.domainColoringEnabled) {
-                        state.domainColoringEnabled = false;
-                        syncDomainColoringKeyVisibility();
-                        syncOrbitColoringModeControl();
-                    }
+                    state.domainColoringEnabled = false;
                     disableFoldSurface3d();
                     if (state.riemannSurfaceEnabled) {
                         state.riemannSurfaceEnabled = false;
-                        if (!state.realPlotsEnabled) {
-                            state.show2DContourPlot = false;
-                            const contourCol = document.getElementById('contour_2d_column');
-                            if (contourCol) contourCol.classList.add('hidden');
-                        }
+                        if (!state.realPlotsEnabled) state.show2DContourPlot = false;
                     }
                     state.manifoldTransformationEnabled = false;
                     state.manifoldTransformationProgressW = 1.0;
 
                     const defaultShape = getDefaultInputShapeForManifold(state.selectedManifold);
                     state.currentInputShape = defaultShape;
-                    if (context.controls?.inputShapeSelector) {
-                        context.controls.inputShapeSelector.value = defaultShape;
-                    }
-                    syncGridDensityControls();
                 } else {
                     state.manifoldTransformationEnabled = false;
-                    syncGridDensityControls();
                 }
-                syncManifoldTransformationUI();
-                updateChainingTitles();
-                syncParameterControlsPanelVisibility();
                 requestDomainRedraw(true);
                 requestUiRedraw();
             }
@@ -664,27 +587,17 @@ function getWPlaneMenuItems() {
             label: 'Riemann Surface',
             type: 'checkbox',
             checked: Boolean(state.riemannSurfaceEnabled),
-            children: getRiemannSubmenuItems(),
+            children: stagedPanelSubmenu('riemann'),
             onClick: () => {
                 state.riemannSurfaceEnabled = !state.riemannSurfaceEnabled;
                 if (state.riemannSurfaceEnabled) {
                     disableFoldSurface3d();
                     state.realPlotsEnabled = false;
-                    const realPlotsCol = document.getElementById('real_plots_column');
-                    if (realPlotsCol) realPlotsCol.classList.add('hidden');
-                    const realPlotsCtrl = document.getElementById('real_plots_controls_container');
-                    if (realPlotsCtrl) realPlotsCtrl.classList.add('hidden');
                     Object.assign(state, { manifold3dViewEnabled: false, manifoldTransformationEnabled: false });
                     if (state.navigationModeEnabled) setNavigationModeEnabled(false);
                 } else {
-                    if (!state.realPlotsEnabled) {
-                        state.show2DContourPlot = false;
-                        const contourCol = document.getElementById('contour_2d_column');
-                        if (contourCol) contourCol.classList.add('hidden');
-                    }
+                    if (!state.realPlotsEnabled) state.show2DContourPlot = false;
                 }
-                updateChainingTitles();
-                syncParameterControlsPanelVisibility();
                 requestDomainRedraw(true);
                 requestUiRedraw();
             }
@@ -744,9 +657,7 @@ function renderSubmenu(parentBtn, children) {
 
     children.forEach(child => {
         if (child.type === 'divider') {
-            const divider = document.createElement('div');
-            divider.className = 'plane-context-menu-divider';
-            sub.appendChild(divider);
+            appendDivider(sub);
             return;
         }
 
@@ -755,32 +666,7 @@ function renderSubmenu(parentBtn, children) {
             return;
         }
 
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'plane-context-menu-item';
-        if (child.id) btn.id = child.id;
-        if (child.disabled) {
-            btn.classList.add('disabled');
-            btn.disabled = true;
-        }
-
-        if (child.type === 'checkbox') {
-            btn.setAttribute('role', 'menuitemcheckbox');
-            btn.setAttribute('aria-checked', child.checked ? 'true' : 'false');
-            if (child.checked) {
-                btn.classList.add('checked');
-            }
-
-            const checkSpan = document.createElement('span');
-            checkSpan.className = 'plane-context-menu-check';
-            checkSpan.innerHTML = child.checked ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : '';
-            btn.appendChild(checkSpan);
-        }
-
-        const labelSpan = document.createElement('span');
-        labelSpan.className = 'plane-context-menu-label';
-        labelSpan.textContent = child.label;
-        btn.appendChild(labelSpan);
+        const btn = createMenuItem(child);
 
         btn.addEventListener('click', event => {
             event.stopPropagation();
@@ -791,12 +677,7 @@ function renderSubmenu(parentBtn, children) {
                         renderSubmenu(parentBtn, parentBtn._getSubmenuItems());
                     } else {
                         child.checked = !child.checked;
-                        btn.setAttribute('aria-checked', child.checked ? 'true' : 'false');
-                        btn.classList.toggle('checked', child.checked);
-                        const checkSpan = btn.querySelector('.plane-context-menu-check');
-                        if (checkSpan) {
-                            checkSpan.innerHTML = child.checked ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : '';
-                        }
+                        setMenuItemChecked(btn, child.checked);
                     }
                 }
             } else {
@@ -864,54 +745,20 @@ function renderMenu(items, x, y) {
 
     items.forEach(item => {
         if (item.type === 'divider') {
-            const divider = document.createElement('div');
-            divider.className = 'plane-context-menu-divider';
-            menu.appendChild(divider);
+            appendDivider(menu);
             return;
         }
 
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'plane-context-menu-item';
-        if (item.disabled) {
-            btn.classList.add('disabled');
-            btn.disabled = true;
-        }
-
-        if (item.type === 'checkbox') {
-            btn.setAttribute('role', 'menuitemcheckbox');
-            btn.setAttribute('aria-checked', item.checked ? 'true' : 'false');
-            if (item.checked) {
-                btn.classList.add('checked');
-            }
-
-            const checkSpan = document.createElement('span');
-            checkSpan.className = 'plane-context-menu-check';
-            checkSpan.innerHTML = item.checked ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : '';
-            btn.appendChild(checkSpan);
-        } else {
-            btn.setAttribute('role', 'menuitem');
-            const iconSpan = document.createElement('span');
-            iconSpan.className = 'plane-context-menu-icon';
-            if (item.icon === 'download') {
-                iconSpan.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
-            }
-            btn.appendChild(iconSpan);
-        }
-
-        const labelSpan = document.createElement('span');
-        labelSpan.className = 'plane-context-menu-label';
-        labelSpan.textContent = item.label;
-        btn.appendChild(labelSpan);
+        const btn = createMenuItem(item, true);
 
         const getChildren = () => typeof item.getSubmenu === 'function' ? item.getSubmenu() : item.children;
         const children = getChildren();
         if (children && children.length > 0) {
             btn.classList.add('has-submenu');
-            const arrowSpan = document.createElement('span');
-            arrowSpan.className = 'plane-context-menu-arrow';
-            arrowSpan.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
-            btn.appendChild(arrowSpan);
+            const arrow = document.createElement('span');
+            arrow.className = 'plane-context-menu-arrow';
+            arrow.innerHTML = SUBMENU_ARROW;
+            btn.appendChild(arrow);
             btn._getSubmenuItems = getChildren;
 
             btn.addEventListener('mouseenter', () => {
@@ -970,7 +817,6 @@ export function handlePlaneContextMenu(event, planeType) {
     if (state.taylorSeriesCanvasClickCenterEnabled) {
         state.taylorSeriesCanvasClickCenterEnabled = false;
         state.taylorSeriesHoverPoint = null;
-        syncTaylorControls();
         requestUiRedraw();
         return;
     }
@@ -985,28 +831,13 @@ export function handlePlaneContextMenu(event, planeType) {
 }
 
 export function initPlaneContextMenu() {
-    const zWrapper = document.getElementById('z_plane_canvas_wrapper');
-    const wWrapper = document.getElementById('w_plane_canvas_wrapper');
-    const zCanvas = document.getElementById('z_plane_canvas');
-    const wCanvas = document.getElementById('w_plane_canvas');
-
-    if (zWrapper) {
-        zWrapper.addEventListener('contextmenu', event => handlePlaneContextMenu(event, 'z'));
-    } else if (zCanvas) {
-        zCanvas.addEventListener('contextmenu', event => handlePlaneContextMenu(event, 'z'));
-    }
-
-    if (wWrapper) {
-        wWrapper.addEventListener('contextmenu', event => handlePlaneContextMenu(event, 'w'));
-    } else if (wCanvas) {
-        wCanvas.addEventListener('contextmenu', event => handlePlaneContextMenu(event, 'w'));
-    }
-
-    // Completely disable native context menu on all canvas elements in the workspace
-    document.querySelectorAll('canvas').forEach(canvas => {
-        canvas.addEventListener('contextmenu', event => {
+    document.getElementById('canvases_section').addEventListener('contextmenu', event => {
+        const wrapper = event.target.closest?.('#z_plane_canvas_wrapper, #w_plane_canvas_wrapper');
+        if (wrapper) {
+            handlePlaneContextMenu(event, wrapper.id.startsWith('z_') ? 'z' : 'w');
+        } else if (event.target.closest?.('canvas')) {
             event.preventDefault();
-        });
+        }
     });
 
     // Dismiss context menu on click outside or escape

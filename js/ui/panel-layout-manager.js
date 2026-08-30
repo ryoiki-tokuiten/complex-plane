@@ -1,12 +1,11 @@
 import { state } from '../store/state.js';
+import { setupVisualParameters } from '../utils/dom-utils.js';
+import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
 
 function triggerLayoutRedraw() {
     if (typeof window === 'undefined') return;
-    import('../utils/dom-utils.js').then(m => m.setupVisualParameters?.(false, false)).catch(() => {});
-    import('../rendering/redraw-scheduler.js').then(m => {
-        m.requestDomainRedraw?.(true);
-        m.requestUiRedraw?.();
-    }).catch(() => {});
+    setupVisualParameters(false, false);
+    requestDomainRedraw(true);
 }
 
 let initialized = false;
@@ -178,7 +177,7 @@ export function updateSnapIndicator(container, target) {
 }
 
 export function hideSnapIndicator(container) {
-    updateSnapIndicator(container || document.querySelector('.two-column-layout'), null);
+    updateSnapIndicator(container, null);
 }
 
 export function savePanelLayout(container) {
@@ -844,7 +843,7 @@ function bindGripEvents(triggerEl, panel) {
             if (snapTarget) {
                 updateSnapIndicator(container, snapTarget);
             } else {
-                hideSnapIndicator();
+                hideSnapIndicator(container);
             }
 
             updateWorkspaceBounds(container, true, {
@@ -876,13 +875,11 @@ function bindGripEvents(triggerEl, panel) {
                 panel.style.left = `${snapTarget.left}px`;
                 panel.style.top = `${snapTarget.top}px`;
             }
-            hideSnapIndicator();
+            hideSnapIndicator(container);
 
             resolveCollisions(panel, container);
             updateWorkspaceBounds(container, false);
             savePanelLayout(container);
-        } else {
-            hideSnapIndicator();
         }
 
         triggerLayoutRedraw();

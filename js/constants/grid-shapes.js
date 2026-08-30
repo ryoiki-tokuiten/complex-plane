@@ -1,198 +1,65 @@
-export const CUSTOM_GRID_INPUT_SHAPES = Object.freeze([
+export const CUSTOM_GRID_INPUT_SHAPES = [
     'grid_rectilinear',
     'grid_nonorthogonal',
     'grid_triangular',
     'grid_curvilinear',
     'grid_spiral',
     'grid_irregular'
-]);
+];
 
 export const CUSTOM_GRID_INPUT_SHAPE_SET = new Set(CUSTOM_GRID_INPUT_SHAPES);
 
-export const GRID_SHAPE_PARAMETERS = Object.freeze({
-    grid_rectilinear: Object.freeze({
-        label: 'Rectilinear Grid',
-        stateKey: 'rectilinear',
-        groupId: 'grid_rectilinear_controls',
-        controls: Object.freeze([
-            Object.freeze({
-                key: 'xSpacing',
-                controlId: 'rectilinear_x_spacing_slider',
-                valueId: 'rectilinear_x_spacing_value_display',
-                label: 'X spacing',
-                min: 0.45,
-                max: 2.5,
-                step: 0.05,
-                value: 1
-            }),
-            Object.freeze({
-                key: 'ySpacing',
-                controlId: 'rectilinear_y_spacing_slider',
-                valueId: 'rectilinear_y_spacing_value_display',
-                label: 'Y spacing',
-                min: 0.45,
-                max: 2.5,
-                step: 0.05,
-                value: 1
-            })
-        ])
-    }),
-    grid_nonorthogonal: Object.freeze({
-        label: 'Non-orthogonal Grid',
-        stateKey: 'nonOrthogonal',
-        groupId: 'grid_nonorthogonal_controls',
-        controls: Object.freeze([
-            Object.freeze({
-                key: 'angle',
-                controlId: 'nonorthogonal_angle_slider',
-                valueId: 'nonorthogonal_angle_value_display',
-                label: 'Skew angle',
-                min: 8,
-                max: 72,
-                step: 1,
-                value: 28,
-                suffix: '°'
-            }),
-            Object.freeze({
-                key: 'spacing',
-                controlId: 'nonorthogonal_spacing_slider',
-                valueId: 'nonorthogonal_spacing_value_display',
-                label: 'Cell spacing',
-                min: 0.55,
-                max: 2,
-                step: 0.05,
-                value: 1
-            })
-        ])
-    }),
-    grid_triangular: Object.freeze({
-        label: 'Triangular Grid',
-        stateKey: 'triangular',
-        groupId: 'grid_triangular_controls',
-        controls: Object.freeze([
-            Object.freeze({
-                key: 'size',
-                controlId: 'triangular_size_slider',
-                valueId: 'triangular_size_value_display',
-                label: 'Triangle size',
-                min: 0.55,
-                max: 2,
-                step: 0.05,
-                value: 1
-            }),
-            Object.freeze({
-                key: 'rotation',
-                controlId: 'triangular_rotation_slider',
-                valueId: 'triangular_rotation_value_display',
-                label: 'Rotation',
-                min: -30,
-                max: 30,
-                step: 1,
-                value: 0,
-                suffix: '°'
-            })
-        ])
-    }),
-    grid_curvilinear: Object.freeze({
-        label: 'Curvilinear Grid',
-        stateKey: 'curvilinear',
-        groupId: 'grid_curvilinear_controls',
-        controls: Object.freeze([
-            Object.freeze({
-                key: 'bend',
-                controlId: 'curvilinear_bend_slider',
-                valueId: 'curvilinear_bend_value_display',
-                label: 'Arc bend',
-                min: 0.15,
-                max: 1,
-                step: 0.05,
-                value: 0.65
-            }),
-            Object.freeze({
-                key: 'focus',
-                controlId: 'curvilinear_focus_slider',
-                valueId: 'curvilinear_focus_value_display',
-                label: 'Focus offset',
-                min: -1,
-                max: 1,
-                step: 0.05,
-                value: 0
-            })
-        ])
-    }),
-    grid_spiral: Object.freeze({
-        label: 'Spiral Grid',
-        stateKey: 'spiral',
-        groupId: 'grid_spiral_controls',
-        controls: Object.freeze([
-            Object.freeze({
-                key: 'turns',
-                controlId: 'spiral_turns_slider',
-                valueId: 'spiral_turns_value_display',
-                label: 'Turns',
-                min: 0.5,
-                max: 5,
-                step: 0.1,
-                value: 2.5
-            }),
-            Object.freeze({
-                key: 'tightness',
-                controlId: 'spiral_tightness_slider',
-                valueId: 'spiral_tightness_value_display',
-                label: 'Tightness',
-                min: 0.2,
-                max: 1.5,
-                step: 0.05,
-                value: 0.8
-            }),
-            Object.freeze({
-                key: 'arms',
-                controlId: 'spiral_arms_slider',
-                valueId: 'spiral_arms_value_display',
-                label: 'Arms',
-                min: 1,
-                max: 6,
-                step: 1,
-                value: 2
-            })
-        ])
-    }),
-    grid_irregular: Object.freeze({
-        label: 'Irregular-spaced Grid',
-        stateKey: 'irregular',
-        groupId: 'grid_irregular_controls',
-        controls: Object.freeze([
-            Object.freeze({
-                key: 'variation',
-                controlId: 'irregular_variation_slider',
-                valueId: 'irregular_variation_value_display',
-                label: 'Spacing variation',
-                min: 0,
-                max: 0.8,
-                step: 0.05,
-                value: 0.35
-            }),
-            Object.freeze({
-                key: 'clustering',
-                controlId: 'irregular_clustering_slider',
-                valueId: 'irregular_clustering_value_display',
-                label: 'Clustering',
-                min: -1,
-                max: 1,
-                step: 0.05,
-                value: 0
-            })
-        ])
-    })
+const control = (key, id, label, min, max, step, value, tooltip, suffix = '') => ({
+    key,
+    controlId: `${id}_slider`,
+    valueId: `${id}_value_display`,
+    label,
+    min,
+    max,
+    step,
+    value,
+    tooltip,
+    suffix
 });
 
-export const GRID_SHAPE_DEFAULTS = Object.freeze(
-    Object.fromEntries(
-        Object.values(GRID_SHAPE_PARAMETERS).map(definition => [
-            definition.stateKey,
-            Object.freeze(Object.fromEntries(
-                definition.controls.map(control => [control.key, control.value])
-            ))
-        ])
-    )
+const grid = (label, stateKey, controls) => ({ label, stateKey, controls });
+
+export const GRID_SHAPE_PARAMETERS = {
+    grid_rectilinear: grid('Rectilinear Grid', 'rectilinear', [
+        control('xSpacing', 'rectilinear_x_spacing', 'X spacing', 0.45, 2.5, 0.05, 1, 'Adjust the horizontal cell spacing'),
+        control('ySpacing', 'rectilinear_y_spacing', 'Y spacing', 0.45, 2.5, 0.05, 1, 'Adjust the vertical cell spacing')
+    ]),
+    grid_nonorthogonal: grid('Non-orthogonal Grid', 'nonOrthogonal', [
+        control('angle', 'nonorthogonal_angle', 'Skew angle', 8, 72, 1, 28, 'Adjust the angle between grid families', '°'),
+        control('spacing', 'nonorthogonal_spacing', 'Cell spacing', 0.55, 2, 0.05, 1, 'Adjust the non-orthogonal cell size')
+    ]),
+    grid_triangular: grid('Triangular Grid', 'triangular', [
+        control('size', 'triangular_size', 'Triangle size', 0.55, 2, 0.05, 1, 'Adjust the triangular cell size'),
+        control('rotation', 'triangular_rotation', 'Rotation', -30, 30, 1, 0, 'Rotate the triangular lattice', '°')
+    ]),
+    grid_curvilinear: grid('Curvilinear Grid', 'curvilinear', [
+        control('bend', 'curvilinear_bend', 'Arc bend', 0.15, 1, 0.05, 0.65, 'Adjust the curvature of the grid arcs'),
+        control('focus', 'curvilinear_focus', 'Focus offset', -1, 1, 0.05, 0, 'Move the curvilinear focus left or right')
+    ]),
+    grid_spiral: grid('Spiral Grid', 'spiral', [
+        control('turns', 'spiral_turns', 'Turns', 0.5, 5, 0.1, 2.5, 'Adjust the number of spiral turns'),
+        control('tightness', 'spiral_tightness', 'Tightness', 0.2, 1.5, 0.05, 0.8, 'Adjust how tightly the spiral winds'),
+        control('arms', 'spiral_arms', 'Arms', 1, 6, 1, 2, 'Adjust the number of interlaced spiral arms')
+    ]),
+    grid_irregular: grid('Irregular-spaced Grid', 'irregular', [
+        control('variation', 'irregular_variation', 'Spacing variation', 0, 0.8, 0.05, 0.35, 'Adjust the amount of irregular spacing'),
+        control('clustering', 'irregular_clustering', 'Clustering', -1, 1, 0.05, 0, 'Bias the spacing toward clustered bands')
+    ])
+};
+
+export const GRID_SHAPE_DEFAULTS = Object.fromEntries(
+    Object.values(GRID_SHAPE_PARAMETERS).map(({ stateKey, controls }) => [
+        stateKey,
+        Object.fromEntries(controls.map(({ key, value }) => [key, value]))
+    ])
 );
+
+export function formatGridValue(value, { step, suffix }) {
+    const decimals = String(step).split('.')[1]?.length || 0;
+    return `${decimals ? Number(value).toFixed(decimals) : Math.round(value)}${suffix}`;
+}

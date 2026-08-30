@@ -7,11 +7,13 @@ import {
 } from '../js/rendering/shape-generators.js';
 import { state } from '../js/store/state.js';
 import { drawAxes, drawGrid } from '../js/rendering/canvas-primitives.js';
+import { GRID_SHAPE_DEFAULTS } from '../js/constants/grid-shapes.js';
 
 const generate = (currentInputShape, config) => generateInputShapePointSets({
     currentInputShape,
     currentFunction: 'identity',
     zetaContinuationEnabled: false,
+    gridParameters: GRID_SHAPE_DEFAULTS,
     ...config
 });
 

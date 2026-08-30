@@ -1,4 +1,4 @@
-import { eventBus } from '../store/events.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import { runtime } from '../store/runtime.js';
 import { generateDiscreteSource } from '../analysis/discrete-sources.js';
@@ -516,7 +516,7 @@ class WorkerNativeDomainDynamicsBackend {
                 ...runtime.rendering.domainDynamicsStats,
                 completedTiles: runtime.rendering.domainDynamicsStats.completedTiles + 1
             });
-            eventBus.emit('redraw:all');
+            requestUiRedraw();
         } else {
             this.cancel(job.id);
             throw new Error(`Unsupported native domain worker message: ${message.type}.`);
@@ -542,7 +542,7 @@ class WorkerNativeDomainDynamicsBackend {
                 maximumTileMilliseconds: job.maximumTileMilliseconds,
                 completedJobs: previous.completedJobs + 1
             });
-            eventBus.emit('redraw:all');
+            requestUiRedraw();
         }
     }
 

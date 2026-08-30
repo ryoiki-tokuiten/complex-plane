@@ -1,14 +1,14 @@
 import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, zPlaneInitialRanges, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
-import { bindGenericPlaneInteractions } from '../ui/event-listeners.js';
+import { bindGenericPlaneInteractions, invalidateAllCanvasRects } from '../ui/event-listeners.js';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
 import { synchronizePreciseViewport } from '../native/precise-viewport.js';
 import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
-import { eventBus } from '../store/events.js';
 import { registerControls } from '../ui/control-registry.js';
 import { requireInteger } from './numeric-contracts.js';
 import { refreshPanelEdgeHandles } from '../ui/panel-layout-manager.js';
+import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
 
 const { controls } = context;
 
@@ -41,7 +41,6 @@ export function setupDOMReferences() {
     wCtx.imageSmoothingQuality = 'high';
 
     registerControls(document, controls);
-    controls.cauchy_integral_results_info = controls.cauchyIntegralResultsInfo;
     controls.zPlaneCanvas = zCanvas;
     controls.wPlaneCanvas = wCanvas;
 
@@ -68,7 +67,7 @@ export function setupDOMReferences() {
 
     const missingControls = requiredControls.filter(key => !controls[key]);
     if (missingControls.length > 0) {
-        console.error(`Essential controls not found: ${missingControls.join(', ')}`);
+        throw new Error(`Essential controls not found: ${missingControls.join(', ')}`);
     }
     context.zCanvas = zCanvas;
     context.wCanvas = wCanvas;
@@ -212,7 +211,7 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
         }
     }
 
-    eventBus.emit('layout:canvas');
+    invalidateAllCanvasRects();
 }
 
 export function getChainingTitleHTML(i, mode) {
@@ -370,7 +369,7 @@ export function updateChainingColumns(count) {
         wPlaneThreeContainersList.push(newThreeContainer);
 
         // Allow pan/zoom in chained canvases
-        bindGenericPlaneInteractions(newCanvas, params, () => eventBus.emit('redraw:domain'));
+        bindGenericPlaneInteractions(newCanvas, params, requestDomainRedraw);
     }
     
     // Remove planes if needed

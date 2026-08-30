@@ -19,6 +19,15 @@ export function disposeThreeObject(object) {
     });
 }
 
+export function scaleSignedOutput(value, outputScale, halfExtent, invalidValue = NaN) {
+    if (!Number.isFinite(value)) return invalidValue;
+    const ratio = value / Math.max(1e-10, outputScale);
+    const magnitude = Math.abs(ratio);
+    return (magnitude <= 1
+        ? ratio
+        : Math.sign(ratio) * (1 + Math.tanh((magnitude - 1) * 0.55) * 0.18)) * halfExtent;
+}
+
 export function createCanvasTextSprite(THREE, text, options = {}) {
     const {
         color = 'rgba(236, 241, 255, 0.95)',

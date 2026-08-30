@@ -13,8 +13,7 @@ import {
 } from '../native/complex-engine.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
 import {
-    CUSTOM_GRID_INPUT_SHAPE_SET,
-    GRID_SHAPE_DEFAULTS
+    CUSTOM_GRID_INPUT_SHAPE_SET
 } from '../constants/grid-shapes.js';
 
 const RADIAL_DISCRETE_STEP_COLOR = 'rgba(255, 255, 0, 0.7)';
@@ -70,9 +69,9 @@ function clamp(value, minimum, maximum) {
 }
 
 function gridParameter(config, shapeKey, key) {
-    const fallback = GRID_SHAPE_DEFAULTS[shapeKey]?.[key];
-    const value = Number(config.gridParameters?.[shapeKey]?.[key]);
-    return Number.isFinite(value) ? value : fallback;
+    const value = Number(config.gridParameters[shapeKey][key]);
+    if (!Number.isFinite(value)) throw new Error(`Invalid ${shapeKey}.${key} grid parameter.`);
+    return value;
 }
 
 function customGridStyles() {
@@ -479,7 +478,7 @@ function styleForRole(role) {
 }
 
 export function generateInputShapePointSets(config) {
-    if (['empty_grid', 'navigate', 'media', 'image', 'video'].includes(config?.currentInputShape)) return [];
+    if (['empty_grid', 'navigate', 'media'].includes(config?.currentInputShape)) return [];
     if (CUSTOM_GRID_INPUT_SHAPE_SET.has(config?.currentInputShape)) {
         const generator = CUSTOM_GRID_GENERATORS[config.currentInputShape];
         if (!generator) throw new Error(`Missing custom grid generator for ${config.currentInputShape}.`);

@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { applyFractalPreset } from '../js/analysis/fractal-presets.js';
 import { runtime } from '../js/store/runtime.js';
 import { context, state } from '../js/store/state.js';
-import { eventBus } from '../js/store/events.js';
 import {
     getEffectiveBaseTransformFunction,
     getMappedTransformProfile
@@ -994,8 +993,6 @@ test('async renderer reaches final scale one without another redraw trigger', as
     const before = snapshotState();
     const targetCtx = makeTargetCtx();
     const restoreGlobals = makeFakeCanvasEnvironment(targetCtx);
-    let redraws = 0;
-    const unsubscribe = eventBus.on('redraw:all', () => { redraws += 1; });
 
     try {
         cancelPlanarDomainDynamics();
@@ -1007,13 +1004,11 @@ test('async renderer reaches final scale one without another redraw trigger', as
         await waitFor(() => targetCtx.puts.some(put => put.image.width === PLANE.width && put.image.height === PLANE.height) &&
             selectDomainDynamicsBackend().queue.length === 0);
         assert.equal(targetCtx.puts.length, 1);
-        assert.equal(redraws, 2);
         assert.equal(selectDomainDynamicsBackend().queue.length, 0);
         assert.equal(selectDomainDynamicsBackend().queueIndex, 0);
         assert.equal(runtime.rendering.processingDomainDynamics, false);
     } finally {
         cancelPlanarDomainDynamics();
-        unsubscribe();
         restoreGlobals();
         restoreState(before);
     }
@@ -1045,19 +1040,15 @@ test('domain-coloring redraws reuse an active CPU job while dirty state is being
     }
 });
 
-test('function and algebraic-expression changes request a domain redraw', () => {
+test('function and algebraic-expression changes invalidate domain coloring', () => {
     const before = snapshotState();
-    const events = [];
-    const unsubscribe = eventBus.on('redraw:domain', markDirty => events.push(markDirty));
 
     try {
         context.domainColoringDirty = false;
         state.currentFunction = state.currentFunction === 'cos' ? 'tan' : 'cos';
         state.algebraicChainingZExpr = 'z + 1';
-        assert.deepEqual(events, [true, true]);
         assert.equal(context.domainColoringDirty, true);
     } finally {
-        unsubscribe();
         restoreState(before);
     }
 });

@@ -82,10 +82,6 @@
                         </div>
                     </div>
 
-                    <!-- Hidden Compatibility inputs -->
-                    <input type="checkbox" id="enable_real_plots_cb" class="hidden" style="display:none;" aria-hidden="true">
-                    <input type="checkbox" id="enable_dynamic_plotting_cb" class="hidden" style="display:none;" aria-hidden="true">
-
                     <!-- Parameter / Controls Content Area -->
                     <div id="parameter-controls-panel" class="panel-content-details">
                         <!-- Laplace Transform Controls -->
@@ -612,40 +608,6 @@
                                                     data-tooltip="Scale the vertical height of the 3D surface plot">
                                             </div>
                                         </div>
-                                    </div>
-                                </div>
-
-                                <div class="control-group spaced-control">
-                                    <label for="real_plots_contours_cb"
-                                        data-tooltip="Overlay level contour lines onto the 3D real surface plot">
-                                        <input type="checkbox" id="real_plots_contours_cb">
-                                        <span class="custom-checkbox-visual"></span>
-                                        Contour Lines
-                                    </label>
-                                </div>
-                                <div id="real_plots_contours_details" class="contour-controls-panel hidden">
-                                    <div class="control-group contour-slider-field">
-                                        <div class="contour-slider-label">
-                                            <label for="real_plots_contour_interval_slider">Contour Interval:</label>
-                                            <output id="real_plots_contour_interval_value_display">0.50</output>
-                                        </div>
-                                        <input type="range" id="real_plots_contour_interval_slider" min="0.05"
-                                            max="3.00" step="0.05" value="0.50">
-                                    </div>
-                                    <div class="control-group contour-slider-field">
-                                        <div class="contour-slider-label">
-                                            <label for="real_plots_contour_thickness_slider">Contour Thickness:</label>
-                                            <output id="real_plots_contour_thickness_value_display">1.5</output>
-                                        </div>
-                                        <input type="range" id="real_plots_contour_thickness_slider" min="0.5" max="5.0"
-                                            step="0.1" value="1.5">
-                                    </div>
-                                    <div class="contour-action-row">
-                                        <button id="real_plots_show_2d_contour_btn" class="contour-2d-toggle-btn"
-                                            type="button">
-                                            <i data-lucide="image"></i>
-                                            <span>Show 2D Contour Plot</span>
-                                        </button>
                                     </div>
                                 </div>
 
@@ -1312,146 +1274,7 @@
                                 <span class="canvas-grid-controls-kicker">z-plane</span>
                             </div>
 
-                            <div id="grid_rectilinear_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
-                                data-grid-shape-group="grid_rectilinear">
-                                <div class="control-group">
-                                    <label for="rectilinear_x_spacing_slider">X spacing:
-                                        <output id="rectilinear_x_spacing_value_display">1.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="rectilinear_x_spacing_slider" min="0.45" max="2.5"
-                                            step="0.05" value="1" data-tooltip="Adjust the horizontal cell spacing">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="rectilinear_y_spacing_slider">Y spacing:
-                                        <output id="rectilinear_y_spacing_value_display">1.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="rectilinear_y_spacing_slider" min="0.45" max="2.5"
-                                            step="0.05" value="1" data-tooltip="Adjust the vertical cell spacing">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="grid_nonorthogonal_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
-                                data-grid-shape-group="grid_nonorthogonal">
-                                <div class="control-group">
-                                    <label for="nonorthogonal_angle_slider">Skew angle:
-                                        <output id="nonorthogonal_angle_value_display">28°</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="nonorthogonal_angle_slider" min="8" max="72"
-                                            step="1" value="28" data-tooltip="Adjust the angle between grid families">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="nonorthogonal_spacing_slider">Cell spacing:
-                                        <output id="nonorthogonal_spacing_value_display">1.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="nonorthogonal_spacing_slider" min="0.55" max="2"
-                                            step="0.05" value="1" data-tooltip="Adjust the non-orthogonal cell size">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="grid_triangular_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
-                                data-grid-shape-group="grid_triangular">
-                                <div class="control-group">
-                                    <label for="triangular_size_slider">Triangle size:
-                                        <output id="triangular_size_value_display">1.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="triangular_size_slider" min="0.55" max="2"
-                                            step="0.05" value="1" data-tooltip="Adjust the triangular cell size">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="triangular_rotation_slider">Rotation:
-                                        <output id="triangular_rotation_value_display">0°</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="triangular_rotation_slider" min="-30" max="30"
-                                            step="1" value="0" data-tooltip="Rotate the triangular lattice">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="grid_curvilinear_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
-                                data-grid-shape-group="grid_curvilinear">
-                                <div class="control-group">
-                                    <label for="curvilinear_bend_slider">Arc bend:
-                                        <output id="curvilinear_bend_value_display">0.65</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="curvilinear_bend_slider" min="0.15" max="1"
-                                            step="0.05" value="0.65" data-tooltip="Adjust the curvature of the grid arcs">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="curvilinear_focus_slider">Focus offset:
-                                        <output id="curvilinear_focus_value_display">0.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="curvilinear_focus_slider" min="-1" max="1"
-                                            step="0.05" value="0" data-tooltip="Move the curvilinear focus left or right">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="grid_spiral_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
-                                data-grid-shape-group="grid_spiral">
-                                <div class="control-group">
-                                    <label for="spiral_turns_slider">Turns:
-                                        <output id="spiral_turns_value_display">2.5</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="spiral_turns_slider" min="0.5" max="5" step="0.1"
-                                            value="2.5" data-tooltip="Adjust the number of spiral turns">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="spiral_tightness_slider">Tightness:
-                                        <output id="spiral_tightness_value_display">0.80</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="spiral_tightness_slider" min="0.2" max="1.5"
-                                            step="0.05" value="0.8" data-tooltip="Adjust how tightly the spiral winds">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="spiral_arms_slider">Arms:
-                                        <output id="spiral_arms_value_display">2</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="spiral_arms_slider" min="1" max="6" step="1" value="2"
-                                            data-tooltip="Adjust the number of interlaced spiral arms">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="grid_irregular_controls" class="canvas-grid-controls-group grid-tuning-group hidden"
-                                data-grid-shape-group="grid_irregular">
-                                <div class="control-group">
-                                    <label for="irregular_variation_slider">Spacing variation:
-                                        <output id="irregular_variation_value_display">0.35</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="irregular_variation_slider" min="0" max="0.8"
-                                            step="0.05" value="0.35" data-tooltip="Adjust the amount of irregular spacing">
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label for="irregular_clustering_slider">Clustering:
-                                        <output id="irregular_clustering_value_display">0.00</output>
-                                    </label>
-                                    <div class="slider-container">
-                                        <input type="range" id="irregular_clustering_slider" min="-1" max="1"
-                                            step="0.05" value="0" data-tooltip="Bias the spacing toward clustered bands">
-                                    </div>
-                                </div>
-                            </div>
+                            <div id="grid_shape_controls_groups"></div>
                         </div>
 
                         <!-- Canvas Radial Discrete Steps Overlay -->

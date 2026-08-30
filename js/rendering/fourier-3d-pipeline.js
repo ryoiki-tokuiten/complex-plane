@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state, context } from '../store/state.js';
-import { disposeThreeObject, createCanvasTextSprite } from './three-utils.js';
+import { disposeThreeObject, createCanvasTextSprite, scaleSignedOutput } from './three-utils.js';
 import { computeCenterOfMassFrequencySweep } from '../analysis/laplace-transform.js';
+import { createOrthographicSceneHost } from './parallel-3d-graphs.js';
 
 const BACKGROUND = 0x05060b;
 const AXIS_COLOR = 0xaeb8cc;
@@ -31,16 +31,8 @@ function lerp(a, b, t) {
     return a + (b - a) * t;
 }
 
-function scaledOutputCoordinate(value, outputScale, halfExtent) {
-    if (!Number.isFinite(value)) return 0;
-    const scale = Math.max(EPSILON, outputScale);
-    const ratio = value / scale;
-    const magnitude = Math.abs(ratio);
-    const signed = magnitude <= 1
-        ? ratio
-        : Math.sign(ratio) * (1 + Math.tanh((magnitude - 1) * 0.55) * 0.18);
-    return signed * halfExtent;
-}
+const scaledOutputCoordinate = (value, outputScale, halfExtent) =>
+    scaleSignedOutput(value, outputScale, halfExtent, 0);
 
 function clearThreeGroup(group) {
     while (group.children.length) {
@@ -153,82 +145,20 @@ function getDecomposedFrequencies() {
 export class Fourier3DPipelineRenderer {
     constructor(container) {
         this.container = container;
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.OrthographicCamera(-18, 18, 11, -11, 0.08, 10000);
-        const cameraTarget = new THREE.Vector3(0, 0, 0);
-        const cameraOffset = new THREE.Vector3(6.7, 4.9, 6.5).normalize().multiplyScalar(2500);
-        this.camera.position.copy(cameraTarget).add(cameraOffset);
-
-        this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: false,
-            powerPreference: 'high-performance',
-            depth: true,
-            stencil: false,
-            preserveDrawingBuffer: true
-        });
-        this.renderer.setClearColor(BACKGROUND);
-        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.05;
-        this.syncPixelRatio();
-        this.container.replaceChildren(this.renderer.domElement);
-
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = false;
-        this.controls.enablePan = true;
-        this.controls.enableZoom = true;
-        this.controls.zoomToCursor = true;
-        this.controls.screenSpacePanning = true;
-        this.controls.target.copy(cameraTarget);
-        this.controls.update();
-        this.controls.saveState();
-        this.controls.addEventListener('change', () => this.render());
-
-        this.contentGroup = new THREE.Group();
-        this.scene.add(this.contentGroup);
-        this.addLights();
-
-        this.resizeObserver = new ResizeObserver(() => this.resize());
-        this.resizeObserver.observe(container);
+        Object.assign(this, createOrthographicSceneHost(container, {
+            cameraBounds: [-18, 18, 11, -11, 0.08, 10000],
+            cameraTarget: [0, 0, 0],
+            cameraOffset: [6.7, 4.9, 6.5],
+            cameraDistance: 2500,
+            background: BACKGROUND,
+            getSize: () => ({
+                width: container.clientWidth || window.innerWidth || 1,
+                height: container.clientHeight || window.innerHeight || 1
+            }),
+            getFrustum: aspect => ({ halfHeight: 12, halfWidth: 12 * aspect }),
+            render: () => this.render()
+        }));
         this.resize();
-    }
-
-    syncPixelRatio() {
-        const ratio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
-        this.renderer.setPixelRatio(Math.min(ratio, 2.5));
-    }
-
-    addLights() {
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.34));
-        this.scene.add(new THREE.HemisphereLight(0xe9f1ff, 0x050510, 1.55));
-
-        const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
-        keyLight.position.set(5, 7, 5);
-        this.scene.add(keyLight);
-
-        const rimLight = new THREE.DirectionalLight(0x8ed8ff, 1.15);
-        rimLight.position.set(-5, 3, -5);
-        this.scene.add(rimLight);
-    }
-
-    resize() {
-        const width = this.container.clientWidth || window.innerWidth || 1;
-        const height = this.container.clientHeight || window.innerHeight || 1;
-        const aspect = width / height;
-
-        const frustumHeight = 24.0;
-        let halfHeight = frustumHeight * 0.5;
-        let halfWidth = halfHeight * aspect;
-
-        this.syncPixelRatio();
-        this.camera.left = -halfWidth;
-        this.camera.right = halfWidth;
-        this.camera.top = halfHeight;
-        this.camera.bottom = -halfHeight;
-        this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height, false);
-        this.render();
     }
 
     render() {
@@ -594,22 +524,7 @@ export class Fourier3DPipelineRenderer {
     }
 
     dispose() {
-        if (this.resizeObserver) {
-            this.resizeObserver.disconnect();
-            this.resizeObserver = null;
-        }
-        if (this.controls) {
-            this.controls.dispose();
-            this.controls = null;
-        }
-        if (this.renderer) {
-            this.renderer.dispose();
-            if (this.renderer.domElement && this.renderer.domElement.parentElement) {
-                this.renderer.domElement.remove();
-            }
-            this.renderer = null;
-        }
-        clearThreeGroup(this.contentGroup);
+        this.disposeSceneHost();
     }
 }
 

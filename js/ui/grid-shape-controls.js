@@ -2,7 +2,8 @@ import { state } from '../store/state.js';
 import {
     CUSTOM_GRID_INPUT_SHAPE_SET,
     GRID_SHAPE_DEFAULTS,
-    GRID_SHAPE_PARAMETERS
+    GRID_SHAPE_PARAMETERS,
+    formatGridValue
 } from '../constants/grid-shapes.js';
 
 const CORNER_OCCUPYING_PANEL_IDS = Object.freeze([
@@ -17,20 +18,9 @@ function element(id) {
     return typeof document === 'undefined' ? null : document.getElementById(id);
 }
 
-function stepPrecision(step) {
-    const decimal = String(step).indexOf('.');
-    return decimal < 0 ? 0 : String(step).length - decimal - 1;
-}
-
-function formatGridValue(value, definition) {
-    const precision = stepPrecision(definition.step);
-    const rendered = precision ? Number(value).toFixed(precision) : String(Math.round(value));
-    return `${rendered}${definition.suffix || ''}`;
-}
-
 function getGridParameters(shape) {
     const definition = GRID_SHAPE_PARAMETERS[shape];
-    return state.gridParameters?.[definition?.stateKey] || GRID_SHAPE_DEFAULTS[definition?.stateKey] || {};
+    return state.gridParameters[definition.stateKey];
 }
 
 function rectanglesOverlap(first, second) {
@@ -160,11 +150,11 @@ export function initializeGridShapeControlsFromDOM() {
 
 export function setGridShapeParameter(shape, key, value) {
     const definition = GRID_SHAPE_PARAMETERS[shape];
-    if (!definition || !Number.isFinite(value)) return;
+    if (!definition || !Number.isFinite(value)) throw new Error(`Invalid ${shape}.${key} grid parameter.`);
     state.gridParameters = {
-        ...(state.gridParameters || {}),
+        ...state.gridParameters,
         [definition.stateKey]: {
-            ...(state.gridParameters?.[definition.stateKey] || GRID_SHAPE_DEFAULTS[definition.stateKey]),
+            ...state.gridParameters[definition.stateKey],
             [key]: value
         }
     };

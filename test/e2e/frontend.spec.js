@@ -36,6 +36,32 @@ test('Riemann surface shaders compile with branch-cut controls', async ({ page }
     expect(shaderErrors).toEqual([]);
 });
 
+test('Riemann surfaces support the full Taylor control range', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+        if (message.type() === 'error') errors.push(message.text());
+    });
+
+    await page.click('#select_cos_btn');
+    const result = await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        const slider = document.getElementById('taylor_series_order_slider');
+        slider.value = '15';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        state.taylorSeriesCenter = { re: 1, im: 0 };
+        state.taylorSeriesEnabled = true;
+        const { renderRiemannSurface } = await import('./js/rendering/webgl-riemann-surface.js');
+        return {
+            order: state.taylorSeriesOrder,
+            rendered: renderRiemannSurface(document.getElementById('w_plane_canvas'), { stage: 1 })
+        };
+    });
+
+    expect(result).toEqual({ order: 15, rendered: true });
+    expect(errors).toEqual([]);
+});
+
 test('branch-aware algebraic Riemann shaders compile', async ({ page }) => {
     const shaderErrors = [];
     page.on('console', message => {
@@ -194,15 +220,19 @@ test('Preact controls preserve the public DOM and interaction contract', async (
     });
     await expect(page.locator('#dynamic_sequence_bindings_list input[type="number"]')).toHaveCount(2);
 
-    await page.locator('#enable_real_plots_cb').evaluate(element => {
-        element.checked = true;
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await page.locator('#select_real_plots_btn').click();
+    await expect(page.locator('#real_plots_controls_container')).not.toHaveClass(/hidden/);
+    await expect(page.locator('#core_application_controls')).toHaveClass(/hidden/);
+    await expect(page.locator('#algebraic_chaining_params')).toHaveClass(/hidden/);
+    await expect(page.locator('#real_plots_contours_cb')).toHaveCount(0);
     for (const part of ['input', 'imag']) {
         await page.locator(`#real_plots_${part}_preset`).selectOption('custom');
         await expect(page.locator(`#real_plots_custom_${part}_container`)).not.toHaveClass(/hidden/);
         await page.locator(`#real_plots_custom_${part}`).fill(part === 'input' ? 'x + y' : 'x - y');
     }
+    await page.locator('#select_laplace_btn').click();
+    await expect(page.locator('#real_plots_controls_container')).toHaveClass(/hidden/);
+    await expect(page.locator('#algebraic_chaining_params')).toHaveClass(/hidden/);
     expect(errors).toEqual([]);
 });
 
@@ -622,7 +652,7 @@ test('raster fold view stays connected and chain depth settles safely', async ({
     await selectInputShape(page, 'media');
     await page.locator('#media_upload_input').setInputFiles(resolve('Example1.png'));
     await page.waitForFunction(() => {
-        return import('./js/store/state.js').then(({ state }) => state.imageContentVersion > 0);
+        return import('./js/store/state.js').then(({ state }) => state.mediaVersion > 0);
     });
 
     await page.locator('#w_plane_canvas_wrapper').click({ button: 'right' });

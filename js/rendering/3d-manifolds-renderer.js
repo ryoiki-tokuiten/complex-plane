@@ -7,10 +7,7 @@ import { requireFiniteComplex, requireFiniteNumber, isFiniteComplex } from '../u
 import { getManifold, DEFAULT_MANIFOLD_ID } from './manifold-registry.js';
 import { buildNativeFoldPreimageMarkers } from '../native/complex-engine.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
-import {
-    getRasterDisplayDimensions,
-    getRasterOpacityForShape
-} from '../utils/raster-media.js';
+import { getMediaDisplayDimensions } from '../utils/raster-media.js';
 
 const COLOR_BACKGROUND = 0x07070d;
 const CANONICAL_SURFACE_RES = 48;
@@ -215,8 +212,7 @@ export class ThreeManifoldsRenderer {
         }
 
         if (this.rasterManifoldMesh && this.rasterManifoldMesh.material) {
-            const rasterOpacity = getRasterOpacityForShape(state.currentInputShape) ?? 1.0;
-            this.rasterManifoldMesh.material.opacity = Math.max(0.05, rasterOpacity);
+            this.rasterManifoldMesh.material.opacity = Math.max(0.05, state.mediaOpacity);
         }
         this.renderDirty = true;
     }
@@ -653,14 +649,14 @@ export class ThreeManifoldsRenderer {
         return true;
     }
 
-    buildRasterManifold(source, shape = state.currentInputShape, progressOverride = undefined) {
+    buildRasterManifold(source, progressOverride = undefined) {
         if (!source) throw new Error('Raster manifold rendering requires a media source.');
         this.setManifold(state.selectedManifold);
         this.resize();
         this.setManifoldMode();
         this.clearManifoldGeometry();
 
-        const sourceSize = getRasterDisplayDimensions(shape);
+        const sourceSize = getMediaDisplayDimensions();
         const w = Math.max(0.1, sourceSize.width);
         const h = Math.max(0.1, sourceSize.height);
         const a0 = Number.isFinite(state.a0) ? state.a0 : 0;
@@ -770,12 +766,11 @@ export class ThreeManifoldsRenderer {
         texture.generateMipmaps = false;
         texture.needsUpdate = true;
 
-        const opacity = getRasterOpacityForShape(shape) ?? 1.0;
         const material = new THREE.MeshStandardMaterial({
             map: texture,
             side: THREE.DoubleSide,
             transparent: true,
-            opacity: Math.max(0.05, opacity),
+            opacity: Math.max(0.05, state.mediaOpacity),
             roughness: 0.7,
             metalness: 0.1,
             depthWrite: true,

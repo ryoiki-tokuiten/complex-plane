@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { state, zPlaneParams } from '../store/state.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { NUM_POINTS_CURVE } from '../constants/numerical.js';
@@ -8,10 +7,11 @@ import {
     buildInputShapeGeometryConfig,
     generateInputShapePointSets
 } from './shape-generators.js';
-import { disposeThreeObject, createCanvasTextSprite } from './three-utils.js';
+import { disposeThreeObject, createCanvasTextSprite, scaleSignedOutput } from './three-utils.js';
 import { buildLaplaceWinding } from '../analysis/laplace-transform.js';
 import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
 import { CUSTOM_GRID_INPUT_SHAPES } from '../constants/grid-shapes.js';
+import { createOrthographicSceneHost } from './parallel-3d-graphs.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -1078,25 +1078,14 @@ function addLabel(group, text, position, options = {}) {
     return sprite;
 }
 
-function scaledOutputCoordinate(value, outputScale, halfExtent) {
-    if (!Number.isFinite(value)) return NaN;
-    const scale = Math.max(EPSILON, outputScale);
-    const ratio = value / scale;
-    const magnitude = Math.abs(ratio);
-    const signed = magnitude <= 1
-        ? ratio
-        : Math.sign(ratio) * (1 + Math.tanh((magnitude - 1) * 0.55) * 0.18);
-    return signed * halfExtent;
-}
-
 function graphPointFor(sample, scales, mode, zOffset = 0) {
     if (!isFiniteComplex(sample.output)) return null;
 
     const x = lerp(-INPUT_AXIS_HALF, INPUT_AXIS_HALF, sample.t);
     const reScale = scales?.reScale || 1;
     const imScale = scales?.imScale || 1;
-    const y = scaledOutputCoordinate(sample.output.re, reScale, OUTPUT_AXIS_HALF);
-    const z = zOffset + scaledOutputCoordinate(sample.output.im, imScale, DEPTH_AXIS_HALF);
+    const y = scaleSignedOutput(sample.output.re, reScale, OUTPUT_AXIS_HALF);
+    const z = zOffset + scaleSignedOutput(sample.output.im, imScale, DEPTH_AXIS_HALF);
 
     if (mode === 're') return new THREE.Vector3(x, y, zOffset);
     if (mode === 'im') return new THREE.Vector3(x, 0, z);
@@ -1173,14 +1162,14 @@ function connectedGraphPointFor(sample, curve, mode) {
     if (mode === 're') {
         return new THREE.Vector3(
             x,
-            scaledOutputCoordinate(sample.output.re, curve.reScale, OUTPUT_AXIS_HALF),
+            scaleSignedOutput(sample.output.re, curve.reScale, OUTPUT_AXIS_HALF),
             transverse * DEPTH_AXIS_HALF
         );
     }
     return new THREE.Vector3(
         x,
         transverse * OUTPUT_AXIS_HALF,
-        scaledOutputCoordinate(sample.output.im, curve.imScale, DEPTH_AXIS_HALF)
+        scaleSignedOutput(sample.output.im, curve.imScale, DEPTH_AXIS_HALF)
     );
 }
 
@@ -1300,83 +1289,24 @@ function graphFourierProgress(data) {
 class TransformationGraphRenderer {
     constructor(container) {
         this.container = container;
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.OrthographicCamera(-5, 5, 3, -3, 0.08, 5000);
-        const cameraTarget = new THREE.Vector3(0.1, 0, 0);
-        const cameraOffset = new THREE.Vector3(6.7, 4.9, 6.5).normalize().multiplyScalar(2000);
-        this.camera.position.copy(cameraTarget).add(cameraOffset);
-
-        this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: false,
-            powerPreference: 'high-performance',
-            depth: true,
-            stencil: false,
-            preserveDrawingBuffer: true
-        });
-        this.renderer.setClearColor(BACKGROUND);
-        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.05;
-        this.syncPixelRatio();
-        this.container.replaceChildren(this.renderer.domElement);
-
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = false;
-        this.controls.enablePan = true;
-        this.controls.enableZoom = true;
-        this.controls.zoomToCursor = true;
-        this.controls.screenSpacePanning = true;
-        this.controls.target.copy(cameraTarget);
-        this.controls.update();
-        this.controls.saveState();
-        this.controls.addEventListener('change', () => this.render());
-
-        this.contentGroup = new THREE.Group();
-        this.scene.add(this.contentGroup);
-        this.addLights();
-
-        this.resizeObserver = new ResizeObserver(() => this.resize());
-        this.resizeObserver.observe(container);
+        Object.assign(this, createOrthographicSceneHost(container, {
+            cameraBounds: [-5, 5, 3, -3, 0.08, 5000],
+            cameraTarget: [0.1, 0, 0],
+            cameraOffset: [6.7, 4.9, 6.5],
+            cameraDistance: 2000,
+            background: BACKGROUND,
+            getFrustum(aspect) {
+                let halfHeight = FRUSTUM_HEIGHT * 0.5;
+                let halfWidth = halfHeight * aspect;
+                if (halfWidth < FRUSTUM_MIN_HALF_WIDTH) {
+                    halfWidth = FRUSTUM_MIN_HALF_WIDTH;
+                    halfHeight = halfWidth / Math.max(0.1, aspect);
+                }
+                return { halfWidth, halfHeight };
+            },
+            render: () => this.render()
+        }));
         this.resize();
-    }
-
-    syncPixelRatio() {
-        const ratio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
-        this.renderer.setPixelRatio(Math.min(ratio, 2.5));
-    }
-
-    addLights() {
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.34));
-        this.scene.add(new THREE.HemisphereLight(0xe9f1ff, 0x050510, 1.55));
-
-        const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
-        keyLight.position.set(5, 7, 5);
-        this.scene.add(keyLight);
-
-        const rimLight = new THREE.DirectionalLight(0x8ed8ff, 1.15);
-        rimLight.position.set(-5, 3, -5);
-        this.scene.add(rimLight);
-    }
-
-    resize() {
-        const width = this.container.clientWidth || 1;
-        const height = this.container.clientHeight || 1;
-        const aspect = width / height;
-        let halfHeight = FRUSTUM_HEIGHT * 0.5;
-        let halfWidth = halfHeight * aspect;
-        if (halfWidth < FRUSTUM_MIN_HALF_WIDTH) {
-            halfWidth = FRUSTUM_MIN_HALF_WIDTH;
-            halfHeight = halfWidth / Math.max(0.1, aspect);
-        }
-        this.syncPixelRatio();
-        this.camera.left = -halfWidth;
-        this.camera.right = halfWidth;
-        this.camera.top = halfHeight;
-        this.camera.bottom = -halfHeight;
-        this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height, false);
-        this.render();
     }
 
     render() {
@@ -2156,11 +2086,7 @@ class TransformationGraphRenderer {
     }
 
     dispose() {
-        this.resizeObserver?.disconnect();
-        this.controls?.dispose?.();
-        disposeThreeObject(this.scene);
-        this.renderer.dispose();
-        this.renderer.domElement.remove();
+        this.disposeSceneHost();
     }
 }
 

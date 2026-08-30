@@ -19,11 +19,8 @@ import { resolveActiveMap } from '../math/active-map.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { buildRasterSurfaceMesh, getImageRenderStage } from './draw-image-webgl.js';
 import {
-    getRasterSourceForShape,
-    getRasterSizeForShape,
-    getRasterAspectRatioForShape,
-    getRasterOpacityForShape,
-    isRasterInputShape
+    getActiveMediaRaster,
+    isMediaInputShape
 } from '../utils/raster-media.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
 import { getLaplaceFrameData } from '../analysis/laplace-transform.js';
@@ -143,7 +140,7 @@ const PLANAR_STATE_DEPENDENCIES = Object.freeze([
     'arbitraryShapeMode', 'arbitraryShapeExpression', 'arbitraryShapeTMin', 'arbitraryShapeTMax',
     'arbitraryShapeClosed', 'arbitraryShapePoints',
     'branchCutType', 'branchCutAngle', 'branchCutPoints',
-    'mediaSize', 'mediaOpacity', 'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity',
+    'mediaSize', 'mediaOpacity', 'mediaAspectRatio', 'mediaVersion',
     'cauchyIntegralModeEnabled', 'graphViewEnabled', 'graphFullGridEnabled', 'graphGridFamily',
     'graphLayerLockEnabled',
     'graphSelectedShape', 'graphSelectedLineIndex'
@@ -303,7 +300,7 @@ function preparePlanarLayer(cache, planeParams, renderScale, clear) {
 // Every cached and uncached planar vector layer uses this same supersampled Canvas path.
 function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, render, renderUncached = render) {
     if (!targetCtx || !planeParams || typeof render !== 'function') return true;
-    const renderScale = isRasterInputShape(state.currentInputShape) ? 1 : PLANAR_CANVAS_SUPERSAMPLE;
+    const renderScale = isMediaInputShape(state.currentInputShape) ? 1 : PLANAR_CANVAS_SUPERSAMPLE;
 
     if (enabled && cache?.canvas && cache.key === cacheKey) {
         compositePlanarLayer(cache, targetCtx, planeParams);
@@ -445,9 +442,7 @@ function scanPlanarLayerDependencies(isWPlane, tracker) {
     captureDependency(tracker, Boolean(state.zetaContinuationEnabled));
     captureDependency(tracker, state.gridColor1);
     captureDependency(tracker, state.gridColor2);
-    captureDependency(tracker, state.imageContentVersion);
     captureDependency(tracker, state.videoProcessingFps);
-    captureDependency(tracker, state.videoFrameVersion);
     captureDependency(tracker, getDynamicPlottingCacheKey());
 
     const domainEnabled = Boolean(state.domainColoringEnabled);
@@ -533,7 +528,7 @@ function buildZFlowLayerCacheKey() {
 function shouldUseWPlanarTransformedLayerCache() {
     return !state.manifold3dViewEnabled
         && !state.navigationModeEnabled
-        && state.currentInputShape !== 'video'
+        && !(isMediaInputShape() && runtime.media.video)
         && !isPanning(runtime.interaction.panZ)
         && !isPanning(runtime.interaction.panW);
 }
@@ -542,7 +537,7 @@ function shouldUseZPlanarInputLayerCache() {
     return !state.navigationModeEnabled
         && !state.vectorFieldEnabled
         && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)
-        && state.currentInputShape !== 'video'
+        && !(isMediaInputShape() && runtime.media.video)
         && !isPanning(runtime.interaction.panZ);
 }
 
@@ -858,7 +853,7 @@ export function drawZPlaneContent(timestamp) {
         if (state.navigationModeEnabled) {
             invalidateCache(zFlowLayerCache);
             invalidateCache(zPlanarInputLayerCache);
-            drawNavigationLayer(zCtx, zPlaneParams, 'z');
+            drawNavigationLayer(zCtx, zPlaneParams);
         } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
             invalidateCache(zPlanarInputLayerCache);
             buildZFlowLayerCacheKey();
@@ -891,7 +886,7 @@ export function drawZPlaneContent(timestamp) {
     if (state.navigationModeEnabled) {
         invalidateCache(zFlowLayerCache);
         invalidateCache(zPlanarInputLayerCache);
-        drawNavigationLayer(zCtx, zPlaneParams, 'z');
+        drawNavigationLayer(zCtx, zPlaneParams);
     } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
         invalidateCache(zPlanarInputLayerCache);
         const cacheKey = buildZFlowLayerCacheKey();
@@ -1033,7 +1028,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             return;
         }
         if (state.foldSurface3dEnabled) {
-            if (isRasterInputShape(state.currentInputShape)) {
+            if (isMediaInputShape(state.currentInputShape)) {
                 controls.wPlaneFoldsOverlay?.classList.remove('hidden');
                 renderThreeWRasterSurface(map);
                 return;
@@ -1192,10 +1187,8 @@ function prepareThreeWRenderer() {
 }
 
 function renderThreeWRasterSurface(map) {
-    const rasterShape = state.currentInputShape;
-    const source = getRasterSourceForShape(rasterShape);
-
-    if (!source) {
+    const raster = getActiveMediaRaster();
+    if (!raster) {
         throw new Error('Raster fold rendering requires a decoded raster source.');
     }
 
@@ -1204,18 +1197,14 @@ function renderThreeWRasterSurface(map) {
     const xRange = wPlaneParams.currentVisXRange;
     const yRange = wPlaneParams.currentVisYRange;
     const rasterStage = getImageRenderStage(map);
-    const rasterSize = getRasterSizeForShape(rasterShape);
-    const rasterAspectRatio = getRasterAspectRatioForShape(rasterShape);
-    const rasterContentVersion = rasterShape === 'image' ? state.imageContentVersion : 0;
     const surfaceKey = [
         rasterStage,
         map.signature,
-        rasterShape,
-        rasterContentVersion,
-        state.a0,
-        state.b0,
-        rasterSize,
-        rasterAspectRatio,
+        raster.token,
+        raster.center.re,
+        raster.center.im,
+        raster.size.width,
+        raster.size.height,
         state.foldSurfaceHeightScale,
         xRange[0], xRange[1], yRange[0], yRange[1]
     ].join('|');
@@ -1224,14 +1213,14 @@ function renderThreeWRasterSurface(map) {
         ? threeRenderer.rasterSurfaceData
         : null;
     if (!surface) {
-        surface = buildRasterSurfaceMesh(wPlaneParams, map);
+        surface = buildRasterSurfaceMesh(wPlaneParams, map, raster);
         threeRenderer.rasterSurfaceKey = surfaceKey;
     }
 
     threeRenderer.setRasterSurface(
         surface,
-        source,
-        getRasterOpacityForShape(rasterShape),
+        raster.source,
+        raster.opacity,
         state.foldSurfaceHeightScale
     );
 
@@ -1361,7 +1350,7 @@ function drawWTransformedShapeChunk(index, map, targetCtx, fresh) {
 function renderWPlanarTransformedShape(index, map) {
     if (state.navigationModeEnabled) {
         invalidateCache(wPlanarTransformedLayerCache);
-        drawNavigationLayer(wCtx, wPlaneParams, 'w', map.evaluate);
+        drawNavigationLayer(wCtx, wPlaneParams, map.evaluate);
         return;
     }
 

@@ -695,7 +695,6 @@ export function syncDynamicPlottingUI() {
     const dynamic = config();
 
     synchronizeTermBindingState();
-    setChecked('enable_dynamic_plotting_cb', dynamic.enabled);
     setHidden('dynamic_plotting_controls_container', !dynamic.enabled);
     setValue('dynamic_source_kind', dynamic.source.kind);
     setValue('dynamic_source_count', dynamic.source.count);
@@ -808,11 +807,6 @@ function setEquationHelpExpanded(expanded) {
 }
 
 function bindControls() {
-    bindCheckbox('enable_dynamic_plotting_cb', (dynamic, checked) => {
-        dynamic.enabled = checked;
-        if (!checked) dynamic.playback.playing = false;
-    }, { preservePreset: true });
-
     bind('dynamic_minimize_studio_btn', 'click', () => {
         studioMinimized = !studioMinimized;
         syncStudioChrome();
@@ -822,8 +816,6 @@ function bindControls() {
             dynamic.enabled = false;
             dynamic.playback.playing = false;
         }, { preservePreset: true });
-        const checkbox = element('enable_dynamic_plotting_cb');
-        if (checkbox) checkbox.checked = false;
     });
 
     bind('dynamic_formula_help_btn', 'click', () => {

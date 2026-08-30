@@ -490,7 +490,7 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
     }
 
     if (packedTerms.length) {
-        const termsPointer = alloc(packedTerms.length * 24); allocations.push(termsPointer);
+        const termsPointer = trackAlloc(allocations, packedTerms.length * 24);
         const termsView = memoryView();
         packedTerms.forEach((term, index) => {
             const at = termsPointer + index * 24;
@@ -502,7 +502,7 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
         view.setUint32(pointer + FUNCTION_TERMS_COUNT, packedTerms.length, true);
     }
     if (packedFactors.length) {
-        const factorsPointer = alloc(packedFactors.length * 24); allocations.push(factorsPointer);
+        const factorsPointer = trackAlloc(allocations, packedFactors.length * 24);
         const factorsView = memoryView();
         packedFactors.forEach((factor, index) => {
             const at = factorsPointer + index * 24;
@@ -519,7 +519,7 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
         ? compileNativeExpression(options.algebraicExpressionAst)
         : parseNativeExpression(options.algebraicChainingZExpr);
     if (instructions.length) {
-        const expressionPointer = alloc(instructions.length * 24); allocations.push(expressionPointer);
+        const expressionPointer = trackAlloc(allocations, instructions.length * 24);
         const expressionView = memoryView();
         instructions.forEach((instruction, index) => {
             const at = expressionPointer + index * 24;
@@ -547,6 +547,22 @@ function alloc(size) {
     const pointer = wasm.ce_alloc(size);
     if (!pointer) throw new Error(`Native complex engine could not allocate ${size} bytes.`);
     return pointer;
+}
+
+function trackAlloc(allocations, size) {
+    const pointer = alloc(size);
+    allocations.push(pointer);
+    return pointer;
+}
+
+function withAllocations(work) {
+    const allocations = [];
+    const allocate = size => trackAlloc(allocations, size);
+    try {
+        return work(allocations, allocate);
+    } finally {
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    }
 }
 
 let cachedMemoryBuffer = null;
@@ -638,12 +654,12 @@ function writeDynamicConfig(view, pointer, dynamic, allocations) {
     const termPointer = writeInstructionBuffer(dynamic.termProgram, allocations);
     const variableCount = dynamic.variableNames.length;
     const sourceCount = dynamic.variables.length;
-    const variablesPointer = alloc(sourceCount * variableCount * 16); allocations.push(variablesPointer);
+    const variablesPointer = trackAlloc(allocations, sourceCount * variableCount * 16);
     const variablesView = memoryView();
     dynamic.variables.forEach((row, source) => row.forEach((value, slot) => writeComplex(
         variablesView, variablesPointer + (source * variableCount + slot) * 16, value, NaN, NaN
     )));
-    const flagsPointer = alloc(variableCount); allocations.push(flagsPointer);
+    const flagsPointer = trackAlloc(allocations, variableCount);
     new Uint8Array(wasm.memory.buffer, flagsPointer, variableCount).set(dynamic.variableFlags);
     view.setUint32(pointer + MAP_DYNAMIC_POINT_PTR, pointPointer, true);
     view.setUint32(pointer + MAP_DYNAMIC_POINT_COUNT, dynamic.pointProgram.instructions.length, true);
@@ -791,9 +807,8 @@ export function evaluateNativeExpressionProgram(program, environments, mapOption
     if (!Array.isArray(environments)) throw new Error('Native expression environments must be an array.');
     if (!environments.length) return [];
     if (!program.instructions.length) throw new Error('Native expression programs cannot be empty.');
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, mapOptions, allocations);
         const instructionPointer = writeInstructionBuffer(program, allocations);
         const variableCount = program.variableNames.length;
@@ -815,9 +830,9 @@ export function evaluateNativeExpressionProgram(program, environments, mapOption
                 });
             });
         }
-        const outputPointer = alloc(environments.length * 16); allocations.push(outputPointer);
-        const errorPointer = alloc(environments.length); allocations.push(errorPointer);
-        const sheetsPointer = alloc(environments.length * 4); allocations.push(sheetsPointer);
+        const outputPointer = trackAlloc(allocations, environments.length * 16);
+        const errorPointer = trackAlloc(allocations, environments.length);
+        const sheetsPointer = trackAlloc(allocations, environments.length * 4);
         const sheetsView = memoryView();
         environments.forEach((environment, index) => {
             const sheet = environment.__sheet === undefined
@@ -845,9 +860,7 @@ export function evaluateNativeExpressionProgram(program, environments, mapOption
             const value = program.resultBoolean ? re !== 0 : { re, im };
             return settled ? { ok: true, value } : value;
         });
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 const NATIVE_SOURCE_KINDS = Object.freeze({
@@ -904,15 +917,14 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
         }
     }
 
-    const allocations = [];
-    try {
-        const outputPointer = alloc(requestedCount * 16); allocations.push(outputPointer);
-        const statsPointer = alloc(12); allocations.push(statsPointer);
+    return withAllocations((allocations, allocate) => {
+        const outputPointer = trackAlloc(allocations, requestedCount * 16);
+        const statsPointer = trackAlloc(allocations, 12);
         const generatorPointer = writeInstructionBuffer(generatorProgram, allocations);
         const predicatePointer = writeInstructionBuffer(predicateProgram, allocations);
         let parametersPointer = 0;
         if (parameterEntries.length) {
-            parametersPointer = alloc(parameterEntries.length * 16); allocations.push(parametersPointer);
+            parametersPointer = trackAlloc(allocations, parameterEntries.length * 16);
             const parameterView = memoryView();
             parameterEntries.forEach(([, value], index) => writeComplex(
                 parameterView, parametersPointer + index * 16, value, NaN, NaN
@@ -933,7 +945,7 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
         if (bound < 1) throw new Error('Native discrete-source bound must be positive.');
         let errorsPointer = 0;
         if (config.kind === 'expression') {
-            errorsPointer = alloc(maxAttempts); allocations.push(errorsPointer);
+            errorsPointer = trackAlloc(allocations, maxAttempts);
             new Uint8Array(wasm.memory.buffer, errorsPointer, maxAttempts).fill(0);
         }
         const status = wasm.ce_generate_discrete_values(
@@ -955,20 +967,17 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
             ? new Uint8Array(new Uint8Array(wasm.memory.buffer, errorsPointer, attempts))
             : new Uint8Array();
         return { values, attempts, invalidCount, attemptErrors };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function evaluateNativePoints(options, points) {
     if (!Array.isArray(points) || !points.length) return { values: [], valid: new Uint8Array() };
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options, allocations);
-        const inputPointer = alloc(points.length * 16); allocations.push(inputPointer);
-        const outputPointer = alloc(points.length * 16); allocations.push(outputPointer);
-        const validPointer = alloc(points.length); allocations.push(validPointer);
+        const inputPointer = trackAlloc(allocations, points.length * 16);
+        const outputPointer = trackAlloc(allocations, points.length * 16);
+        const validPointer = trackAlloc(allocations, points.length);
         writePointBuffer(inputPointer, points);
         const status = wasm.ce_evaluate_points(configPointer, inputPointer, points.length, outputPointer, validPointer);
         if (status !== 0) throw new Error(`Native point evaluation failed with status ${status}.`);
@@ -976,9 +985,7 @@ export function evaluateNativePoints(options, points) {
         valid.set(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
         const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function evaluateNativeAlgebraic(options, points, parameters = points) {
@@ -986,14 +993,13 @@ export function evaluateNativeAlgebraic(options, points, parameters = points) {
         throw new Error('Native algebraic evaluation requires equally sized point and parameter arrays.');
     }
     if (!points.length) return { values: [], valid: new Uint8Array() };
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, { ...options, functionKey: 'algebraic_chaining' }, allocations);
-        const inputPointer = alloc(points.length * 16); allocations.push(inputPointer);
-        const parameterPointer = alloc(points.length * 16); allocations.push(parameterPointer);
-        const outputPointer = alloc(points.length * 16); allocations.push(outputPointer);
-        const validPointer = alloc(points.length); allocations.push(validPointer);
+        const inputPointer = trackAlloc(allocations, points.length * 16);
+        const parameterPointer = trackAlloc(allocations, points.length * 16);
+        const outputPointer = trackAlloc(allocations, points.length * 16);
+        const validPointer = trackAlloc(allocations, points.length);
         writePointBuffer(inputPointer, points);
         writePointBuffer(parameterPointer, parameters);
         const status = wasm.ce_evaluate_algebraic_points(
@@ -1003,9 +1009,7 @@ export function evaluateNativeAlgebraic(options, points, parameters = points) {
         const valid = new Uint8Array(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
         const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function evaluateNativeSheets(options, points, sheets) {
@@ -1015,14 +1019,13 @@ export function evaluateNativeSheets(options, points, sheets) {
     if (!points.length) {
         return { values: [], valid: new Uint8Array() };
     }
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options, allocations);
-        const inputPointer = alloc(points.length * 16); allocations.push(inputPointer);
-        const sheetsPointer = alloc(points.length * 4); allocations.push(sheetsPointer);
-        const outputPointer = alloc(points.length * 16); allocations.push(outputPointer);
-        const validPointer = alloc(points.length); allocations.push(validPointer);
+        const inputPointer = trackAlloc(allocations, points.length * 16);
+        const sheetsPointer = trackAlloc(allocations, points.length * 4);
+        const outputPointer = trackAlloc(allocations, points.length * 16);
+        const validPointer = trackAlloc(allocations, points.length);
         writePointBuffer(inputPointer, points);
         const sheetView = memoryView();
         sheets.forEach((sheet, index) => sheetView.setInt32(
@@ -1037,9 +1040,7 @@ export function evaluateNativeSheets(options, points, sheets) {
         const valid = new Uint8Array(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
         const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
@@ -1053,18 +1054,17 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
         };
     }
     const count = dynamic.variables.length;
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, { ...mapOptions, dynamicAggregate: dynamic }, allocations);
-        const pointPointer = alloc(count * 16); allocations.push(pointPointer);
-        const termPointer = alloc(count * 16); allocations.push(termPointer);
-        const errorsPointer = alloc(count); allocations.push(errorsPointer);
-        const statusPointer = alloc(count); allocations.push(statusPointer);
-        const partialPointer = alloc(count * 16); allocations.push(partialPointer);
-        const partialProductPointer = alloc(count * 48); allocations.push(partialProductPointer);
-        const finalPointer = alloc(16); allocations.push(finalPointer);
-        const productPointer = alloc(48); allocations.push(productPointer);
+        const pointPointer = trackAlloc(allocations, count * 16);
+        const termPointer = trackAlloc(allocations, count * 16);
+        const errorsPointer = trackAlloc(allocations, count);
+        const statusPointer = trackAlloc(allocations, count);
+        const partialPointer = trackAlloc(allocations, count * 16);
+        const partialProductPointer = trackAlloc(allocations, count * 48);
+        const finalPointer = trackAlloc(allocations, 16);
+        const productPointer = trackAlloc(allocations, 48);
         const [parameterRe, parameterIm] = complexParts(parameter);
         const status = wasm.ce_evaluate_dynamic(
             configPointer, parameterRe, parameterIm,
@@ -1111,9 +1111,7 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
             } : null,
             valid: status === 0
         };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function continuationNativeSheet(path, branchCutType, branchCutAngle, branchCutPoints = []) {
@@ -1122,9 +1120,8 @@ export function continuationNativeSheet(path, branchCutType, branchCutAngle, bra
         throw new Error(`Unsupported native continuation cut: ${branchCutType}.`);
     }
     const angle = requireFiniteNumber(branchCutAngle, 'Native continuation branch angle');
-    const allocations = [];
-    try {
-        const pathPointer = alloc(path.length * 16); allocations.push(pathPointer);
+    return withAllocations((allocations, allocate) => {
+        const pathPointer = trackAlloc(allocations, path.length * 16);
         writePointBuffer(pathPointer, path);
         const drawn = branchCutType === 'draw';
         let cutPointer = 0;
@@ -1132,16 +1129,14 @@ export function continuationNativeSheet(path, branchCutType, branchCutAngle, bra
             if (!Array.isArray(branchCutPoints) || branchCutPoints.length < 2) {
                 throw new Error('Drawn native branch cuts require at least two points.');
             }
-            cutPointer = alloc(branchCutPoints.length * 16); allocations.push(cutPointer);
+            cutPointer = trackAlloc(allocations, branchCutPoints.length * 16);
             writePointBuffer(cutPointer, branchCutPoints);
         }
         return wasm.ce_continuation_sheets(
             pathPointer, path.length, drawn ? 1 : 0, angle,
             cutPointer, drawn ? branchCutPoints.length : 0
         );
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function computeNativeTaylorCoefficients(map, center, radius, order) {
@@ -1152,19 +1147,16 @@ export function computeNativeTaylorCoefficients(map, center, radius, order) {
         throw new Error('Native Taylor radius must be positive and order must be between zero and 128.');
     }
     const stepCount = Math.max(192, 48 * (boundedOrder + 1));
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, { ...map, taylor: null }, allocations);
-        const outputPointer = alloc((boundedOrder + 1) * 16); allocations.push(outputPointer);
+        const outputPointer = trackAlloc(allocations, (boundedOrder + 1) * 16);
         const status = wasm.ce_compute_taylor_coefficients(
             configPointer, center.re, center.im, radiusValue, stepCount, boundedOrder, outputPointer
         );
         if (status !== 0) throw new Error(`Native Taylor coefficient job failed with status ${status}.`);
         return readComplexObjects(outputPointer, boundedOrder + 1);
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function nativeMapOptions(runtimeState, overrides = {}) {
@@ -1303,23 +1295,22 @@ export function generateNativeInputShape(config, mapOptions) {
     } else if (shape === 7) {
         lineCapacity = 2; pointCapacity = 2 * (curvePoints + 1);
     }
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, mapOptions, allocations);
         const expressionPointer = writeInstructionBuffer(expressionProgram, allocations);
         let drawPointer = 0;
         if (drawPoints.length) {
-            drawPointer = alloc(drawPoints.length * 16); allocations.push(drawPointer);
+            drawPointer = trackAlloc(allocations, drawPoints.length * 16);
             const drawView = memoryView();
             drawPoints.forEach((point, index) => writeComplex(
                 drawView, drawPointer + index * 16, point, NaN, NaN
             ));
         }
-        const outputPointer = alloc(pointCapacity * 16); allocations.push(outputPointer);
-        const offsetsPointer = alloc((lineCapacity + 1) * 4); allocations.push(offsetsPointer);
-        const rolesPointer = alloc(lineCapacity * 4); allocations.push(rolesPointer);
-        const statsPointer = alloc(8); allocations.push(statsPointer);
+        const outputPointer = trackAlloc(allocations, pointCapacity * 16);
+        const offsetsPointer = trackAlloc(allocations, (lineCapacity + 1) * 4);
+        const rolesPointer = trackAlloc(allocations, lineCapacity * 4);
+        const statsPointer = trackAlloc(allocations, 8);
         const status = wasm.ce_generate_input_shape(
             configPointer, shape,
             Number(config.xRange?.[0]), Number(config.xRange?.[1]),
@@ -1352,9 +1343,7 @@ export function generateNativeInputShape(config, mapOptions) {
         }
         if (pointCount > pointCapacity) throw new Error('Native input-shape job exceeded its output capacity.');
         return result;
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function generateNativeViewportGridPixels(config) {
@@ -1373,12 +1362,11 @@ export function generateNativeViewportGridPixels(config) {
     const pointCapacity = shape === 0
         ? lineCapacity * (samples + 1)
         : (density + 1) * (density + 1);
-    const allocations = [];
-    try {
-        const outputPointer = alloc(pointCapacity * 8); allocations.push(outputPointer);
-        const offsetsPointer = alloc((lineCapacity + 1) * 4); allocations.push(offsetsPointer);
-        const rolesPointer = alloc(lineCapacity * 4); allocations.push(rolesPointer);
-        const statsPointer = alloc(8); allocations.push(statsPointer);
+    return withAllocations((allocations, allocate) => {
+        const outputPointer = trackAlloc(allocations, pointCapacity * 8);
+        const offsetsPointer = trackAlloc(allocations, (lineCapacity + 1) * 4);
+        const rolesPointer = trackAlloc(allocations, lineCapacity * 4);
+        const statsPointer = trackAlloc(allocations, 8);
         const status = wasm.ce_generate_viewport_grid_pixels(
             shape, density, curvePoints,
             viewportWidth, viewportHeight,
@@ -1397,9 +1385,7 @@ export function generateNativeViewportGridPixels(config) {
                 )
             };
         });
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePoints) {
@@ -1413,13 +1399,12 @@ export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePo
     if (domainMin >= domainMax) throw new Error('Native radial domain must increase.');
     const pointsPerCircle = curvePointCount + 1;
     const pointCapacity = steps * pointsPerCircle;
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, mapOptions, allocations);
-        const outputPointer = alloc(pointCapacity * 16); allocations.push(outputPointer);
-        const offsetsPointer = alloc((steps + 1) * 4); allocations.push(offsetsPointer);
-        const statsPointer = alloc(8); allocations.push(statsPointer);
+        const outputPointer = trackAlloc(allocations, pointCapacity * 16);
+        const offsetsPointer = trackAlloc(allocations, (steps + 1) * 4);
+        const statsPointer = trackAlloc(allocations, 8);
         const status = wasm.ce_generate_radial_steps(
             configPointer, domainMin, domainMax, steps, pointsPerCircle - 1,
             outputPointer, pointCapacity, offsetsPointer, steps, statsPointer
@@ -1435,9 +1420,7 @@ export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePo
                 im: view.getFloat64(outputPointer + (start + offset) * 16 + 8, true)
             }));
         });
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativePlanarLine(options) {
@@ -1449,12 +1432,11 @@ export function buildNativePlanarLine(options) {
     requireFiniteComplex(options.end, 'Native planar-line end');
     requirePlanarRenderOptions(options);
     const outputCapacity = (sampleCount + 1) * 2 + 2;
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const cut = writeBranchCutPoints(options.branchCutPoints, allocations);
-        const outputPointer = alloc(outputCapacity * 16); allocations.push(outputPointer);
+        const outputPointer = trackAlloc(allocations, outputCapacity * 16);
         const count = wasm.ce_build_planar_line(
             configPointer,
             options.start.re, options.start.im, options.end.re, options.end.im, sampleCount,
@@ -1465,23 +1447,20 @@ export function buildNativePlanarLine(options) {
         );
         if (count < 0) throw new Error(`Native planar line job failed with status ${count}.`);
         return readComplexBuffer(outputPointer, count);
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativePlanarLines(options) {
     if (!Array.isArray(options.lines) || !options.lines.length) return [];
     requirePlanarRenderOptions(options);
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const lineCount = options.lines.length;
-        const startsPointer = alloc(lineCount * 16); allocations.push(startsPointer);
-        const endsPointer = alloc(lineCount * 16); allocations.push(endsPointer);
-        const countsPointer = alloc(lineCount * 4); allocations.push(countsPointer);
-        const offsetsPointer = alloc((lineCount + 1) * 4); allocations.push(offsetsPointer);
+        const startsPointer = trackAlloc(allocations, lineCount * 16);
+        const endsPointer = trackAlloc(allocations, lineCount * 16);
+        const countsPointer = trackAlloc(allocations, lineCount * 4);
+        const offsetsPointer = trackAlloc(allocations, (lineCount + 1) * 4);
         const lineView = memoryView();
         let outputCapacity = 0;
         options.lines.forEach((line, index) => {
@@ -1497,7 +1476,7 @@ export function buildNativePlanarLines(options) {
             outputCapacity += (sampleCount + 1) * 2 + 2;
         });
         const cut = writeBranchCutPoints(options.branchCutPoints, allocations);
-        const outputPointer = alloc(outputCapacity * 16); allocations.push(outputPointer);
+        const outputPointer = trackAlloc(allocations, outputCapacity * 16);
         const total = wasm.ce_build_planar_lines(
             configPointer, startsPointer, endsPointer, countsPointer, lineCount,
             options.scaleX, options.scaleY, options.renderLimit,
@@ -1510,9 +1489,7 @@ export function buildNativePlanarLines(options) {
         const offsets = new Uint32Array(new Uint32Array(wasm.memory.buffer, offsetsPointer, lineCount + 1));
         const packed = readComplexBuffer(outputPointer, total);
         return options.lines.map((_line, index) => packed.slice(offsets[index] * 2, offsets[index + 1] * 2));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativePlanarPolyline(options) {
@@ -1528,11 +1505,10 @@ export function buildNativePlanarPolyline(options) {
     if (maxSegmentSq <= 0) throw new Error('Native planar-polyline segment limit must be positive.');
     const theoretical = options.points.length * 2 ** Math.min(maxDepth, 12);
     const outputCapacity = Math.min(1_000_000, Math.max(4096, theoretical));
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
-        const inputPointer = alloc(options.points.length * 16); allocations.push(inputPointer);
+        const inputPointer = trackAlloc(allocations, options.points.length * 16);
         const inputView = memoryView();
         options.points.forEach((point, index) => {
             const offset = inputPointer + index * 16;
@@ -1540,7 +1516,7 @@ export function buildNativePlanarPolyline(options) {
             inputView.setFloat64(offset + 8, Number.isFinite(point?.im) ? point.im : NaN, true);
         });
         const cut = writeBranchCutPoints(options.branchCutPoints, allocations);
-        const outputPointer = alloc(outputCapacity * 16); allocations.push(outputPointer);
+        const outputPointer = trackAlloc(allocations, outputCapacity * 16);
         const count = wasm.ce_build_planar_polyline(
             configPointer, inputPointer, options.points.length,
             options.originX, options.originY, options.scaleX, options.scaleY,
@@ -1552,9 +1528,7 @@ export function buildNativePlanarPolyline(options) {
         );
         if (count < 0) throw new Error(`Native planar polyline job failed with status ${count}.`);
         return readComplexBuffer(outputPointer, count);
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function traceNativeStreamlines(options) {
@@ -1575,15 +1549,14 @@ export function traceNativeStreamlines(options) {
     if (stepSize <= 0) throw new Error('Native streamline step size must be positive.');
     requireBoolean(options.inverse, 'Native streamline inverse');
     const capacity = seeds.length * maxSteps;
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
-        const seedsPointer = alloc(seeds.length * 16); allocations.push(seedsPointer);
+        const seedsPointer = trackAlloc(allocations, seeds.length * 16);
         writePointBuffer(seedsPointer, seeds.map(seed => ({ re: seed.x ?? seed.re, im: seed.y ?? seed.im })));
-        const positionsPointer = alloc(capacity * 16); allocations.push(positionsPointer);
-        const magnitudesPointer = alloc(capacity * 8); allocations.push(magnitudesPointer);
-        const offsetsPointer = alloc((seeds.length + 1) * 4); allocations.push(offsetsPointer);
+        const positionsPointer = trackAlloc(allocations, capacity * 16);
+        const magnitudesPointer = trackAlloc(allocations, capacity * 8);
+        const offsetsPointer = trackAlloc(allocations, (seeds.length + 1) * 4);
         const count = wasm.ce_trace_streamlines(
             configPointer, seedsPointer, seeds.length,
             xRange[0], xRange[1], yRange[0], yRange[1], stepSize,
@@ -1604,9 +1577,7 @@ export function traceNativeStreamlines(options) {
                 };
             }
         ));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeVectorField(options) {
@@ -1618,14 +1589,13 @@ export function buildNativeVectorField(options) {
     const yRange = requireIncreasingRange(options.yRange, 'Native vector-field y range');
     requireBoolean(options.inverse, 'Native vector-field inverse');
     const count = (density + 1) ** 2;
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
-        const positionsPointer = alloc(count * 16); allocations.push(positionsPointer);
-        const vectorsPointer = alloc(count * 16); allocations.push(vectorsPointer);
-        const magnitudesPointer = alloc(count * 8); allocations.push(magnitudesPointer);
-        const validPointer = alloc(count); allocations.push(validPointer);
+        const positionsPointer = trackAlloc(allocations, count * 16);
+        const vectorsPointer = trackAlloc(allocations, count * 16);
+        const magnitudesPointer = trackAlloc(allocations, count * 8);
+        const validPointer = trackAlloc(allocations, count);
         const status = wasm.ce_build_vector_field(
             configPointer, xRange[0], xRange[1], yRange[0], yRange[1],
             density, options.inverse ? 1 : 0,
@@ -1646,9 +1616,7 @@ export function buildNativeVectorField(options) {
             });
         }
         return result;
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeTissot(options) {
@@ -1658,9 +1626,7 @@ export function buildNativeTissot(options) {
     const columns = Math.max(4, Math.min(10, Math.round(density * 0.48)));
     const capacity = (columns - 1) ** 2;
     const circlePoints = segments + 1;
-    const allocations = [];
-    const allocate = size => { const pointer = alloc(size); allocations.push(pointer); return pointer; };
-    try {
+    return withAllocations((allocations, allocate) => {
         const configPointer = allocate(MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const sourceCenters = allocate(capacity * 16);
@@ -1700,9 +1666,7 @@ export function buildNativeTissot(options) {
             mappedArrowhead: points(mappedArrows, index * 3, 3).filter(value => Number.isFinite(value.re)),
             isCritical: criticalValues[index] !== 0
         }));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function findNativePreimages(options) {
@@ -1736,11 +1700,10 @@ export function findNativePreimages(options) {
     if (tolerance <= 0 || derivativeStep <= 0 || mergeDistance <= 0 || maxIterations < 1) {
         throw new Error('Native preimage search tolerances and iteration limit must be positive.');
     }
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
-        const rootsPointer = alloc(capacity * 16); allocations.push(rootsPointer);
+        const rootsPointer = trackAlloc(allocations, capacity * 16);
         const count = wasm.ce_find_preimages(
             configPointer, options.target.re, options.target.im,
             xMin, xMax, yMin, yMax,
@@ -1750,9 +1713,7 @@ export function findNativePreimages(options) {
         );
         if (count < 0) throw new Error(`Native preimage job failed with status ${count}.`);
         return readComplexObjects(rootsPointer, count);
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function findNativePolynomialRoots(coefficients, options) {
@@ -1762,35 +1723,31 @@ export function findNativePolynomialRoots(coefficients, options) {
     if (maxIterations < 1 || tolerance <= 0) {
         throw new Error('Native polynomial-root iterations and tolerance must be positive.');
     }
-    const allocations = [];
-    try {
-        const coefficientsPointer = alloc(coefficients.length * 16); allocations.push(coefficientsPointer);
+    return withAllocations((allocations, allocate) => {
+        const coefficientsPointer = trackAlloc(allocations, coefficients.length * 16);
         writePointBuffer(coefficientsPointer, coefficients.map(value => typeof value === 'number' ? { re: value, im: 0 } : value));
-        const rootsPointer = alloc((coefficients.length - 1) * 16); allocations.push(rootsPointer);
+        const rootsPointer = trackAlloc(allocations, (coefficients.length - 1) * 16);
         const count = wasm.ce_find_polynomial_roots(
             coefficientsPointer, coefficients.length,
             maxIterations, tolerance, rootsPointer
         );
         if (count < 0) throw new Error(`Native polynomial-root job failed with status ${count}.`);
         return readComplexObjects(rootsPointer, count);
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function analyzeNativeContour(map, points) {
     if (!Array.isArray(points) || points.length < 2) return null;
     points.forEach((point, index) => requireFiniteComplex(point, `Native contour point ${index}`));
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, map, allocations);
-        const pointsPointer = alloc(points.length * 16); allocations.push(pointsPointer);
+        const pointsPointer = trackAlloc(allocations, points.length * 16);
         const pointsView = memoryView();
         points.forEach((point, index) => writeComplex(pointsView, pointsPointer + index * 16, point));
-        const integralPointer = alloc(16); allocations.push(integralPointer);
-        const windingPointer = alloc(8); allocations.push(windingPointer);
-        const statusPointer = alloc(4); allocations.push(statusPointer);
+        const integralPointer = trackAlloc(allocations, 16);
+        const windingPointer = trackAlloc(allocations, 8);
+        const statusPointer = trackAlloc(allocations, 4);
         const result = wasm.ce_analyze_contour(
             configPointer, pointsPointer, points.length, integralPointer, windingPointer, statusPointer
         );
@@ -1804,9 +1761,7 @@ export function analyzeNativeContour(map, points) {
             winding: view.getFloat64(windingPointer, true),
             status: view.getUint32(statusPointer, true)
         };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function estimateNativeResidue(map, pole, radius, samples) {
@@ -1816,20 +1771,17 @@ export function estimateNativeResidue(map, pole, radius, samples) {
     if (radiusValue <= 0 || sampleCount < 8) {
         throw new Error('Native residue radius must be positive and sample count must be at least eight.');
     }
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, map, allocations);
-        const outputPointer = alloc(16); allocations.push(outputPointer);
+        const outputPointer = trackAlloc(allocations, 16);
         const status = wasm.ce_estimate_residue(
             configPointer, pole.re, pole.im, radiusValue, sampleCount, outputPointer
         );
         if (status !== 0) throw new Error(`Native residue estimation failed with status ${status}.`);
         const view = memoryView();
         return { re: view.getFloat64(outputPointer, true), im: view.getFloat64(outputPointer + 8, true) };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function generateNativeContourPoints(type, params, stepCount) {
@@ -1842,17 +1794,14 @@ export function generateNativeContourPoints(type, params, stepCount) {
     const paramA = requireFiniteNumber(typeId === 1 ? params?.r : params?.a, 'Native contour first radius');
     const paramB = typeId === 1 ? 0 : requireFiniteNumber(params?.b, 'Native contour second radius');
     if (paramA <= 0 || (typeId === 2 && paramB <= 0)) throw new Error('Native contour radii must be positive.');
-    const allocations = [];
-    try {
-        const outputPointer = alloc((count + 1) * 16); allocations.push(outputPointer);
+    return withAllocations((allocations, allocate) => {
+        const outputPointer = trackAlloc(allocations, (count + 1) * 16);
         const total = wasm.ce_generate_contour_points(
             typeId, centerX, centerY, paramA, paramB, count, outputPointer
         );
         if (total < 0) throw new Error(`Native contour generation failed with status ${total}.`);
         return readComplexObjects(outputPointer, total);
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function classifyNativeContourSingularities(contourType, params, polygonContours, epsilon, singularities) {
@@ -1868,8 +1817,7 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
     if (epsilonValue < 0) throw new Error('Native contour epsilon must be non-negative.');
     singularities.forEach((singularity, index) =>
         requireFiniteComplex(singularity, `Native contour singularity ${index}`));
-    const allocations = [];
-    try {
+    return withAllocations((allocations, allocate) => {
         let polygonPointsPointer = 0;
         let polygonOffsetsPointer = 0;
         let polygonCount = 0;
@@ -1880,8 +1828,8 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
             }
             polygonCount = polygonContours.length;
             const totalPoints = polygonContours.reduce((sum, points) => sum + points.length, 0);
-            polygonPointsPointer = alloc(totalPoints * 16); allocations.push(polygonPointsPointer);
-            polygonOffsetsPointer = alloc((polygonCount + 1) * 4); allocations.push(polygonOffsetsPointer);
+            polygonPointsPointer = trackAlloc(allocations, totalPoints * 16);
+            polygonOffsetsPointer = trackAlloc(allocations, (polygonCount + 1) * 4);
             const view = memoryView();
             let currentOffset = 0;
             polygonContours.forEach((points, pIndex) => {
@@ -1895,9 +1843,9 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
             view.setUint32(polygonOffsetsPointer + polygonCount * 4, currentOffset, true);
         }
 
-        const singPointer = alloc(singularities.length * 16); allocations.push(singPointer);
-        const insidePointer = alloc(singularities.length); allocations.push(insidePointer);
-        const safePointer = alloc(singularities.length); allocations.push(safePointer);
+        const singPointer = trackAlloc(allocations, singularities.length * 16);
+        const insidePointer = trackAlloc(allocations, singularities.length);
+        const safePointer = trackAlloc(allocations, singularities.length);
         const singView = memoryView();
         singularities.forEach((sing, index) => writeComplex(singView, singPointer + index * 16, sing));
 
@@ -1914,17 +1862,15 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
             inside: insideBuf[index] !== 0,
             safeForResidue: safeBuf[index] !== 0
         }));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 function writeDomainPalette(palette, allocations) {
     if (!Array.isArray(palette) || palette.length < 2) {
         throw new Error('Native domain rendering requires at least two palette stops.');
     }
-    const paletteRgPointer = alloc(palette.length * 16); allocations.push(paletteRgPointer);
-    const paletteBPointer = alloc(palette.length * 8); allocations.push(paletteBPointer);
+    const paletteRgPointer = trackAlloc(allocations, palette.length * 16);
+    const paletteBPointer = trackAlloc(allocations, palette.length * 8);
     const paletteView = memoryView();
     palette.forEach((stop, index) => {
         if (!Array.isArray(stop) || stop.length < 3 || !stop.slice(0, 3).every(Number.isFinite)) {
@@ -1939,7 +1885,7 @@ function writeDomainPalette(palette, allocations) {
 
 export function createCompiledDomainTileRenderer(snapshot) {
     const allocations = [];
-    const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
     writeMapConfig(configPointer, snapshot, allocations);
     const palette = snapshot.paletteStops;
     const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(palette, allocations);
@@ -2027,13 +1973,12 @@ export function renderNativeMapContour(options) {
     if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
         throw new Error('Native contour rendering requires finite style parameters.');
     }
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
         const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(options.paletteStops, allocations);
         const outputLength = width * height * 4;
-        const outputPointer = alloc(outputLength); allocations.push(outputPointer);
+        const outputPointer = trackAlloc(allocations, outputLength);
         const status = wasm.ce_render_map_contour(
             configPointer,
             options.xRange[0], options.xRange[1], options.yRange[0], options.yRange[1],
@@ -2045,9 +1990,7 @@ export function renderNativeMapContour(options) {
         );
         if (status !== 0) throw new Error(`Native contour rendering failed with status ${status}.`);
         return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 function preciseViewportArguments(viewport) {
@@ -2087,16 +2030,15 @@ export function projectNativePrecisePixels(options, pixels) {
     if (packed.length % 2) throw new Error('Native precise pixel geometry requires x/y pairs.');
     const pointCount = packed.length / 2;
     if (!pointCount) return new Float32Array();
-    const allocations = [];
-    try {
+    return withAllocations((allocations, allocate) => {
         const mapPointer = optionalMapPointer(options, allocations);
         const inputRePointer = writeCString(options.inputViewport.centerRe, allocations);
         const inputImPointer = writeCString(options.inputViewport.centerIm, allocations);
         const outputRePointer = writeCString(options.outputViewport.centerRe, allocations);
         const outputImPointer = writeCString(options.outputViewport.centerIm, allocations);
-        const pixelsPointer = alloc(packed.byteLength); allocations.push(pixelsPointer);
-        const resultPointer = alloc(packed.byteLength); allocations.push(resultPointer);
-        const validPointer = alloc(pointCount); allocations.push(validPointer);
+        const pixelsPointer = trackAlloc(allocations, packed.byteLength);
+        const resultPointer = trackAlloc(allocations, packed.byteLength);
+        const validPointer = trackAlloc(allocations, pointCount);
         new Float32Array(wasm.memory.buffer, pixelsPointer, packed.length).set(packed);
         const status = wasm.ce_project_precise_pixels(
             mapPointer, inputRePointer, inputImPointer, input.zoomPower, input.precisionBits,
@@ -2106,9 +2048,7 @@ export function projectNativePrecisePixels(options, pixels) {
         );
         if (status !== 0) throw new Error(`Native precise pixel geometry failed with status ${status}.`);
         return new Float32Array(new Float32Array(wasm.memory.buffer, resultPointer, packed.length));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function projectNativePrecisePixelsToCanvas(options, pixels) {
@@ -2117,14 +2057,13 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
     if (packed.length % 2) throw new Error('Native precise canvas geometry requires x/y pairs.');
     const pointCount = packed.length / 2;
     if (!pointCount) return new Float32Array();
-    const allocations = [];
-    try {
+    return withAllocations((allocations, allocate) => {
         const mapPointer = optionalMapPointer(options, allocations);
         const inputRePointer = writeCString(options.inputViewport.centerRe, allocations);
         const inputImPointer = writeCString(options.inputViewport.centerIm, allocations);
-        const pixelsPointer = alloc(packed.byteLength); allocations.push(pixelsPointer);
-        const resultPointer = alloc(packed.byteLength); allocations.push(resultPointer);
-        const validPointer = alloc(pointCount); allocations.push(validPointer);
+        const pixelsPointer = trackAlloc(allocations, packed.byteLength);
+        const resultPointer = trackAlloc(allocations, packed.byteLength);
+        const validPointer = trackAlloc(allocations, pointCount);
         new Float32Array(wasm.memory.buffer, pixelsPointer, packed.length).set(packed);
         const status = wasm.ce_project_precise_pixels_to_canvas(
             mapPointer, inputRePointer, inputImPointer, input.zoomPower, input.precisionBits,
@@ -2137,22 +2076,19 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
         );
         if (status !== 0) throw new Error(`Native precise-to-canvas geometry failed with status ${status}.`);
         return new Float32Array(new Float32Array(wasm.memory.buffer, resultPointer, packed.length));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function projectNativeValuesToPrecise(options, points) {
     if (!Array.isArray(points) || !points.length) return new Float32Array();
     const output = preciseViewportArguments(options.outputViewport);
-    const allocations = [];
-    try {
+    return withAllocations((allocations, allocate) => {
         const mapPointer = optionalMapPointer(options, allocations);
         const outputRePointer = writeCString(options.outputViewport.centerRe, allocations);
         const outputImPointer = writeCString(options.outputViewport.centerIm, allocations);
-        const pointsPointer = alloc(points.length * 16); allocations.push(pointsPointer);
-        const resultPointer = alloc(points.length * 8); allocations.push(resultPointer);
-        const validPointer = alloc(points.length); allocations.push(validPointer);
+        const pointsPointer = trackAlloc(allocations, points.length * 16);
+        const resultPointer = trackAlloc(allocations, points.length * 8);
+        const validPointer = trackAlloc(allocations, points.length);
         const view = memoryView();
         points.forEach((point, index) => writeComplex(view, pointsPointer + index * 16, point, NaN, NaN));
         const status = wasm.ce_project_values_to_precise(
@@ -2162,9 +2098,7 @@ export function projectNativeValuesToPrecise(options, points) {
         );
         if (status !== 0) throw new Error(`Native precise value geometry failed with status ${status}.`);
         return new Float32Array(new Float32Array(wasm.memory.buffer, resultPointer, points.length * 2));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 const TRANSFORM_SIGNAL_TYPES = Object.freeze({
@@ -2196,10 +2130,9 @@ export function generateNativeTransformSignal(funcType, frequency, amplitude, ti
     if (window <= 0) throw new Error('Transform time window must be positive.');
     const seed = requireInteger(randomSeed, 'Transform random seed');
     if (seed < 0 || seed > 0xffffffff) throw new Error('Transform random seed must be an unsigned 32-bit integer.');
-    const allocations = [];
-    try {
-        const timesPointer = alloc(samples * 8); allocations.push(timesPointer);
-        const valuesPointer = alloc(samples * 8); allocations.push(valuesPointer);
+    return withAllocations((allocations, allocate) => {
+        const timesPointer = trackAlloc(allocations, samples * 8);
+        const valuesPointer = trackAlloc(allocations, samples * 8);
         const status = wasm.ce_generate_transform_signal(
             signalType, frequencyValue, amplitudeValue, window, samples, seed,
             timesPointer, valuesPointer
@@ -2211,22 +2144,19 @@ export function generateNativeTransformSignal(funcType, frequency, amplitude, ti
             t: timesBuf[index],
             value: valuesBuf[index]
         }));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function computeNativeSpectrum(values) {
     if (!Array.isArray(values) || !values.length) return [];
     const count = values.length;
-    const allocations = [];
-    try {
-        const valuesPointer = alloc(count * 8); allocations.push(valuesPointer);
-        const freqPointer = alloc(count * 8); allocations.push(freqPointer);
-        const realPointer = alloc(count * 8); allocations.push(realPointer);
-        const imagPointer = alloc(count * 8); allocations.push(imagPointer);
-        const magPointer = alloc(count * 8); allocations.push(magPointer);
-        const phasePointer = alloc(count * 8); allocations.push(phasePointer);
+    return withAllocations((allocations, allocate) => {
+        const valuesPointer = trackAlloc(allocations, count * 8);
+        const freqPointer = trackAlloc(allocations, count * 8);
+        const realPointer = trackAlloc(allocations, count * 8);
+        const imagPointer = trackAlloc(allocations, count * 8);
+        const magPointer = trackAlloc(allocations, count * 8);
+        const phasePointer = trackAlloc(allocations, count * 8);
 
         const valBuf = new Float64Array(wasm.memory.buffer, valuesPointer, count);
         for (let i = 0; i < count; i++) {
@@ -2252,9 +2182,7 @@ export function computeNativeSpectrum(values) {
             magnitude: magBuf[index],
             phase: phaseBuf[index]
         }));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeLaplaceWinding(signal, sigma, omega, progress = 1) {
@@ -2269,16 +2197,15 @@ export function buildNativeLaplaceWinding(signal, sigma, omega, progress = 1) {
         throw new Error('Laplace animation progress must be between zero and one.');
     }
 
-    const allocations = [];
-    try {
-        const timesPointer = alloc(count * 8); allocations.push(timesPointer);
-        const valuesPointer = alloc(count * 8); allocations.push(valuesPointer);
-        const woundPointer = alloc(count * 16); allocations.push(woundPointer);
-        const weightedPointer = alloc(count * 8); allocations.push(weightedPointer);
-        const envelopePointer = alloc(count * 8); allocations.push(envelopePointer);
-        const integralPointer = alloc(16); allocations.push(integralPointer);
-        const maxRadiusPointer = alloc(8); allocations.push(maxRadiusPointer);
-        const maxAmplitudePointer = alloc(8); allocations.push(maxAmplitudePointer);
+    return withAllocations((allocations, allocate) => {
+        const timesPointer = trackAlloc(allocations, count * 8);
+        const valuesPointer = trackAlloc(allocations, count * 8);
+        const woundPointer = trackAlloc(allocations, count * 16);
+        const weightedPointer = trackAlloc(allocations, count * 8);
+        const envelopePointer = trackAlloc(allocations, count * 8);
+        const integralPointer = trackAlloc(allocations, 16);
+        const maxRadiusPointer = trackAlloc(allocations, 8);
+        const maxAmplitudePointer = trackAlloc(allocations, 8);
 
         const times = new Float64Array(wasm.memory.buffer, timesPointer, count);
         const values = new Float64Array(wasm.memory.buffer, valuesPointer, count);
@@ -2314,9 +2241,7 @@ export function buildNativeLaplaceWinding(signal, sigma, omega, progress = 1) {
             omega: omegaValue,
             animTime: progressValue
         };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export const NATIVE_LAPLACE_FUNCTION_IDS = Object.freeze({
@@ -2348,16 +2273,15 @@ export function buildNativeLaplaceAnalysis(options) {
     const amplitude = requireFiniteNumber(options.amplitude, 'Laplace amplitude');
     const timeWindow = requireFiniteNumber(options.timeWindow, 'Laplace time window');
     if (timeWindow <= 0) throw new Error('Laplace time window must be positive.');
-    const allocations = [];
-    try {
-        const timesPointer = alloc(sampleCount * 8); allocations.push(timesPointer);
-        const signalPointer = alloc(sampleCount * 8); allocations.push(signalPointer);
-        const polesPointer = alloc(2 * 16); allocations.push(polesPointer);
-        const poleOrdersPointer = alloc(2 * 4); allocations.push(poleOrdersPointer);
-        const zerosPointer = alloc(2 * 16); allocations.push(zerosPointer);
-        const poleCountPointer = alloc(4); allocations.push(poleCountPointer);
-        const zeroCountPointer = alloc(4); allocations.push(zeroCountPointer);
-        const rocPointer = alloc(8); allocations.push(rocPointer);
+    return withAllocations((allocations, allocate) => {
+        const timesPointer = trackAlloc(allocations, sampleCount * 8);
+        const signalPointer = trackAlloc(allocations, sampleCount * 8);
+        const polesPointer = trackAlloc(allocations, 2 * 16);
+        const poleOrdersPointer = trackAlloc(allocations, 2 * 4);
+        const zerosPointer = trackAlloc(allocations, 2 * 16);
+        const poleCountPointer = trackAlloc(allocations, 4);
+        const zeroCountPointer = trackAlloc(allocations, 4);
+        const rocPointer = trackAlloc(allocations, 8);
         const status = wasm.ce_generate_laplace_analysis(
             laplaceFunctionId(options.functionKey), frequency,
             damping, amplitude, timeWindow,
@@ -2385,9 +2309,7 @@ export function buildNativeLaplaceAnalysis(options) {
             zeros: Array.from({ length: zeroCount }, (_, index) => readFeature(zerosPointer, index)),
             rocBoundary: view.getFloat64(rocPointer, true)
         };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeLaplaceSurface(specification, options) {
@@ -2413,13 +2335,12 @@ export function buildNativeLaplaceSurface(specification, options) {
     const mode = options.mode === 'magnitude' ? 0 : options.mode === 'phase' ? 1
         : options.mode === 'combined' ? 2 : -1;
     if (mode < 0) throw new Error(`Unsupported Laplace surface mode: ${options.mode}.`);
-    const allocations = [];
-    try {
-        const positionsPointer = alloc(vertexCount * 12); allocations.push(positionsPointer);
-        const normalsPointer = alloc(vertexCount * 12); allocations.push(normalsPointer);
-        const magnitudesPointer = alloc(vertexCount * 4); allocations.push(magnitudesPointer);
-        const phasesPointer = alloc(vertexCount * 4); allocations.push(phasesPointer);
-        const indicesPointer = alloc(indexCapacity * 4); allocations.push(indicesPointer);
+    return withAllocations((allocations, allocate) => {
+        const positionsPointer = trackAlloc(allocations, vertexCount * 12);
+        const normalsPointer = trackAlloc(allocations, vertexCount * 12);
+        const magnitudesPointer = trackAlloc(allocations, vertexCount * 4);
+        const phasesPointer = trackAlloc(allocations, vertexCount * 4);
+        const indicesPointer = trackAlloc(allocations, indexCapacity * 4);
         const indexCount = wasm.ce_build_laplace_surface(
             laplaceFunctionId(specification.functionKey), frequency,
             damping, amplitude,
@@ -2439,9 +2360,7 @@ export function buildNativeLaplaceSurface(specification, options) {
             minOmega: omegaMin,
             maxOmega: omegaMax
         };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeImageMesh(options) {
@@ -2477,14 +2396,13 @@ export function buildNativeImageMesh(options) {
         }
     }
     const indexCapacity = maxCells * 24;
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
-        const texturePointer = alloc(maxVertices * 8); allocations.push(texturePointer);
-        const mappedPointer = alloc(maxVertices * 8); allocations.push(mappedPointer);
-        const indicesPointer = alloc(indexCapacity * 2); allocations.push(indicesPointer);
-        const statsPointer = alloc(16); allocations.push(statsPointer);
+        const texturePointer = trackAlloc(allocations, maxVertices * 8);
+        const mappedPointer = trackAlloc(allocations, maxVertices * 8);
+        const indicesPointer = trackAlloc(allocations, indexCapacity * 2);
+        const statsPointer = trackAlloc(allocations, 16);
         const foldPositionsPointer = buildFold ? alloc(maxVertices * 12) : 0;
         const foldUvsPointer = buildFold ? alloc(maxVertices * 8) : 0;
         const foldMappingPointer = buildFold ? alloc(32) : 0;
@@ -2541,9 +2459,7 @@ export function buildNativeImageMesh(options) {
                 scale: view.getFloat64(foldMappingPointer + 24, true)
             }
         });
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeGridFold(options, pointSets) {
@@ -2574,27 +2490,26 @@ export function buildNativeGridFold(options, pointSets) {
     if (!sourceCount) throw new Error('Native grid-fold rendering requires source points.');
     const lineCapacity = sourceCount + pointSets.length * 4096 + 8;
     const pointCapacity = sourceCount;
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
-        const sourcePointer = alloc(sourceCount * 16); allocations.push(sourcePointer);
-        const offsetsPointer = alloc(offsets.byteLength); allocations.push(offsetsPointer);
-        const rolesPointer = alloc(pointSets.length); allocations.push(rolesPointer);
+        const sourcePointer = trackAlloc(allocations, sourceCount * 16);
+        const offsetsPointer = trackAlloc(allocations, offsets.byteLength);
+        const rolesPointer = trackAlloc(allocations, pointSets.length);
         const flattened = pointSets.flatMap(set => set.points);
         writePointBuffer(sourcePointer, flattened);
         new Uint32Array(wasm.memory.buffer, offsetsPointer, offsets.length).set(offsets);
         new Uint8Array(wasm.memory.buffer, rolesPointer, pointSets.length).set(
             pointSets.map(set => set?.role === 'grid-dots' ? 1 : 0)
         );
-        const linePositionsPointer = alloc(lineCapacity * 12); allocations.push(linePositionsPointer);
-        const lineOffsetsPointer = alloc((lineCapacity + 1) * 4); allocations.push(lineOffsetsPointer);
-        const lineSetsPointer = alloc((lineCapacity + 1) * 4); allocations.push(lineSetsPointer);
-        const pointPositionsPointer = alloc(Math.max(1, pointCapacity) * 12); allocations.push(pointPositionsPointer);
-        const pointOffsetsPointer = alloc((pointSets.length + 1) * 4); allocations.push(pointOffsetsPointer);
-        const pointSetsPointer = alloc((pointSets.length + 1) * 4); allocations.push(pointSetsPointer);
-        const statsPointer = alloc(16); allocations.push(statsPointer);
-        const mappingPointer = alloc(32); allocations.push(mappingPointer);
+        const linePositionsPointer = trackAlloc(allocations, lineCapacity * 12);
+        const lineOffsetsPointer = trackAlloc(allocations, (lineCapacity + 1) * 4);
+        const lineSetsPointer = trackAlloc(allocations, (lineCapacity + 1) * 4);
+        const pointPositionsPointer = trackAlloc(allocations, Math.max(1, pointCapacity) * 12);
+        const pointOffsetsPointer = trackAlloc(allocations, (pointSets.length + 1) * 4);
+        const pointSetsPointer = trackAlloc(allocations, (pointSets.length + 1) * 4);
+        const statsPointer = trackAlloc(allocations, 16);
+        const mappingPointer = trackAlloc(allocations, 32);
         const status = wasm.ce_build_grid_fold(
             configPointer, sourcePointer, offsetsPointer, rolesPointer, pointSets.length,
             sourceXMin, sourceXMax, outputXMin, outputXMax, outputYMin, outputYMax,
@@ -2630,19 +2545,16 @@ export function buildNativeGridFold(options, pointSets) {
                 scale: view.getFloat64(mappingPointer + 24, true)
             }
         };
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeFoldPreimageMarkers(options, roots) {
     if (!Array.isArray(roots) || !roots.length) return new Float32Array();
-    const allocations = [];
-    try {
-        const mapPointer = alloc(MAP_CONFIG_SIZE); allocations.push(mapPointer);
+    return withAllocations((allocations, allocate) => {
+        const mapPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(mapPointer, options.mapOptions, allocations);
-        const rootsPointer = alloc(roots.length * 16); allocations.push(rootsPointer);
-        const positionsPointer = alloc(roots.length * 12); allocations.push(positionsPointer);
+        const rootsPointer = trackAlloc(allocations, roots.length * 16);
+        const positionsPointer = trackAlloc(allocations, roots.length * 12);
         writePointBuffer(rootsPointer, roots);
         const count = wasm.ce_build_fold_preimage_markers(
             mapPointer, rootsPointer, roots.length,
@@ -2652,9 +2564,7 @@ export function buildNativeFoldPreimageMarkers(options, roots) {
         );
         if (count < 0) throw new Error(`Native fold preimage geometry failed with status ${count}.`);
         return new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, count * 3));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function buildNativeRealSurface(options) {
@@ -2690,9 +2600,8 @@ export function buildNativeRealSurface(options) {
         !palette.every(value => Number.isFinite(value) && value >= 0 && value <= 1))) {
         throw new Error('Native real surface requires a normalized RGB Float32 palette.');
     }
-    const allocations = [];
-    try {
-        const configPointer = alloc(MAP_CONFIG_SIZE); allocations.push(configPointer);
+    return withAllocations((allocations, allocate) => {
+        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
         const inputUPointer = writeInstructionBuffer(options.inputUProgram, allocations);
         const inputVPointer = writeInstructionBuffer(options.inputVProgram, allocations);
@@ -2709,10 +2618,10 @@ export function buildNativeRealSurface(options) {
         const indicesPointer = valuesOnly ? 0 : alloc(maxIndexCount * 4);
         for (const pointer of [positionsPointer, normalsPointer, colorsPointer, rawValuesPointer,
             phasesPointer, indicesPointer]) if (pointer) allocations.push(pointer);
-        const valuesPointer = alloc(vertexCount * 8); allocations.push(valuesPointer);
-        const minimumPointer = alloc(8); allocations.push(minimumPointer);
-        const maximumPointer = alloc(8); allocations.push(maximumPointer);
-        const finitePointer = alloc(4); allocations.push(finitePointer);
+        const valuesPointer = trackAlloc(allocations, vertexCount * 8);
+        const minimumPointer = trackAlloc(allocations, 8);
+        const maximumPointer = trackAlloc(allocations, 8);
+        const finitePointer = trackAlloc(allocations, 4);
         const indexCount = wasm.ce_build_real_surface(
             configPointer, xMin, xMax, yMin, yMax,
             segments,
@@ -2742,9 +2651,7 @@ export function buildNativeRealSurface(options) {
             phases: new Float32Array(new Float32Array(wasm.memory.buffer, phasesPointer, vertexCount)),
             indices: new Uint32Array(new Uint32Array(wasm.memory.buffer, indicesPointer, indexCount))
         });
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }
 
 export function renderNativeRealContour(options) {
@@ -2799,8 +2706,7 @@ export function renderNativeRealContour(options) {
         throw new Error('Native real-contour rendering requires a normalized RGB Float32 palette.');
     }
 
-    const allocations = [];
-    try {
+    return withAllocations((allocations, allocate) => {
         const configPointer = gridEnabled ? 0 : alloc(MAP_CONFIG_SIZE);
         if (configPointer) {
             allocations.push(configPointer);
@@ -2822,7 +2728,7 @@ export function renderNativeRealContour(options) {
             new Float32Array(wasm.memory.buffer, colorsPointer, colors.length).set(colors);
         }
         const outputLength = width * height * 4;
-        const outputPointer = alloc(outputLength); allocations.push(outputPointer);
+        const outputPointer = trackAlloc(allocations, outputLength);
         const status = wasm.ce_render_real_contour(
             configPointer, xMin, xMax, yMin, yMax, width, height,
             inputUPreset, inputUPointer, options.inputUProgram?.instructions?.length ?? 0,
@@ -2833,7 +2739,5 @@ export function renderNativeRealContour(options) {
         );
         if (status !== 0) throw new Error(`Native real-contour rendering failed with status ${status}.`);
         return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
-    } finally {
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    }
+    });
 }

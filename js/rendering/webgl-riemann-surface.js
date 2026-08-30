@@ -75,6 +75,8 @@ const SURFACE_COMPONENT_IDS = Object.freeze({
 
 const ALGEBRAIC_C_FUNCTION_ID = -1;
 const MAX_DRAWN_BRANCH_CUT_POINTS = 32;
+const TAYLOR_MAX_ORDER = 15;
+const TAYLOR_COEFFICIENT_COUNT = TAYLOR_MAX_ORDER + 1;
 
 const SURFACE_PALETTE_GLSL = createDomainPaletteGlslSource('surfacePaletteColor');
 
@@ -114,7 +116,7 @@ uniform vec4 u_contourParams;
 uniform vec2 u_polyCoeffs[11];
 uniform vec2 u_chainSeed;
 uniform vec2 u_taylorCenter;
-uniform vec2 u_taylorCoefficients[9];
+uniform vec2 u_taylorCoefficients[${TAYLOR_COEFFICIENT_COUNT}];
 uniform vec2 u_branchCutPoints[${MAX_DRAWN_BRANCH_CUT_POINTS}];
 uniform int u_branchCutPointCount;
 #define u_functionId u_functionParams.x
@@ -151,7 +153,7 @@ uniform int u_branchCutPointCount;
 
 const ARRAY_UNIFORMS = Object.freeze([
   { key: 'uPolyCoeffs', name: 'u_polyCoeffs', length: 11 },
-  { key: 'uTaylorCoefficients', name: 'u_taylorCoefficients', length: 9 },
+  { key: 'uTaylorCoefficients', name: 'u_taylorCoefficients', length: TAYLOR_COEFFICIENT_COUNT },
   { key: 'uBranchCutPoints', name: 'u_branchCutPoints', length: MAX_DRAWN_BRANCH_CUT_POINTS }
 ]);
 
@@ -520,11 +522,11 @@ bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 
   },
 
   evaluateTaylorSurface: {
-    source: `vec2 evaluateTaylorSurface(vec2 z, vec2 center, int order, vec2 coefficients[9]) {
+    source: `vec2 evaluateTaylorSurface(vec2 z, vec2 center, int order, vec2 coefficients[${TAYLOR_COEFFICIENT_COUNT}]) {
   vec2 delta = z - center;
   vec2 power = vec2(1.0, 0.0);
   vec2 sum = vec2(0.0);
-  for (int i = 0; i <= 8; i++) {
+  for (int i = 0; i <= ${TAYLOR_MAX_ORDER}; i++) {
     if (i <= order) sum += complexMul(coefficients[i], power);
     power = complexMul(power, delta);
   }
@@ -551,7 +553,7 @@ bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 
   float useTaylor,
   vec2 taylorCenter,
   int taylorOrder,
-  vec2 taylorCoefficients[9],
+  vec2 taylorCoefficients[${TAYLOR_COEFFICIENT_COUNT}],
   out vec2 mapped
 ) {
   if (useTaylor > 0.5) {
@@ -596,7 +598,7 @@ ${buildAlgebraicBranchBody(appState)}
   float useTaylor,
   vec2 taylorCenter,
   int taylorOrder,
-  vec2 taylorCoefficients[9],
+  vec2 taylorCoefficients[${TAYLOR_COEFFICIENT_COUNT}],
   out vec2 mapped
 ) {
   if (chainMode == 2) {
@@ -1730,7 +1732,9 @@ function getTaylorCoefficients(order) {
 function setTaylorUniforms(renderer) {
   const { gl, locations } = renderer;
   const order = requireInteger(state.taylorSeriesOrder, 'Riemann Taylor order');
-  if (order < 0 || order > 8) throw new Error('Riemann Taylor order must be between zero and eight.');
+  if (order < 0 || order > TAYLOR_MAX_ORDER) {
+    throw new Error(`Riemann Taylor order must be between zero and ${TAYLOR_MAX_ORDER}.`);
+  }
   const coefficients = getTaylorCoefficients(order);
   const useTaylor = Boolean(coefficients);
   const center = requireFiniteComplex(state.taylorSeriesCenter, 'Riemann Taylor center');
@@ -1745,7 +1749,7 @@ function setTaylorUniforms(renderer) {
   gl.uniform2f(locations.uTaylorCenter, center.re, center.im);
 
   const packed = renderer.taylorCoeffUniformData;
-  for (let i = 0, offset = 0; i <= 8; i++, offset += 2) {
+  for (let i = 0, offset = 0; i < TAYLOR_COEFFICIENT_COUNT; i++, offset += 2) {
     const coefficient = i <= order ? coefficients[i] : ZERO_COMPLEX;
     packed[offset] = coefficient.re;
     packed[offset + 1] = coefficient.im;
@@ -2215,7 +2219,7 @@ class RiemannSurfaceRendererFactory {
       modelViewMatrix: new Float32Array(16),
       projectionMatrix: new Float32Array(16),
       polyCoeffUniformData: new Float32Array(22),
-      taylorCoeffUniformData: new Float32Array(18),
+      taylorCoeffUniformData: new Float32Array(TAYLOR_COEFFICIENT_COUNT * 2),
       branchCutUniformData: new Float32Array(MAX_DRAWN_BRANCH_CUT_POINTS * 2),
       continuationData: new Float32Array(4096 * 3),
       continuationProgram: null,

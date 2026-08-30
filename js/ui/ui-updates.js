@@ -7,7 +7,7 @@ import {
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
 import { syncVideoPlaybackUI } from '../utils/raster-media.js';
-import { findTaylorCenterPreset, formatTaylorNumericValue, getChainingTitleHTML } from '../utils/dom-utils.js';
+import { findTaylorCenterPreset, formatTaylorNumericValue, getChainingTitleHTML, updateChainingTitles } from '../utils/dom-utils.js';
 import { refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import { syncNavigationControls } from '../navigation-plane.js';
 import {
@@ -16,7 +16,7 @@ import {
     baseExpressionHasBranches
 } from '../analysis/riemann-surface.js';
 import { domainPalettes } from './theme-manager.js';
-import { startManifoldTransformationAnimation, stopManifoldTransformationAnimation, syncManifoldTransformationPlayPauseButton, initThreeJSRenderers, buildThreeJSMeshes, syncManifoldSliders, disposeThreeJSRenderers } from '../rendering/manifold-transformation-animation.js';
+import { startManifoldTransformationAnimation, stopManifoldTransformationAnimation, syncManifoldTransformationPlayPauseButton, initThreeJSRenderers, syncManifoldSliders, disposeThreeJSRenderers } from '../rendering/manifold-transformation-animation.js';
 import { getDynamicFunctionFormulaHtml } from '../analysis/dynamic-plotting.js';
 import { compileExpression, createExpressionMathML } from '../math/expression/index.js';
 import { createFormulaFragment } from './dom-components.js';
@@ -27,6 +27,7 @@ import { syncGridShapeControls } from './grid-shape-controls.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices, getTissotViewportBounds } from '../analysis/tissot.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { setPlaneViewport } from '../utils/canvas-utils.js';
+import { syncGridDensityControls } from './grid-density-controls.js';
 
 const { controls = {} } = context;
 
@@ -64,7 +65,7 @@ export function syncLaplacePlayPauseButton() {
     }
 }
 
-const CENTER_LABELS = Object.freeze({
+const CENTER_LABELS = {
     line: [
         'Fixed Re(z) (<code>a<sub>0</sub></code>):',
         'Fixed Im(z) (<code>b<sub>0</sub></code>):'
@@ -73,21 +74,13 @@ const CENTER_LABELS = Object.freeze({
         'Media Center Re (<code>a<sub>0</sub></code>):',
         'Media Center Im (<code>b<sub>0</sub></code>):'
     ],
-    image: [
-        'Image Center Re (<code>a<sub>0</sub></code>):',
-        'Image Center Im (<code>b<sub>0</sub></code>):'
-    ],
-    video: [
-        'Video Center Re (<code>a<sub>0</sub></code>):',
-        'Video Center Im (<code>b<sub>0</sub></code>):'
-    ],
     default: [
         'Center Re(z<sub>0</sub>) (<code>a<sub>0</sub></code>):',
         'Center Im(z<sub>0</sub>) (<code>b<sub>0</sub></code>):'
     ]
-});
+};
 
-const INPUT_SHAPE_TITLE_SUFFIX = Object.freeze({
+const INPUT_SHAPE_TITLE_SUFFIX = {
     line: ': Lines',
     circle: ': Circle',
     grid_cartesian: ': Cartesian Grid',
@@ -103,17 +96,15 @@ const INPUT_SHAPE_TITLE_SUFFIX = Object.freeze({
     grid_irregular: ': Irregular-spaced Grid',
     arbitrary: ': Arbitrary Shape',
     media: ': Media',
-    image: ': Image',
-    video: ': Video',
     navigate: ': Navigation',
     empty_grid: ': Empty'
-});
+};
 
-const SHAPE_SPECIFIC_GROUPS = Object.freeze({
+const SHAPE_SPECIFIC_GROUPS = {
     circle: 'circleRSliderGroup'
-});
+};
 
-const SIMPLE_FUNCTION_LABELS = Object.freeze({
+const SIMPLE_FUNCTION_LABELS = {
     sin: 'sin',
     cos: 'cos',
     tan: 'tan',
@@ -127,9 +118,9 @@ const SIMPLE_FUNCTION_LABELS = Object.freeze({
     gamma: 'Γ',
     loggamma: 'log Γ',
     bessel: 'Jν'
-});
+};
 
-const FUNCTION_ARGUMENT_HTML = Object.freeze({
+const FUNCTION_ARGUMENT_HTML = {
     sin: 'sin(z)',
     cos: 'cos(z)',
     tan: 'tan(z)',
@@ -146,7 +137,7 @@ const FUNCTION_ARGUMENT_HTML = Object.freeze({
     mobius: 'Möbius(z)',
     zeta: 'ζ(z)',
     polynomial: 'P(z)'
-});
+};
 
 const NORMAL_MODE_VALUE_BINDINGS = Object.freeze([
     { display: 'gridDensityValueDisplay', key: 'gridDensity' },
@@ -161,11 +152,7 @@ const NORMAL_MODE_VALUE_BINDINGS = Object.freeze([
     { display: 'domainLightnessCyclesValueDisplay', key: 'domainLightnessCycles', digits: 2 },
     { display: 'mediaSizeValueDisplay', key: 'mediaSize', digits: 1 },
     { display: 'mediaOpacityValueDisplay', key: 'mediaOpacity', digits: 2 },
-    { display: 'imageSizeValueDisplay', key: 'imageSize', digits: 1 },
-    { display: 'imageOpacityValueDisplay', key: 'imageOpacity', digits: 2 },
     { display: 'videoFpsValueDisplay', key: 'videoProcessingFps' },
-    { display: 'videoSizeValueDisplay', key: 'videoSize', digits: 1 },
-    { display: 'videoOpacityValueDisplay', key: 'videoOpacity', digits: 2 },
     {
         display: 'radialDiscreteStepsCountValueDisplay',
         key: 'radialDiscreteStepsCount',
@@ -213,16 +200,12 @@ const LAPLACE_VALUE_BINDINGS = Object.freeze([
 ]);
 
 function control(key) {
-    return controls?.[key] ?? null;
+    return controls[key] ?? null;
 }
 
 function resolveControl(target) {
     if (!target) return null;
-    return typeof target === 'string' ? (controls?.[target] ?? document.getElementById(target) ?? null) : target;
-}
-
-function runUiTransaction(_name, action) {
-    action();
+    return typeof target === 'string' ? control(target) : target;
 }
 
 function setHidden(target, hidden = true) {
@@ -263,8 +246,8 @@ function setDisabled(key, disabled) {
     }
 }
 
-function setValue(key, value) {
-    const node = control(key);
+function setValue(target, value) {
+    const node = resolveControl(target);
     if (node && value !== undefined && value !== null && 'value' in node) {
         node.value = value;
     }
@@ -284,30 +267,10 @@ function setFixedText(key, value, digits) {
 
 function syncValueBindings(bindings) {
     for (const binding of bindings) {
-        if (binding.guard && !binding.guard()) {
-            continue;
-        }
-
-        if (binding.companion && !control(binding.companion)) {
-            continue;
-        }
-
-        const value = typeof binding.get === 'function'
-            ? binding.get()
-            : state[binding.key];
-
-        if (value === undefined || value === null) {
-            continue;
-        }
-
-        if (binding.digits === undefined) {
-            setText(binding.display, value);
-            continue;
-        }
-
-        const rendered = toFixedText(value, binding.digits);
-        if (rendered !== null) {
-            setText(binding.display, rendered);
+        if ((binding.guard && !binding.guard()) || (binding.companion && !control(binding.companion))) continue;
+        const value = binding.get ? binding.get() : state[binding.key];
+        if (value !== undefined && value !== null) {
+            setText(binding.display, binding.digits === undefined ? value : toFixedText(value, binding.digits));
         }
     }
 }
@@ -462,14 +425,14 @@ export function syncComplexParameterControls() {
     setHidden('chainingControlsContainer', !state.chainingEnabled);
     setChecked('enableChainingCb', state.chainingEnabled);
     setChecked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
-    setHidden('algebraicChainingParams', !state.realPlotsEnabled && !state.algebraicChainingEnabled);
     setHidden('chainSeedControl', !state.chainingEnabled || state.chainingMode !== 'zero_seed');
+    setValue('inputShapeSelector', state.currentInputShape);
 
     const shape = state.currentInputShape;
     const activeFunctions = collectActiveFunctionKeys();
     const isLine = shape === 'line';
     const isCircle = shape === 'circle';
-    const isMedia = shape === 'media' || shape === 'image' || shape === 'video';
+    const isMedia = shape === 'media';
     const isGrid = isFoldableInputShape(shape);
     const isArbitrary = shape === 'arbitrary';
     const showCommonParams = isLine || isCircle;
@@ -527,7 +490,7 @@ export function syncComplexParameterControls() {
         ? `${drawnPointCount} sampled points. Drag again to append another stroke.`
         : 'Drag anywhere on the z-plane. New strokes are appended.');
     const isFoldActive = Boolean(state.foldSurface3dEnabled && (isGrid || isMedia));
-    setHidden('w_plane_folds_overlay', !isFoldActive);
+    setHidden('wPlaneFoldsOverlay', !isFoldActive);
 
     syncShapeSpecificParameterGroups(shape, showShapeSpecificSliders);
 
@@ -588,15 +551,20 @@ export function syncVectorFlowControls() {
     syncValueBindings(PARTICLE_VALUE_BINDINGS);
 }
 
-export function syncTransformControlPanels() {
+function syncModeControlPanels() {
     const transformHubActive = state.laplaceModeEnabled || state.graphFourierEnabled;
-    setHidden('coreApplicationControls', state.laplaceModeEnabled);
+    setHidden('coreApplicationControls', state.laplaceModeEnabled || state.realPlotsEnabled);
     setHidden('laplaceSpecificControls', !transformHubActive);
+    setHidden('realPlotsControlsContainer', !state.realPlotsEnabled);
+    setHidden(
+        'algebraicChainingParams',
+        state.laplaceModeEnabled || !(state.realPlotsEnabled || state.algebraicChainingEnabled)
+    );
     setHidden('inputShapeSelector', state.laplaceModeEnabled);
 }
 
 function syncRiemannAndTransformDisplays() {
-    syncTransformControlPanels();
+    syncModeControlPanels();
     const graphSource = state.graphFourierEnabled && !state.laplaceModeEnabled;
     const sourceSelector = control('laplaceFunctionSelector');
     const graphOption = control('laplaceCurrentGraphOption');
@@ -626,12 +594,7 @@ function syncRiemannAndTransformDisplays() {
     setChecked('laplaceSyncWindingVectorCb', state.laplaceSyncWindingVector);
     setChecked('laplaceShowBarriersCb', state.laplaceShowBarriers);
     setValue('laplaceComComponentSelector', state.laplaceComComponent);
-    setChecked('laplaceContoursCb', state.contoursEnabled);
-    setValue('laplaceContourIntervalSlider', state.contourInterval);
-    setText('laplaceContourIntervalValueDisplay', Number(state.contourInterval).toFixed(2));
-    setValue('laplaceContourThicknessSlider', state.contourThickness);
-    setText('laplaceContourThicknessValueDisplay', Number(state.contourThickness).toFixed(1));
-    setHidden('laplaceContoursDetails', !state.contoursEnabled);
+    syncContourControls('laplace');
     syncValueBindings(RIEMANN_VIEW_VALUE_BINDINGS);
     syncValueBindings(LAPLACE_VALUE_BINDINGS);
 }
@@ -662,16 +625,15 @@ function syncGraphControls() {
 }
 
 export function updateSliderLabelsAndDisplay() {
-    runUiTransaction('updateSliderLabelsAndDisplay', () => {
-        syncComplexParameterControls();
-        syncNormalModeDisplays();
-        syncTaylorControls();
-        syncVectorFlowControls();
-        syncRiemannAndTransformDisplays();
-        syncGraphControls();
-        syncParameterControlsPanelVisibility();
-        syncDelegates();
-    });
+    syncGridDensityControls();
+    syncComplexParameterControls();
+    syncNormalModeDisplays();
+    syncTaylorControls();
+    syncVectorFlowControls();
+    syncRiemannAndTransformDisplays();
+    syncGraphControls();
+    syncParameterControlsPanelVisibility();
+    syncDelegates();
 }
 
 export function getTaylorDisplayCenter() {
@@ -778,26 +740,19 @@ function transformedProbeHtml() {
 }
 
 export function updateProbeInfo() {
-    runUiTransaction('updateProbeInfo', () => {
-        const zIsPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
-        const probeCanRender = state.probeActive
-            && zIsPlanar
-            && !state.navigationModeEnabled
-            && !state.laplaceModeEnabled
-            && !isPanning(runtime.interaction.panZ)
-            && !isPanning(runtime.interaction.panW)
-            && finiteComplex(state.probeZ);
+    const probeCanRender = state.probeActive
+        && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)
+        && !state.navigationModeEnabled
+        && !state.laplaceModeEnabled
+        && !isPanning(runtime.interaction.panZ)
+        && !isPanning(runtime.interaction.panW)
+        && finiteComplex(state.probeZ);
 
-        if (!probeCanRender) {
-            hideProbeInfo();
-            return;
-        }
-
-        showProbeInfo(
-            `z = ${formatProbeComplex(state.probeZ.re, state.probeZ.im)}`,
-            transformedProbeHtml()
-        );
-    });
+    if (!probeCanRender) return hideProbeInfo();
+    showProbeInfo(
+        `z = ${formatProbeComplex(state.probeZ.re, state.probeZ.im)}`,
+        transformedProbeHtml()
+    );
 }
 
 function formatNumberForFormula(value) {
@@ -1139,7 +1094,7 @@ function syncPrimaryPlaneTitles() {
     if (state.riemannSurfaceEnabled) {
         setHtml('zPlaneTitle', zPlaneTitle);
         setHtml('wPlaneTitle', `Riemann surface (${model.wOutputDescriptor})`);
-        setHidden('cauchy_integral_results_info', true);
+        setHidden('cauchyIntegralResultsInfo', true);
         return;
     }
 
@@ -1148,7 +1103,7 @@ function syncPrimaryPlaneTitles() {
         setHtml('zPlaneTitle', `z-manifold (Input: Transforming Flat Grid to ${manifold.name})`);
         const mappedGridLabel = state.mapPresentation === 'derivative' ? 'Derivative Grid' : 'Mapped Grid';
         setHtml('wPlaneTitle', `w-manifold (Output: Transforming ${mappedGridLabel} to ${manifold.name})`);
-        setHidden('cauchy_integral_results_info', true);
+        setHidden('cauchyIntegralResultsInfo', true);
         return;
     }
 
@@ -1156,7 +1111,7 @@ function syncPrimaryPlaneTitles() {
         const manifold = getManifold(state.selectedManifold);
         setHtml('zPlaneTitle', zPlaneTitle);
         setHtml('wPlaneTitle', `w-manifold (Output: ${manifold.name})`);
-        setHidden('cauchy_integral_results_info', true);
+        setHidden('cauchyIntegralResultsInfo', true);
         return;
     }
 
@@ -1189,6 +1144,15 @@ function syncTransformModeTitles() {
     return true;
 }
 
+function syncContourControls(prefix) {
+    setChecked(`${prefix}ContoursCb`, state.contoursEnabled);
+    setValue(`${prefix}ContourIntervalSlider`, state.contourInterval);
+    setFixedText(`${prefix}ContourIntervalValueDisplay`, state.contourInterval, 2);
+    setValue(`${prefix}ContourThicknessSlider`, state.contourThickness);
+    setFixedText(`${prefix}ContourThicknessValueDisplay`, state.contourThickness, 1);
+    setHidden(`${prefix}ContoursDetails`, !state.contoursEnabled);
+}
+
 function syncRiemannSurfaceControls() {
     setHidden(
         'manifoldOptionsDiv',
@@ -1197,12 +1161,7 @@ function syncRiemannSurfaceControls() {
     setHidden('riemannSurfaceOptionsDiv', !state.riemannSurfaceEnabled);
     setValue('riemannSurfaceComponentSelector', state.riemannSurfaceComponent);
     setChecked('riemannSurfaceWireframeCb', state.riemannSurfaceWireframe);
-    setChecked('riemannSurfaceContoursCb', state.contoursEnabled);
-    setValue('riemannSurfaceContourIntervalSlider', state.contourInterval);
-    setText('riemannSurfaceContourIntervalValueDisplay', Number(state.contourInterval).toFixed(2));
-    setValue('riemannSurfaceContourThicknessSlider', state.contourThickness);
-    setText('riemannSurfaceContourThicknessValueDisplay', Number(state.contourThickness).toFixed(1));
-    setHidden('riemannSurfaceContoursDetails', !state.contoursEnabled);
+    syncContourControls('riemannSurface');
 
     if (control('riemannSurfaceStatus')) {
         const hasBranches = baseExpressionHasBranches(state);
@@ -1466,9 +1425,9 @@ export function syncCanvasZoomControlsUI() {
     const wZoomVisible = isEnabled && !isRiemann && !isFold && !isManifoldW && !isGraph && !isLaplace;
     const realPlotsZoomVisible = isEnabled && Boolean(state.realPlotsEnabled);
 
-    setHidden('z_plane_zoom_controls', !zZoomVisible);
-    setHidden('w_plane_zoom_controls', !wZoomVisible);
-    setHidden('real_plots_zoom_controls', !realPlotsZoomVisible);
+    setHidden('zPlaneZoomControls', !zZoomVisible);
+    setHidden('wPlaneZoomControls', !wZoomVisible);
+    setHidden('realPlotsZoomControls', !realPlotsZoomVisible);
 }
 
 function syncVisualizationOptionControls() {
@@ -1478,27 +1437,21 @@ function syncVisualizationOptionControls() {
     setHidden('radialDiscreteStepsOptionsDiv', !state.radialDiscreteStepsEnabled);
     syncZetaControls();
     syncFunctionEquationCard();
-    syncCanvasZoomControlsUI();
 }
 
 export function updateTitlesAndGlobalUI() {
-    runUiTransaction('updateTitlesAndGlobalUI', () => {
-        updateSliderLabelsAndDisplay();
-        updateProbeInfo();
-        syncCanvasZoomControlsUI();
+    updateSliderLabelsAndDisplay();
+    updateProbeInfo();
+    syncCanvasZoomControlsUI();
 
-        if (syncTransformModeTitles()) {
-            sync2DContourUI();
-            syncGridShapeControls();
-            return;
-        }
-
+    if (!syncTransformModeTitles()) {
         syncPrimaryPlaneTitles();
         syncVisualizationOptionControls();
         syncManifoldTransformationUI();
-        sync2DContourUI();
-        syncGridShapeControls();
-    });
+    }
+    updateChainingTitles();
+    sync2DContourUI();
+    syncGridShapeControls();
 }
 
 export function updateDomainColoringKey() {
@@ -1544,52 +1497,22 @@ export function syncManifoldTransformationUI() {
     const isManifoldActive = Boolean(state.manifold3dViewEnabled);
     const isTransformActive = Boolean(state.manifoldTransformationEnabled && isManifoldActive);
 
-    const overlayZ = document.getElementById('z_plane_transformation_overlay');
-    const containerZ = document.getElementById('z_plane_threejs_container');
-    const canvasZ = document.getElementById('z_plane_canvas');
-
-    const overlayW = document.getElementById('w_plane_transformation_overlay');
-    const containerW = document.getElementById('w_plane_threejs_container');
-    const canvasW = document.getElementById('w_plane_canvas');
-
-    // Left panel (Z): In Mode 1 (3D Manifolds), Z is 2D canvas. Only in Mode 2 (Show Transformation) does Z switch to 3D.
-    if (overlayZ) overlayZ.classList.toggle('hidden', !isTransformActive);
-    if (containerZ) containerZ.classList.toggle('hidden', !isTransformActive);
-    if (canvasZ) canvasZ.classList.toggle('hidden', isTransformActive);
-
-    // Right panel (W): Shows 3D Manifold whenever 3D Manifolds is enabled. Shows HUD overlay during transformation.
-    if (overlayW) overlayW.classList.toggle('hidden', !isTransformActive);
-    if (containerW) containerW.classList.toggle('hidden', !isManifoldActive);
-    if (canvasW) {
-        canvasW.classList.toggle(
-            'hidden',
-            isManifoldActive || state.riemannSurfaceEnabled
-        );
-    }
-
-    const manifoldOptionsDiv = document.getElementById('manifold_options_div');
-    if (manifoldOptionsDiv) {
-        manifoldOptionsDiv.classList.toggle('hidden', !isManifoldActive);
-    }
-
-    const selector = document.getElementById('manifold_shape_selector');
-    if (selector && selector.value !== state.selectedManifold) {
-        selector.value = state.selectedManifold || 'sphere';
-    }
-
-    const transCb = document.getElementById('enable_manifold_transformation_cb');
-    if (transCb && transCb.checked !== state.manifoldTransformationEnabled) {
-        transCb.checked = state.manifoldTransformationEnabled;
-    }
+    ['zPlaneTransformationOverlay', 'zPlaneThreejsContainer', 'wPlaneTransformationOverlay']
+        .forEach(key => setHidden(key, !isTransformActive));
+    setHidden('zPlaneCanvas', isTransformActive);
+    setHidden('wPlaneThreejsContainer', !isManifoldActive);
+    setHidden('wPlaneCanvas', isManifoldActive || state.riemannSurfaceEnabled);
+    setHidden('manifoldOptionsDiv', !isManifoldActive);
+    setValue('manifoldShapeSelector', state.selectedManifold);
+    setChecked('enableManifoldTransformationCb', state.manifoldTransformationEnabled);
 
     if (isManifoldActive) {
         initThreeJSRenderers();
-        buildThreeJSMeshes();
+        syncManifoldSliders();
         if (isTransformActive) {
             startManifoldTransformationAnimation();
         } else {
             stopManifoldTransformationAnimation();
-            syncManifoldSliders();
         }
         syncManifoldTransformationPlayPauseButton();
     } else {
@@ -1598,98 +1521,28 @@ export function syncManifoldTransformationUI() {
     }
 }
 
+function syncRealPlotExpression(part) {
+    const statePrefix = `realPlots${part}`;
+    const value = state[`${statePrefix}Expr`];
+    const custom = state[`${statePrefix}IsCustom`];
+    setValue(`${statePrefix}Preset`, custom ? 'custom' : value);
+    setHidden(`realPlotsCustom${part}Container`, !custom);
+    if (!custom) return;
+
+    const input = control(`realPlotsCustom${part}`);
+    setValue(input, value);
+    updateCustomFormulaPreview(input, control(`realPlotsCustom${part}Math`));
+}
+
 export function syncRealPlotsUI() {
-    const inputPreset = document.getElementById('real_plots_input_preset');
-    const imagPreset = document.getElementById('real_plots_imag_preset');
-    const customInputContainer = document.getElementById('real_plots_custom_input_container');
-    const customImagContainer = document.getElementById('real_plots_custom_imag_container');
-    const customInput = document.getElementById('real_plots_custom_input');
-    const customImag = document.getElementById('real_plots_custom_imag');
-    const customInputMath = document.getElementById('real_plots_custom_input_math');
-    const customImagMath = document.getElementById('real_plots_custom_imag_math');
-
-    if (!inputPreset || !imagPreset) return;
-
-    const uVal = state.realPlotsInputExpr || 'x';
-    const vVal = state.realPlotsImagExpr || '0';
-
-    if (!state.realPlotsInputIsCustom) {
-        inputPreset.value = uVal;
-        if (customInputContainer) customInputContainer.classList.add('hidden');
-    } else {
-        inputPreset.value = 'custom';
-        if (customInputContainer) customInputContainer.classList.remove('hidden');
-        if (customInput && customInput.value !== uVal) {
-            customInput.value = uVal;
-        }
-        updateCustomFormulaPreview(customInput, customInputMath);
+    ['Input', 'Imag'].forEach(syncRealPlotExpression);
+    setValue('realPlotsColorMode', state.realPlotsColorMode);
+    setValue('realPlotsOutputComponent', state.realPlotsOutputComponent);
+    for (const name of ['Brightness', 'Contrast', 'Saturation', 'HeightScale']) {
+        const value = state[`realPlots${name}`];
+        setValue(`realPlots${name}Slider`, value);
+        setFixedText(`realPlots${name}ValueDisplay`, value, 2);
     }
-
-    if (!state.realPlotsImagIsCustom) {
-        imagPreset.value = vVal;
-        if (customImagContainer) customImagContainer.classList.add('hidden');
-    } else {
-        imagPreset.value = 'custom';
-        if (customImagContainer) customImagContainer.classList.remove('hidden');
-        if (customImag && customImag.value !== vVal) {
-            customImag.value = vVal;
-        }
-        updateCustomFormulaPreview(customImag, customImagMath);
-    }
-
-    const colorModeEl = document.getElementById('real_plots_color_mode');
-    if (colorModeEl && state.realPlotsColorMode) {
-        colorModeEl.value = state.realPlotsColorMode;
-    }
-
-    const outputCompEl = document.getElementById('real_plots_output_component');
-    if (outputCompEl && state.realPlotsOutputComponent) {
-        outputCompEl.value = state.realPlotsOutputComponent;
-    }
-
-    const brightnessSlider = document.getElementById('real_plots_brightness_slider');
-    const brightnessDisplay = document.getElementById('real_plots_brightness_value_display');
-    if (brightnessSlider && state.realPlotsBrightness !== undefined) {
-        brightnessSlider.value = String(state.realPlotsBrightness);
-        if (brightnessDisplay) {
-            brightnessDisplay.textContent = Number(state.realPlotsBrightness).toFixed(2);
-        }
-    }
-
-    const contrastSlider = document.getElementById('real_plots_contrast_slider');
-    const contrastDisplay = document.getElementById('real_plots_contrast_value_display');
-    if (contrastSlider && state.realPlotsContrast !== undefined) {
-        contrastSlider.value = String(state.realPlotsContrast);
-        if (contrastDisplay) {
-            contrastDisplay.textContent = Number(state.realPlotsContrast).toFixed(2);
-        }
-    }
-
-    const saturationSlider = document.getElementById('real_plots_saturation_slider');
-    const saturationDisplay = document.getElementById('real_plots_saturation_value_display');
-    if (saturationSlider && state.realPlotsSaturation !== undefined) {
-        saturationSlider.value = String(state.realPlotsSaturation);
-        if (saturationDisplay) {
-            saturationDisplay.textContent = Number(state.realPlotsSaturation).toFixed(2);
-        }
-    }
-
-    const heightScaleSlider = document.getElementById('real_plots_height_scale_slider');
-    const heightScaleDisplay = document.getElementById('real_plots_height_scale_value_display');
-    if (heightScaleSlider && state.realPlotsHeightScale !== undefined) {
-        heightScaleSlider.value = String(state.realPlotsHeightScale);
-        if (heightScaleDisplay) {
-            heightScaleDisplay.textContent = Number(state.realPlotsHeightScale).toFixed(2);
-        }
-    }
-
-    // Sync Real Plots Contours
-    setChecked('realPlotsContoursCb', state.contoursEnabled);
-    setValue('realPlotsContourIntervalSlider', state.contourInterval);
-    setText('realPlotsContourIntervalValueDisplay', Number(state.contourInterval).toFixed(2));
-    setValue('realPlotsContourThicknessSlider', state.contourThickness);
-    setText('realPlotsContourThicknessValueDisplay', Number(state.contourThickness).toFixed(1));
-    setHidden('realPlotsContoursDetails', !state.contoursEnabled);
 }
 
 export function updateCustomFormulaPreview(inputEl, displayEl, options = {}) {
@@ -1719,7 +1572,6 @@ export function sync2DContourUI() {
     const active = state.show2DContourPlot;
     [
         control('riemannSurfaceShow2DContourBtn'),
-        control('realPlotsShow2DContourBtn'),
         control('laplaceShow2DContourBtn')
     ].forEach(btn => {
         if (btn) {

@@ -11,6 +11,11 @@ import {
     evaluateAlgebraicChaining,
     evaluateDomainColoringMappedTransform
 } from './helpers/native-map.js';
+import {
+    DOMAIN_PALETTE_IDS,
+    createDomainPaletteGlslSource,
+    domainPalettes
+} from '../js/constants/domain-palettes.js';
 
 function snapshotState(keys) {
     return Object.fromEntries(keys.map(key => [key, state[key]]));
@@ -68,6 +73,12 @@ test('Newton preset represents Newton iteration for z^3 - 1 through algebraic ch
         assert.equal(state.orbitColoringMode, 'attractor');
         assert.equal(state.currentInputShape, 'empty_grid');
         assert.equal(state.domainPalette, 'three-b1b-newton-deep');
+        assert.equal(DOMAIN_PALETTE_IDS[state.domainPalette], 21);
+        assert.deepEqual(
+            domainPalettes.filter(palette => palette.name.includes('Newton')).map(palette => palette.id),
+            [state.domainPalette]
+        );
+        assert.match(createDomainPaletteGlslSource('surfacePaletteColor'), /paletteId == 21/);
         assert.equal(state.polynomialN, 1);
         assert.deepEqual(state.polynomialCoeffs, [
             { re: 0, im: 0 },
