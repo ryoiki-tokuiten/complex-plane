@@ -156,7 +156,16 @@ test('Preact controls preserve the public DOM and interaction contract', async (
     await expect(page.locator('#algebraic_terms_list .algebraic-term-card')).toHaveCount(1);
     await expect(page.locator('#dynamic_example_gallery .dynamic-example-button')).toHaveCount(14);
     await expect(page.locator('#dynamic_term_factors .dynamic-term-factor-card')).toHaveCount(1);
-    await expect(page.locator('#dynamic_parameters_list .dynamic-parameter-card')).toHaveCount(1);
+    await page.evaluate(async () => {
+        const { state } = await import('./js/store/state.js');
+        state.dynamicPlotting = { ...state.dynamicPlotting, enabled: true };
+    });
+    await expect(page.locator('#dynamic_plotting_controls_container')).toBeVisible();
+    await expect(page.locator('#dynamic_play_pause_btn')).toHaveText('Play terms');
+    await page.locator('#dynamic_source_kind').selectOption('arithmetic');
+    await expect(page.locator('#dynamic_arithmetic_options')).toBeVisible();
+    await expect(page.locator('#dynamic_studio_summary')).toContainText('Arithmetic sequence');
+    await page.locator('#dynamic_close_studio_btn').click();
 
     await page.click('#theme_selector_btn');
     await expect(page.locator('#theme_modal')).not.toHaveClass(/hidden/);
@@ -204,9 +213,7 @@ test('Preact controls preserve the public DOM and interaction contract', async (
     await page.locator('#view_palette_circle_btn').evaluate(element => element.click());
     await expect(page.locator('#domain_palette_circle_panel')).not.toHaveClass(/hidden/);
 
-    await page.locator('#dynamic_add_parameter_btn').evaluate(element => element.click());
     await page.locator('#dynamic_add_numerator_factor_btn').evaluate(element => element.click());
-    await expect(page.locator('#dynamic_parameters_list .dynamic-parameter-card')).toHaveCount(2);
     await expect(page.locator('#dynamic_term_factors .dynamic-term-factor-card')).toHaveCount(2);
 
     await page.locator('#dynamic_term_expression').evaluate(element => {
@@ -219,12 +226,21 @@ test('Preact controls preserve the public DOM and interaction contract', async (
         element.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await expect(page.locator('#dynamic_sequence_bindings_list input[type="number"]')).toHaveCount(2);
+    await page.locator('#dynamic_point_expression').evaluate(element => {
+        element.value = 's*d';
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect(page.locator('#dynamic_free_parameter_title')).toContainText('s');
 
     await page.locator('#select_real_plots_btn').click();
     await expect(page.locator('#real_plots_controls_container')).not.toHaveClass(/hidden/);
     await expect(page.locator('#core_application_controls')).toHaveClass(/hidden/);
     await expect(page.locator('#algebraic_chaining_params')).not.toHaveClass(/hidden/);
-    await expect(page.locator('#real_plots_contours_cb')).toHaveCount(0);
+    await page.locator('#real_plots_contours_cb').evaluate(element => element.click());
+    await expect(page.locator('#real_plots_contours_details')).not.toHaveClass(/hidden/);
+    await page.locator('#real_plots_show_2d_contour_btn').click();
+    await expect(page.locator('#contour_2d_column')).not.toHaveClass(/hidden/);
+    await expect(page.locator('#contour_2d_canvas')).toHaveAttribute('width', /.+/);
     for (const part of ['input', 'imag']) {
         await page.locator(`#real_plots_${part}_preset`).selectOption('custom');
         await expect(page.locator(`#real_plots_custom_${part}_container`)).not.toHaveClass(/hidden/);
@@ -233,6 +249,7 @@ test('Preact controls preserve the public DOM and interaction contract', async (
     await page.locator('#select_laplace_btn').click();
     await expect(page.locator('#real_plots_controls_container')).toHaveClass(/hidden/);
     await expect(page.locator('#algebraic_chaining_params')).toHaveClass(/hidden/);
+    await expect(page.locator('#real_plots_contours_cb')).toBeAttached();
     expect(errors).toEqual([]);
 });
 
@@ -708,7 +725,6 @@ test('branch-aware dynamic aggregate Riemann shaders compile', async ({ page }) 
             pointExpression: 'd',
             term: { kind: 'expression', expression: 'ln(s) + d^(-s)', bindings: [] },
             reduction: { kind: 'sum', invalidPolicy: 'stop' },
-            parameters: [],
             playback: { visibleCount: 4, playing: false, speed: 10, loop: false }
         });
         const { renderRiemannSurface } = await import('./js/rendering/webgl-riemann-surface.js');

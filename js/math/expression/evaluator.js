@@ -11,8 +11,6 @@ const CONSTANTS = new Set(['i', 'pi', 'e', 'true', 'false']);
 const SOURCE_CACHE = new Map();
 const AST_CACHE = new WeakMap();
 
-const ARITY = FUNCTION_ARITY;
-
 export class ExpressionEvaluationError extends Error {
     constructor(message, node = null) {
         super(message);
@@ -35,13 +33,13 @@ function validate(ast, dependencies, allowedVariables) {
         }
     }
     for (const name of dependencies.functions) {
-        const range = ARITY[name];
+        const range = FUNCTION_ARITY[name];
         if (!range) throw new ExpressionEvaluationError(`Unknown function "${name}"`, ast);
     }
     const visit = node => {
         if (!node || typeof node !== 'object') return;
         if (node.type === 'call') {
-            const range = ARITY[node.name];
+            const range = FUNCTION_ARITY[node.name];
             if (!range || node.args.length < range[0] || node.args.length > range[1]) {
                 const expected = range && range[0] === range[1]
                     ? `${range[0]}`

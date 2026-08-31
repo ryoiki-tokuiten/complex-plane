@@ -1543,6 +1543,7 @@ function syncRealPlotsUI() {
         setValue(`realPlots${name}Slider`, value);
         setFixedText(`realPlots${name}ValueDisplay`, value, 2);
     }
+    syncContourControls('realPlots');
 }
 
 export function updateCustomFormulaPreview(inputEl, displayEl, options = {}) {
@@ -1571,6 +1572,7 @@ function sync2DContourUI() {
     // Toggle button active states and labels
     const active = state.show2DContourPlot;
     [
+        control('realPlotsShow2DContourBtn'),
         control('riemannSurfaceShow2DContourBtn'),
         control('laplaceShow2DContourBtn')
     ].forEach(btn => {
@@ -1599,13 +1601,12 @@ function sync2DContourUI() {
     }
 
     if (state.realPlotsEnabled) {
-        // Real plots active: z_plane and w_plane are hidden, real_plots is visible
         const zCard = control('zPlaneColumn');
         const wCard = control('wPlaneColumn');
         const rpCol = control('realPlotsColumn');
-        if (zCard) zCard.classList.add('hidden');
-        if (wCard) wCard.classList.add('hidden');
-        if (rpCol) rpCol.classList.remove('hidden');
+        zCard?.classList.add('hidden');
+        wCard?.classList.add('hidden');
+        rpCol?.classList.remove('hidden');
     } else if (state.riemannSurfaceEnabled) {
         // Riemann surface active:
         // If showContour is true, hide the z-plane column so the 3D Riemann and 2D contour views sit side by side.

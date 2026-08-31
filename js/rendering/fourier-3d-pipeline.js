@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import { state, context } from '../store/state.js';
-import { disposeThreeObject, createCanvasTextSprite, scaleSignedOutput } from './three-utils.js';
+import {
+    addCanvasTextSprite,
+    addThreeLineSegments,
+    addThreePointCloud,
+    appendPolylineSegments,
+    clearThreeGroup,
+    scaleSignedOutput
+} from './three-utils.js';
 import { computeCenterOfMassFrequencySweep } from '../analysis/laplace-transform.js';
 import { createOrthographicSceneHost } from './parallel-3d-graphs.js';
 
@@ -34,16 +41,8 @@ function lerp(a, b, t) {
 const scaledOutputCoordinate = (value, outputScale, halfExtent) =>
     scaleSignedOutput(value, outputScale, halfExtent, 0);
 
-function clearThreeGroup(group) {
-    while (group.children.length) {
-        const child = group.children[0];
-        group.remove(child);
-        disposeThreeObject(child);
-    }
-}
-
-function makeTextSprite(text, options = {}) {
-    return createCanvasTextSprite(THREE, text, {
+function addLabel(group, text, position, options = {}) {
+    return addCanvasTextSprite(THREE, group, text, position, {
         color: options.color || 'rgba(235, 239, 250, 0.95)',
         fontSize: options.fontSize || 40,
         weight: options.weight || 600,
@@ -53,61 +52,10 @@ function makeTextSprite(text, options = {}) {
     });
 }
 
-function addLabel(group, text, position, options = {}) {
-    const sprite = makeTextSprite(text, options);
-    sprite.position.copy(position);
-    group.add(sprite);
-    return sprite;
-}
-
-function addLineSegments(group, segments, options = {}) {
-    if (!segments.length) return;
-    const positions = [];
-
-    segments.forEach(segment => {
-        const [a, b] = segment;
-        if (a && b) {
-            positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
-        }
-    });
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-
-    const material = new THREE.LineBasicMaterial({
-        color: options.color ?? 0xffffff,
-        transparent: (options.opacity ?? 1) < 1,
-        opacity: options.opacity ?? 1,
-        depthWrite: false
-    });
-    group.add(new THREE.LineSegments(geometry, material));
-}
-
-function appendPolylineSegments(target, points) {
-    for (let index = 1; index < points.length; index += 1) {
-        target.push([points[index - 1], points[index]]);
-    }
-}
-
-function addPointCloud(group, points, options = {}) {
-    if (!points.length) return;
-    const positions = [];
-    points.forEach(point => {
-        if (point) positions.push(point.x, point.y, point.z);
-    });
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const material = new THREE.PointsMaterial({
-        color: options.color ?? 0xffffff,
-        size: options.size ?? 6,
-        transparent: (options.opacity ?? 1) < 1,
-        opacity: options.opacity ?? 1,
-        sizeAttenuation: false,
-        depthWrite: false
-    });
-    group.add(new THREE.Points(geometry, material));
-}
+const addLineSegments = (group, segments, options) =>
+    addThreeLineSegments(THREE, group, segments, { ...options, depthWrite: false });
+const addPointCloud = (group, points, options) =>
+    addThreePointCloud(THREE, group, points, { ...options, depthWrite: false });
 
 function getDecomposedFrequencies() {
     const count = Math.max(1, Math.min(16, state.fourier3DParallelGraphs || 4));

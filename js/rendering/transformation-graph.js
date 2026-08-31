@@ -7,7 +7,14 @@ import {
     buildInputShapeGeometryConfig,
     generateInputShapePointSets
 } from './shape-generators.js';
-import { disposeThreeObject, createCanvasTextSprite, scaleSignedOutput } from './three-utils.js';
+import {
+    addCanvasTextSprite,
+    addThreeLineSegments,
+    addThreePointCloud,
+    appendPolylineSegments,
+    disposeThreeObject,
+    scaleSignedOutput
+} from './three-utils.js';
 import { buildLaplaceWinding } from '../analysis/laplace-transform.js';
 import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
 import { CUSTOM_GRID_INPUT_SHAPES } from '../constants/grid-shapes.js';
@@ -916,72 +923,9 @@ function addSegmentedPolyline(group, points, options = {}) {
     flush();
 }
 
-function addLineSegments(group, segments, {
-    color = GRID_COLOR,
-    opacity = 1,
-    vertexColors = null
-} = {}) {
-    if (!Array.isArray(segments) || segments.length === 0) return null;
-    const positions = new Float32Array(segments.length * 6);
-    const colors = vertexColors ? new Float32Array(segments.length * 6) : null;
-
-    segments.forEach(([start, end], index) => {
-        const offset = index * 6;
-        positions.set([start.x, start.y, start.z, end.x, end.y, end.z], offset);
-        if (!colors) return;
-        const [startColor, endColor = startColor] = vertexColors[index];
-        colors.set([
-            startColor.r, startColor.g, startColor.b,
-            endColor.r, endColor.g, endColor.b
-        ], offset);
-    });
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const material = new THREE.LineBasicMaterial({
-        color: colors ? 0xffffff : color,
-        vertexColors: Boolean(colors),
-        transparent: opacity < 1,
-        opacity,
-        depthWrite: opacity >= 0.85
-    });
-    const lines = new THREE.LineSegments(geometry, material);
-    group.add(lines);
-    return lines;
-}
-
-function appendPolylineSegments(target, points) {
-    let previous = null;
-    points.forEach(point => {
-        if (!point) {
-            previous = null;
-            return;
-        }
-        if (previous) target.push([previous, point]);
-        previous = point;
-    });
-}
-
-function addPointCloud(group, points, {
-    color,
-    size = 4,
-    opacity = 1
-} = {}) {
-    if (!points.length) return null;
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.PointsMaterial({
-        color,
-        size,
-        sizeAttenuation: false,
-        transparent: opacity < 1,
-        opacity,
-        depthWrite: opacity >= 0.85
-    });
-    const cloud = new THREE.Points(geometry, material);
-    group.add(cloud);
-    return cloud;
-}
+const addLineSegments = (group, segments, options = {}) =>
+    addThreeLineSegments(THREE, group, segments, { color: GRID_COLOR, ...options });
+const addPointCloud = (group, points, options) => addThreePointCloud(THREE, group, points, options);
 
 function addMarker(group, point, color, radius = 0.07) {
     const geometry = new THREE.SphereGeometry(radius, 18, 12);
@@ -1060,8 +1004,8 @@ function addPlane(group, width, height, position, rotation, color, opacity) {
     return mesh;
 }
 
-function makeTextSprite(text, options = {}) {
-    return createCanvasTextSprite(THREE, text, {
+function addLabel(group, text, position, options = {}) {
+    return addCanvasTextSprite(THREE, group, text, position, {
         fontSize: 46,
         height: 0.28,
         weight: 600,
@@ -1069,13 +1013,6 @@ function makeTextSprite(text, options = {}) {
         shadowBlur: 10,
         ...options
     });
-}
-
-function addLabel(group, text, position, options = {}) {
-    const sprite = makeTextSprite(text, options);
-    sprite.position.copy(position);
-    group.add(sprite);
-    return sprite;
 }
 
 function graphPointFor(sample, scales, mode, zOffset = 0) {

@@ -858,16 +858,7 @@ export class ThreeManifoldsRenderer {
                 const pt = pointSet.points[k];
                 const x = Number.isFinite(pt?.re) ? pt.re : 0;
                 const y = Number.isFinite(pt?.im) ? pt.im : 0;
-
-                let u = x;
-                let v = y;
-                if (this.planeType === 'w' && this.activeMap && typeof this.activeMap.evaluate === 'function') {
-                    const mapped = this.activeMap.evaluate(x, y);
-                    if (Number.isFinite(mapped?.re) && Number.isFinite(mapped?.im)) {
-                        u = mapped.re;
-                        v = mapped.im;
-                    }
-                }
+                const { u, v } = this.mapInputPoint(x, y);
 
                 pointsData[k] = { u, v };
 
@@ -910,6 +901,14 @@ export class ThreeManifoldsRenderer {
         this.updateOpacities(progress);
         this.renderDirty = true;
         this.render();
+    }
+
+    mapInputPoint(x, y) {
+        if (this.planeType !== 'w' || typeof this.activeMap?.evaluate !== 'function') return { u: x, v: y };
+        const mapped = this.activeMap.evaluate(x, y);
+        return Number.isFinite(mapped?.re) && Number.isFinite(mapped?.im)
+            ? { u: mapped.re, v: mapped.im }
+            : { u: x, v: y };
     }
 
     clearDynamicOverlay() {
@@ -1020,15 +1019,7 @@ export class ThreeManifoldsRenderer {
         const x = this.probePoint.re;
         const y = this.probePoint.im;
 
-        let u = x;
-        let v = y;
-        if (this.planeType === 'w' && this.activeMap && typeof this.activeMap.evaluate === 'function') {
-            const mapped = this.activeMap.evaluate(x, y);
-            if (Number.isFinite(mapped?.re) && Number.isFinite(mapped?.im)) {
-                u = mapped.re;
-                v = mapped.im;
-            }
-        }
+        const { u, v } = this.mapInputPoint(x, y);
 
         const activePos = this.manifold.morph(u, v, progress);
         const finalPos = this.manifold.project(u, v);

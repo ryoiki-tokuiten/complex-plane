@@ -309,18 +309,7 @@ class PlaneController {
     }
 
     dispose() {
-        if (this.ui.slider && this.boundSliderInput) {
-            this.ui.slider.removeEventListener('input', this.boundSliderInput);
-            this.boundSliderInput = null;
-        }
-        if (this.ui.button && this.boundButtonClick) {
-            this.ui.button.removeEventListener('click', this.boundButtonClick);
-            this.boundButtonClick = null;
-        }
-        if (this.ui.speedGroup && this.boundSpeedClick) {
-            this.ui.speedGroup.removeEventListener('click', this.boundSpeedClick);
-            this.boundSpeedClick = null;
-        }
+        this.unbindEvents();
         if (this.renderer) {
             this.renderer.dispose();
             this.renderer = null;

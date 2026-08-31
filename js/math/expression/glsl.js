@@ -27,18 +27,6 @@ function isBooleanBinaryOperator(op) {
         op === '<' || op === '<=' || op === '>' || op === '>=';
 }
 
-function isSafeIdentifierName(name) {
-    if (typeof name !== 'string' || name.length === 0) return false;
-    let code = name.charCodeAt(0);
-    if (!((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95)) return false;
-    for (let index = 1; index < name.length; index++) {
-        code = name.charCodeAt(index);
-        if (!((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95 || (code >= 48 && code <= 57))) return false;
-    }
-    return true;
-}
-const GPU_ARITY = FUNCTION_ARITY;
-
 function cacheMapResult(cache, limit, key, result) {
     cache.set(key, result);
     if (cache.size > limit) cache.delete(cache.keys().next().value);
@@ -69,7 +57,9 @@ function assertExpressionNode(node) {
 
 function assertGPUArity(node) {
     const args = Array.isArray(node.args) ? node.args : [];
-    const [minimum, maximum] = GPU_ARITY[node.name] || [1, 1];
+    const range = FUNCTION_ARITY[node.name];
+    if (!range) throw new Error(`Unsupported GPU function "${node.name}"`);
+    const [minimum, maximum] = range;
     if (args.length < minimum || args.length > maximum) {
         const expected = minimum === maximum
             ? String(minimum)
@@ -91,22 +81,6 @@ function dynamicEnabled(appState) {
     return true;
 }
 
-function parameterMap(appState) {
-    const parameters = appState?.dynamicPlotting?.parameters;
-    if (!Array.isArray(parameters)) throw new Error('GPU dynamic plotting requires a parameter array.');
-    const output = {};
-    for (let index = 0; index < parameters.length; index++) {
-        const parameter = parameters[index];
-        const name = String(parameter?.name ?? '').trim();
-        if (!isSafeIdentifierName(name)) throw new Error(`Invalid dynamic parameter name: ${name}.`);
-        output[name] = {
-            re: requireFiniteNumber(parameter.value, `Dynamic parameter ${name}`),
-            im: 0
-        };
-    }
-    return output;
-}
-
 function variableExpression(node, context) {
     const name = node.name;
     if (name === 'd' || name === 'z' || name === 's') return name;
@@ -117,7 +91,6 @@ function variableExpression(node, context) {
     if (name === 'true') return TRUE_VEC;
     if (name === 'false') return FALSE_VEC;
     if (context.variables?.[name]) return context.variables[name];
-    if (context.parameters?.[name]) return vec2(context.parameters[name]);
     throw new Error(`Variable "${name}" is not supported by the GPU expression compiler`);
 }
 
@@ -479,18 +452,11 @@ function compileExpressionWithCSE(ast, context, prefix) {
 
 function contextSignature(context) {
     const variables = context.variables || {};
-    const parameters = context.parameters || {};
     const variableKeys = Object.keys(variables).sort();
-    const parameterKeys = Object.keys(parameters).sort();
     const parts = [context.sheet ? '1' : '0', '|', glslFloat(context.selectedFunctionId || 0), '|v'];
     for (let index = 0; index < variableKeys.length; index++) {
         const key = variableKeys[index];
         parts.push('|', key, '=', variables[key]);
-    }
-    parts.push('|p');
-    for (let index = 0; index < parameterKeys.length; index++) {
-        const key = parameterKeys[index];
-        parts.push('|', key, '=', literalSignature(parameters[key]));
     }
     return parts.join('');
 }
@@ -628,8 +594,7 @@ function sourceRecords(appState) {
     if (sourceConfig.kind === 'custom_points' && !Array.isArray(sourceConfig.points)) {
         throw new Error('GPU custom-point sources require a points array.');
     }
-    const parameters = parameterMap(appState);
-    const source = generateDiscreteSource(sourceConfig, { parameters });
+    const source = generateDiscreteSource(sourceConfig);
     const limit = requireInteger(
         appState.dynamicPlotting.playback?.visibleCount,
         'GPU dynamic visible count'
@@ -702,7 +667,6 @@ export function buildDynamicAggregateGLSL(appState, getFunctionId) {
             throw new Error('GPU dynamic plotting requires a term.');
         }
         const records = sourceRecords(appState);
-        const parameters = parameterMap(appState);
         const bindings = config.term?.kind === 'expression'
             ? synchronizeSequenceBindings(
                 config.term.expression,
@@ -710,8 +674,7 @@ export function buildDynamicAggregateGLSL(appState, getFunctionId) {
             )
             : [];
         const bindingResult = generateSequenceBindingSeries(bindings, records.length, {
-            aggregateParameter: config.aggregateParameter,
-            parameters
+            aggregateParameter: config.aggregateParameter
         });
         const variables = {};
         for (let index = 0; index < bindings.length; index++) {
@@ -729,7 +692,6 @@ export function buildDynamicAggregateGLSL(appState, getFunctionId) {
         }
 
         const context = {
-            parameters,
             variables,
             selectedFunctionId,
             sheet: false,
@@ -815,7 +777,6 @@ export function dynamicAggregateGLSLSignature(appState) {
         pointExpression: appState.dynamicPlotting.pointExpression,
         term: appState.dynamicPlotting.term,
         reduction: appState.dynamicPlotting.reduction,
-        parameters: appState.dynamicPlotting.parameters,
         visibleCount: appState.dynamicPlotting.playback?.visibleCount
     });
 }
@@ -832,7 +793,6 @@ export function compileCustomExpressionToGLSL(source, getFunctionId, options = n
     if (cached) return cached;
     const ast = parseExpression(source);
     const context = {
-        parameters: {},
         variables: { z: 'z', i: I_VEC },
         sheet: Boolean(options?.sheet),
         getFunctionId: name => getFunctionId(name, true)

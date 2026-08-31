@@ -28,8 +28,8 @@ import { syncLaplacePlayPauseButton, updateCustomFormulaPreview, syncComplexPara
 import { syncGridDensityControls } from './grid-density-controls.js';
 import {
     bindGridShapePicker,
-    bindGridShapeControlResize,
     initializeGridShapeControlsFromDOM,
+    positionGridShapeControls,
     setGridShapeParameter
 } from './grid-shape-controls.js';
 import { GRID_SHAPE_PARAMETERS } from '../constants/grid-shapes.js';
@@ -40,11 +40,7 @@ import { initializePolynomialCoeffs } from './polynomial-ui.js';
 import { resizeScalarSurface } from '../rendering/real-plots-renderer.js';
 import { applyTheme, loadThemePreferences } from './theme-manager.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
-import { initPanelLayoutManager, refreshPanelEdgeHandles } from './panel-layout-manager.js';
-import {
-    initializeDynamicPlottingUI,
-    syncDynamicPlottingUI
-} from './dynamic-plotting-ui.js';
+import { initPanelLayoutManager, refreshPanelEdgeHandles, refreshPanelLayout } from './panel-layout-manager.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { compileExpression } from '../math/expression/index.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
@@ -166,7 +162,6 @@ const SIMPLE_SELECTOR_BINDINGS = [
 const BINDERS = [
     bindBaseParameterControls,
     bindAlgebraicChainingControls,
-    bindDynamicPlottingControls,
     bindMobiusControls,
     bindFunctionButtons,
     bindImageControls,
@@ -265,12 +260,6 @@ function resetContinuationForCutChange() {
     state.riemannSurfaceBranchCenter = 0;
 }
 
-function bindDynamicPlottingControls() {
-    initializeDynamicPlottingUI({
-        requestRedraw: markDomainDirty => requestDomainRedraw(markDomainDirty)
-    });
-}
-
 function parseInteger(value) {
     return parseInt(value, 10);
 }
@@ -284,9 +273,7 @@ function clamp(value, min, max) {
 }
 
 function frame(callback) {
-    return typeof requestAnimationFrame === 'function'
-        ? requestAnimationFrame(callback)
-        : setTimeout(callback, DEFAULT_FRAME_DELAY);
+    return requestAnimationFrame(callback);
 }
 
 function laterFrame(callback, delay = DEFAULT_FRAME_DELAY) {
@@ -511,13 +498,9 @@ function restoreNormalPlaneLayout() {
 }
 
 function refreshPlanesAfterLayoutChange() {
-    const refresh = () => {
+    frame(() => {
         setupVisualParameters(false, false);
         requestUiRedraw();
-    };
-    requestAnimationFrame(() => {
-        refresh();
-        setTimeout(refresh, 360);
     });
 }
 
@@ -647,7 +630,6 @@ function activateFractalPreset(key) {
     display(controls.algebraicChainingControlsContainer, true);
     updateModePanels();
     setActiveFunctionButton(key);
-    if (state.dynamicPlotting?.enabled) syncDynamicPlottingUI();
     requestDomainRedraw(true);
     return true;
 }
@@ -777,7 +759,6 @@ function activateFunctionMode(key) {
 
     updateModePanels();
     setActiveFunctionButton(key);
-    if (state.dynamicPlotting?.enabled) syncDynamicPlottingUI();
     requestDomainRedraw(true);
 }
 
@@ -847,7 +828,6 @@ function bindGridShapeControls() {
             });
         });
     });
-    bindGridShapeControlResize();
 }
 
 function bindMobiusControls() {
@@ -1027,10 +1007,8 @@ function bindDomainColoringControls() {
 function disableRiemannSurface() {
     state.riemannSurfaceEnabled = false;
     hidden(controls.riemannSurfaceOptionsDiv, true);
-    if (!state.realPlotsEnabled) {
-        state.show2DContourPlot = false;
-        hidden(controls.contour2DColumn, true);
-    }
+    state.show2DContourPlot = false;
+    hidden(controls.contour2DColumn, true);
 }
 
 function syncFoldSurfaceControls() {
@@ -1795,20 +1773,23 @@ function bindContourCanvasInteractions() {
     });
 }
 
-function bindCanvasRectInvalidation() {
-    const handleLayoutRefresh = () => {
-        invalidateAllCanvasRects();
-        setupVisualParameters(false, false);
-        requestDomainRedraw(true);
-        requestUiRedraw();
-    };
+function refreshCanvasLayout() {
+    refreshPanelLayout();
+    positionGridShapeControls();
+    hidePlaneContextMenu();
+    invalidateAllCanvasRects();
+    setupVisualParameters(false, false);
+    requestDomainRedraw(true);
+    requestUiRedraw();
+}
 
-    bindElementListener(window, 'resize', handleLayoutRefresh, PASSIVE_LISTENER_OPTIONS);
+function bindCanvasRectInvalidation() {
+    bindElementListener(window, 'resize', refreshCanvasLayout, PASSIVE_LISTENER_OPTIONS);
     bindElementListener(window, 'scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
     bindElementListener(document, 'scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
     bindElementListener(document, 'transitionend', (e) => {
         if (e.target && (e.target.id === 'canvases_section' || e.target.classList?.contains('plane-column') || e.target.classList?.contains('two-column-layout') || e.target.classList?.contains('controls-panel') || e.target.id === 'controls_options_section')) {
-            handleLayoutRefresh();
+            refreshCanvasLayout();
         }
     }, PASSIVE_LISTENER_OPTIONS);
 }
@@ -2092,23 +2073,11 @@ function syncTopControlsCollapseState() {
     });
 }
 
-function refreshCanvasLayoutAfterTopControlsToggle() {
-    const refresh = () => {
-        setupVisualParameters(false, false);
-        requestDomainRedraw(true);
-    };
-    frame(refresh);
-    setTimeout(refresh, 50);
-    setTimeout(refresh, 150);
-    setTimeout(refresh, 280);
-    setTimeout(refresh, 350);
-}
-
 function bindTopControlsToggle() {
     const toggle = () => {
         state.topControlsCollapsed = !state.topControlsCollapsed;
         syncTopControlsCollapseState();
-        refreshCanvasLayoutAfterTopControlsToggle();
+        frame(refreshCanvasLayout);
     };
 
     bindControlListener('toggleTopControlsBtn', 'click', toggle);
@@ -2468,7 +2437,7 @@ function bindRealPlotsControls() {
 }
 
 function bindContourControls() {
-    ['riemannSurface', 'laplace'].forEach(prefix => {
+    ['realPlots', 'riemannSurface', 'laplace'].forEach(prefix => {
         bindCheckbox(`${prefix}ContoursCb`, 'contoursEnabled', requestUiRedraw);
         bindSlider(`${prefix}ContourIntervalSlider`, 'contourInterval', parseFloat, requestUiRedraw);
         bindSlider(`${prefix}ContourThicknessSlider`, 'contourThickness', parseFloat, requestUiRedraw);

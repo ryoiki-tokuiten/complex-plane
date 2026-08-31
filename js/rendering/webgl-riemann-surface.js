@@ -1542,6 +1542,8 @@ function drawContinuationTrace(renderer) {
   gl.drawArrays(gl.LINE_STRIP, 0, count);
   gl.drawArrays(gl.POINTS, 0, count);
   gl.enable(gl.DEPTH_TEST);
+  renderer.boundGridMesh = null;
+  renderer.boundGridProgram = null;
 }
 
 function addDisposableListener(target, type, listener, options) {

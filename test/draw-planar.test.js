@@ -66,143 +66,46 @@ test('point-set endpoints reflect interior point mutations', () => {
     assert.equal(updated.end, replacementEnd);
 });
 
-test('drawPointSetCollectionOnPlane supports ordinary source x ordinary destination', () => {
-    const planeParams = {
-        width: 200,
-        height: 160,
-        origin: { x: 100, y: 80 },
-        scale: { x: 20, y: 20 },
-        currentVisXRange: [-5, 5],
-        currentVisYRange: [-4, 4]
-    };
-    const capture = new LineCaptureContext();
-    const pointSet = {
-        role: 'grid-horizontal',
-        color: '#fff',
-        lineWidth: 1,
-        points: [{ re: -1, im: 0 }, { re: 1, im: 0 }]
-    };
-
-    drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
-        transformFunc: transformFunctions.identity,
-        transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
-        map: IDENTITY_MAP
-    });
-    assert.ok(capture.paths.length > 0);
+const PRECISE_VIEWPORT = Object.freeze({
+    centerRe: '0', centerIm: '0', zoomPower: 0, precisionBits: 128
 });
 
-test('drawPointSetCollectionOnPlane supports ordinary source x precise destination', () => {
-    const planeParams = {
-        width: 200,
-        height: 160,
-        origin: { x: 100, y: 80 },
-        scale: { x: 20, y: 20 },
-        currentVisXRange: [-5, 5],
-        currentVisYRange: [-4, 4],
-        preciseViewport: {
-            centerRe: '0',
-            centerIm: '0',
-            zoomPower: 0,
-            precisionBits: 128
-        }
-    };
-    const capture = new LineCaptureContext();
-    const pointSet = {
-        role: 'grid-horizontal',
-        color: '#fff',
-        lineWidth: 1,
-        points: [{ re: -1, im: 0 }, { re: 1, im: 0 }]
-    };
+for (const source of ['ordinary', 'precise']) {
+    for (const destination of ['ordinary', 'precise']) {
+        test(`drawPointSetCollectionOnPlane supports ${source} source x ${destination} destination`, () => {
+            const previousPrecise = zPlaneParams.preciseViewport;
+            zPlaneParams.preciseViewport = source === 'precise' ? PRECISE_VIEWPORT : null;
+            const planeParams = {
+                width: 200,
+                height: 160,
+                origin: { x: 100, y: 80 },
+                scale: { x: 20, y: 20 },
+                currentVisXRange: [-5, 5],
+                currentVisYRange: [-4, 4],
+                ...(destination === 'precise' && { preciseViewport: PRECISE_VIEWPORT })
+            };
+            const pointSet = {
+                role: 'grid-horizontal',
+                color: '#fff',
+                lineWidth: 1,
+                points: [{ re: -1, im: 0 }, { re: 1, im: 0 }],
+                ...(source === 'precise' && { canvasPoints: new Float32Array([80, 80, 120, 80]) })
+            };
 
-    drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
-        transformFunc: transformFunctions.identity,
-        transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
-        map: IDENTITY_MAP
-    });
-    assert.ok(capture.paths.length > 0);
-});
-
-test('drawPointSetCollectionOnPlane supports precise source x ordinary destination', () => {
-    const prevPrecise = zPlaneParams.preciseViewport;
-    zPlaneParams.preciseViewport = {
-        centerRe: '0',
-        centerIm: '0',
-        zoomPower: 0,
-        precisionBits: 128
-    };
-
-    try {
-        const planeParams = {
-            width: 200,
-            height: 160,
-            origin: { x: 100, y: 80 },
-            scale: { x: 20, y: 20 },
-            currentVisXRange: [-5, 5],
-            currentVisYRange: [-4, 4]
-        };
-        const capture = new LineCaptureContext();
-        const pointSet = {
-            role: 'grid-horizontal',
-            color: '#fff',
-            lineWidth: 1,
-            points: [{ re: -1, im: 0 }, { re: 1, im: 0 }],
-            canvasPoints: new Float32Array([80, 80, 120, 80])
-        };
-
-        drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
-            transformFunc: transformFunctions.identity,
-            transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
-            map: IDENTITY_MAP
-        });
-        assert.ok(capture.paths.length > 0);
-    } finally {
-        zPlaneParams.preciseViewport = prevPrecise;
-    }
-});
-
-test('drawPointSetCollectionOnPlane supports precise source x precise destination', () => {
-    const prevPrecise = zPlaneParams.preciseViewport;
-    zPlaneParams.preciseViewport = {
-        centerRe: '0',
-        centerIm: '0',
-        zoomPower: 0,
-        precisionBits: 128
-    };
-
-    try {
-        const planeParams = {
-            width: 200,
-            height: 160,
-            origin: { x: 100, y: 80 },
-            scale: { x: 20, y: 20 },
-            currentVisXRange: [-5, 5],
-            currentVisYRange: [-4, 4],
-            preciseViewport: {
-                centerRe: '0',
-                centerIm: '0',
-                zoomPower: 0,
-                precisionBits: 128
+            try {
+                const capture = new LineCaptureContext();
+                drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
+                    transformFunc: transformFunctions.identity,
+                    transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
+                    map: IDENTITY_MAP
+                });
+                assert.ok(capture.paths.length > 0);
+            } finally {
+                zPlaneParams.preciseViewport = previousPrecise;
             }
-        };
-        const capture = new LineCaptureContext();
-        const pointSet = {
-            role: 'grid-horizontal',
-            color: '#fff',
-            lineWidth: 1,
-            points: [{ re: -1, im: 0 }, { re: 1, im: 0 }],
-            canvasPoints: new Float32Array([80, 80, 120, 80])
-        };
-
-        drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {
-            transformFunc: transformFunctions.identity,
-            transformProfile: getMappedTransformProfile('identity', transformFunctions.identity),
-            map: IDENTITY_MAP
         });
-        assert.ok(capture.paths.length > 0);
-    } finally {
-        zPlaneParams.preciseViewport = prevPrecise;
     }
-});
+}
 
 
 test('transformed polylines require Path2D and preserve disconnected subpaths', () => {

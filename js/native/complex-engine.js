@@ -391,9 +391,8 @@ export function compileNativeDynamicAggregate(aggregate) {
         throw new Error('Native dynamic aggregate requires a term expression.');
     }
     if (!Array.isArray(aggregate.bindings) || !aggregate.bindingSeries ||
-        typeof aggregate.bindingSeries !== 'object' || !aggregate.parameters ||
-        typeof aggregate.parameters !== 'object') {
-        throw new Error('Native dynamic aggregate requires explicit bindings, series, and parameters.');
+        typeof aggregate.bindingSeries !== 'object') {
+        throw new Error('Native dynamic aggregate requires explicit bindings and series.');
     }
     if (aggregate.reductionKind !== 'none' && aggregate.reductionKind !== 'sum' && aggregate.reductionKind !== 'product') {
         throw new Error(`Unsupported native aggregate reduction: ${aggregate.reductionKind}.`);
@@ -422,7 +421,6 @@ export function compileNativeDynamicAggregate(aggregate) {
         return [binding.symbol, binding];
     }));
     const bindingSeries = aggregate.bindingSeries;
-    const parameters = aggregate.parameters;
     const variableFlags = variableNames.map(name => {
         if (name === 's' || name === 'c') return 1;
         if (name === 'z') return 3;
@@ -438,7 +436,6 @@ export function compileNativeDynamicAggregate(aggregate) {
             return { re: Number(record.ordinal), im: 0 };
         }
         if (name === 's' || name === 'c' || name === 'z') return { re: 0, im: 0 };
-        if (Object.prototype.hasOwnProperty.call(parameters, name)) return parameters[name];
         if (!Array.isArray(bindingSeries[name]) || bindingSeries[name][index] === undefined) {
             throw new Error(`Native aggregate is missing binding ${name} at source index ${index}.`);
         }
@@ -575,6 +572,10 @@ function memoryView() {
         cachedMemoryView = new DataView(buffer);
     }
     return cachedMemoryView;
+}
+
+function copyWasmArray(Type, pointer, length) {
+    return new Type(wasm.memory.buffer, pointer, length).slice();
 }
 
 function requireBoolean(value, label) {
@@ -788,7 +789,7 @@ function writePointBuffer(pointer, points) {
 
 function copyComplexBuffer(pointer, count) {
     if (!count) return new Float64Array();
-    return new Float64Array(new Float64Array(wasm.memory.buffer, pointer, count * 2));
+    return copyWasmArray(Float64Array, pointer, count * 2);
 }
 
 function readComplexObjects(pointer, count) {
@@ -964,7 +965,7 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
         const invalidCount = view.getUint32(statsPointer + 8, true);
         const values = readComplexObjects(outputPointer, count);
         const attemptErrors = errorsPointer
-            ? new Uint8Array(new Uint8Array(wasm.memory.buffer, errorsPointer, attempts))
+            ? copyWasmArray(Uint8Array, errorsPointer, attempts)
             : new Uint8Array();
         return { values, attempts, invalidCount, attemptErrors };
     });
@@ -1006,7 +1007,7 @@ export function evaluateNativeAlgebraic(options, points, parameters = points) {
             configPointer, inputPointer, parameterPointer, points.length, outputPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native algebraic evaluation failed with status ${status}.`);
-        const valid = new Uint8Array(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
+        const valid = copyWasmArray(Uint8Array, validPointer, points.length);
         const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
     });
@@ -1037,7 +1038,7 @@ export function evaluateNativeSheets(options, points, sheets) {
             configPointer, inputPointer, sheetsPointer, points.length, outputPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native sheet evaluation failed with status ${status}.`);
-        const valid = new Uint8Array(new Uint8Array(wasm.memory.buffer, validPointer, points.length));
+        const valid = copyWasmArray(Uint8Array, validPointer, points.length);
         const values = readComplexObjects(outputPointer, points.length);
         return { values, valid };
     });
@@ -1084,8 +1085,8 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
         return {
             pointValues: readValues(pointPointer),
             termValues: readValues(termPointer),
-            errors: new Uint8Array(new Uint8Array(wasm.memory.buffer, errorsPointer, count)),
-            reductionStatus: new Uint8Array(new Uint8Array(wasm.memory.buffer, statusPointer, count)),
+            errors: copyWasmArray(Uint8Array, errorsPointer, count),
+            reductionStatus: copyWasmArray(Uint8Array, statusPointer, count),
             partialValues: readValues(partialPointer),
             partialProducts: Array.from({ length: count }, (_, index) => ({
                 normalized: {
@@ -1486,7 +1487,7 @@ export function buildNativePlanarLines(options) {
             outputPointer, outputCapacity, offsetsPointer
         );
         if (total < 0) throw new Error(`Native planar lines job failed with status ${total}.`);
-        const offsets = new Uint32Array(new Uint32Array(wasm.memory.buffer, offsetsPointer, lineCount + 1));
+        const offsets = copyWasmArray(Uint32Array, offsetsPointer, lineCount + 1);
         const packed = readComplexBuffer(outputPointer, total);
         return options.lines.map((_line, index) => packed.slice(offsets[index] * 2, offsets[index + 1] * 2));
     });
@@ -1989,7 +1990,7 @@ export function renderNativeMapContour(options) {
             outputPointer
         );
         if (status !== 0) throw new Error(`Native contour rendering failed with status ${status}.`);
-        return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
+        return copyWasmArray(Uint8ClampedArray, outputPointer, outputLength);
     });
 }
 
@@ -2047,7 +2048,7 @@ export function projectNativePrecisePixels(options, pixels) {
             resultPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native precise pixel geometry failed with status ${status}.`);
-        return new Float32Array(new Float32Array(wasm.memory.buffer, resultPointer, packed.length));
+        return copyWasmArray(Float32Array, resultPointer, packed.length);
     });
 }
 
@@ -2075,7 +2076,7 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
             resultPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native precise-to-canvas geometry failed with status ${status}.`);
-        return new Float32Array(new Float32Array(wasm.memory.buffer, resultPointer, packed.length));
+        return copyWasmArray(Float32Array, resultPointer, packed.length);
     });
 }
 
@@ -2097,7 +2098,7 @@ export function projectNativeValuesToPrecise(options, points) {
             output.width, output.height, resultPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native precise value geometry failed with status ${status}.`);
-        return new Float32Array(new Float32Array(wasm.memory.buffer, resultPointer, points.length * 2));
+        return copyWasmArray(Float32Array, resultPointer, points.length * 2);
     });
 }
 
@@ -2350,11 +2351,11 @@ export function buildNativeLaplaceSurface(specification, options) {
         );
         if (indexCount < 0) throw new Error(`Native Laplace surface failed with status ${indexCount}.`);
         return {
-            positions: new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, vertexCount * 3)),
-            normals: new Float32Array(new Float32Array(wasm.memory.buffer, normalsPointer, vertexCount * 3)),
-            magnitudeValues: new Float32Array(new Float32Array(wasm.memory.buffer, magnitudesPointer, vertexCount)),
-            phaseValues: new Float32Array(new Float32Array(wasm.memory.buffer, phasesPointer, vertexCount)),
-            indices: new Uint32Array(new Uint32Array(wasm.memory.buffer, indicesPointer, indexCount)),
+            positions: copyWasmArray(Float32Array, positionsPointer, vertexCount * 3),
+            normals: copyWasmArray(Float32Array, normalsPointer, vertexCount * 3),
+            magnitudeValues: copyWasmArray(Float32Array, magnitudesPointer, vertexCount),
+            phaseValues: copyWasmArray(Float32Array, phasesPointer, vertexCount),
+            indices: copyWasmArray(Uint32Array, indicesPointer, indexCount),
             minSigma: sigmaMin,
             maxSigma: sigmaMax,
             minOmega: omegaMin,
@@ -2440,18 +2441,16 @@ export function buildNativeImageMesh(options) {
         const vertexCount = view.getUint32(statsPointer, true);
         const indexCount = view.getUint32(statsPointer + 4, true);
         const result = {
-            vertices: new Float32Array(new Float32Array(wasm.memory.buffer, texturePointer, vertexCount * 2)),
-            mappedPositions: new Float32Array(new Float32Array(wasm.memory.buffer, mappedPointer, vertexCount * 2)),
-            indices: new Uint16Array(new Uint16Array(wasm.memory.buffer, indicesPointer, indexCount)),
+            vertices: copyWasmArray(Float32Array, texturePointer, vertexCount * 2),
+            mappedPositions: copyWasmArray(Float32Array, mappedPointer, vertexCount * 2),
+            indices: copyWasmArray(Uint16Array, indicesPointer, indexCount),
             cellCount: view.getUint32(statsPointer + 8, true),
             sampleCount: view.getUint32(statsPointer + 12, true)
         };
         if (!buildFold) return result;
         return Object.assign(result, {
-            foldPositions: new Float32Array(new Float32Array(
-                wasm.memory.buffer, foldPositionsPointer, vertexCount * 3
-            )),
-            foldUvs: new Float32Array(new Float32Array(wasm.memory.buffer, foldUvsPointer, vertexCount * 2)),
+            foldPositions: copyWasmArray(Float32Array, foldPositionsPointer, vertexCount * 3),
+            foldUvs: copyWasmArray(Float32Array, foldUvsPointer, vertexCount * 2),
             foldMapping: {
                 mappedCenterX: view.getFloat64(foldMappingPointer, true),
                 mappedCenterY: view.getFloat64(foldMappingPointer + 8, true),
@@ -2563,7 +2562,7 @@ export function buildNativeFoldPreimageMarkers(options, roots) {
             positionsPointer
         );
         if (count < 0) throw new Error(`Native fold preimage geometry failed with status ${count}.`);
-        return new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, count * 3));
+        return copyWasmArray(Float32Array, positionsPointer, count * 3);
     });
 }
 
@@ -2637,19 +2636,19 @@ export function buildNativeRealSurface(options) {
         const view = memoryView();
         const result = {
             segments, vertexCount,
-            values: new Float64Array(new Float64Array(wasm.memory.buffer, valuesPointer, vertexCount)),
+            values: copyWasmArray(Float64Array, valuesPointer, vertexCount),
             minValue: view.getFloat64(minimumPointer, true),
             maxValue: view.getFloat64(maximumPointer, true),
             finiteResultCount: view.getUint32(finitePointer, true)
         };
         if (valuesOnly) return result;
         return Object.assign(result, {
-            positions: new Float32Array(new Float32Array(wasm.memory.buffer, positionsPointer, vertexCount * 3)),
-            normals: new Float32Array(new Float32Array(wasm.memory.buffer, normalsPointer, vertexCount * 3)),
-            colors: new Float32Array(new Float32Array(wasm.memory.buffer, colorsPointer, vertexCount * 3)),
-            rawValues: new Float32Array(new Float32Array(wasm.memory.buffer, rawValuesPointer, vertexCount)),
-            phases: new Float32Array(new Float32Array(wasm.memory.buffer, phasesPointer, vertexCount)),
-            indices: new Uint32Array(new Uint32Array(wasm.memory.buffer, indicesPointer, indexCount))
+            positions: copyWasmArray(Float32Array, positionsPointer, vertexCount * 3),
+            normals: copyWasmArray(Float32Array, normalsPointer, vertexCount * 3),
+            colors: copyWasmArray(Float32Array, colorsPointer, vertexCount * 3),
+            rawValues: copyWasmArray(Float32Array, rawValuesPointer, vertexCount),
+            phases: copyWasmArray(Float32Array, phasesPointer, vertexCount),
+            indices: copyWasmArray(Uint32Array, indicesPointer, indexCount)
         });
     });
 }
@@ -2738,6 +2737,6 @@ export function renderNativeRealContour(options) {
             valuesPointer, colorsPointer, sourceWidth, sourceHeight, outputPointer
         );
         if (status !== 0) throw new Error(`Native real-contour rendering failed with status ${status}.`);
-        return new Uint8ClampedArray(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
+        return copyWasmArray(Uint8ClampedArray, outputPointer, outputLength);
     });
 }

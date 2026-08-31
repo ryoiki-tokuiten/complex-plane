@@ -18,6 +18,41 @@ const MIN_HEIGHT = 180;
 const MAX_HEIGHT = 2000;
 const COLLISION_GAP = 24;
 const LAYOUT_VERSION = 'v8';
+const LAYOUT_PADDING = 24;
+
+function isVerticalLayout() {
+    return typeof document !== 'undefined' && (
+        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
+    );
+}
+
+function panelRect(left, top, width, height) {
+    return { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` };
+}
+
+function defaultPanelSize(containerWidth, containerHeight) {
+    return isVerticalLayout()
+        ? {
+            width: Math.max(MIN_WIDTH, containerWidth - LAYOUT_PADDING * 2),
+            height: Math.max(MIN_HEIGHT, Math.floor((containerHeight - LAYOUT_PADDING * 2 - COLLISION_GAP) / 2))
+        }
+        : {
+            width: Math.max(MIN_WIDTH, Math.floor((containerWidth - LAYOUT_PADDING * 2 - COLLISION_GAP) / 2)),
+            height: Math.max(MIN_HEIGHT, containerHeight - LAYOUT_PADDING * 2)
+        };
+}
+
+function normalPanelSize(containerWidth, containerHeight) {
+    return isVerticalLayout()
+        ? {
+            width: Math.max(220, containerWidth - LAYOUT_PADDING * 2),
+            height: Math.max(180, Math.floor((Math.max(400, containerHeight - LAYOUT_PADDING * 2) - COLLISION_GAP) / 2))
+        }
+        : {
+            width: Math.max(220, Math.floor((Math.max(480, containerWidth - LAYOUT_PADDING * 2) - COLLISION_GAP) / 2)),
+            height: Math.max(200, containerHeight - LAYOUT_PADDING * 2)
+        };
+}
 
 export function updateWorkspaceBounds(container, isInteracting = false, activeDragBounds = null) {
     if (!container) {
@@ -97,9 +132,7 @@ export function resolveCollisions(activePanel, container) {
         return { el, left, top, width, height, right: left + width, bottom: top + height };
     };
 
-    const isVertical = typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
+    const isVertical = isVerticalLayout();
 
     for (let pass = 0; pass < 4; pass++) {
         let anyMoved = false;
@@ -214,9 +247,7 @@ function getCurrentLayoutMode() {
 }
 
 function getLayoutStorageKey() {
-    const isVertical = typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
+    const isVertical = isVerticalLayout();
     const orientation = isVertical ? 'vert' : 'horiz';
     const mode = getCurrentLayoutMode();
     return `complex_panelLayout_${mode}_${orientation}_${LAYOUT_VERSION}`;
@@ -255,163 +286,46 @@ export function resetAllPanelLayouts() {
 }
 
 export function computeRealPlotsLayout(containerWidth, containerHeight) {
-    const isVertical = typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
-    const hasContour2D = Boolean(state?.show2DContourPlot);
-    const padding = 24;
-    const gap = 24;
-
-    if (!hasContour2D) {
-        // Real plots is alone: take the entire available space
-        const fullWidth = Math.max(300, containerWidth - padding * 2);
-        const fullHeight = Math.max(300, containerHeight - padding * 2);
+    if (!state?.show2DContourPlot) {
         return {
-            real_plots_column: {
-                left: `${padding}px`,
-                top: `${padding}px`,
-                width: `${fullWidth}px`,
-                height: `${fullHeight}px`
-            }
+            real_plots_column: panelRect(
+                LAYOUT_PADDING,
+                LAYOUT_PADDING,
+                Math.max(300, containerWidth - LAYOUT_PADDING * 2),
+                Math.max(300, containerHeight - LAYOUT_PADDING * 2)
+            )
         };
     }
 
-    if (isVertical) {
-        const panelWidth = Math.max(220, containerWidth - padding * 2);
-        const availHeight = Math.max(400, containerHeight - padding * 2);
-        const panelHeight = Math.max(180, Math.floor((availHeight - gap) / 2));
-        return {
-            real_plots_column: {
-                left: `${padding}px`,
-                top: `${padding}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            },
-            contour_2d_column: {
-                left: `${padding}px`,
-                top: `${padding + panelHeight + gap}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            }
-        };
-    } else {
-        const availWidth = Math.max(480, containerWidth - padding * 2);
-        const panelWidth = Math.max(220, Math.floor((availWidth - gap) / 2));
-        const panelHeight = Math.max(200, containerHeight - padding * 2);
-        return {
-            real_plots_column: {
-                left: `${padding}px`,
-                top: `${padding}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            },
-            contour_2d_column: {
-                left: `${padding + panelWidth + gap}px`,
-                top: `${padding}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            }
-        };
-    }
+    const { width, height } = normalPanelSize(containerWidth, containerHeight);
+    const realPlot = panelRect(LAYOUT_PADDING, LAYOUT_PADDING, width, height);
+    const contour = isVerticalLayout()
+        ? panelRect(LAYOUT_PADDING, LAYOUT_PADDING + height + COLLISION_GAP, width, height)
+        : panelRect(LAYOUT_PADDING + width + COLLISION_GAP, LAYOUT_PADDING, width, height);
+    return { real_plots_column: realPlot, contour_2d_column: contour };
 }
 
 export function computeNormalModeLayout(containerWidth, containerHeight) {
-    const isVertical = typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
-    const padding = 24;
-    const gap = 24;
+    const isVertical = isVerticalLayout();
+    const { width, height } = normalPanelSize(containerWidth, containerHeight);
     const layout = {};
-
-    if (isVertical) {
-        // Vertical mode: panels are stacked vertically (Row 1 top, Row 2 bottom)
-        // 100% horizontal view, 50% vertical height
-        const panelWidth = Math.max(220, containerWidth - padding * 2);
-        const availHeight = Math.max(400, containerHeight - padding * 2);
-        const panelHeight = Math.max(180, Math.floor((availHeight - gap) / 2));
-
-        layout.z_plane_column = {
-            left: `${padding}px`,
-            top: `${padding}px`,
-            width: `${panelWidth}px`,
-            height: `${panelHeight}px`
-        };
-
-        const wTop = padding + panelHeight + gap;
-        layout.w_plane_column = {
-            left: `${padding}px`,
-            top: `${wTop}px`,
-            width: `${panelWidth}px`,
-            height: `${panelHeight}px`
-        };
-
-        const graphTop = wTop + panelHeight + gap;
-        layout.graph_column = {
-            left: `${padding}px`,
-            top: `${graphTop}px`,
-            width: `${panelWidth}px`,
-            height: `${panelHeight}px`
-        };
-
-        // Chained w_plane columns (w_plane_column_1, w_plane_column_2, ...)
-        for (let i = 1; i <= 32; i++) {
-            layout[`w_plane_column_${i}`] = {
-                left: `${padding}px`,
-                top: `${wTop + i * (panelHeight + gap)}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            };
-        }
-    } else {
-        // Horizontal mode: panels are side-by-side horizontally (Track 1 left, Track 2 right, Track 3 right)
-        // 50% horizontal view, 100% vertical height
-        const availWidth = Math.max(480, containerWidth - padding * 2);
-        const panelWidth = Math.max(220, Math.floor((availWidth - gap) / 2));
-        const panelHeight = Math.max(200, containerHeight - padding * 2);
-
-        layout.z_plane_column = {
-            left: `${padding}px`,
-            top: `${padding}px`,
-            width: `${panelWidth}px`,
-            height: `${panelHeight}px`
-        };
-
-        const wLeft = padding + panelWidth + gap;
-        layout.w_plane_column = {
-            left: `${wLeft}px`,
-            top: `${padding}px`,
-            width: `${panelWidth}px`,
-            height: `${panelHeight}px`
-        };
-
-        const graphLeft = wLeft + panelWidth + gap;
-        layout.graph_column = {
-            left: `${graphLeft}px`,
-            top: `${padding}px`,
-            width: `${panelWidth}px`,
-            height: `${panelHeight}px`
-        };
-
-        // Chained w_plane columns (w_plane_column_1, w_plane_column_2, ...)
-        for (let i = 1; i <= 32; i++) {
-            layout[`w_plane_column_${i}`] = {
-                left: `${wLeft + i * (panelWidth + gap)}px`,
-                top: `${padding}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            };
-        }
-    }
-
+    const position = index => panelRect(
+        isVertical ? LAYOUT_PADDING : LAYOUT_PADDING + index * (width + COLLISION_GAP),
+        isVertical ? LAYOUT_PADDING + index * (height + COLLISION_GAP) : LAYOUT_PADDING,
+        width,
+        height
+    );
+    layout.z_plane_column = position(0);
+    layout.w_plane_column = position(1);
+    layout.graph_column = position(2);
+    for (let index = 1; index <= 32; index++) layout[`w_plane_column_${index}`] = position(index + 1);
     return layout;
 }
 
 export function computeLaplaceModeLayout(containerWidth, containerHeight) {
-    const isVertical = typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
-    const padding = 24;
-    const gap = 24;
+    const isVertical = isVerticalLayout();
+    const padding = LAYOUT_PADDING;
+    const gap = COLLISION_GAP;
 
     if (isVertical) {
         // Vertical mode: rows are stacked downwards
@@ -430,42 +344,12 @@ export function computeLaplaceModeLayout(containerWidth, containerHeight) {
         const topRow5 = topRow4 + row4Height + gap;
 
         return {
-            z_plane_column: {
-                left: `${padding}px`,
-                top: `${topRow1}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            },
-            w_plane_column: {
-                left: `${padding}px`,
-                top: `${topRow2}px`,
-                width: `${panelWidth}px`,
-                height: `${panelHeight}px`
-            },
-            fourier_3d_column: {
-                left: `${padding}px`,
-                top: `${topRow3}px`,
-                width: `${panelWidth}px`,
-                height: `${row3Height}px`
-            },
-            laplace_com_column: {
-                left: `${padding}px`,
-                top: `${topRow4}px`,
-                width: `${halfWidth}px`,
-                height: `${row4Height}px`
-            },
-            laplace_spectrum_column: {
-                left: `${padding + halfWidth + gap}px`,
-                top: `${topRow4}px`,
-                width: `${halfWidth}px`,
-                height: `${row4Height}px`
-            },
-            laplace_3d_column: {
-                left: `${padding}px`,
-                top: `${topRow5}px`,
-                width: `${panelWidth}px`,
-                height: `${row5Height}px`
-            }
+            z_plane_column: panelRect(padding, topRow1, panelWidth, panelHeight),
+            w_plane_column: panelRect(padding, topRow2, panelWidth, panelHeight),
+            fourier_3d_column: panelRect(padding, topRow3, panelWidth, row3Height),
+            laplace_com_column: panelRect(padding, topRow4, halfWidth, row4Height),
+            laplace_spectrum_column: panelRect(padding + halfWidth + gap, topRow4, halfWidth, row4Height),
+            laplace_3d_column: panelRect(padding, topRow5, panelWidth, row5Height)
         };
     }
 
@@ -488,51 +372,27 @@ export function computeLaplaceModeLayout(containerWidth, containerHeight) {
     const totalLeftHeight = topRow3 + row3Height - padding;
 
     return {
-        // Row 1: Time Domain Signal & Complex Frequency Domain - Both 100% Screen Height
-        z_plane_column: {
-            left: `${track1Left}px`,
-            top: `${topRow1}px`,
-            width: `${trackWidth}px`,
-            height: `${screenHeight}px`
-        },
-        w_plane_column: {
-            left: `${track2Left}px`,
-            top: `${topRow1}px`,
-            width: `${trackWidth}px`,
-            height: `${screenHeight}px`
-        },
-
-        // Row 2: 3D Fourier Decomposition & Sum spanning 100% view width below both of them
-        fourier_3d_column: {
-            left: `${track1Left}px`,
-            top: `${topRow2}px`,
-            width: `${combinedWidth}px`,
-            height: `${row2Height}px`
-        },
-
-        // Row 3: Half Center of Mass (Left) & Half Discrete Spectrum (Right)
-        laplace_com_column: {
-            left: `${track1Left}px`,
-            top: `${topRow3}px`,
-            width: `${trackWidth}px`,
-            height: `${row3Height}px`
-        },
-        laplace_spectrum_column: {
-            left: `${track2Left}px`,
-            top: `${topRow3}px`,
-            width: `${trackWidth}px`,
-            height: `${row3Height}px`
-        },
-
-        // Right side of Track 2: Full complete sized Laplace 3D Surface
-        laplace_3d_column: {
-            left: `${track3Left}px`,
-            top: `${topRow1}px`,
-            width: `${Math.max(680, trackWidth)}px`,
-            height: `${Math.max(700, totalLeftHeight)}px`
-        }
+        z_plane_column: panelRect(track1Left, topRow1, trackWidth, screenHeight),
+        w_plane_column: panelRect(track2Left, topRow1, trackWidth, screenHeight),
+        fourier_3d_column: panelRect(track1Left, topRow2, combinedWidth, row2Height),
+        laplace_com_column: panelRect(track1Left, topRow3, trackWidth, row3Height),
+        laplace_spectrum_column: panelRect(track2Left, topRow3, trackWidth, row3Height),
+        laplace_3d_column: panelRect(track3Left, topRow1, Math.max(680, trackWidth), Math.max(700, totalLeftHeight))
     };
 }
+
+function layoutForMode(containerWidth, containerHeight, mode = getCurrentLayoutMode()) {
+    if (mode === 'laplace') return computeLaplaceModeLayout(containerWidth, containerHeight);
+    if (mode === 'real_plots') return computeRealPlotsLayout(containerWidth, containerHeight);
+    return computeNormalModeLayout(containerWidth, containerHeight);
+}
+
+function applyPanelRect(panel, rectangle) {
+    Object.assign(panel.style, rectangle);
+}
+
+const pointerDelta = (position, start, scroll, initialScroll) =>
+    (position - start) + (scroll - initialScroll);
 
 /**
  * Finds the next available non-overlapping free slot on the whiteboard
@@ -541,16 +401,14 @@ export function computeLaplaceModeLayout(containerWidth, containerHeight) {
  * Vertical mode: places at the bottom.
  */
 export function findNextAvailableSlot(container, panel, targetWidth, targetHeight) {
-    const isVertical = typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
+    const isVertical = isVerticalLayout();
 
     const visibleSiblings = container?.children ? [...container.children].filter(
         child => child !== panel && !child.classList.contains('hidden') && !child.classList.contains('workspace-bounds-extender') && Boolean(child.id)
     ) : [];
 
-    const padding = 24;
-    const gap = 24;
+    const padding = LAYOUT_PADDING;
+    const gap = COLLISION_GAP;
 
     if (visibleSiblings.length === 0) {
         return { left: `${padding}px`, top: `${padding}px` };
@@ -586,9 +444,7 @@ function initializeDefaultPanelPositions(container) {
     if (!container) return;
 
     const mode = getCurrentLayoutMode();
-    const isVertical = typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
+    const isVertical = isVerticalLayout();
     const hasContour = Boolean(state?.show2DContourPlot);
     const hasGraph = Boolean(state?.graphViewEnabled);
     const currentModeKey = `${mode}_${isVertical ? 'vert' : 'horiz'}_${hasContour}_${hasGraph}`;
@@ -608,11 +464,7 @@ function initializeDefaultPanelPositions(container) {
     const containerWidth = container.clientWidth || window.innerWidth || 1200;
     const containerHeight = container.clientHeight || window.innerHeight || 700;
 
-    const defaultLayoutMap = mode === 'laplace' 
-        ? computeLaplaceModeLayout(containerWidth, containerHeight)
-        : (mode === 'real_plots'
-            ? computeRealPlotsLayout(containerWidth, containerHeight)
-            : computeNormalModeLayout(containerWidth, containerHeight));
+    const defaultLayoutMap = layoutForMode(containerWidth, containerHeight, mode);
 
     let savedLayout = null;
     try {
@@ -636,29 +488,12 @@ function initializeDefaultPanelPositions(container) {
 
         // 2. Mode specific preset default layout
         if (panel.id && defaultLayoutMap && defaultLayoutMap[panel.id]) {
-            const preset = defaultLayoutMap[panel.id];
-            panel.style.left = preset.left;
-            panel.style.top = preset.top;
-            panel.style.width = preset.width;
-            panel.style.height = preset.height;
+            applyPanelRect(panel, defaultLayoutMap[panel.id]);
             return;
         }
 
         // 3. Fallback: Find next available non-overlapping free slot with 50%/100% sizing
-        const padding = 24;
-        const gap = 24;
-
-        let dynamicWidth, dynamicHeight;
-        if (isVertical) {
-            // Vertical mode: 100% horizontal view, 50% vertical height
-            dynamicWidth = Math.max(MIN_WIDTH, containerWidth - padding * 2);
-            dynamicHeight = Math.max(MIN_HEIGHT, Math.floor((containerHeight - padding * 2 - gap) / 2));
-        } else {
-            // Horizontal mode: 50% horizontal view, 100% vertical height
-            dynamicWidth = Math.max(MIN_WIDTH, Math.floor((containerWidth - padding * 2 - gap) / 2));
-            dynamicHeight = Math.max(MIN_HEIGHT, containerHeight - padding * 2);
-        }
-
+        const { width: dynamicWidth, height: dynamicHeight } = defaultPanelSize(containerWidth, containerHeight);
         panel.style.width = `${dynamicWidth}px`;
         panel.style.height = `${dynamicHeight}px`;
 
@@ -687,8 +522,8 @@ function bindResizeEvents(resizeBtn, panel) {
         const currentScrollLeft = container ? container.scrollLeft : 0;
         const currentScrollTop = container ? container.scrollTop : 0;
 
-        const deltaX = (event.clientX - startX) + (currentScrollLeft - origScrollLeft);
-        const deltaY = (event.clientY - startY) + (currentScrollTop - origScrollTop);
+        const deltaX = pointerDelta(event.clientX, startX, currentScrollLeft, origScrollLeft);
+        const deltaY = pointerDelta(event.clientY, startY, currentScrollTop, origScrollTop);
 
         const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(startWidth + deltaX)));
         const newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(startHeight + deltaY)));
@@ -799,8 +634,8 @@ function bindGripEvents(triggerEl, panel) {
 
                 const currentScrollLeft = container.scrollLeft;
                 const currentScrollTop = container.scrollTop;
-                const deltaX = (currentClientX - startX) + (currentScrollLeft - origScrollLeft);
-                const deltaY = (currentClientY - startY) + (currentScrollTop - origScrollTop);
+                const deltaX = pointerDelta(currentClientX, startX, currentScrollLeft, origScrollLeft);
+                const deltaY = pointerDelta(currentClientY, startY, currentScrollTop, origScrollTop);
                 const newLeft = Math.max(0, Math.round(origLeft + deltaX));
                 const newTop = Math.max(0, Math.round(origTop + deltaY));
                 panel.style.left = `${newLeft}px`;
@@ -827,8 +662,8 @@ function bindGripEvents(triggerEl, panel) {
         const currentScrollLeft = container ? container.scrollLeft : 0;
         const currentScrollTop = container ? container.scrollTop : 0;
 
-        const deltaX = (event.clientX - startX) + (currentScrollLeft - origScrollLeft);
-        const deltaY = (event.clientY - startY) + (currentScrollTop - origScrollTop);
+        const deltaX = pointerDelta(event.clientX, startX, currentScrollLeft, origScrollLeft);
+        const deltaY = pointerDelta(event.clientY, startY, currentScrollTop, origScrollTop);
 
         const newLeft = Math.max(0, Math.round(origLeft + deltaX));
         const newTop = Math.max(0, Math.round(origTop + deltaY));
@@ -964,35 +799,14 @@ function createEdgeHandle(panel) {
         if (container) {
             const containerWidth = container.clientWidth || window.innerWidth || 1200;
             const containerHeight = container.clientHeight || window.innerHeight || 700;
-            const mode = getCurrentLayoutMode();
-            const defaultLayoutMap = mode === 'laplace' 
-                ? computeLaplaceModeLayout(containerWidth, containerHeight)
-                : (mode === 'real_plots'
-                    ? computeRealPlotsLayout(containerWidth, containerHeight)
-                    : computeNormalModeLayout(containerWidth, containerHeight));
+            const defaultLayoutMap = layoutForMode(containerWidth, containerHeight);
 
             if (panel.id && defaultLayoutMap && defaultLayoutMap[panel.id]) {
-                const preset = defaultLayoutMap[panel.id];
-                panel.style.left = preset.left;
-                panel.style.top = preset.top;
-                panel.style.width = preset.width;
-                panel.style.height = preset.height;
+                applyPanelRect(panel, defaultLayoutMap[panel.id]);
             } else {
-                const isVertical = typeof document !== 'undefined' && (
-                    document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-                );
-                const padding = 24;
-                const gap = 24;
-                let defaultWidth, defaultHeight;
-                if (isVertical) {
-                    defaultWidth = Math.max(MIN_WIDTH, containerWidth - padding * 2);
-                    defaultHeight = Math.max(MIN_HEIGHT, Math.floor((containerHeight - padding * 2 - gap) / 2));
-                } else {
-                    defaultWidth = Math.max(MIN_WIDTH, Math.floor((containerWidth - padding * 2 - gap) / 2));
-                    defaultHeight = Math.max(MIN_HEIGHT, containerHeight - padding * 2);
-                }
-                panel.style.width = `${defaultWidth}px`;
-                panel.style.height = `${defaultHeight}px`;
+                const { width, height } = defaultPanelSize(containerWidth, containerHeight);
+                panel.style.width = `${width}px`;
+                panel.style.height = `${height}px`;
             }
 
             resolveCollisions(panel, container);
@@ -1071,6 +885,30 @@ function executeRefresh() {
     }
 }
 
+export function refreshPanelLayout() {
+    const row = document.querySelector('.canvas-row.two-column-layout');
+    if (!row) return;
+
+    const containerWidth = row.clientWidth || window.innerWidth || 1200;
+    const containerHeight = row.clientHeight || window.innerHeight || 700;
+
+    let savedLayout = null;
+    try {
+        const stored = localStorage.getItem(getLayoutStorageKey());
+        if (stored) savedLayout = JSON.parse(stored);
+    } catch (e) {}
+
+    const defaultLayoutMap = layoutForMode(containerWidth, containerHeight);
+    [...row.children]
+        .filter(el => !el.classList.contains('hidden') && !el.classList.contains('workspace-bounds-extender') && Boolean(el.id))
+        .forEach(panel => {
+            if (!savedLayout?.[panel.id] && defaultLayoutMap?.[panel.id]) {
+                applyPanelRect(panel, defaultLayoutMap[panel.id]);
+            }
+        });
+    updateWorkspaceBounds(row);
+}
+
 export function initPanelLayoutManager() {
     if (initialized) return;
     initialized = true;
@@ -1089,47 +927,8 @@ export function initPanelLayoutManager() {
                 }
                 return false;
             });
-            if (hasChange) {
-                refreshPanelEdgeHandles();
-            }
+            if (hasChange) refreshPanelEdgeHandles();
         });
         observer.observe(container, { childList: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
     }
-
-    window.addEventListener('resize', () => {
-        const row = document.querySelector('.canvas-row.two-column-layout');
-        if (!row) return;
-
-        const isLaplace = Boolean(state?.laplaceModeEnabled);
-        const containerWidth = row.clientWidth || window.innerWidth || 1200;
-        const containerHeight = row.clientHeight || window.innerHeight || 700;
-
-        let savedLayout = null;
-        try {
-            const stored = localStorage.getItem(getLayoutStorageKey());
-            if (stored) savedLayout = JSON.parse(stored);
-        } catch (e) {}
-
-        const defaultLayoutMap = isLaplace
-            ? computeLaplaceModeLayout(containerWidth, containerHeight)
-            : computeNormalModeLayout(containerWidth, containerHeight);
-
-        const visiblePanels = [...row.children].filter(
-            el => !el.classList.contains('hidden') && !el.classList.contains('workspace-bounds-extender') && Boolean(el.id)
-        );
-
-        visiblePanels.forEach(panel => {
-            if (!savedLayout || !savedLayout[panel.id]) {
-                if (defaultLayoutMap && defaultLayoutMap[panel.id]) {
-                    const preset = defaultLayoutMap[panel.id];
-                    panel.style.left = preset.left;
-                    panel.style.top = preset.top;
-                    panel.style.width = preset.width;
-                    panel.style.height = preset.height;
-                }
-            }
-        });
-
-        updateWorkspaceBounds(row);
-    });
 }

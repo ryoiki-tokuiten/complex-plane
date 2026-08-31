@@ -117,18 +117,6 @@ function normalizeChainMode(mode) {
     return mode;
 }
 
-function dynamicParameters(config) {
-    if (!Array.isArray(config.parameters)) throw new Error('Domain dynamics requires a dynamic parameter array.');
-    return Object.fromEntries(config.parameters.map(parameter => {
-        const name = String(parameter?.name ?? '').trim();
-        const value = Number(parameter?.value);
-        if (!name || !Number.isFinite(value)) {
-            throw new Error('Domain-dynamics parameters require a name and finite value.');
-        }
-        return [name, { re: value, im: 0 }];
-    }));
-}
-
 function dynamicAggregateSnapshot(runtimeState) {
     const config = runtimeState?.dynamicPlotting;
     const reductionKind = config?.reduction?.kind;
@@ -141,8 +129,7 @@ function dynamicAggregateSnapshot(runtimeState) {
     if (config.reduction.invalidPolicy !== 'stop' && config.reduction.invalidPolicy !== 'skip') {
         throw new Error(`Unsupported dynamic invalid policy: ${config.reduction.invalidPolicy}.`);
     }
-    const parameters = dynamicParameters(config);
-    const source = generateDiscreteSource(clonePlain(config.source), { parameters });
+    const source = generateDiscreteSource(clonePlain(config.source));
 
     const requestedVisibleCount = Number(config.playback?.visibleCount);
     if (!Number.isFinite(requestedVisibleCount)) {
@@ -160,8 +147,7 @@ function dynamicAggregateSnapshot(runtimeState) {
     const bindings = synchronizeSequenceBindings(termExpression, config.term.bindings);
 
     const bindingResult = generateSequenceBindingSeries(bindings, visibleCount, {
-        aggregateParameter: { re: 0, im: 0 },
-        parameters
+        aggregateParameter: { re: 0, im: 0 }
     });
     return compileNativeDynamicAggregate({
         pointExpression: config.pointExpression,
@@ -169,7 +155,6 @@ function dynamicAggregateSnapshot(runtimeState) {
         bindings: clonePlain(bindings),
         reductionKind,
         invalidPolicy: config.reduction.invalidPolicy,
-        parameters,
         sourceRecords: source.records.slice(0, visibleCount).map(record => ({
             ordinal: record.ordinal,
             domainValue: clonePlain(record.domainValue)

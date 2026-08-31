@@ -14,7 +14,7 @@ const STATE_KEYS = [
     'graphFullGridEnabled', 'graphGridFamily', 'graphFourierEnabled',
     'graphFocusBoxEnabled', 'graphLayerLockEnabled',
     'graphSelectedShape', 'graphSelectedLineIndex', 'graphSelectionRevision',
-    'laplaceModeEnabled'
+    'laplaceModeEnabled', 'expBase', 'logBase'
 ];
 
 test('full-grid perspective selects the expected Cartesian and polar families', () => {
@@ -184,6 +184,38 @@ test('standalone transform-hub mode never produces transformation-graph data', (
         });
 
         assert.equal(buildTransformationGraphData(zPlaneParams), null);
+    } finally {
+        Object.assign(state, previous);
+    }
+});
+
+test('transformation graph cache identity follows configurable exp and ln bases', () => {
+    const previous = Object.fromEntries(STATE_KEYS.map(key => [key, state[key]]));
+
+    try {
+        Object.assign(state, {
+            currentFunction: 'exp',
+            currentInputShape: 'grid_cartesian',
+            graphViewEnabled: true,
+            graphFullGridEnabled: false,
+            graphLayerLockEnabled: false,
+            graphSelectedShape: '',
+            graphSelectedLineIndex: -1,
+            graphSelectionRevision: 0,
+            laplaceModeEnabled: false,
+            expBase: { re: 2, im: 0 }
+        });
+        const exponential = buildTransformationGraphData(zPlaneParams);
+        state.expBase = { re: 3, im: 0 };
+        const changedExponential = buildTransformationGraphData(zPlaneParams);
+        assert.notEqual(exponential.geometryKey, changedExponential.geometryKey);
+
+        state.currentFunction = 'ln';
+        state.logBase = { re: 2, im: 0 };
+        const logarithm = buildTransformationGraphData(zPlaneParams);
+        state.logBase = { re: 10, im: 0 };
+        const changedLogarithm = buildTransformationGraphData(zPlaneParams);
+        assert.notEqual(logarithm.geometryKey, changedLogarithm.geometryKey);
     } finally {
         Object.assign(state, previous);
     }

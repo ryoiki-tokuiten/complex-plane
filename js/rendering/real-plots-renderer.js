@@ -19,7 +19,7 @@ import { REAL_SURFACE_FRAME } from '../constants/surface-rendering.js';
 import { paletteLutFor } from '../constants/surface-palettes.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
-import { disposeThreeObject, createCanvasTextSprite } from './three-utils.js';
+import { clearThreeGroup, createCanvasTextSprite, disposeThreeObject } from './three-utils.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
 import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 
@@ -48,14 +48,6 @@ export function applySurfaceCoordinateZoom(event, currentZoom, updateZoom) {
         Math.min(MAX_STATE_ZOOM_LEVEL, oldZoom * factor)
     );
     if (nextZoom !== oldZoom) updateZoom(nextZoom, oldZoom);
-}
-
-function clearGroup(group) {
-    while (group.children.length) {
-        const child = group.children[0];
-        group.remove(child);
-        disposeThreeObject(child);
-    }
 }
 
 function makeAxisLabel(text, color, scale = [1.35, 0.5, 1]) {
@@ -319,7 +311,7 @@ class ScalarSurfaceRenderer {
     }
 
     #buildFrame(frame = DEFAULT_FRAME) {
-        clearGroup(this.frameGroup);
+        clearThreeGroup(this.frameGroup);
         const width = requireFiniteNumber(frame.width, 'Surface frame width');
         const depth = requireFiniteNumber(frame.depth, 'Surface frame depth');
         const yMin = requireFiniteNumber(frame.yMin, 'Surface frame minimum height');
@@ -423,7 +415,7 @@ class ScalarSurfaceRenderer {
     }
 
     #addOverlays(overlays = []) {
-        clearGroup(this.overlayGroup);
+        clearThreeGroup(this.overlayGroup);
         overlays.forEach(overlay => {
             if (overlay.type === 'line') {
                 const geometry = new THREE.BufferGeometry().setFromPoints(

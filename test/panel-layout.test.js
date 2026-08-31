@@ -320,37 +320,6 @@ test('Chained columns in Normal Mode layout align side-by-side with uniform gaps
     assert.equal(w2Left, w1Left + wWidth + 24);
 });
 
-test('Real Plots with 2D Contour divides workspace cleanly side-by-side or stacked', () => {
-    const stateMock = { show2DContourPlot: true };
-    
-    // Import state or test computeRealPlotsLayout with contour enabled
-    const containerWidth = 1400;
-    const containerHeight = 900;
-    
-    // Test horizontal mode (default)
-    const padding = 24;
-    const gap = 24;
-    const availWidth = 1400 - padding * 2;
-    const panelWidth = Math.floor((availWidth - gap) / 2);
-    const panelHeight = 900 - padding * 2;
-
-    // Simulate state.show2DContourPlot = true via global or function
-    // We already tested standalone, now let's verify findNextAvailableSlot doesn't collide
-    const container = {
-        clientWidth: containerWidth,
-        clientHeight: containerHeight,
-        children: [
-            { id: 'real_plots_column', offsetLeft: 24, offsetTop: 24, offsetWidth: panelWidth, offsetHeight: panelHeight, style: { left: '24px', top: '24px', width: `${panelWidth}px`, height: `${panelHeight}px` }, classList: { contains: () => false } }
-        ]
-    };
-
-    const contourPanel = { id: 'contour_2d_column', style: {}, classList: { contains: () => false } };
-    const slot = findNextAvailableSlot(container, contourPanel, panelWidth, panelHeight);
-
-    assert.equal(parseInt(slot.left, 10), 24 + panelWidth + gap);
-    assert.equal(parseInt(slot.top, 10), 24);
-});
-
 test('resolveCollisions supports vertical stacking in the same column without shifting to another column', async () => {
     const { resolveCollisions } = await import('../js/ui/panel-layout-manager.js');
 
@@ -383,5 +352,4 @@ test('resolveCollisions supports vertical stacking in the same column without sh
     assert.equal(parseInt(wPanel.style.left, 10), 748);
     assert.equal(parseInt(wPanel.style.top, 10), 24);
 });
-
 

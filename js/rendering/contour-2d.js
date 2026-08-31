@@ -176,16 +176,18 @@ export function draw2DContourPlot(canvas) {
         return;
     }
 
-    if (!state.realPlotsEnabled) {
-        throw new Error('2D contour rendering requires an active Laplace, Riemann, or real-plot mode.');
+    if (state.realPlotsEnabled) {
+        const pixels = renderRealPlotContour({
+            width,
+            height,
+            contoursEnabled: state.contoursEnabled,
+            contourInterval: getContourInterval(),
+            contourThickness: getContourThickness()
+        });
+        putNativePixels(ctx, width, height, pixels);
+        drawPlaneOverlay(ctx, cssWidth, cssHeight, dpr, { x: 'x', y: 'y' });
+        return;
     }
-    const pixels = renderRealPlotContour({
-        width,
-        height,
-        contoursEnabled: state.contoursEnabled,
-        contourInterval: getContourInterval(),
-        contourThickness: getContourThickness()
-    });
-    putNativePixels(ctx, width, height, pixels);
-    drawPlaneOverlay(ctx, cssWidth, cssHeight, dpr, { x: 'x', y: 'y' });
+
+    throw new Error('2D contour rendering requires an active Laplace, Riemann, or real-plot mode.');
 }

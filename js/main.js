@@ -8,8 +8,7 @@ import { initializeDynamicPlottingEngine } from './analysis/dynamic-plotting.js'
 import { renderApplicationFrame } from './rendering/application-renderer.js';
 import {
     configureRedrawScheduler,
-    requestDomainRedraw,
-    requestUiRedraw
+    requestDomainRedraw
 } from './rendering/redraw-scheduler.js';
 import { mountFrontend, mountFrontendControls } from './frontend/mount-frontend.jsx';
 import { startUiSynchronization } from './frontend/controllers/ui-sync-controller.js';
@@ -65,9 +64,3 @@ function hidePreloader() {
         }, 500); 
     }
 }
-
-window.addEventListener('resize', () => {
-    setupVisualParameters(false, false); 
-    requestDomainRedraw(true);
-    requestUiRedraw();
-});

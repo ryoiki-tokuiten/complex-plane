@@ -1,6 +1,9 @@
 import { state } from '../store/state.js';
 import { evaluateNativePoints } from '../native/complex-engine.js';
-import { resolveNativeMapOptions } from '../native/map-runtime.js';
+import {
+    buildMappedTransformProfileKey,
+    resolveNativeMapOptions
+} from '../native/map-runtime.js';
 
 const MAP_PRESENTATION = Object.freeze({
     function: 'function',
@@ -16,18 +19,11 @@ function normalizeStageIndex(stageIndex) {
 
 function sourceSignature() {
     return JSON.stringify({
-        function: state.currentFunction,
+        mappedProfile: buildMappedTransformProfileKey(state.currentFunction),
         chaining: state.chainingEnabled,
         chainCount: state.chainCount,
         chainMode: state.chainingMode,
         chainSeed: state.chainSeed,
-        algebraic: state.algebraicChainingTerms,
-        algebraicZExpr: state.algebraicChainingZExpr,
-        mobius: [state.mobiusA, state.mobiusB, state.mobiusC, state.mobiusD],
-        polynomial: [state.polynomialN, state.polynomialCoeffs],
-        fractionalPower: state.fractionalPowerN,
-        branchCut: [state.branchCutType, state.branchCutAngle],
-        zetaContinuationEnabled: state.zetaContinuationEnabled,
         taylor: [state.taylorSeriesEnabled, state.taylorSeriesCenter, state.taylorSeriesOrder],
         dynamic: state.dynamicPlotting
     });

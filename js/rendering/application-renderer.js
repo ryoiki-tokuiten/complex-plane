@@ -71,10 +71,13 @@ function drawLaplaceSurface() {
 
 function runSurfaceRedraw() {
     surfaceRedrawFrame = null;
-    if (state.show2DContourPlot && (state.realPlotsEnabled || state.laplaceModeEnabled)) {
+    if (state.show2DContourPlot && state.laplaceModeEnabled) {
         draw2DContourPlot(controls.contour2DCanvas);
     }
-    if (state.realPlotsEnabled) drawRealPlot();
+    if (state.realPlotsEnabled) {
+        drawRealPlot();
+        if (state.show2DContourPlot) draw2DContourPlot(controls.contour2DCanvas);
+    }
 }
 
 function requestSurfaceRedraw() {
@@ -93,10 +96,7 @@ function syncOptionalColumn(column, shouldHide, onHide) {
         setupVisualParameters(false, false);
         requestUiRedraw();
     };
-    requestAnimationFrame(() => {
-        refreshPlanes();
-        setTimeout(refreshPlanes, 360);
-    });
+    requestAnimationFrame(refreshPlanes);
 }
 
 export function renderApplicationFrame(timestamp) {

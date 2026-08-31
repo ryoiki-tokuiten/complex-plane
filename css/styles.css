@@ -2474,7 +2474,7 @@ select:focus {
     font: 0.88rem/1.5 'SF Mono', 'Roboto Mono', monospace;
 }
 
-.dynamic-formula-banner-content > math {
+.dynamic-formula-banner-content .dynamic-math-contents > math {
     width: 100%;
     overflow-x: auto;
     padding: 0.25rem 0 0.45rem;
@@ -2483,10 +2483,14 @@ select:focus {
     font-size: 1.42rem;
 }
 
-.dynamic-formula-banner-content > math + math {
+.dynamic-formula-banner-content .dynamic-math-contents > math + math {
     margin-top: 0.2rem;
     padding-top: 0.65rem;
     border-top: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
+}
+
+.dynamic-math-contents {
+    display: contents;
 }
 
 .dynamic-formula-definitions {
@@ -3336,7 +3340,6 @@ select:focus {
 }
 
 .dynamic-card-heading-row,
-.dynamic-parameter-header,
 .dynamic-playback-row {
     display: flex;
     align-items: center;
@@ -3367,7 +3370,6 @@ select:focus {
 }
 
 .dynamic-number-input,
-.dynamic-text-input,
 .dynamic-formula-input {
     box-sizing: border-box;
     width: 100%;
@@ -3391,7 +3393,6 @@ textarea.dynamic-formula-input {
 }
 
 .dynamic-number-input:focus,
-.dynamic-text-input:focus,
 .dynamic-formula-input:focus {
     border-color: color-mix(in srgb, var(--accent-purple) 70%, white);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-purple) 18%, transparent);
@@ -3432,45 +3433,6 @@ textarea.dynamic-formula-input {
     font-weight: 700;
 }
 
-.dynamic-parameter-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-    padding: 0.6rem 0;
-    border-top: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent);
-}
-
-.dynamic-parameter-card:first-child {
-    padding-top: 0;
-    border-top: 0;
-}
-
-.dynamic-parameter-name {
-    max-width: 9rem;
-    font-weight: 700;
-}
-
-.dynamic-parameter-fields {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.4rem;
-}
-
-.dynamic-parameter-fields label {
-    display: flex !important;
-    flex-direction: column;
-    align-items: stretch !important;
-    gap: 0.25rem;
-    font-size: 0.61rem !important;
-}
-
-
-@media (max-width: 900px) {
-    .dynamic-parameter-fields {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
 @media (max-width: 700px) {
     .dynamic-plotting-controls,
     .dynamic-plotting-controls.is-minimized {
@@ -3494,7 +3456,6 @@ textarea.dynamic-formula-input {
     .dynamic-example-grid,
     .dynamic-grid-two,
     .dynamic-grid-three,
-    .dynamic-parameter-fields,
     .dynamic-factor-controls,
     .dynamic-binding-controls,
     .dynamic-factor-add-row {

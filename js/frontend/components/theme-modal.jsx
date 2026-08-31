@@ -10,10 +10,6 @@ import { isThemeModalOpen, closeThemeModal } from '../theme-state.js';
 
 function refreshLayout() {
     window.dispatchEvent(new Event('resize'));
-    const timers = [50, 150, 350].map(delay =>
-        setTimeout(() => window.dispatchEvent(new Event('resize')), delay)
-    );
-    return () => timers.forEach(clearTimeout);
 }
 
 function GridColor({ index, stateKey }) {
@@ -91,7 +87,7 @@ export function ThemeModal() {
         refreshPanelEdgeHandles(true);
         const needsRefresh = vertical || layoutApplied.current;
         layoutApplied.current = true;
-        return needsRefresh ? refreshLayout() : undefined;
+        if (needsRefresh) refreshLayout();
     }, [vertical]);
 
     useEffect(() => {

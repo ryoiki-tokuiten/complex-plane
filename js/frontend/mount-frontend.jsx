@@ -5,13 +5,7 @@ import { ComplexParameterEditor } from './components/complex-parameter-editor.js
 import { AlgebraicTermEditor } from './components/algebraic-term-editor.jsx';
 import { PaletteGuide } from './components/palette-guide.jsx';
 import { ThemeModal } from './components/theme-modal.jsx';
-import {
-    DynamicExampleCount,
-    DynamicExampleGallery,
-    DynamicParameters,
-    DynamicSequenceBindings,
-    DynamicTermFactors
-} from './components/dynamic-generated-controls.jsx';
+import { DynamicPlottingStudio } from './components/dynamic-plotting-studio.jsx';
 import {
     ActiveDomainPaletteName,
     ActiveSurfacePaletteName,
@@ -35,11 +29,6 @@ const ISLANDS = [
     ['active_domain_palette_name', ActiveDomainPaletteName],
     ['active_real_plots_palette_name', ActiveSurfacePaletteName],
     ['active_laplace_surface_palette_name', ActiveSurfacePaletteName],
-    ['dynamic_example_count', DynamicExampleCount],
-    ['dynamic_example_gallery', DynamicExampleGallery],
-    ['dynamic_term_factors', DynamicTermFactors],
-    ['dynamic_sequence_bindings_list', DynamicSequenceBindings],
-    ['dynamic_parameters_list', DynamicParameters]
 ];
 
 const GUIDES = [
@@ -61,4 +50,5 @@ export function mountFrontend() {
 
 export function mountFrontendControls() {
     render(<GridShapeControls />, document.getElementById('grid_shape_controls_groups'));
+    render(<DynamicPlottingStudio />, document.getElementById('dynamic_plotting_root'));
 }

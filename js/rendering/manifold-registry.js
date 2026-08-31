@@ -43,6 +43,10 @@ export class AbstractManifold {
         if (t >= 0.9999) return this.project(u, v);
 
         const eased = (1 - Math.cos(Math.PI * t)) / 2;
+        return this.morphIntermediate(u, v, eased);
+    }
+
+    morphIntermediate(u, v, eased) {
         const target = this.project(u, v);
         return {
             X: (1 - eased) * u + eased * target.X,
@@ -89,15 +93,7 @@ class SphereManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
+    morphIntermediate(u, v, eased) {
         const r = Math.hypot(u, v);
         const theta = Math.atan2(v, u);
 
@@ -108,8 +104,8 @@ class SphereManifold extends AbstractManifold {
             return { X: u, Y: 0, Z: v };
         }
 
-        const curAlpha = t_e * alpha;
-        const R_t = (r / curAlpha) * (1 - t_e) + R_final * t_e;
+        const curAlpha = eased * alpha;
+        const R_t = (r / curAlpha) * (1 - eased) + R_final * eased;
 
         return {
             X: R_t * Math.sin(curAlpha) * Math.cos(theta),
@@ -148,16 +144,8 @@ class CylinderManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
-        const R_roll = this.radius / t_e;
+    morphIntermediate(u, v, eased) {
+        const R_roll = this.radius / eased;
         const angle = v / R_roll;
 
         return {
@@ -198,17 +186,9 @@ class TorusManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
-        const roll1 = Math.min(t_e * 1.8, 1.0);
-        const roll2 = Math.max((t_e - 0.4) / 0.6, 0.0);
+    morphIntermediate(u, v, eased) {
+        const roll1 = Math.min(eased * 1.8, 1.0);
+        const roll2 = Math.max((eased - 0.4) / 0.6, 0.0);
 
         const R1 = this.r_minor / Math.max(0.001, roll1);
         const angle1 = u / R1;
@@ -257,20 +237,12 @@ class HelicoidManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
+    morphIntermediate(u, v, eased) {
         const theta = Math.atan2(v, u);
 
         return {
             X: u,
-            Y: t_e * this.pitch * theta,
+            Y: eased * this.pitch * theta,
             Z: v
         };
     }
@@ -376,16 +348,8 @@ class BonnetManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
-        const theta_b = t_e * (Math.PI / 2);
+    morphIntermediate(u, v, eased) {
+        const theta_b = eased * (Math.PI / 2);
         const u_s = u * 0.35;
         const v_s = Math.max(-3, Math.min(3, v * 0.35));
 
@@ -394,9 +358,9 @@ class BonnetManifold extends AbstractManifold {
         const Y_end = u_s * Math.cos(theta_b) + v_s * Math.sin(theta_b);
 
         return {
-            X: (1 - t_e) * u + t_e * X_end * this.scale,
-            Y: t_e * Y_end * this.scale,
-            Z: (1 - t_e) * v + t_e * Z_end * this.scale
+            X: (1 - eased) * u + eased * X_end * this.scale,
+            Y: eased * Y_end * this.scale,
+            Z: (1 - eased) * v + eased * Z_end * this.scale
         };
     }
 
@@ -499,20 +463,12 @@ class ScherkManifold extends AbstractManifold {
         };
     }
 
-    morph(u, v, t) {
-        if (t <= 0.0001) {
-            return { X: u, Y: 0, Z: v };
-        }
-        if (t >= 0.9999) {
-            return this.project(u, v);
-        }
-
-        const t_e = (1 - Math.cos(Math.PI * t)) / 2;
+    morphIntermediate(u, v, eased) {
         const target = this.project(u, v);
 
         return {
             X: u,
-            Y: t_e * target.Y,
+            Y: eased * target.Y,
             Z: v
         };
     }

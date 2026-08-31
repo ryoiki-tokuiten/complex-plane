@@ -4,7 +4,7 @@ import {
     fitConformalGridOutputViewport
 } from './ui-updates.js';
 import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
-import { downloadCanvasImage, setupVisualParameters } from '../utils/dom-utils.js';
+import { downloadCanvasImage } from '../utils/dom-utils.js';
 import {
     isGraphViewSupported,
     isFullGridPerspectiveSupported,
@@ -13,7 +13,7 @@ import {
 import { syncGridDensityControls } from './grid-density-controls.js';
 import { refreshPanelEdgeHandles } from './panel-layout-manager.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
-import { updateDynamicPlotting } from './dynamic-plotting-ui.js';
+import { updateDynamicPlotting } from './dynamic-plotting-state.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
 
 let menuElement = null;
@@ -216,16 +216,7 @@ function toggleGraphView() {
         if (graphCol) graphCol.classList.remove('hidden');
     }
     refreshPanelEdgeHandles(true);
-    setupVisualParameters(false, false);
-    requestUiRedraw();
-    requestAnimationFrame(() => {
-        setupVisualParameters(false, false);
-        requestUiRedraw();
-        setTimeout(() => {
-            setupVisualParameters(false, false);
-            requestUiRedraw();
-        }, 360);
-    });
+    window.dispatchEvent(new Event('resize'));
 }
 
 function toggleFullGrid() {
@@ -568,7 +559,7 @@ function getWPlaneMenuItems() {
                     disableFoldSurface3d();
                     if (state.riemannSurfaceEnabled) {
                         state.riemannSurfaceEnabled = false;
-                        if (!state.realPlotsEnabled) state.show2DContourPlot = false;
+                        state.show2DContourPlot = false;
                     }
                     state.manifoldTransformationEnabled = false;
                     state.manifoldTransformationProgressW = 1.0;
@@ -596,7 +587,7 @@ function getWPlaneMenuItems() {
                     Object.assign(state, { manifold3dViewEnabled: false, manifoldTransformationEnabled: false });
                     if (state.navigationModeEnabled) setNavigationModeEnabled(false);
                 } else {
-                    if (!state.realPlotsEnabled) state.show2DContourPlot = false;
+                    state.show2DContourPlot = false;
                 }
                 requestDomainRedraw(true);
                 requestUiRedraw();
@@ -853,5 +844,4 @@ export function initPlaneContextMenu() {
         }
     }, { passive: true });
 
-    window.addEventListener('resize', hidePlaneContextMenu, { passive: true });
 }

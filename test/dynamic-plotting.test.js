@@ -30,14 +30,12 @@ function configure(overrides) {
         term: { kind: 'expression', expression: '1/d^2' },
         reduction: { kind: 'sum', invalidPolicy: 'stop' },
         aggregateParameter: { re: 2, im: 0 },
-        parameters: [],
         playback: {
             visibleCount: 10,
             playing: false,
             speed: 10,
             loop: false
         },
-        display: {},
         ...overrides
     });
     invalidateDynamicPlotting();
@@ -286,7 +284,6 @@ test('dynamic aggregate branch continuation evaluates branch sheets natively', a
         invalidPolicy: 'stop',
         bindings: [],
         bindingSeries: {},
-        parameters: {},
         sourceRecords: [{ ordinal: 1, domainValue: { re: 1, im: 0 } }]
     });
 
@@ -313,7 +310,6 @@ test('native dynamic aggregates compile mathematical constants as constants', as
         invalidPolicy: 'stop',
         bindings: [],
         bindingSeries: {},
-        parameters: {},
         sourceRecords: [{ ordinal: 1, domainValue: { re: 1, im: 0 } }]
     });
 

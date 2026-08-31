@@ -253,19 +253,6 @@ function dynamicConfig() {
     return state.dynamicPlotting;
 }
 
-function parameterEnvironment() {
-    const parameters = dynamicConfig().parameters;
-    if (!Array.isArray(parameters)) throw new Error('Dynamic plotting parameters must be an array.');
-    const environment = {};
-    for (const parameter of parameters) {
-        const name = String(parameter?.name ?? '').trim();
-        const value = Number(parameter?.value);
-        if (!name || !Number.isFinite(value)) throw new Error('Dynamic parameters require a name and finite value.');
-        environment[name] = { re: value, im: 0 };
-    }
-    return environment;
-}
-
 function termBindings() {
     const term = dynamicConfig().term;
     if (!term || typeof term !== 'object') throw new Error('Dynamic plotting requires a term.');
@@ -283,10 +270,7 @@ function termBindings() {
 function sourceSignature() {
     const source = dynamicConfig().source;
     if (!source || typeof source !== 'object') throw new Error('Dynamic plotting requires a source.');
-    return stableStringify({
-        source,
-        parameters: parameterEnvironment()
-    });
+    return stableStringify(source);
 }
 
 function getSource() {
@@ -299,9 +283,7 @@ function getSource() {
         if (!Array.isArray(sourceConfig.points)) throw new Error('Custom dynamic sources require a points array.');
     }
 
-    const source = generateDiscreteSource(sourceConfig, {
-        parameters: parameterEnvironment()
-    });
+    const source = generateDiscreteSource(sourceConfig);
     runtime.sourceSignature = signature;
     runtime.source = source;
     runtime.results.clear();
@@ -350,7 +332,6 @@ function nativeAggregateDefinition(source, bindings, bindingResult, count) {
         bindings: clonePlain(bindings),
         reductionKind: config.reduction.kind,
         invalidPolicy: config.reduction.invalidPolicy,
-        parameters: parameterEnvironment(),
         sourceRecords: source.records.slice(0, count).map(record => ({
             ordinal: record.ordinal,
             domainValue: record.domainValue
@@ -366,8 +347,7 @@ function evaluateSamples(selectedFunction, aggregateParameter, limit = null) {
         : Math.max(0, Math.min(source.records.length, limit));
     const bindings = termBindings();
     const bindingResult = generateSequenceBindingSeries(bindings, count, {
-        aggregateParameter,
-        parameters: parameterEnvironment()
+        aggregateParameter
     });
     const aggregate = nativeAggregateDefinition(source, bindings, bindingResult, count);
     const evaluated = evaluateNativeDynamic(
@@ -454,7 +434,6 @@ function resultSignature(selectedFunction, aggregateParameter, stageIndex) {
         pointExpression: config.pointExpression,
         term: config.term,
         reduction: config.reduction,
-        parameters: parameterEnvironment(),
         aggregateParameter,
         stageIndex,
         transformId: getTransformId(selectedFunction),
@@ -575,8 +554,7 @@ function createDynamicAggregateTransform(selectedFunction) {
     const count = visibleCount(source.records.length);
     const bindings = termBindings();
     const bindingResult = generateSequenceBindingSeries(bindings, count, {
-        aggregateParameter: { re: 0, im: 0 },
-        parameters: parameterEnvironment()
+        aggregateParameter: { re: 0, im: 0 }
     });
     const aggregate = nativeAggregateDefinition(source, bindings, bindingResult, count);
     const metadata = {
@@ -618,7 +596,6 @@ export function initializeDynamicPlottingEngine() {
                 pointExpression: dynamicConfig().pointExpression,
                 term: dynamicConfig().term,
                 reduction: dynamicConfig().reduction,
-                parameters: dynamicConfig().parameters,
                 visibleCount: dynamicConfig().playback?.visibleCount
             }
         });
@@ -716,10 +693,9 @@ export function getDynamicPlottingCacheKey() {
         pointExpression: config.pointExpression,
         term: config.term,
         reduction: config.reduction,
-        parameters: config.parameters,
         aggregateParameter: config.aggregateParameter,
         visibleCount: config.playback?.visibleCount,
-        display: config.display,
+        productView: config.productView,
         transformEnvironment: transformEnvironmentSignature()
     });
 }

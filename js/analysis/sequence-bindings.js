@@ -167,7 +167,6 @@ export function synchronizeSequenceBindings(source, bindings = [], parameterName
 }
 
 
-const ENVIRONMENT_FACTORY_CACHE = new Map();
 const NORMALIZED_BINDING_CACHE = new WeakMap();
 
 function sameCachedBinding(cache, binding) {
@@ -203,52 +202,10 @@ function normalizeSequenceBindingCached(binding) {
 }
 
 
-function isArrayIndex(property, length) {
-    if (typeof property !== 'string' || property.length === 0) return -1;
-    const index = property >>> 0;
-    return String(index) === property && index < length ? index : -1;
-}
-
-function createLazyEnvironments(valueSets, symbols, count) {
-    const makeEnvironment = environmentFactory(symbols);
-    const target = new Array(count);
-    if (!makeEnvironment) {
-        for (let row = 0; row < count; row++) target[row] = {};
-        return target;
-    }
-    const materialize = row => target[row] || (target[row] = makeEnvironment(valueSets, row));
-    return new Proxy(target, {
-        get(array, property, receiver) {
-            const row = isArrayIndex(property, count);
-            return row >= 0 ? materialize(row) : Reflect.get(array, property, receiver);
-        },
-        has(array, property) {
-            return isArrayIndex(property, count) >= 0 || Reflect.has(array, property);
-        },
-        getOwnPropertyDescriptor(array, property) {
-            const row = isArrayIndex(property, count);
-            if (row < 0) return Reflect.getOwnPropertyDescriptor(array, property);
-            return { value: materialize(row), writable: true, enumerable: true, configurable: true };
-        },
-        ownKeys() {
-            const keys = new Array(count + 1);
-            for (let index = 0; index < count; index++) keys[index] = String(index);
-            keys[count] = 'length';
-            return keys;
-        }
-    });
-}
-
-function environmentFactory(symbols) {
-    if (!symbols.length) return null;
-    const key = symbols.join('\u0001');
-    const cached = ENVIRONMENT_FACTORY_CACHE.get(key);
-    if (cached) return cached;
-    const fields = symbols.map((symbol, index) => `${JSON.stringify(symbol)}: sets[${index}][row] || { re: NaN, im: NaN }`).join(',');
-    const factory = new Function('sets', 'row', `return ({${fields}});`);
-    ENVIRONMENT_FACTORY_CACHE.set(key, factory);
-    if (ENVIRONMENT_FACTORY_CACHE.size > 64) ENVIRONMENT_FACTORY_CACHE.delete(ENVIRONMENT_FACTORY_CACHE.keys().next().value);
-    return factory;
+function createEnvironments(valueSets, symbols, count) {
+    return Array.from({ length: count }, (_, row) => Object.fromEntries(
+        symbols.map((symbol, index) => [symbol, valueSets[index][row] ?? { re: NaN, im: NaN }])
+    ));
 }
 
 function repeatedComplex(re, im, count) {
@@ -327,7 +284,7 @@ export function generateSequenceBindingSeries(bindings, count, runtime = {}) {
         valueSets.push(values);
     }
 
-    const environments = createLazyEnvironments(valueSets, symbols, normalizedCount);
+    const environments = createEnvironments(valueSets, symbols, normalizedCount);
 
     return { series, environments, diagnostics };
 }

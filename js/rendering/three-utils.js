@@ -19,6 +19,14 @@ export function disposeThreeObject(object) {
     });
 }
 
+export function clearThreeGroup(group) {
+    while (group.children.length) {
+        const child = group.children[0];
+        group.remove(child);
+        disposeThreeObject(child);
+    }
+}
+
 export function scaleSignedOutput(value, outputScale, halfExtent, invalidValue = NaN) {
     if (!Number.isFinite(value)) return invalidValue;
     const ratio = value / Math.max(1e-10, outputScale);
@@ -81,4 +89,65 @@ export function createCanvasTextSprite(THREE, text, options = {}) {
         sprite.scale.set(1.35, 0.5, 1);
     }
     return sprite;
+}
+
+export function addCanvasTextSprite(THREE, group, text, position, options) {
+    const sprite = createCanvasTextSprite(THREE, text, options);
+    sprite.position.copy(position);
+    group.add(sprite);
+    return sprite;
+}
+
+export function appendPolylineSegments(target, points) {
+    let previous = null;
+    points.forEach(point => {
+        if (point && previous) target.push([previous, point]);
+        previous = point;
+    });
+}
+
+export function addThreeLineSegments(THREE, group, segments, options = {}) {
+    if (!segments.length) return null;
+    const { color = 0xffffff, opacity = 1, vertexColors = null, depthWrite = opacity >= 0.85 } = options;
+    const positions = new Float32Array(segments.length * 6);
+    const colors = vertexColors ? new Float32Array(segments.length * 6) : null;
+    segments.forEach(([start, end], index) => {
+        const offset = index * 6;
+        positions.set([start.x, start.y, start.z, end.x, end.y, end.z], offset);
+        if (colors) {
+            const [startColor, endColor = startColor] = vertexColors[index];
+            colors.set([startColor.r, startColor.g, startColor.b, endColor.r, endColor.g, endColor.b], offset);
+        }
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.LineBasicMaterial({
+        color: colors ? 0xffffff : color,
+        vertexColors: Boolean(colors),
+        transparent: opacity < 1,
+        opacity,
+        depthWrite
+    });
+    const lines = new THREE.LineSegments(geometry, material);
+    group.add(lines);
+    return lines;
+}
+
+export function addThreePointCloud(THREE, group, points, options = {}) {
+    const finitePoints = points.filter(Boolean);
+    if (!finitePoints.length) return null;
+    const { color = 0xffffff, size = 4, opacity = 1, depthWrite = opacity >= 0.85 } = options;
+    const geometry = new THREE.BufferGeometry().setFromPoints(finitePoints);
+    const material = new THREE.PointsMaterial({
+        color,
+        size,
+        sizeAttenuation: false,
+        transparent: opacity < 1,
+        opacity,
+        depthWrite
+    });
+    const cloud = new THREE.Points(geometry, material);
+    group.add(cloud);
+    return cloud;
 }

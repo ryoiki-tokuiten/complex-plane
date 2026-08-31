@@ -309,29 +309,13 @@ const rawState = {
             invalidPolicy: 'stop'
         },
         aggregateParameter: { re: 2, im: 0 },
-        parameters: [
-            { id: 'k', name: 'k', value: 1, min: -5, max: 5, step: 0.05 }
-        ],
         playback: {
             visibleCount: 50,
             playing: false,
             speed: 12,
-            loop: true,
-            followResult: false
+            loop: true
         },
-        display: {
-            showInputPoints: true,
-            showInputPath: false,
-            showTermPoints: true,
-            showPartialPath: true,
-            showVectors: true,
-            showLabels: false,
-            showInvalid: true,
-            colorMode: 'semantic',
-            productView: 'orbit',
-            pointRadius: 3
-        },
-        selectedSampleId: null,
+        productView: 'orbit',
         preset: 'custom'
     },
 
