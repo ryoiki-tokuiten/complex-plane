@@ -1,4 +1,4 @@
-import { state } from '../store/state.js';
+import { state, subscribeState } from '../store/state.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
 
@@ -10,173 +10,228 @@ function triggerLayoutRedraw() {
 
 let initialized = false;
 let highestZIndex = 10;
-let lastInitializedMode = null;
+let lastModeKey = null;
 
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 2560;
 const MIN_HEIGHT = 180;
 const MAX_HEIGHT = 2000;
 const COLLISION_GAP = 24;
+const LAYOUT_PADDING = 0;
 const LAYOUT_VERSION = 'v8';
-const LAYOUT_PADDING = 24;
 
-function isVerticalLayout() {
-    return typeof document !== 'undefined' && (
-        document.body?.classList?.contains('vertical-layout') || Boolean(state?.verticalLayoutEnabled)
-    );
-}
+const isVerticalLayout = () => {
+    if (typeof document === 'undefined') return false;
+    if (document.body?.classList?.contains('vertical-layout')) return true;
+    if (Boolean(document.querySelector?.('.application-root')?.classList?.contains('vertical-layout'))) return true;
+    if (state?.verticalLayoutEnabled === true) return true;
+    try {
+        if (typeof localStorage !== 'undefined' && localStorage.getItem('complex_verticalLayoutEnabled') === 'true') return true;
+    } catch (e) {}
+    const container = document.querySelector?.('.canvas-row.two-column-layout');
+    if (container && typeof window !== 'undefined') {
+        const dir = window.getComputedStyle?.(container)?.flexDirection;
+        if (dir === 'column') return true;
+    }
+    return false;
+};
 
-function panelRect(left, top, width, height) {
-    return { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` };
-}
-
-function defaultPanelSize(containerWidth, containerHeight) {
-    return isVerticalLayout()
-        ? {
-            width: Math.max(MIN_WIDTH, containerWidth - LAYOUT_PADDING * 2),
-            height: Math.max(MIN_HEIGHT, Math.floor((containerHeight - LAYOUT_PADDING * 2 - COLLISION_GAP) / 2))
-        }
-        : {
-            width: Math.max(MIN_WIDTH, Math.floor((containerWidth - LAYOUT_PADDING * 2 - COLLISION_GAP) / 2)),
-            height: Math.max(MIN_HEIGHT, containerHeight - LAYOUT_PADDING * 2)
-        };
-}
+const panelRect = (left, top, width, height) => ({
+    left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`
+});
 
 function normalPanelSize(containerWidth, containerHeight) {
-    return isVerticalLayout()
-        ? {
-            width: Math.max(220, containerWidth - LAYOUT_PADDING * 2),
-            height: Math.max(180, Math.floor((Math.max(400, containerHeight - LAYOUT_PADDING * 2) - COLLISION_GAP) / 2))
-        }
-        : {
-            width: Math.max(220, Math.floor((Math.max(480, containerWidth - LAYOUT_PADDING * 2) - COLLISION_GAP) / 2)),
-            height: Math.max(200, containerHeight - LAYOUT_PADDING * 2)
-        };
+    const isVert = isVerticalLayout();
+    return {
+        width: Math.max(MIN_WIDTH, isVert ? containerWidth - LAYOUT_PADDING * 2 : Math.floor((Math.max(480, containerWidth - LAYOUT_PADDING * 2) - COLLISION_GAP) / 2)),
+        height: Math.max(MIN_HEIGHT, isVert ? Math.floor((Math.max(400, containerHeight - LAYOUT_PADDING * 2) - COLLISION_GAP) / 2) : containerHeight - LAYOUT_PADDING * 2)
+    };
 }
 
 export function updateWorkspaceBounds(container, isInteracting = false, activeDragBounds = null) {
-    if (!container) {
-        container = document.querySelector('.canvas-row.two-column-layout');
-    }
+    if (!container) container = document.querySelector('.canvas-row.two-column-layout');
     if (!container) return;
 
-    const isLaplace = Boolean(state?.laplaceModeEnabled);
     const visiblePanels = [...container.children].filter(
-        el => !el.classList?.contains('hidden') && !el.classList?.contains('workspace-bounds-extender') && Boolean(el.id)
+        el => !el.classList?.contains('hidden') && !el.classList?.contains('workspace-bounds-extender') && !el.classList?.contains('panel-snap-indicator') && Boolean(el.id)
     );
 
     let maxRight = 0;
     let maxBottom = 0;
 
-    visiblePanels.forEach(panel => {
-        const left = panel.offsetLeft || parseInt(panel.style.left, 10) || 0;
-        const top = panel.offsetTop || parseInt(panel.style.top, 10) || 0;
-        const width = panel.offsetWidth || parseInt(panel.style.width, 10) || 0;
-        const height = panel.offsetHeight || parseInt(panel.style.height, 10) || 0;
-        const right = left + width;
-        const bottom = top + height;
+    for (const panel of visiblePanels) {
+        const styleLeft = panel.style?.left !== undefined && panel.style?.left !== '' ? parseInt(panel.style.left, 10) : NaN;
+        const styleTop = panel.style?.top !== undefined && panel.style?.top !== '' ? parseInt(panel.style.top, 10) : NaN;
+        const left = Number.isFinite(styleLeft) ? styleLeft : (panel.offsetLeft || 0);
+        const top = Number.isFinite(styleTop) ? styleTop : (panel.offsetTop || 0);
+        const right = left + (parseInt(panel.style?.width, 10) || panel.offsetWidth || 0);
+        const bottom = top + (parseInt(panel.style?.height, 10) || panel.offsetHeight || 0);
         if (right > maxRight) maxRight = right;
         if (bottom > maxBottom) maxBottom = bottom;
-    });
+    }
 
     if (activeDragBounds) {
         if (activeDragBounds.right > maxRight) maxRight = activeDragBounds.right;
         if (activeDragBounds.bottom > maxBottom) maxBottom = activeDragBounds.bottom;
     }
 
-    let extender = container.querySelector('.workspace-bounds-extender');
-    if (!extender) {
-        extender = document.createElement('div');
-        extender.className = 'workspace-bounds-extender';
-        extender.style.position = 'absolute';
-        extender.style.width = '1px';
-        extender.style.height = '1px';
-        extender.style.pointerEvents = 'none';
-        container.appendChild(extender);
-    }
+    const extender = container.querySelector('.workspace-bounds-extender');
+    if (!extender) throw new Error('Workspace bounds extender is missing.');
 
     const clientW = container.clientWidth || window.innerWidth || 1200;
     const clientH = container.clientHeight || window.innerHeight || 700;
 
-    // Normal mode with default 2 planes (or whenever all panels fit completely inside viewport without active drag):
-    // If panels fit within client dimensions, keep extender at 0 to guarantee NO scrollbars!
     if (!isInteracting && maxRight <= clientW && maxBottom <= clientH) {
         extender.style.left = '0px';
         extender.style.top = '0px';
         return;
     }
 
-    // Extend beyond container client dimensions when panels overflow or to provide generous scroll space during drag
-    const extraSpace = isInteracting ? 2000 : 24;
-    const neededLeft = (maxRight > clientW || isInteracting) ? (maxRight + extraSpace) : 0;
-    const neededTop = (maxBottom > clientH || isInteracting) ? (maxBottom + extraSpace) : 0;
-
-    extender.style.left = `${neededLeft}px`;
-    extender.style.top = `${neededTop}px`;
+    const extra = isInteracting ? 2000 : 24;
+    extender.style.left = `${(maxRight > clientW || isInteracting) ? (maxRight + extra) : 0}px`;
+    extender.style.top = `${(maxBottom > clientH || isInteracting) ? (maxBottom + extra) : 0}px`;
 }
 
-export function resolveCollisions(activePanel, container) {
-    if (!container || !activePanel) return;
+export function resolveCollisions(activePanel = null, container = null, save = false) {
+    if (!container && typeof document !== 'undefined') {
+        container = document.querySelector('.canvas-row.two-column-layout');
+    }
+    if (!container) return;
 
     const allPanels = [...container.children].filter(
-        child => !child.classList.contains('hidden') && !child.classList.contains('workspace-bounds-extender') && !child.classList.contains('panel-snap-indicator') && Boolean(child.id)
+        child => child && !child.classList.contains('hidden') &&
+                 !child.classList.contains('workspace-bounds-extender') &&
+                 !child.classList.contains('panel-snap-indicator') &&
+                 Boolean(child.id)
     );
+    if (allPanels.length <= 1) {
+        if (save) savePanelLayout(container);
+        return;
+    }
 
     const GAP = COLLISION_GAP;
-
-    const getRect = (el) => {
-        const left = parseInt(el.style.left, 10) || el.offsetLeft || 0;
-        const top = parseInt(el.style.top, 10) || el.offsetTop || 0;
-        const width = parseInt(el.style.width, 10) || el.offsetWidth || 500;
-        const height = parseInt(el.style.height, 10) || el.offsetHeight || 400;
-        return { el, left, top, width, height, right: left + width, bottom: top + height };
-    };
-
+    const PADDING = LAYOUT_PADDING;
     const isVertical = isVerticalLayout();
 
-    for (let pass = 0; pass < 4; pass++) {
+    const getRect = el => {
+        const styleLeft = el.style?.left !== undefined && el.style?.left !== '' ? parseInt(el.style.left, 10) : NaN;
+        const styleTop = el.style?.top !== undefined && el.style?.top !== '' ? parseInt(el.style.top, 10) : NaN;
+        const left = Number.isFinite(styleLeft) ? styleLeft : (el.offsetLeft || 0);
+        const top = Number.isFinite(styleTop) ? styleTop : (el.offsetTop || 0);
+        const width = parseInt(el.style?.width, 10) || el.offsetWidth || 500;
+        const height = parseInt(el.style?.height, 10) || el.offsetHeight || 400;
+        return { el, id: el.id, left, top, width, height, right: left + width, bottom: top + height };
+    };
+
+    let boxes = allPanels.map(getRect);
+
+    // Phase 1: Directional Push Phase (Strict non-overlap enforcement)
+    for (let pass = 0; pass < 8; pass++) {
         let anyMoved = false;
-        const activeRect = getRect(activePanel);
-        const others = allPanels.filter(p => p !== activePanel).map(getRect);
+        const activeRect = activePanel ? (boxes.find(b => b.el === activePanel) || null) : null;
 
-        others.forEach(p => {
-            const overlapX = Math.min(activeRect.right, p.right) - Math.max(activeRect.left, p.left);
-            const overlapY = Math.min(activeRect.bottom, p.bottom) - Math.max(activeRect.top, p.top);
-            if (overlapX > 0 && overlapY > 0) {
-                if (overlapX > overlapY || (overlapX === overlapY && isVertical)) {
-                    p.el.style.top = `${activeRect.bottom + GAP}px`;
-                } else {
-                    p.el.style.left = `${activeRect.right + GAP}px`;
-                }
-                anyMoved = true;
-            }
-        });
-
-        const updated = allPanels.map(getRect);
-        for (let i = 0; i < updated.length; i++) {
-            for (let j = i + 1; j < updated.length; j++) {
-                const rA = updated[i];
-                const rB = updated[j];
-                if (rA.el === activePanel || rB.el === activePanel) continue;
-
-                const overlapX = Math.min(rA.right, rB.right) - Math.max(rA.left, rB.left);
-                const overlapY = Math.min(rA.bottom, rB.bottom) - Math.max(rA.top, rB.top);
-
+        if (activeRect) {
+            for (const other of boxes) {
+                if (other.el === activeRect.el) continue;
+                const overlapX = Math.min(activeRect.right, other.right) - Math.max(activeRect.left, other.left);
+                const overlapY = Math.min(activeRect.bottom, other.bottom) - Math.max(activeRect.top, other.top);
                 if (overlapX > 0 && overlapY > 0) {
-                    if (overlapX > overlapY || (overlapX === overlapY && isVertical)) {
-                        rB.el.style.top = `${rA.bottom + GAP}px`;
+                    if (overlapX > overlapY && (isVertical || other.top >= activeRect.top + Math.floor(activeRect.height * 0.4))) {
+                        other.top = activeRect.bottom + GAP;
+                        other.bottom = other.top + other.height;
                     } else {
-                        rB.el.style.left = `${rA.right + GAP}px`;
+                        other.left = activeRect.right + GAP;
+                        other.right = other.left + other.width;
                     }
                     anyMoved = true;
                 }
             }
         }
 
+        for (let i = 0; i < boxes.length; i++) {
+            for (let j = i + 1; j < boxes.length; j++) {
+                const bA = boxes[i];
+                const bB = boxes[j];
+                if (activeRect && (bA.el === activePanel || bB.el === activePanel)) continue;
+                const overlapX = Math.min(bA.right, bB.right) - Math.max(bA.left, bB.left);
+                const overlapY = Math.min(bA.bottom, bB.bottom) - Math.max(bA.top, bB.top);
+                if (overlapX > 0 && overlapY > 0) {
+                    let pusher = bA;
+                    let target = bB;
+                    if (isVertical) {
+                        if (bA.top > bB.top) { pusher = bB; target = bA; }
+                        target.top = pusher.bottom + GAP;
+                        target.bottom = target.top + target.height;
+                    } else {
+                        if (bA.left > bB.left || (bA.left === bB.left && bA.top > bB.top)) { pusher = bB; target = bA; }
+                        if (overlapX > overlapY && target.top >= pusher.top + Math.floor(pusher.height * 0.4)) {
+                            target.top = pusher.bottom + GAP;
+                            target.bottom = target.top + target.height;
+                        } else {
+                            target.left = pusher.right + GAP;
+                            target.right = target.left + target.width;
+                        }
+                    }
+                    anyMoved = true;
+                }
+            }
+        }
         if (!anyMoved) break;
     }
 
-    savePanelLayout(container);
+    // Phase 2: Gravity Pull towards Top-Left (Compacting blocks to touch borders)
+    if (isVertical) {
+        boxes.sort((a, b) => a.top - b.top);
+        for (const b of boxes) {
+            let barrierY = PADDING;
+            for (const other of boxes) {
+                if (other === b) continue;
+                const hOverlap = Math.min(b.right, other.right) - Math.max(b.left, other.left);
+                if (hOverlap > 0 && other.bottom <= b.top + GAP) barrierY = Math.max(barrierY, other.bottom + GAP);
+            }
+            if (barrierY < b.top) {
+                b.top = barrierY;
+                b.bottom = b.top + b.height;
+            }
+        }
+    } else {
+        // Pass 2A: Pull Left
+        boxes.sort((a, b) => a.left - b.left || a.top - b.top);
+        for (const b of boxes) {
+            let barrierX = PADDING;
+            for (const other of boxes) {
+                if (other === b) continue;
+                const vOverlap = Math.min(b.bottom, other.bottom) - Math.max(b.top, other.top);
+                if (vOverlap > 0 && other.right <= b.left + GAP) barrierX = Math.max(barrierX, other.right + GAP);
+            }
+            if (barrierX < b.left) {
+                b.left = barrierX;
+                b.right = b.left + b.width;
+            }
+        }
+        // Pass 2B: Pull Up
+        boxes.sort((a, b) => a.top - b.top || a.left - b.left);
+        for (const b of boxes) {
+            let barrierY = PADDING;
+            for (const other of boxes) {
+                if (other === b) continue;
+                const hOverlap = Math.min(b.right, other.right) - Math.max(b.left, other.left);
+                if (hOverlap > 0 && other.bottom <= b.top + GAP) barrierY = Math.max(barrierY, other.bottom + GAP);
+            }
+            if (barrierY < b.top) {
+                b.top = barrierY;
+                b.bottom = b.top + b.height;
+            }
+        }
+    }
+
+    for (const b of boxes) {
+        b.el.style.left = `${b.left}px`;
+        b.el.style.top = `${b.top}px`;
+    }
+    if (save) {
+        savePanelLayout(container);
+    }
 }
 
 function calculateSnapTarget(panel, container, rawLeft, rawTop) {
@@ -186,102 +241,188 @@ function calculateSnapTarget(panel, container, rawLeft, rawTop) {
     );
     const pW = parseInt(panel.style.width, 10) || panel.offsetWidth || 500;
     const pH = parseInt(panel.style.height, 10) || panel.offsetHeight || 400;
-    const xCandidates = [24, ...siblings.flatMap(s => [s.offsetLeft, s.offsetLeft + s.offsetWidth + 24, s.offsetLeft + s.offsetWidth - pW])];
-    const yCandidates = [24, ...siblings.flatMap(s => [s.offsetTop, s.offsetTop + s.offsetHeight + 24, s.offsetTop + s.offsetHeight - pH])];
-    const snapX = xCandidates.find(x => Math.abs(rawLeft - x) <= 32) ?? rawLeft;
-    const snapY = yCandidates.find(y => Math.abs(rawTop - y) <= 32) ?? rawTop;
+    const GAP = COLLISION_GAP;
+    const PADDING = LAYOUT_PADDING;
+    const THRESHOLD = 28;
+
+    const xCandidates = [PADDING];
+    const yCandidates = [PADDING];
+
+    for (const s of siblings) {
+        const sL = s.offsetLeft || parseInt(s.style.left, 10) || 0;
+        const sT = s.offsetTop || parseInt(s.style.top, 10) || 0;
+        const sW = s.offsetWidth || parseInt(s.style.width, 10) || 500;
+        const sH = s.offsetHeight || parseInt(s.style.height, 10) || 400;
+        xCandidates.push(sL + sW + GAP, sL - pW - GAP, sL);
+        yCandidates.push(sT + sH + GAP, sT - pH - GAP, sT);
+    }
+
+    let snapX = rawLeft;
+    let minDiffX = THRESHOLD + 1;
+    for (const cand of xCandidates) {
+        if (cand < PADDING) continue;
+        const diff = Math.abs(rawLeft - cand);
+        if (diff <= THRESHOLD && diff < minDiffX) { minDiffX = diff; snapX = cand; }
+    }
+
+    let snapY = rawTop;
+    let minDiffY = THRESHOLD + 1;
+    for (const cand of yCandidates) {
+        if (cand < PADDING) continue;
+        const diff = Math.abs(rawTop - cand);
+        if (diff <= THRESHOLD && diff < minDiffY) { minDiffY = diff; snapY = cand; }
+    }
+
     return (snapX !== rawLeft || snapY !== rawTop) ? { left: snapX, top: snapY, width: pW, height: pH } : null;
 }
 
 function updateSnapIndicator(container, target) {
-    let ind = container?.querySelector('#panel_snap_indicator');
-    if (!ind && container) {
-        ind = document.createElement('div');
-        ind.id = 'panel_snap_indicator';
-        ind.className = 'panel-snap-indicator';
-        container.appendChild(ind);
-    }
+    const ind = container?.querySelector('#panel_snap_indicator');
     if (!ind) return;
     if (target) {
-        Object.assign(ind.style, { left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px`, display: 'block', opacity: '1' });
+        Object.assign(ind.style, {
+            left: `${target.left}px`,
+            top: `${target.top}px`,
+            width: `${target.width}px`,
+            height: `${target.height}px`,
+            display: 'block'
+        });
+        ind.classList.add('is-active');
     } else {
-        Object.assign(ind.style, { display: 'none', opacity: '0' });
+        ind.classList.remove('is-active');
+        ind.style.display = 'none';
     }
 }
 
-function hideSnapIndicator(container) {
-    updateSnapIndicator(container, null);
-}
+const hideSnapIndicator = container => updateSnapIndicator(container, null);
+
+const getCurrentLayoutMode = () => state?.laplaceModeEnabled ? 'laplace' : (state?.realPlotsEnabled ? 'real_plots' : 'normal');
+
+const getLayoutStorageKey = () => `complex_panelLayout_${getCurrentLayoutMode()}_${isVerticalLayout() ? 'vert' : 'horiz'}_${LAYOUT_VERSION}`;
 
 function savePanelLayout(container) {
     if (!container) return;
-    const panels = [...container.children].filter(el => 
-        el.classList.contains('plane-column') || 
-        el.classList.contains('auxiliary-surface-column') || 
-        el.id === 'graph_column' || 
-        el.id === 'real_plots_column' || 
-        el.id === 'contour_2d_column'
+    const panels = [...container.children].filter(el =>
+        !el.classList.contains('hidden') && (
+            el.classList.contains('plane-column') || el.classList.contains('auxiliary-surface-column') ||
+            el.id === 'graph_column' || el.id === 'real_plots_column' || el.id === 'contour_2d_column'
+        )
     );
-    
     const layout = {};
-    panels.forEach(panel => {
+    for (const panel of panels) {
         if (panel.id && panel.style.left && panel.style.top) {
-            layout[panel.id] = {
-                left: panel.style.left,
-                top: panel.style.top,
-                width: panel.style.width,
-                height: panel.style.height
-            };
+            layout[panel.id] = { left: panel.style.left, top: panel.style.top, width: panel.style.width, height: panel.style.height };
         }
-    });
-    
-    try {
-        localStorage.setItem(getLayoutStorageKey(), JSON.stringify(layout));
-    } catch (e) {}
+    }
+    try { localStorage.setItem(getLayoutStorageKey(), JSON.stringify(layout)); } catch (e) {}
 }
 
-function getCurrentLayoutMode() {
-    if (state?.laplaceModeEnabled) return 'laplace';
-    if (state?.realPlotsEnabled) return 'real_plots';
-    return 'normal';
-}
+export function positionContour2DPanel(container) {
+    if (!container && typeof document !== 'undefined') {
+        container = document.querySelector('.canvas-row.two-column-layout');
+    }
+    if (!container) return;
 
-function getLayoutStorageKey() {
-    const isVertical = isVerticalLayout();
-    const orientation = isVertical ? 'vert' : 'horiz';
+    const contourPanel = container.querySelector('#contour_2d_column');
+    if (!contourPanel) return;
+
+    const isVert = isVerticalLayout();
+    const clientW = container.clientWidth || window.innerWidth || 1200;
+    const clientH = container.clientHeight || window.innerHeight || 700;
+    const { width, height } = normalPanelSize(clientW, clientH);
+
+    contourPanel.style.width = `${width}px`;
+    contourPanel.style.height = `${height}px`;
+
     const mode = getCurrentLayoutMode();
-    return `complex_panelLayout_${mode}_${orientation}_${LAYOUT_VERSION}`;
+    if (mode === 'real_plots') {
+        const realPlot = container.querySelector('#real_plots_column');
+        if (realPlot) {
+            realPlot.style.left = `${LAYOUT_PADDING}px`;
+            realPlot.style.top = `${LAYOUT_PADDING}px`;
+            realPlot.style.width = `${width}px`;
+            realPlot.style.height = `${height}px`;
+        }
+        if (isVert) {
+            contourPanel.style.left = `${LAYOUT_PADDING}px`;
+            contourPanel.style.top = `${LAYOUT_PADDING + height + COLLISION_GAP}px`;
+        } else {
+            contourPanel.style.left = `${LAYOUT_PADDING + width + COLLISION_GAP}px`;
+            contourPanel.style.top = `${LAYOUT_PADDING}px`;
+        }
+    } else {
+        const slot = findNextAvailableSlot(container, contourPanel, width, height);
+        contourPanel.style.left = slot.left;
+        contourPanel.style.top = slot.top;
+    }
+
+    if (contourPanel.dataset) {
+        contourPanel.dataset.layoutInitialized = `${mode}_${isVert ? 'vert' : 'horiz'}_${Boolean(state?.show2DContourPlot)}_${Boolean(state?.graphViewEnabled)}`;
+    }
+    resolveCollisions(contourPanel, container);
+    updateWorkspaceBounds(container, false);
+    triggerLayoutRedraw();
+}
+
+export function positionNewPanel(panel, container) {
+    if (!container && typeof document !== 'undefined') {
+        container = document.querySelector('.canvas-row.two-column-layout');
+    }
+    if (!container || !panel) return;
+
+    if (panel.id === 'contour_2d_column') {
+        positionContour2DPanel(container);
+        return;
+    }
+
+    const isVert = isVerticalLayout();
+    const clientW = container.clientWidth || window.innerWidth || 1200;
+    const clientH = container.clientHeight || window.innerHeight || 700;
+    const { width, height } = normalPanelSize(clientW, clientH);
+
+    if (!panel.style.width) panel.style.width = `${width}px`;
+    if (!panel.style.height) panel.style.height = `${height}px`;
+
+    const pW = parseInt(panel.style.width, 10) || width;
+    const pH = parseInt(panel.style.height, 10) || height;
+
+    const slot = findNextAvailableSlot(container, panel, pW, pH);
+    panel.style.left = slot.left;
+    panel.style.top = slot.top;
+    if (panel.dataset) {
+        panel.dataset.layoutInitialized = `${getCurrentLayoutMode()}_${isVert ? 'vert' : 'horiz'}_${Boolean(state?.show2DContourPlot)}_${Boolean(state?.graphViewEnabled)}`;
+    }
+
+    resolveCollisions(panel, container);
+    updateWorkspaceBounds(container, false);
+    triggerLayoutRedraw();
 }
 
 export function resetAllPanelLayouts() {
     try {
         if (typeof localStorage !== 'undefined') {
-            const keysToRemove = [];
+            const keys = [];
             for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && (key.startsWith('complex_panelLayout_') || key.includes('panelLayout'))) {
-                    keysToRemove.push(key);
-                }
+                const k = localStorage.key(i);
+                if (k && (k.startsWith('complex_panelLayout_') || k.includes('panelLayout'))) keys.push(k);
             }
-            keysToRemove.forEach(k => localStorage.removeItem(k));
+            keys.forEach(k => localStorage.removeItem(k));
         }
     } catch (e) {}
 
     const container = typeof document !== 'undefined' ? document.querySelector('.canvas-row.two-column-layout') : null;
     if (container) {
-        lastInitializedMode = null;
-        [...container.children].forEach(panel => {
-            delete panel.dataset.layoutInitialized;
-            panel.style.left = '';
-            panel.style.top = '';
-            panel.style.width = '';
-            panel.style.height = '';
+        lastModeKey = null;
+        [...container.children].forEach(p => {
+            delete p.dataset.layoutInitialized;
+            p.style.left = ''; p.style.top = ''; p.style.width = ''; p.style.height = '';
         });
-
         initializeDefaultPanelPositions(container);
         updateWorkspaceBounds(container, false);
         triggerLayoutRedraw();
-        window.dispatchEvent(new Event('resize'));
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('resize'));
+        }
     }
 }
 
@@ -289,52 +430,48 @@ export function computeRealPlotsLayout(containerWidth, containerHeight) {
     if (!state?.show2DContourPlot) {
         return {
             real_plots_column: panelRect(
-                LAYOUT_PADDING,
-                LAYOUT_PADDING,
+                LAYOUT_PADDING, LAYOUT_PADDING,
                 Math.max(300, containerWidth - LAYOUT_PADDING * 2),
                 Math.max(300, containerHeight - LAYOUT_PADDING * 2)
             )
         };
     }
-
     const { width, height } = normalPanelSize(containerWidth, containerHeight);
-    const realPlot = panelRect(LAYOUT_PADDING, LAYOUT_PADDING, width, height);
-    const contour = isVerticalLayout()
-        ? panelRect(LAYOUT_PADDING, LAYOUT_PADDING + height + COLLISION_GAP, width, height)
-        : panelRect(LAYOUT_PADDING + width + COLLISION_GAP, LAYOUT_PADDING, width, height);
-    return { real_plots_column: realPlot, contour_2d_column: contour };
+    return {
+        real_plots_column: panelRect(LAYOUT_PADDING, LAYOUT_PADDING, width, height),
+        contour_2d_column: isVerticalLayout()
+            ? panelRect(LAYOUT_PADDING, LAYOUT_PADDING + height + COLLISION_GAP, width, height)
+            : panelRect(LAYOUT_PADDING + width + COLLISION_GAP, LAYOUT_PADDING, width, height)
+    };
 }
 
 export function computeNormalModeLayout(containerWidth, containerHeight) {
-    const isVertical = isVerticalLayout();
+    const isVert = isVerticalLayout();
     const { width, height } = normalPanelSize(containerWidth, containerHeight);
     const layout = {};
-    const position = index => panelRect(
-        isVertical ? LAYOUT_PADDING : LAYOUT_PADDING + index * (width + COLLISION_GAP),
-        isVertical ? LAYOUT_PADDING + index * (height + COLLISION_GAP) : LAYOUT_PADDING,
-        width,
-        height
+    const pos = i => panelRect(
+        isVert ? LAYOUT_PADDING : LAYOUT_PADDING + i * (width + COLLISION_GAP),
+        isVert ? LAYOUT_PADDING + i * (height + COLLISION_GAP) : LAYOUT_PADDING,
+        width, height
     );
-    layout.z_plane_column = position(0);
-    layout.w_plane_column = position(1);
-    layout.graph_column = position(2);
-    for (let index = 1; index <= 32; index++) layout[`w_plane_column_${index}`] = position(index + 1);
+    layout.z_plane_column = pos(0);
+    layout.w_plane_column = pos(1);
+    layout.graph_column = pos(2);
+    for (let i = 1; i <= 32; i++) layout[`w_plane_column_${i}`] = pos(i + 1);
     return layout;
 }
 
 export function computeLaplaceModeLayout(containerWidth, containerHeight) {
-    const isVertical = isVerticalLayout();
-    const padding = LAYOUT_PADDING;
+    const isVert = isVerticalLayout();
+    const pad = LAYOUT_PADDING;
     const gap = COLLISION_GAP;
 
-    if (isVertical) {
-        // Vertical mode: rows are stacked downwards
-        const panelWidth = Math.max(220, containerWidth - padding * 2);
-        const availHeight = Math.max(400, containerHeight - padding * 2);
+    if (isVert) {
+        const panelWidth = Math.max(220, containerWidth - pad * 2);
+        const availHeight = Math.max(400, containerHeight - pad * 2);
         const panelHeight = Math.max(180, Math.floor((availHeight - gap) / 2));
         const halfWidth = Math.max(180, Math.floor((panelWidth - gap) / 2));
-
-        const topRow1 = padding;
+        const topRow1 = pad;
         const topRow2 = topRow1 + panelHeight + gap;
         const row3Height = Math.max(340, Math.floor(panelHeight * 0.85));
         const topRow3 = topRow2 + panelHeight + gap;
@@ -344,32 +481,27 @@ export function computeLaplaceModeLayout(containerWidth, containerHeight) {
         const topRow5 = topRow4 + row4Height + gap;
 
         return {
-            z_plane_column: panelRect(padding, topRow1, panelWidth, panelHeight),
-            w_plane_column: panelRect(padding, topRow2, panelWidth, panelHeight),
-            fourier_3d_column: panelRect(padding, topRow3, panelWidth, row3Height),
-            laplace_com_column: panelRect(padding, topRow4, halfWidth, row4Height),
-            laplace_spectrum_column: panelRect(padding + halfWidth + gap, topRow4, halfWidth, row4Height),
-            laplace_3d_column: panelRect(padding, topRow5, panelWidth, row5Height)
+            z_plane_column: panelRect(pad, topRow1, panelWidth, panelHeight),
+            w_plane_column: panelRect(pad, topRow2, panelWidth, panelHeight),
+            fourier_3d_column: panelRect(pad, topRow3, panelWidth, row3Height),
+            laplace_com_column: panelRect(pad, topRow4, halfWidth, row4Height),
+            laplace_spectrum_column: panelRect(pad + halfWidth + gap, topRow4, halfWidth, row4Height),
+            laplace_3d_column: panelRect(pad, topRow5, panelWidth, row5Height)
         };
     }
 
-    const availWidth = Math.max(800, containerWidth - padding * 2);
+    const availWidth = Math.max(800, containerWidth - pad * 2);
     const trackWidth = Math.max(460, Math.floor((availWidth - gap) / 2));
     const combinedWidth = trackWidth * 2 + gap;
-
-    const screenHeight = Math.max(480, containerHeight - padding * 2);
+    const screenHeight = Math.max(480, containerHeight - pad * 2);
     const row2Height = Math.max(380, Math.floor(screenHeight * 0.75));
     const row3Height = Math.max(340, Math.floor(screenHeight * 0.60));
-
-    const track1Left = padding;                           // 24px (Track 1)
-    const track2Left = padding + trackWidth + gap;        // Track 2 (Right side of initial screen)
-    const track3Left = padding + combinedWidth + gap;     // Track 3 (To the right of Track 2)
-
-    const topRow1 = padding;                              // 24px (Row 1: 100% Screen Height)
-    const topRow2 = topRow1 + screenHeight + gap;         // Row 2 below Row 1
-    const topRow3 = topRow2 + row2Height + gap;           // Row 3 below Row 2
-
-    const totalLeftHeight = topRow3 + row3Height - padding;
+    const track1Left = pad;
+    const track2Left = pad + trackWidth + gap;
+    const track3Left = pad + combinedWidth + gap;
+    const topRow1 = pad;
+    const topRow2 = topRow1 + screenHeight + gap;
+    const topRow3 = topRow2 + row2Height + gap;
 
     return {
         z_plane_column: panelRect(track1Left, topRow1, trackWidth, screenHeight),
@@ -377,7 +509,7 @@ export function computeLaplaceModeLayout(containerWidth, containerHeight) {
         fourier_3d_column: panelRect(track1Left, topRow2, combinedWidth, row2Height),
         laplace_com_column: panelRect(track1Left, topRow3, trackWidth, row3Height),
         laplace_spectrum_column: panelRect(track2Left, topRow3, trackWidth, row3Height),
-        laplace_3d_column: panelRect(track3Left, topRow1, Math.max(680, trackWidth), Math.max(700, totalLeftHeight))
+        laplace_3d_column: panelRect(track3Left, topRow1, Math.max(680, trackWidth), Math.max(700, topRow3 + row3Height - pad))
     };
 }
 
@@ -387,84 +519,59 @@ function layoutForMode(containerWidth, containerHeight, mode = getCurrentLayoutM
     return computeNormalModeLayout(containerWidth, containerHeight);
 }
 
-function applyPanelRect(panel, rectangle) {
-    Object.assign(panel.style, rectangle);
-}
-
-const pointerDelta = (position, start, scroll, initialScroll) =>
-    (position - start) + (scroll - initialScroll);
-
-/**
- * Finds the next available non-overlapping free slot on the whiteboard
- * making space on the fly to ensure new panels NEVER stack on top of existing panels.
- * Horizontal mode: places to the absolute right side.
- * Vertical mode: places at the bottom.
- */
 export function findNextAvailableSlot(container, panel, targetWidth, targetHeight) {
-    const isVertical = isVerticalLayout();
-
-    const visibleSiblings = container?.children ? [...container.children].filter(
-        child => child !== panel && !child.classList.contains('hidden') && !child.classList.contains('workspace-bounds-extender') && Boolean(child.id)
+    const isVert = isVerticalLayout();
+    const visible = container?.children ? [...container.children].filter(
+        c => c !== panel && !c.classList.contains('hidden') && !c.classList.contains('workspace-bounds-extender') && !c.classList.contains('panel-snap-indicator') && Boolean(c.id)
     ) : [];
 
-    const padding = LAYOUT_PADDING;
-    const gap = COLLISION_GAP;
+    if (visible.length === 0) return { left: `${LAYOUT_PADDING}px`, top: `${LAYOUT_PADDING}px` };
 
-    if (visibleSiblings.length === 0) {
-        return { left: `${padding}px`, top: `${padding}px` };
+    let maxBottom = 0, maxRight = 0, minTop = Infinity;
+    for (const sib of visible) {
+        const styleL = sib.style?.left !== undefined && sib.style?.left !== '' ? parseInt(sib.style.left, 10) : NaN;
+        const styleT = sib.style?.top !== undefined && sib.style?.top !== '' ? parseInt(sib.style.top, 10) : NaN;
+        const l = Number.isFinite(styleL) ? styleL : (sib.offsetLeft || 0);
+        const t = Number.isFinite(styleT) ? styleT : (sib.offsetTop || 0);
+        const w = parseInt(sib.style?.width, 10) || sib.offsetWidth || targetWidth || 540;
+        const h = parseInt(sib.style?.height, 10) || sib.offsetHeight || targetHeight || 420;
+        if (t + h > maxBottom) maxBottom = t + h;
+        if (l + w > maxRight) maxRight = l + w;
+        if (t < minTop) minTop = t;
     }
-
-    let maxBottom = 0;
-    let maxRight = 0;
-    let minTop = Infinity;
-
-    visibleSiblings.forEach(sib => {
-        const left = sib.offsetLeft || parseInt(sib.style.left, 10) || 0;
-        const top = sib.offsetTop || parseInt(sib.style.top, 10) || 0;
-        const width = sib.offsetWidth || parseInt(sib.style.width, 10) || targetWidth || 540;
-        const height = sib.offsetHeight || parseInt(sib.style.height, 10) || targetHeight || 420;
-        if (top + height > maxBottom) maxBottom = top + height;
-        if (left + width > maxRight) maxRight = left + width;
-        if (top < minTop) minTop = top;
-    });
-
-    if (minTop === Infinity) minTop = padding;
-
-    if (isVertical) {
-        return { left: `${padding}px`, top: `${maxBottom + gap}px` };
-    } else {
-        return { left: `${maxRight + gap}px`, top: `${minTop}px` };
-    }
+    if (minTop === Infinity) minTop = LAYOUT_PADDING;
+    return isVert
+        ? { left: `${LAYOUT_PADDING}px`, top: `${maxBottom + COLLISION_GAP}px` }
+        : { left: `${maxRight + COLLISION_GAP}px`, top: `${minTop}px` };
 }
 
 function initializeDefaultPanelPositions(container) {
-    if (!container) {
-        container = document.querySelector('.canvas-row.two-column-layout');
-    }
+    if (!container) container = document.querySelector('.canvas-row.two-column-layout');
     if (!container) return;
 
-    const mode = getCurrentLayoutMode();
-    const isVertical = isVerticalLayout();
-    const hasContour = Boolean(state?.show2DContourPlot);
-    const hasGraph = Boolean(state?.graphViewEnabled);
-    const currentModeKey = `${mode}_${isVertical ? 'vert' : 'horiz'}_${hasContour}_${hasGraph}`;
+    const visiblePanels = [...container.children].filter(
+        el => !el.classList.contains('hidden') && !el.classList.contains('workspace-bounds-extender') && !el.classList.contains('panel-snap-indicator') && Boolean(el.id)
+    );
+    const visibleIds = visiblePanels.map(p => p.id).sort().join(',');
 
-    // When transform mode, orientation, or contour state changes, reset panel initialization marks to reposition correctly for the mode
-    if (lastInitializedMode !== currentModeKey) {
-        [...container.children].forEach(panel => {
-            delete panel.dataset.layoutInitialized;
+    const mode = getCurrentLayoutMode();
+    const isVert = isVerticalLayout();
+    const currentModeKey = `${mode}_${isVert ? 'vert' : 'horiz'}_${visibleIds}`;
+
+    if (lastModeKey !== currentModeKey) {
+        [...container.children].forEach(p => {
+            if (p.dataset) delete p.dataset.layoutInitialized;
+            p.style.left = '';
+            p.style.top = '';
+            p.style.width = '';
+            p.style.height = '';
         });
-        lastInitializedMode = currentModeKey;
+        lastModeKey = currentModeKey;
     }
 
-    const visiblePanels = [...container.children].filter(
-        el => !el.classList.contains('hidden') && !el.classList.contains('workspace-bounds-extender') && Boolean(el.id)
-    );
-
-    const containerWidth = container.clientWidth || window.innerWidth || 1200;
-    const containerHeight = container.clientHeight || window.innerHeight || 700;
-
-    const defaultLayoutMap = layoutForMode(containerWidth, containerHeight, mode);
+    const clientW = container.clientWidth || window.innerWidth || 1200;
+    const clientH = container.clientHeight || window.innerHeight || 700;
+    const defaultLayoutMap = layoutForMode(clientW, clientH, mode);
 
     let savedLayout = null;
     try {
@@ -472,74 +579,56 @@ function initializeDefaultPanelPositions(container) {
         if (stored) savedLayout = JSON.parse(stored);
     } catch (e) {}
 
-    visiblePanels.forEach(panel => {
-        if (panel.dataset.layoutInitialized === currentModeKey && panel.style.left && panel.style.top) return;
-        panel.dataset.layoutInitialized = currentModeKey;
+    for (const panel of visiblePanels) {
+        if (panel.dataset?.layoutInitialized === currentModeKey && panel.style.left && panel.style.top) continue;
+        if (panel.dataset) panel.dataset.layoutInitialized = currentModeKey;
 
-        // 1. User saved custom layout
-        if (panel.id && savedLayout && savedLayout[panel.id]) {
-            const saved = savedLayout[panel.id];
-            panel.style.left = saved.left;
-            panel.style.top = saved.top;
-            if (saved.width) panel.style.width = saved.width;
-            if (saved.height) panel.style.height = saved.height;
-            return;
+        if (panel.id === 'contour_2d_column' && mode !== 'real_plots') {
+            positionContour2DPanel(container);
+            continue;
         }
 
-        // 2. Mode specific preset default layout
-        if (panel.id && defaultLayoutMap && defaultLayoutMap[panel.id]) {
-            applyPanelRect(panel, defaultLayoutMap[panel.id]);
-            return;
+        if (panel.id && savedLayout?.[panel.id]) {
+            Object.assign(panel.style, savedLayout[panel.id]);
+            continue;
         }
 
-        // 3. Fallback: Find next available non-overlapping free slot with 50%/100% sizing
-        const { width: dynamicWidth, height: dynamicHeight } = defaultPanelSize(containerWidth, containerHeight);
-        panel.style.width = `${dynamicWidth}px`;
-        panel.style.height = `${dynamicHeight}px`;
+        if (panel.id && defaultLayoutMap?.[panel.id]) {
+            Object.assign(panel.style, defaultLayoutMap[panel.id]);
+            continue;
+        }
 
-        const slot = findNextAvailableSlot(container, panel, dynamicWidth, dynamicHeight);
+        const size = normalPanelSize(clientW, clientH);
+        panel.style.width = `${size.width}px`;
+        panel.style.height = `${size.height}px`;
+        const slot = findNextAvailableSlot(container, panel, size.width, size.height);
         panel.style.left = slot.left;
         panel.style.top = slot.top;
-    });
+    }
 
+    resolveCollisions(null, container);
     updateWorkspaceBounds(container);
 }
 
 function bindResizeEvents(resizeBtn, panel) {
-    let startX = 0;
-    let startY = 0;
-    let startWidth = 0;
-    let startHeight = 0;
-    let origScrollLeft = 0;
-    let origScrollTop = 0;
-    let isResizing = false;
+    let startX = 0, startY = 0, startW = 0, startH = 0;
+    let origScrollL = 0, origScrollT = 0, isResizing = false;
 
-    const onPointerMove = (event) => {
+    const onPointerMove = e => {
         if (!isResizing) return;
-        event.preventDefault();
-
+        e.preventDefault();
         const container = panel.closest('.two-column-layout');
-        const currentScrollLeft = container ? container.scrollLeft : 0;
-        const currentScrollTop = container ? container.scrollTop : 0;
-
-        const deltaX = pointerDelta(event.clientX, startX, currentScrollLeft, origScrollLeft);
-        const deltaY = pointerDelta(event.clientY, startY, currentScrollTop, origScrollTop);
-
-        const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(startWidth + deltaX)));
-        const newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(startHeight + deltaY)));
-
-        panel.style.width = `${newWidth}px`;
-        panel.style.height = `${newHeight}px`;
-
+        const dX = (e.clientX - startX) + ((container?.scrollLeft || 0) - origScrollL);
+        const dY = (e.clientY - startY) + ((container?.scrollTop || 0) - origScrollT);
+        const newW = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(startW + dX)));
+        const newH = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(startH + dY)));
+        panel.style.width = `${newW}px`;
+        panel.style.height = `${newH}px`;
         if (container) {
-            const pLeft = panel.offsetLeft || parseInt(panel.style.left, 10) || 0;
-            const pTop = panel.offsetTop || parseInt(panel.style.top, 10) || 0;
-            updateWorkspaceBounds(container, true, {
-                right: pLeft + newWidth + 2000,
-                bottom: pTop + newHeight + 2000
-            });
+            const pL = panel.offsetLeft || parseInt(panel.style.left, 10) || 0;
+            const pT = panel.offsetTop || parseInt(panel.style.top, 10) || 0;
+            updateWorkspaceBounds(container, true, { right: pL + newW + 2000, bottom: pT + newH + 2000 });
         }
-
         triggerLayoutRedraw();
     };
 
@@ -547,7 +636,6 @@ function bindResizeEvents(resizeBtn, panel) {
         if (!isResizing) return;
         isResizing = false;
         panel.classList.remove('is-resizing');
-
         window.removeEventListener('pointermove', onPointerMove, true);
         window.removeEventListener('pointerup', onPointerUp, true);
         window.removeEventListener('pointercancel', onPointerUp, true);
@@ -558,28 +646,22 @@ function bindResizeEvents(resizeBtn, panel) {
             updateWorkspaceBounds(container, false);
             savePanelLayout(container);
         }
-
         triggerLayoutRedraw();
         window.dispatchEvent(new Event('resize'));
     };
 
-    resizeBtn.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-
+    resizeBtn.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
         panel.style.zIndex = `${++highestZIndex}`;
         isResizing = true;
         panel.classList.add('is-resizing');
-
         const container = panel.closest('.two-column-layout');
-        startX = event.clientX;
-        startY = event.clientY;
-        startWidth = panel.offsetWidth;
-        startHeight = panel.offsetHeight;
-        origScrollLeft = container ? container.scrollLeft : 0;
-        origScrollTop = container ? container.scrollTop : 0;
-
+        startX = e.clientX; startY = e.clientY;
+        startW = panel.offsetWidth; startH = panel.offsetHeight;
+        origScrollL = container?.scrollLeft || 0;
+        origScrollT = container?.scrollTop || 0;
         window.addEventListener('pointermove', onPointerMove, { passive: false, capture: true });
         window.addEventListener('pointerup', onPointerUp, { capture: true });
         window.addEventListener('pointercancel', onPointerUp, { capture: true });
@@ -587,103 +669,54 @@ function bindResizeEvents(resizeBtn, panel) {
 }
 
 function bindGripEvents(triggerEl, panel) {
-    let startX = 0;
-    let startY = 0;
-    let origLeft = 0;
-    let origTop = 0;
-    let origScrollLeft = 0;
-    let origScrollTop = 0;
-    let isDragging = false;
-    let currentClientX = 0;
-    let currentClientY = 0;
-    let autoScrollRaf = null;
+    let startX = 0, startY = 0, origL = 0, origT = 0;
+    let origScrollL = 0, origScrollT = 0, isDragging = false;
+    let clientX = 0, clientY = 0, autoScrollRaf = null;
 
     const autoScrollLoop = () => {
         if (!isDragging) return;
         const container = panel.closest('.two-column-layout');
         if (container) {
-            const SCROLL_THRESHOLD = 45;
-            const MAX_SCROLL_SPEED = 14;
-            const containerRect = container.getBoundingClientRect();
-            let scrollX = 0;
-            let scrollY = 0;
+            const rect = container.getBoundingClientRect();
+            let dx = 0, dy = 0;
+            if (clientX < rect.left + 45 && container.scrollLeft > 0) dx = -12;
+            else if (clientX > rect.right - 45) dx = 12;
+            if (clientY < rect.top + 45 && container.scrollTop > 0) dy = -12;
+            else if (clientY > rect.bottom - 45) dy = 12;
 
-            if (currentClientX < containerRect.left + SCROLL_THRESHOLD && container.scrollLeft > 0) {
-                const depth = (containerRect.left + SCROLL_THRESHOLD) - currentClientX;
-                const factor = Math.min(1, Math.max(0.1, depth / SCROLL_THRESHOLD));
-                scrollX = -Math.round(factor * MAX_SCROLL_SPEED);
-            } else if (currentClientX > containerRect.right - SCROLL_THRESHOLD) {
-                const depth = currentClientX - (containerRect.right - SCROLL_THRESHOLD);
-                const factor = Math.min(1, Math.max(0.1, depth / SCROLL_THRESHOLD));
-                scrollX = Math.round(factor * MAX_SCROLL_SPEED);
-            }
-
-            if (currentClientY < containerRect.top + SCROLL_THRESHOLD && container.scrollTop > 0) {
-                const depth = (containerRect.top + SCROLL_THRESHOLD) - currentClientY;
-                const factor = Math.min(1, Math.max(0.1, depth / SCROLL_THRESHOLD));
-                scrollY = -Math.round(factor * MAX_SCROLL_SPEED);
-            } else if (currentClientY > containerRect.bottom - SCROLL_THRESHOLD) {
-                const depth = currentClientY - (containerRect.bottom - SCROLL_THRESHOLD);
-                const factor = Math.min(1, Math.max(0.1, depth / SCROLL_THRESHOLD));
-                scrollY = Math.round(factor * MAX_SCROLL_SPEED);
-            }
-
-            if (scrollX !== 0 || scrollY !== 0) {
-                container.scrollLeft += scrollX;
-                container.scrollTop += scrollY;
-
-                const currentScrollLeft = container.scrollLeft;
-                const currentScrollTop = container.scrollTop;
-                const deltaX = pointerDelta(currentClientX, startX, currentScrollLeft, origScrollLeft);
-                const deltaY = pointerDelta(currentClientY, startY, currentScrollTop, origScrollTop);
-                const newLeft = Math.max(0, Math.round(origLeft + deltaX));
-                const newTop = Math.max(0, Math.round(origTop + deltaY));
-                panel.style.left = `${newLeft}px`;
-                panel.style.top = `${newTop}px`;
-
-                const pW = panel.offsetWidth || 500;
-                const pH = panel.offsetHeight || 400;
+            if (dx !== 0 || dy !== 0) {
+                container.scrollLeft += dx;
+                container.scrollTop += dy;
+                const newL = Math.max(0, Math.round(origL + (clientX - startX) + (container.scrollLeft - origScrollL)));
+                const newT = Math.max(0, Math.round(origT + (clientY - startY) + (container.scrollTop - origScrollT)));
+                panel.style.left = `${newL}px`;
+                panel.style.top = `${newT}px`;
                 updateWorkspaceBounds(container, true, {
-                    right: newLeft + pW + 2000,
-                    bottom: newTop + pH + 2000
+                    right: newL + (panel.offsetWidth || 500) + 2000,
+                    bottom: newT + (panel.offsetHeight || 400) + 2000
                 });
             }
         }
         autoScrollRaf = requestAnimationFrame(autoScrollLoop);
     };
 
-    const onPointerMove = (event) => {
+    const onPointerMove = e => {
         if (!isDragging) return;
-        event.preventDefault();
-        currentClientX = event.clientX;
-        currentClientY = event.clientY;
-
+        e.preventDefault();
+        clientX = e.clientX; clientY = e.clientY;
         const container = panel.closest('.two-column-layout');
-        const currentScrollLeft = container ? container.scrollLeft : 0;
-        const currentScrollTop = container ? container.scrollTop : 0;
-
-        const deltaX = pointerDelta(event.clientX, startX, currentScrollLeft, origScrollLeft);
-        const deltaY = pointerDelta(event.clientY, startY, currentScrollTop, origScrollTop);
-
-        const newLeft = Math.max(0, Math.round(origLeft + deltaX));
-        const newTop = Math.max(0, Math.round(origTop + deltaY));
-
-        panel.style.left = `${newLeft}px`;
-        panel.style.top = `${newTop}px`;
+        const newL = Math.max(0, Math.round(origL + (e.clientX - startX) + ((container?.scrollLeft || 0) - origScrollL)));
+        const newT = Math.max(0, Math.round(origT + (e.clientY - startY) + ((container?.scrollTop || 0) - origScrollT)));
+        panel.style.left = `${newL}px`;
+        panel.style.top = `${newT}px`;
 
         if (container) {
-            const pW = panel.offsetWidth || 500;
-            const pH = panel.offsetHeight || 400;
-            const snapTarget = calculateSnapTarget(panel, container, newLeft, newTop);
-            if (snapTarget) {
-                updateSnapIndicator(container, snapTarget);
-            } else {
-                hideSnapIndicator(container);
-            }
-
+            const snap = calculateSnapTarget(panel, container, newL, newT);
+            if (snap) updateSnapIndicator(container, snap);
+            else hideSnapIndicator(container);
             updateWorkspaceBounds(container, true, {
-                right: newLeft + pW + 2000,
-                bottom: newTop + pH + 2000
+                right: newL + (panel.offsetWidth || 500) + 2000,
+                bottom: newT + (panel.offsetHeight || 400) + 2000
             });
         }
     };
@@ -691,12 +724,8 @@ function bindGripEvents(triggerEl, panel) {
     const onPointerUp = () => {
         if (!isDragging) return;
         isDragging = false;
-        if (autoScrollRaf) {
-            cancelAnimationFrame(autoScrollRaf);
-            autoScrollRaf = null;
-        }
+        if (autoScrollRaf) { cancelAnimationFrame(autoScrollRaf); autoScrollRaf = null; }
         panel.classList.remove('is-dragging');
-
         window.removeEventListener('pointermove', onPointerMove, true);
         window.removeEventListener('pointerup', onPointerUp, true);
         window.removeEventListener('pointercancel', onPointerUp, true);
@@ -705,158 +734,75 @@ function bindGripEvents(triggerEl, panel) {
         if (container) {
             const curL = parseInt(panel.style.left, 10) || panel.offsetLeft || 0;
             const curT = parseInt(panel.style.top, 10) || panel.offsetTop || 0;
-            const snapTarget = calculateSnapTarget(panel, container, curL, curT);
-            if (snapTarget) {
-                panel.style.left = `${snapTarget.left}px`;
-                panel.style.top = `${snapTarget.top}px`;
+            const snap = calculateSnapTarget(panel, container, curL, curT);
+            if (snap) {
+                panel.style.left = `${snap.left}px`;
+                panel.style.top = `${snap.top}px`;
             }
             hideSnapIndicator(container);
-
             resolveCollisions(panel, container);
             updateWorkspaceBounds(container, false);
             savePanelLayout(container);
         }
-
         triggerLayoutRedraw();
         window.dispatchEvent(new Event('resize'));
     };
 
-    triggerEl.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-
+    triggerEl.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
         panel.style.zIndex = `${++highestZIndex}`;
         isDragging = true;
         panel.classList.add('is-dragging');
-
         const container = panel.closest('.two-column-layout');
-        startX = event.clientX;
-        startY = event.clientY;
-        currentClientX = event.clientX;
-        currentClientY = event.clientY;
-        origLeft = panel.offsetLeft || parseInt(panel.style.left, 10) || 0;
-        origTop = panel.offsetTop || parseInt(panel.style.top, 10) || 0;
-        origScrollLeft = container ? container.scrollLeft : 0;
-        origScrollTop = container ? container.scrollTop : 0;
-
+        startX = e.clientX; startY = e.clientY;
+        clientX = e.clientX; clientY = e.clientY;
+        origL = panel.offsetLeft || parseInt(panel.style.left, 10) || 0;
+        origT = panel.offsetTop || parseInt(panel.style.top, 10) || 0;
+        origScrollL = container?.scrollLeft || 0;
+        origScrollT = container?.scrollTop || 0;
         window.addEventListener('pointermove', onPointerMove, { passive: false, capture: true });
         window.addEventListener('pointerup', onPointerUp, { capture: true });
         window.addEventListener('pointercancel', onPointerUp, { capture: true });
-
         if (autoScrollRaf) cancelAnimationFrame(autoScrollRaf);
         autoScrollRaf = requestAnimationFrame(autoScrollLoop);
     });
 }
 
 function createEdgeHandle(panel) {
-    if (!panel || !panel.id || panel.classList.contains('workspace-bounds-extender')) return;
-    if (panel.querySelector('.panel-edge-handle-bar')) return;
-
-    const bar = document.createElement('div');
-    bar.className = 'panel-edge-handle-bar';
-
-    const group = document.createElement('div');
-    group.className = 'panel-edge-btn-group';
-
-    // 1. Move / Resize button (Scaling-like icon)
-    const resizeBtn = document.createElement('button');
-    resizeBtn.type = 'button';
-    resizeBtn.className = 'panel-edge-action-btn panel-resize-btn';
-    resizeBtn.title = 'Resize panel (drag)';
-    resizeBtn.setAttribute('aria-label', 'Resize panel');
-    resizeBtn.innerHTML = `<i data-lucide="maximize-2" class="icon-whiteboard" aria-hidden="true"></i>`;
-
-    // 2. Grip / Move button
-    const gripBtn = document.createElement('button');
-    gripBtn.type = 'button';
-    gripBtn.className = 'panel-edge-action-btn panel-grip-btn';
-    gripBtn.title = 'Move panel (drag)';
-    gripBtn.setAttribute('aria-label', 'Move panel');
-    gripBtn.innerHTML = `<i data-lucide="grip" class="icon-whiteboard" aria-hidden="true"></i>`;
-
-    // 3. Reset Size button
-    const resetBtn = document.createElement('button');
-    resetBtn.type = 'button';
-    resetBtn.className = 'panel-edge-action-btn panel-reset-btn';
-    resetBtn.title = 'Reset panel size';
-    resetBtn.setAttribute('aria-label', 'Reset panel size');
-    resetBtn.innerHTML = `<i data-lucide="rotate-ccw" class="icon-whiteboard" aria-hidden="true"></i>`;
-
-    group.appendChild(resetBtn);
-    group.appendChild(resizeBtn);
-    group.appendChild(gripBtn);
-    bar.appendChild(group);
-    panel.appendChild(bar);
+    if (!panel || !panel.id || panel.classList.contains('workspace-bounds-extender') ||
+        panel.classList.contains('panel-snap-indicator') || panel.dataset.handlesBound === 'true') return;
+    const bar = panel.querySelector('.panel-edge-handle-bar');
+    const resizeBtn = bar?.querySelector('.panel-resize-btn');
+    const gripBtn = bar?.querySelector('.panel-grip-btn');
+    if (!bar || !resizeBtn || !gripBtn) throw new Error(`Panel controls are missing for ${panel.id}.`);
+    panel.dataset.handlesBound = 'true';
 
     bindResizeEvents(resizeBtn, panel);
     bindGripEvents(gripBtn, panel);
-    
-    // Bind reset event
-    resetBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const container = panel.closest('.two-column-layout');
-        if (container) {
-            const containerWidth = container.clientWidth || window.innerWidth || 1200;
-            const containerHeight = container.clientHeight || window.innerHeight || 700;
-            const defaultLayoutMap = layoutForMode(containerWidth, containerHeight);
 
-            if (panel.id && defaultLayoutMap && defaultLayoutMap[panel.id]) {
-                applyPanelRect(panel, defaultLayoutMap[panel.id]);
-            } else {
-                const { width, height } = defaultPanelSize(containerWidth, containerHeight);
-                panel.style.width = `${width}px`;
-                panel.style.height = `${height}px`;
-            }
-
-            resolveCollisions(panel, container);
-            updateWorkspaceBounds(container);
-            savePanelLayout(container);
-
-            triggerLayoutRedraw();
-            window.dispatchEvent(new Event('resize'));
-        }
-    });
-
-    // Bring to front when clicked
-    panel.addEventListener('pointerdown', () => {
-        panel.style.zIndex = `${++highestZIndex}`;
-    });
-
-    // Detect when cursor is near the side or bottom edges to show the handle
-    panel.addEventListener('pointermove', (e) => {
+    panel.addEventListener('pointerdown', () => { panel.style.zIndex = `${++highestZIndex}`; });
+    panel.addEventListener('pointermove', e => {
         const rect = panel.getBoundingClientRect();
-        const nearRightEdge = (rect.right - e.clientX) < 60;
-        const nearBottomEdge = (rect.bottom - e.clientY) < 60;
-        
-        if (nearRightEdge || nearBottomEdge) {
+        if ((rect.right - e.clientX < 60) || (rect.bottom - e.clientY < 60)) {
             panel.classList.add('show-edge-handle');
         } else {
             panel.classList.remove('show-edge-handle');
         }
     });
-    
-    panel.addEventListener('pointerleave', () => {
-        panel.classList.remove('show-edge-handle');
-    });
+    panel.addEventListener('pointerleave', () => { panel.classList.remove('show-edge-handle'); });
 
-    if (window.lucide && typeof window.lucide.createIcons === 'function') {
-        window.lucide.createIcons();
-    }
+    if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
 }
 
 let isRefreshing = false;
 let refreshScheduled = false;
 
 export function refreshPanelEdgeHandles(sync = false) {
-    if (sync) {
-        executeRefresh();
-        return;
-    }
-    
+    if (sync) { executeRefresh(); return; }
     if (isRefreshing || refreshScheduled) return;
     refreshScheduled = true;
-
     requestAnimationFrame(() => {
         refreshScheduled = false;
         executeRefresh();
@@ -868,18 +814,14 @@ function executeRefresh() {
     try {
         const container = document.querySelector('.canvas-row.two-column-layout');
         if (!container) return;
-
         initializeDefaultPanelPositions(container);
-
         const panels = [...container.children].filter(
-            el => !el.classList.contains('workspace-bounds-extender') && Boolean(el.id)
+            el => !el.classList.contains('workspace-bounds-extender') && !el.classList.contains('panel-snap-indicator') && Boolean(el.id)
         );
-
         panels.forEach(createEdgeHandle);
-
-        if (window.lucide && typeof window.lucide.createIcons === 'function') {
-            window.lucide.createIcons();
-        }
+        resolveCollisions(null, container);
+        updateWorkspaceBounds(container, false);
+        if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
     } finally {
         isRefreshing = false;
     }
@@ -888,47 +830,93 @@ function executeRefresh() {
 export function refreshPanelLayout() {
     const row = document.querySelector('.canvas-row.two-column-layout');
     if (!row) return;
-
-    const containerWidth = row.clientWidth || window.innerWidth || 1200;
-    const containerHeight = row.clientHeight || window.innerHeight || 700;
-
-    let savedLayout = null;
-    try {
-        const stored = localStorage.getItem(getLayoutStorageKey());
-        if (stored) savedLayout = JSON.parse(stored);
-    } catch (e) {}
-
-    const defaultLayoutMap = layoutForMode(containerWidth, containerHeight);
-    [...row.children]
-        .filter(el => !el.classList.contains('hidden') && !el.classList.contains('workspace-bounds-extender') && Boolean(el.id))
-        .forEach(panel => {
-            if (!savedLayout?.[panel.id] && defaultLayoutMap?.[panel.id]) {
-                applyPanelRect(panel, defaultLayoutMap[panel.id]);
-            }
-        });
-    updateWorkspaceBounds(row);
+    initializeDefaultPanelPositions(row);
+    resolveCollisions(null, row);
+    updateWorkspaceBounds(row, false);
 }
 
 export function initPanelLayoutManager() {
     if (initialized) return;
     initialized = true;
-
     refreshPanelEdgeHandles();
-
     const container = document.querySelector('.canvas-row.two-column-layout');
     if (container && typeof MutationObserver !== 'undefined') {
-        const observer = new MutationObserver((mutations) => {
-            const hasChange = mutations.some(m => {
-                if (m.type === 'childList') return true;
-                if (m.type === 'attributes' && m.attributeName === 'class') {
-                    const oldClass = m.oldValue || '';
-                    const newClass = m.target.className || '';
-                    return oldClass.includes('hidden') !== newClass.includes('hidden');
+        const observer = new MutationObserver(mutations => {
+            const newlyAppearedPanels = [];
+            let hasChange = false;
+            for (const m of mutations) {
+                if (m.type === 'childList') {
+                    m.addedNodes.forEach(node => {
+                        if (node?.id && (node.classList?.contains('plane-column') || node.classList?.contains('auxiliary-surface-column') || node.id.includes('column')) && !node.classList?.contains('hidden')) {
+                            newlyAppearedPanels.push(node);
+                        }
+                    });
+                    hasChange = true;
+                } else if (m.type === 'attributes' && m.attributeName === 'class') {
+                    const target = m.target;
+                    if (target?.id && (target.classList?.contains('plane-column') || target.classList?.contains('auxiliary-surface-column') || target.id.includes('column'))) {
+                        const wasHidden = (m.oldValue || '').includes('hidden');
+                        const isHidden = (target.className || '').includes('hidden');
+                        if (wasHidden && !isHidden) {
+                            newlyAppearedPanels.push(target);
+                        }
+                        if (wasHidden !== isHidden) hasChange = true;
+                    }
                 }
-                return false;
-            });
-            if (hasChange) refreshPanelEdgeHandles();
+            }
+            if (newlyAppearedPanels.length > 0) {
+                const mode = getCurrentLayoutMode();
+                const clientW = container.clientWidth || window.innerWidth || 1200;
+                const clientH = container.clientHeight || window.innerHeight || 700;
+                const defaultMap = layoutForMode(clientW, clientH, mode);
+
+                let needsModeInit = false;
+                for (const panel of newlyAppearedPanels) {
+                    if (panel.id && defaultMap[panel.id]) {
+                        needsModeInit = true;
+                    } else {
+                        positionNewPanel(panel, container);
+                    }
+                }
+                if (needsModeInit) {
+                    initializeDefaultPanelPositions(container);
+                    resolveCollisions(null, container);
+                    updateWorkspaceBounds(container, false);
+                    triggerLayoutRedraw();
+                }
+                refreshPanelEdgeHandles();
+            } else if (hasChange) {
+                initializeDefaultPanelPositions(container);
+                resolveCollisions(null, container);
+                updateWorkspaceBounds(container, false);
+                triggerLayoutRedraw();
+                refreshPanelEdgeHandles();
+            }
         });
-        observer.observe(container, { childList: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+        observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
     }
+
+    subscribeState(() => {
+        const row = document.querySelector('.canvas-row.two-column-layout');
+        if (!row) return;
+        const isVert = Boolean(state.verticalLayoutEnabled);
+        if (typeof document !== 'undefined') {
+            document.body?.classList?.toggle('vertical-layout', isVert);
+            document.querySelector?.('.application-root')?.classList?.toggle('vertical-layout', isVert);
+        }
+        lastModeKey = null;
+        initializeDefaultPanelPositions(row);
+        if (state.show2DContourPlot) {
+            positionContour2DPanel(row);
+        }
+        if (state.graphViewEnabled) {
+            const graph = row.querySelector('#graph_column');
+            if (graph && (!graph.style.left || !graph.style.top)) {
+                positionNewPanel(graph, row);
+            }
+        }
+        resolveCollisions(null, row);
+        updateWorkspaceBounds(row, false);
+        triggerLayoutRedraw();
+    }, ['show2DContourPlot', 'graphViewEnabled', 'realPlotsEnabled', 'riemannSurfaceEnabled', 'laplaceModeEnabled', 'verticalLayoutEnabled', 'chainingEnabled', 'chainCount']);
 }

@@ -1,7 +1,7 @@
-import { state, context } from '../store/state.js';
+import { state } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { requestDomainRedraw, requestRedrawAll } from '../rendering/redraw-scheduler.js';
-const { controls } = context;
+import { signal } from '@preact/signals';
 
 const RASTER_MEDIA_TIME_EPSILON = 1e-4;
 
@@ -102,7 +102,7 @@ function processUploadedVideoFrame(force = false) {
     state.mediaAspectRatio = aspectRatio;
     state.mediaVersion += 1;
     runtime.media.lastProcessedMediaTime = currentTime;
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
     return true;
 }
 
@@ -139,15 +139,18 @@ function buildVideoStatusText() {
     return `${statusLabel} · ${currentTime} / ${duration}${dims} · ${fps} FPS`;
 }
 
-export function syncVideoPlaybackUI() {
-    if (controls.videoPlayPauseBtn) {
-        controls.videoPlayPauseBtn.disabled = !runtime.media.video;
-        controls.videoPlayPauseBtn.textContent = state.videoIsPlaying ? '⏸ Pause' : '▶ Play';
-    }
+export const videoPlaybackUi = signal({
+    available: false,
+    label: '▶ Play',
+    status: 'No video loaded.'
+});
 
-    if (controls.videoStatusDisplay) {
-        controls.videoStatusDisplay.textContent = buildVideoStatusText();
-    }
+export function publishVideoPlaybackStatus() {
+    videoPlaybackUi.value = {
+        available: Boolean(runtime.media.video),
+        label: state.videoIsPlaying ? '⏸ Pause' : '▶ Play',
+        status: buildVideoStatusText()
+    };
 }
 
 function stopVideoProcessingLoop() {
@@ -161,7 +164,7 @@ function runVideoProcessingLoop(now) {
     runtime.media.processingFrame = null;
 
     if (!runtime.media.video || !state.videoIsPlaying || !isMediaInputShape()) {
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         return;
     }
 
@@ -174,7 +177,7 @@ function runVideoProcessingLoop(now) {
             runtime.media.lastProcessedWallTime = now;
             requestDomainRedraw(false);
         } else {
-            syncVideoPlaybackUI();
+            publishVideoPlaybackStatus();
         }
     }
 
@@ -185,13 +188,13 @@ export function startVideoProcessingLoop() {
     stopVideoProcessingLoop();
 
     if (!runtime.media.video || !state.videoIsPlaying || !isMediaInputShape()) {
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         return;
     }
 
     runtime.media.lastProcessedWallTime = performance.now() - (1000 / Math.max(1, state.videoProcessingFps || 24));
     runtime.media.processingFrame = requestAnimationFrame(runVideoProcessingLoop);
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 }
 
 export function pauseUploadedVideoPlayback() {
@@ -205,7 +208,7 @@ export function pauseUploadedVideoPlayback() {
         state.videoStatusMessage = 'Paused';
     }
     stopVideoProcessingLoop();
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 
     requestRedrawAll();
 }
@@ -213,12 +216,12 @@ export function pauseUploadedVideoPlayback() {
 function startUploadedVideoPlayback() {
     const video = runtime.media.video;
     if (!video) {
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         return Promise.resolve(false);
     }
 
     state.videoStatusMessage = 'Starting playback';
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 
     return video.play().then(() => {
         state.videoIsPlaying = true;
@@ -229,14 +232,14 @@ function startUploadedVideoPlayback() {
             stopVideoProcessingLoop();
         }
 
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         requestRedrawAll();
         return true;
     }).catch(error => {
         state.videoIsPlaying = false;
         state.videoStatusMessage = 'Ready to play';
         stopVideoProcessingLoop();
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         console.warn('Video playback could not start automatically:', error);
         return false;
     });
@@ -276,7 +279,7 @@ function cleanupUploadedVideo() {
         URL.revokeObjectURL(previousUrl);
     }
 
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 }
 
 function loadUploadedVideoFile(file) {
@@ -297,7 +300,7 @@ function loadUploadedVideoFile(file) {
     runtime.media.video = video;
     runtime.media.videoUrl = objectUrl;
     state.videoStatusMessage = 'Loading video';
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 
     const handleReady = () => {
         if (runtime.media.video !== video) {
@@ -306,7 +309,7 @@ function loadUploadedVideoFile(file) {
 
         processUploadedVideoFrame(true);
         state.videoStatusMessage = 'Ready to play';
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
 
         requestRedrawAll();
 
@@ -325,7 +328,7 @@ function loadUploadedVideoFile(file) {
         if (isMediaInputShape()) {
             startVideoProcessingLoop();
         }
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
     });
     video.addEventListener('pause', () => {
         if (runtime.media.video !== video) {
@@ -335,7 +338,7 @@ function loadUploadedVideoFile(file) {
         state.videoStatusMessage = 'Paused';
         stopVideoProcessingLoop();
         processUploadedVideoFrame(true);
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         requestRedrawAll();
     });
     video.addEventListener('error', () => {
@@ -345,7 +348,7 @@ function loadUploadedVideoFile(file) {
         state.videoIsPlaying = false;
         state.videoStatusMessage = 'Could not load video.';
         stopVideoProcessingLoop();
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
     });
 
     video.src = objectUrl;

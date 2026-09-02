@@ -2,6 +2,7 @@ import { state, context, zPlaneParams } from '../store/state.js';
 import { renderRealPlotContour } from './real-plots-renderer.js';
 import { buildLaplaceSurfaceGeometry } from '../analysis/laplace-transform.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
+import { getCanvasGridColors } from '../frontend/theme.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import { renderNativeMapContour } from '../native/complex-engine.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
@@ -136,10 +137,11 @@ function drawPlaneOverlay(ctx, cssWidth, cssHeight, dpr, labels, xRange, yRange)
 
     ctx.save();
     ctx.scale(dpr, dpr);
+    const gridColors = getCanvasGridColors();
     drawGrid(ctx, params, {
         targetCount: 12,
-        minorColor: 'rgba(128, 137, 255, 0.08)',
-        majorColor: 'rgba(128, 137, 255, 0.15)'
+        minorColor: gridColors.minorColor,
+        majorColor: gridColors.majorColor
     });
     drawAxes(ctx, params, {
         xLabel: labels.x,

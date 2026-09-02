@@ -39,7 +39,6 @@ export function domainDynamicsSignature(snapshot) {
         mobiusC: snapshot.mobiusC,
         mobiusD: snapshot.mobiusD,
         fractionalPowerN: snapshot.fractionalPowerN,
-        branchCutType: snapshot.branchCutType,
         branchCutAngle: snapshot.branchCutAngle,
         zetaContinuationEnabled: snapshot.zetaContinuationEnabled,
         taylor: snapshot.taylor,

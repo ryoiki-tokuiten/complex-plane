@@ -2,41 +2,14 @@ import { state, zPlaneParams } from '../store/state.js';
 import { ThreeManifoldsRenderer } from './3d-manifolds-renderer.js';
 import { generateCurrentInputShapePointSets } from './shape-generators.js';
 import { resolveActiveMap } from '../math/active-map.js';
-import { getManifold } from './manifold-registry.js';
 import { getMediaSource, isMediaInputShape } from '../utils/raster-media.js';
 
 const ANIMATION_DURATION = 4.0;
 const BOUNCE_PAUSE_TIME = 1.0;
 
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
-
-function createPlaybackIcon(playing) {
-    const svg = document.createElementNS(SVG_NAMESPACE, 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    if (!playing) {
-        const path = document.createElementNS(SVG_NAMESPACE, 'path');
-        path.setAttribute('d', 'M8 5v14l11-7z');
-        svg.appendChild(path);
-        return svg;
-    }
-    for (const x of ['6', '14']) {
-        const rect = document.createElementNS(SVG_NAMESPACE, 'rect');
-        Object.entries({ x, y: '4', width: '4', height: '16' })
-            .forEach(([name, value]) => rect.setAttribute(name, value));
-        svg.appendChild(rect);
-    }
-    return svg;
-}
-
 const PLANE_CONFIGS = {
     z: {
         containerId: 'z_plane_threejs_container',
-        sliderId: 'z_transformation_progress_slider',
-        buttonId: 'z_transformation_play_pause_btn',
-        titleId: 'z_transformation_title',
-        formulaId: 'z_transformation_formula',
-        labelId: 'z_transformation_manifold_label',
-        speedGroupId: 'z_transformation_speed_group',
         progressKey: 'manifoldTransformationProgressZ',
         playingKey: 'manifoldTransformationPlayingZ',
         speedKey: 'manifoldTransformationSpeedZ',
@@ -44,12 +17,6 @@ const PLANE_CONFIGS = {
     },
     w: {
         containerId: 'w_plane_threejs_container',
-        sliderId: 'w_transformation_progress_slider',
-        buttonId: 'w_transformation_play_pause_btn',
-        titleId: 'w_transformation_title',
-        formulaId: 'w_transformation_formula',
-        labelId: 'w_transformation_manifold_label',
-        speedGroupId: 'w_transformation_speed_group',
         progressKey: 'manifoldTransformationProgressW',
         playingKey: 'manifoldTransformationPlayingW',
         speedKey: 'manifoldTransformationSpeedW',
@@ -66,26 +33,10 @@ class PlaneController {
         this.direction = 1;
         this.pauseTimer = 0;
 
-        this.ui = {
-            slider: null,
-            button: null,
-            title: null,
-            formula: null,
-            label: null,
-            speedGroup: null
-        };
-
         this.cache = {
-            progress: null,
-            playing: null,
-            speed: null,
             map: null,
             buildInputs: []
         };
-
-        this.boundSliderInput = null;
-        this.boundButtonClick = null;
-        this.boundSpeedClick = null;
     }
 
     init() {
@@ -93,67 +44,6 @@ class PlaneController {
         const container = document.getElementById(this.config.containerId);
         if (!container) return;
         this.renderer = new ThreeManifoldsRenderer(container, this.id);
-        this.bindEvents();
-    }
-
-    bindEvents() {
-        this.unbindEvents();
-
-        this.ui.slider = document.getElementById(this.config.sliderId);
-        this.ui.button = document.getElementById(this.config.buttonId);
-        this.ui.title = document.getElementById(this.config.titleId);
-        this.ui.formula = document.getElementById(this.config.formulaId);
-        this.ui.label = document.getElementById(this.config.labelId);
-        this.ui.speedGroup = document.getElementById(this.config.speedGroupId);
-
-        if (this.ui.slider) {
-            this.boundSliderInput = (e) => {
-                const val = parseFloat(e.target.value);
-                state[this.config.playingKey] = false;
-                state[this.config.progressKey] = val;
-                this.resetTemporalState();
-                this.render(val);
-                this.syncUI();
-            };
-            this.ui.slider.addEventListener('input', this.boundSliderInput);
-        }
-
-        if (this.ui.button) {
-            this.boundButtonClick = () => {
-                if (this.id === 'z') {
-                    toggleManifoldTransformationAnimationZ();
-                } else {
-                    toggleManifoldTransformationAnimationW();
-                }
-            };
-            this.ui.button.addEventListener('click', this.boundButtonClick);
-        }
-
-        if (this.ui.speedGroup) {
-            this.boundSpeedClick = (e) => {
-                const btn = e.target.closest('.speed-btn');
-                if (!btn || !btn.dataset.speed) return;
-                const spd = parseFloat(btn.dataset.speed);
-                state[this.config.speedKey] = spd;
-                this.syncSpeedUI();
-            };
-            this.ui.speedGroup.addEventListener('click', this.boundSpeedClick);
-        }
-    }
-
-    unbindEvents() {
-        if (this.ui.slider && this.boundSliderInput) {
-            this.ui.slider.removeEventListener('input', this.boundSliderInput);
-            this.boundSliderInput = null;
-        }
-        if (this.ui.button && this.boundButtonClick) {
-            this.ui.button.removeEventListener('click', this.boundButtonClick);
-            this.boundButtonClick = null;
-        }
-        if (this.ui.speedGroup && this.boundSpeedClick) {
-            this.ui.speedGroup.removeEventListener('click', this.boundSpeedClick);
-            this.boundSpeedClick = null;
-        }
     }
 
     build(map = this.id === 'w' ? resolveActiveMap() : null) {
@@ -172,8 +62,6 @@ class PlaneController {
             const source = getMediaSource();
             if (source) {
                 this.renderer.buildRasterManifold(source, initialProgress);
-                this.syncLabels();
-                this.syncSpeedUI();
                 return;
             }
         }
@@ -196,26 +84,6 @@ class PlaneController {
         });
 
         this.renderer.buildGridFromPointSets(pointSets, initialProgress);
-        this.syncLabels();
-        this.syncSpeedUI();
-    }
-
-    syncLabels() {
-        const manifold = getManifold(state.selectedManifold);
-        if (this.ui.title) this.ui.title.textContent = manifold.title;
-        if (this.ui.formula) this.ui.formula.textContent = manifold.formula;
-        if (this.ui.label) this.ui.label.textContent = manifold.name;
-    }
-
-    syncSpeedUI() {
-        const speed = state[this.config.speedKey] || 1.0;
-        if (this.ui.speedGroup) {
-            const buttons = this.ui.speedGroup.querySelectorAll('.speed-btn');
-            buttons.forEach(btn => {
-                const btnSpd = parseFloat(btn.dataset.speed);
-                btn.classList.toggle('active', Math.abs(btnSpd - speed) < 0.01);
-            });
-        }
     }
 
     updateAnimation(deltaTime) {
@@ -254,31 +122,7 @@ class PlaneController {
         this.renderer.updateProbe(probeZ);
     }
 
-    syncUI() {
-        const currentProgress = state[this.config.progressKey];
-        const currentPlaying = state[this.config.playingKey];
-        const currentSpeed = state[this.config.speedKey];
-
-        if (currentProgress !== this.cache.progress) {
-            if (this.ui.slider && document.activeElement !== this.ui.slider) {
-                this.ui.slider.value = currentProgress;
-            }
-            this.cache.progress = currentProgress;
-        }
-
-        if (currentPlaying !== this.cache.playing) {
-            if (this.ui.button) {
-                this.ui.button.replaceChildren(createPlaybackIcon(currentPlaying));
-                this.ui.button.classList.toggle('playing', currentPlaying);
-            }
-            this.cache.playing = currentPlaying;
-        }
-
-        if (currentSpeed !== this.cache.speed) {
-            this.syncSpeedUI();
-            this.cache.speed = currentSpeed;
-        }
-
+    syncRuntime() {
         const map = this.id === 'w' ? resolveActiveMap() : null;
         const buildInputs = [
             state.selectedManifold, state.currentInputShape, state.currentFunction,
@@ -309,17 +153,10 @@ class PlaneController {
     }
 
     dispose() {
-        this.unbindEvents();
         if (this.renderer) {
             this.renderer.dispose();
             this.renderer = null;
         }
-        this.ui.slider = null;
-        this.ui.button = null;
-        this.ui.title = null;
-        this.ui.formula = null;
-        this.ui.label = null;
-        this.ui.speedGroup = null;
         this.cache.buildInputs = [];
     }
 }
@@ -373,12 +210,8 @@ export function startManifoldTransformationAnimation() {
 
         if (!isAnyPlaneMoving) {
             animationHandle = null;
-            syncManifoldTransformationPlayPauseButton();
             return;
         }
-
-        // 4. DOM Sync Pipeline
-        syncManifoldSliders();
 
         animationHandle = requestAnimationFrame(animateFrame);
     }
@@ -392,31 +225,36 @@ export function stopManifoldTransformationAnimation() {
     }
     state.manifoldTransformationPlayingZ = false;
     state.manifoldTransformationPlayingW = false;
-    syncManifoldTransformationPlayPauseButton();
 }
 
-function toggleManifoldTransformationAnimationZ() {
-    state.manifoldTransformationPlayingZ = !state.manifoldTransformationPlayingZ;
-    syncManifoldTransformationPlayPauseButton();
+export function toggleManifoldTransformationAnimation(plane) {
+    const controller = controllers.find(candidate => candidate.id === plane);
+    if (!controller) throw new Error(`Unknown manifold plane: ${plane}.`);
+    const key = controller.config.playingKey;
+    state[key] = !state[key];
     if (state.manifoldTransformationPlayingZ || state.manifoldTransformationPlayingW) {
         startManifoldTransformationAnimation();
     }
 }
 
-function toggleManifoldTransformationAnimationW() {
-    state.manifoldTransformationPlayingW = !state.manifoldTransformationPlayingW;
-    syncManifoldTransformationPlayPauseButton();
-    if (state.manifoldTransformationPlayingZ || state.manifoldTransformationPlayingW) {
-        startManifoldTransformationAnimation();
-    }
+export function setManifoldTransformationProgress(plane, progress) {
+    const controller = controllers.find(candidate => candidate.id === plane);
+    if (!controller) throw new Error(`Unknown manifold plane: ${plane}.`);
+    const value = Math.max(0, Math.min(1, Number(progress)));
+    state[controller.config.playingKey] = false;
+    state[controller.config.progressKey] = value;
+    controller.resetTemporalState();
+    controller.render(value);
 }
 
-export function syncManifoldSliders() {
-    for (let i = 0; i < controllers.length; i++) controllers[i].syncUI();
+export function setManifoldTransformationSpeed(plane, speed) {
+    const config = PLANE_CONFIGS[plane];
+    if (!config) throw new Error(`Unknown manifold plane: ${plane}.`);
+    state[config.speedKey] = Number(speed);
 }
 
-export function syncManifoldTransformationPlayPauseButton() {
-    for (let i = 0; i < controllers.length; i++) controllers[i].syncUI();
+export function syncManifoldRenderers() {
+    for (let i = 0; i < controllers.length; i++) controllers[i].syncRuntime();
 }
 
 export function disposeThreeJSRenderers() {

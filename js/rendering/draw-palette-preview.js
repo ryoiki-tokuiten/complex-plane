@@ -1,9 +1,7 @@
 import { state } from '../store/state.js';
 import { domainColorForValue } from './domain-coloring.js';
-import { domainPalettes } from '../constants/domain-palettes.js';
 import { SURFACE_PALETTES } from '../constants/surface-palettes.js';
 import { DOMAIN_COLOR_LOG_MAGNITUDE_MAX, DOMAIN_COLOR_LOG_MAGNITUDE_MIN } from '../constants/domain-dynamics.js';
-const $ = id => typeof id === 'string' ? document.getElementById(id) : id;
 
 function drawPaletteCircleAnnotations(ctx, cx, cy, rOuter, rInner) {
     const style = getComputedStyle(document.documentElement);
@@ -149,18 +147,12 @@ function drawSurfaceAmplitudeStrip(canvas, paletteId) {
     ctx.fillRect(0, 0, w, h);
 }
 
-export function updateDomainPaletteCirclePanel() {
-    const activePalette = domainPalettes.find(p => p.id === state.domainPalette) || domainPalettes[0];
-    const title = $('domain_palette_circle_title');
-    if (title) title.textContent = activePalette.name;
-    drawDomainPaletteCircle($('domain_palette_circle_canvas'), state.domainPalette);
-    drawAmplitudeStrip($('amplitude_strip_canvas'), state.domainPalette);
+export function drawDomainPalettePreview(circleCanvas, stripCanvas) {
+    drawDomainPaletteCircle(circleCanvas, state.domainPalette);
+    drawAmplitudeStrip(stripCanvas, state.domainPalette);
 }
 
-export function updateSurfacePaletteCirclePanel() {
-    const activePalette = SURFACE_PALETTES.find(p => p.id === state.surfacePalette) || SURFACE_PALETTES.find(p => p.id === 'viridis');
-    const title = $('real_plots_palette_circle_title');
-    if (title && activePalette) title.textContent = activePalette.name;
-    drawSurfacePaletteCircle($('real_plots_palette_circle_canvas'), state.surfacePalette);
-    drawSurfaceAmplitudeStrip($('real_plots_amplitude_strip_canvas'), state.surfacePalette);
+export function drawSurfacePalettePreview(circleCanvas, stripCanvas) {
+    drawSurfacePaletteCircle(circleCanvas, state.surfacePalette);
+    drawSurfaceAmplitudeStrip(stripCanvas, state.surfacePalette);
 }

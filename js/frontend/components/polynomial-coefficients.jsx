@@ -1,18 +1,21 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef } from 'preact/hooks';
-import { context, getStateSignal, mutateState } from '../../store/state.js';
+import { context, mutateState } from '../../store/state.js';
+import { useAppState } from '../state-hooks.js';
 import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
-import { toggleAnimation } from '../../ui/animation.js';
+import { toggleAnimation } from '../animation-controller.js';
 
 const SPEEDS = ['0.01', '0.1', '0.5', '1', '2'];
 
 function CoefficientControl({ index, part, value }) {
+    useAppState('animationRevision');
     const slider = useRef(null);
     const button = useRef(null);
     const speed = useRef(null);
     const label = part === 're' ? 'Re' : 'Im';
     const idPart = part === 're' ? 'Re' : 'Im';
     const sliderId = `poly_coeff_${idPart}_${index}_slider`;
+    const animating = Boolean(context.animationStates[sliderId]?.animating);
 
     const update = event => {
         const nextValue = Number.parseFloat(event.currentTarget.value);
@@ -24,16 +27,16 @@ function CoefficientControl({ index, part, value }) {
 
     return (
         <div class="control-group">
-            <label for={sliderId}>{label}(a<sub>{index}</sub>):</label>
-            <output id={`poly_coeff_${idPart}_${index}_value_display`} class="slider-value-output">
-                {Number(value).toFixed(1)}
-            </output>
+            <label for={sliderId}>
+                {label}(a<sub>{index}</sub>): <output id={`poly_coeff_${idPart}_${index}_value_display`} class="slider-value-output">{Number(value).toFixed(1)}</output>
+            </label>
             <div class="slider-container">
                 <input ref={slider} type="range" id={sliderId} min="-5" max="5" step="0.1"
                     value={value} onInput={update} />
                 <button ref={button} id={`play_poly_coeff_${idPart}_${index}_btn`} type="button"
+                    class={animating ? 'active' : ''}
                     onClick={() => toggleAnimation(slider.current, '', button.current, speed.current, true, index, part)}>
-                    Play
+                    {animating ? 'Pause' : 'Play'}
                 </button>
                 <select ref={speed} id={`speed_poly_coeff_${idPart}_${index}_selector`}
                     class="animation-speed-selector" value="1">
@@ -45,8 +48,8 @@ function CoefficientControl({ index, part, value }) {
 }
 
 export function PolynomialCoefficients() {
-    const degree = getStateSignal('polynomialN').value;
-    const coefficients = getStateSignal('polynomialCoeffs').value;
+    const degree = useAppState('polynomialN');
+    const coefficients = useAppState('polynomialCoeffs');
 
     useEffect(() => () => {
         Object.entries(context.animationStates).forEach(([key, animation]) => {

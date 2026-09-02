@@ -70,7 +70,7 @@ test('state signals batch component-facing updates across a transaction', () => 
     dispose();
 });
 
-test('the application store enforces mutually exclusive probe and chaining modes', async () => {
+test('the application store enforces cross-feature UI invariants', async () => {
     const { state } = await import('../js/store/state.js');
     state.chainingEnabled = false;
     state.probeActive = true;
@@ -82,6 +82,17 @@ test('the application store enforces mutually exclusive probe and chaining modes
     assert.equal(state.probeActive, false);
 
     state.chainingEnabled = false;
+
+    state.realPlotsEnabled = false;
+    state.riemannSurfaceEnabled = false;
+    state.laplaceModeEnabled = false;
+    state.show2DContourPlot = true;
+    assert.equal(state.show2DContourPlot, false);
+    state.realPlotsEnabled = true;
+    state.show2DContourPlot = true;
+    assert.equal(state.show2DContourPlot, true);
+    state.realPlotsEnabled = false;
+    assert.equal(state.show2DContourPlot, false);
 });
 
 test('reactive application state excludes DOM and frame-runtime handles', async () => {

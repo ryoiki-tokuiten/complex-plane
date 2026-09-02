@@ -1,5 +1,5 @@
 import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, zPlaneInitialRanges, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
-import { bindGenericPlaneInteractions, invalidateAllCanvasRects } from '../ui/event-listeners.js';
+import { bindGenericPlaneInteractions, invalidateAllCanvasRects } from '../frontend/actions.js';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
@@ -245,161 +245,64 @@ function formatChainingSeed(seed) {
     return `${re} ${imValue < 0 ? '-' : '+'} ${im}i`;
 }
 
-function renderChainingTitle(target, index, derivative = false) {
-    const code = document.createElement('code');
-    code.id = `w-plane-title-func_${index}`;
-    code.textContent = getChainingTitleHTML(index, state.chainingMode);
-    target.replaceChildren(
-        document.createTextNode(`${getChainedOutputLabel()} (Chain ${index}: ${derivative ? 'Derivative of ' : ''}`),
-        code,
-        document.createTextNode(')')
-    );
+function ensureChainedPlaneLists() {
+    if (wCanvasList?.length) return;
+    wCanvasList = [wCanvas];
+    wCtxList = [wCtx];
+    wPlaneParamsList = [wPlaneParams];
+    wPlaneThreeContainersList = [controls.wPlaneThreeContainer];
 }
 
-export function updateChainingTitles() {
-    if (!wCanvasList) return;
-    for (let i = 1; i < wCanvasList.length; i++) {
-        const titleSpan = document.getElementById(`w-plane-title_${i}`);
-        if (titleSpan) {
-            renderChainingTitle(titleSpan, i, state.mapPresentation === 'derivative');
-        }
-    }
-}
-
-function getChainedOutputLabel() {
-    if (state.riemannSurfaceEnabled) return 'Riemann surface';
-    if (state.manifold3dViewEnabled) {
-        return '3D Manifold';
-    }
-    return 'w-plane';
-}
-
-export function updateChainingColumns(count) {
-    if (!wCanvasList || wCanvasList.length === 0) {
-        wCanvasList = [wCanvas];
-        wCtxList = [wCtx];
-        wPlaneParamsList = [wPlaneParams];
-        wPlaneThreeContainersList = [controls.wPlaneThreeContainer];
-    }
-    
-    const chainCount = requireInteger(count, 'Chaining column count');
-    if (chainCount < 1 || chainCount > 1024) {
-        throw new Error('Chaining column count must be from one through 1024.');
-    }
-    const displayCount = chainCount > 25 ? 1 : chainCount;
-    const canvasesRow = document.querySelector('.canvas-row.two-column-layout');
-    if (!canvasesRow) return;
-
-    if (wCanvasList.length === displayCount) {
-        context.wCanvasList = wCanvasList;
-        context.wCtxList = wCtxList;
-        context.wPlaneParamsList = wPlaneParamsList;
-        context.wPlaneThreeContainersList = wPlaneThreeContainersList;
-        return;
-    }
-
-    // Create more planes if needed
-    while (wCanvasList.length < displayCount) {
-        const i = wCanvasList.length;
-        
-        // Clone the w-plane column
-        const originalCol = document.getElementById('w_plane_column');
-        const newCol = originalCol.cloneNode(true);
-        newCol.id = `w_plane_column_${i}`;
-        delete newCol.dataset.handlesBound;
-        delete newCol.dataset.layoutInitialized;
-        newCol.classList.remove('show-edge-handle', 'is-dragging', 'is-resizing');
-        
-        // Remove cloned edge handle bars so the layout manager recreates them with fresh event listeners
-        newCol.querySelectorAll('.panel-edge-handle-bar').forEach(el => el.remove());
-        
-        // Update IDs within the new column
-        const titleSpan = newCol.querySelector('#w-plane-title');
-        if (titleSpan) {
-            titleSpan.id = `w-plane-title_${i}`;
-            renderChainingTitle(titleSpan, i);
-        }
-
-        newCol.querySelectorAll('.riemann-surface-canvas, .riemann-surface-hud').forEach(element => {
-            element.remove();
-        });
-        
-        const newCanvas = newCol.querySelector('#w_plane_canvas');
-        if (newCanvas) {
-            newCanvas.id = `w_plane_canvas_${i}`;
-        }
-        
-        const newThreeContainer = newCol.querySelector('#w_plane_three_container');
-        if (newThreeContainer) {
-            newThreeContainer.id = `w_plane_three_container_${i}`;
-        }
-
-        // Make fullscreen toggle IDs unique for event delegation
-        const fsBtn = newCol.querySelector('#toggle_fullscreen_w_btn');
-        if (fsBtn) {
-            fsBtn.id = `toggle_fullscreen_w_btn_${i}`;
-        }
-
-
-        
-        const probeInfo = newCol.querySelector('#w_plane_probe_info');
-        if (probeInfo) probeInfo.id = `w_plane_probe_info_${i}`;
-        
-        const cauchyInfo = newCol.querySelector('#cauchy_integral_results_info');
-        if (cauchyInfo) cauchyInfo.id = `cauchy_integral_results_info_${i}`;
-
-        // Append to DOM
-        canvasesRow.appendChild(newCol);
-        
-        // Setup contexts and params
-        const ctx = newCanvas.getContext('2d');
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        
-        const params = {
-            width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT,
-            origin: {x:0, y:0}, scale: {x:1, y:1},
-            currentVisXRange: [...wPlaneInitialRanges.x],
-            currentVisYRange: [...wPlaneInitialRanges.y]
-        };
-        
-        wCanvasList.push(newCanvas);
-        wCtxList.push(ctx);
-        wPlaneParamsList.push(params);
-        wPlaneThreeContainersList.push(newThreeContainer);
-
-        // Allow pan/zoom in chained canvases
-        bindGenericPlaneInteractions(newCanvas, params, requestDomainRedraw);
-    }
-    
-    // Remove planes if needed
-    while (wCanvasList.length > displayCount) {
-        const i = wCanvasList.length - 1;
-        const colToRemove = document.getElementById(`w_plane_column_${i}`);
-        disposeRiemannSurface(wCanvasList[i]);
-        wPlaneThreeContainersList[i]?.__threeManifoldsRenderer?.dispose();
-        if (colToRemove) {
-            canvasesRow.removeChild(colToRemove);
-        }
-        wCanvasList.pop();
-        wCtxList.pop();
-        wPlaneParamsList.pop();
-        wPlaneThreeContainersList.pop();
-        context.wPlanarTransformedLayerCacheList?.pop();
-    }
-    
-    // Update the original w_plane title if needed
-    const wPlaneTitleFunc = document.getElementById('w-plane-title-func');
-    if (wPlaneTitleFunc && displayCount > 1) {
-        wPlaneTitleFunc.textContent = getChainingTitleHTML(0, state.chainingMode);
-    }
-    
-    setupVisualParameters(false, false);
+function publishChainedPlaneLists() {
     context.wCanvasList = wCanvasList;
     context.wCtxList = wCtxList;
     context.wPlaneParamsList = wPlaneParamsList;
     context.wPlaneThreeContainersList = wPlaneThreeContainersList;
+}
+
+export function registerChainedPlane(index, canvas, threeContainer) {
+    requireInteger(index, 'Chaining column index');
+    if (!canvas || index < 1 || index > 24) throw new Error('Invalid chained plane registration.');
+    ensureChainedPlaneLists();
+
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    const params = wPlaneParamsList[index] || {
+        width: DEFAULT_CANVAS_WIDTH,
+        height: DEFAULT_CANVAS_HEIGHT,
+        origin: { x: 0, y: 0 },
+        scale: { x: 1, y: 1 },
+        currentVisXRange: [...wPlaneInitialRanges.x],
+        currentVisYRange: [...wPlaneInitialRanges.y]
+    };
+
+    wCanvasList[index] = canvas;
+    wCtxList[index] = ctx;
+    wPlaneParamsList[index] = params;
+    wPlaneThreeContainersList[index] = threeContainer;
+    if (!canvas.dataset.interactionsBound) {
+        canvas.dataset.interactionsBound = 'true';
+        bindGenericPlaneInteractions(canvas, params, requestDomainRedraw);
+    }
+    publishChainedPlaneLists();
+    setupVisualParameters(false, false);
     refreshPanelEdgeHandles(true);
+}
+
+export function unregisterChainedPlane(index) {
+    ensureChainedPlaneLists();
+    const canvas = wCanvasList[index];
+    if (canvas) disposeRiemannSurface(canvas);
+    wPlaneThreeContainersList[index]?.__threeManifoldsRenderer?.dispose();
+    [wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList].forEach(list => {
+        list[index] = null;
+        while (list.length > 1 && list.at(-1) == null) list.pop();
+    });
+    if (context.wPlanarTransformedLayerCacheList?.length > wCanvasList.length) {
+        context.wPlanarTransformedLayerCacheList.length = wCanvasList.length;
+    }
+    publishChainedPlaneLists();
 }
 
 export function downloadCanvasImage(canvas, filename = 'complex-plane.png') {

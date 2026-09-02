@@ -1,5 +1,5 @@
 import { state, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
-import { COLOR_CANVAS_BACKGROUND } from '../constants/colors.js';
+import { getCanvasBackgroundColor, getCanvasTextColor } from '../frontend/theme.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { drawAxes, drawGrid, drawTipToTailVectors, drawSpiral, drawArrowHead } from './canvas-primitives.js';
 
@@ -10,7 +10,7 @@ export function drawLaplaceTimeDomain(ctx, signal, planeParams, frameData) {
     }
 
     ctx.save();
-    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(0, 0, planeParams.width, planeParams.height);
     drawGrid(ctx, planeParams);
     drawAxes(ctx, planeParams, "Time (t)", "f(t)");
@@ -278,9 +278,9 @@ function drawIntegralResult(ctx, windingData, planeParams) {
     const label = 'Center of Mass', labelX = result.x + 15, labelY = result.y - 8;
     ctx.font = 'bold 13px "SF Pro Display", sans-serif';
     const labelWidth = ctx.measureText(label).width;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(labelX - 4, labelY - 14, labelWidth + 8, 20);
-    ctx.fillStyle = 'rgba(255, 240, 100, 1)';
+    ctx.fillStyle = getCanvasTextColor();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(label, labelX, labelY);
@@ -293,7 +293,7 @@ export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameD
     }
 
     ctx.save();
-    ctx.fillStyle = 'rgba(8, 10, 18, 1)';
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(0, 0, planeParams.width, planeParams.height);
 
     if (frameData.points.length === 0) {
@@ -350,16 +350,15 @@ export function drawLaplaceWindingVisualization(ctx, signal, planeParams, frameD
 
     // Equation badge
     ctx.save();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
     ctx.font = '12px "SF Pro Text", -apple-system, sans-serif';
     ctx.textAlign = 'right';
     const eqLabel = Math.abs(frameData.sigma) > 0.01
         ? '∫ g(t) e^-(σ+iω)t dt'
         : 'COM(f) = 1/(t₂-t₁) ∫ g(t) e^(-2πift) dt';
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     const eqWidth = ctx.measureText(eqLabel).width;
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(planeParams.width - eqWidth - 22, 10, eqWidth + 14, 22);
-    ctx.fillStyle = 'rgba(255, 230, 150, 0.95)';
+    ctx.fillStyle = getCanvasTextColor();
     ctx.fillText(eqLabel, planeParams.width - 15, 25);
     ctx.restore();
 
@@ -383,7 +382,7 @@ export function drawLaplaceSpectrum(ctx, spectrum = state.laplaceSpectrum, plane
     if (!ctx || !planeParams) return;
 
     ctx.save();
-    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(0, 0, planeParams.width, planeParams.height);
     drawGrid(ctx, planeParams);
     drawAxes(ctx, planeParams, "Harmonic (k)", "Magnitude |X[k]|");
@@ -433,7 +432,7 @@ export function drawLaplaceComGraph(ctx, comSweep = state.laplaceComSweep, plane
     if (!ctx || !planeParams) return;
 
     ctx.save();
-    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(0, 0, planeParams.width, planeParams.height);
     drawGrid(ctx, planeParams);
     drawAxes(ctx, planeParams, "Frequency (Hz)", "Center of Mass");
@@ -602,9 +601,9 @@ function drawPolesAndZerosOverlay(ctx, planeParams) {
             if (pole.label) {
                 ctx.font = '10px "SF Mono", monospace';
                 const labelWidth = ctx.measureText(pole.label).width;
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillStyle = getCanvasBackgroundColor();
                 ctx.fillRect(canvas.x - labelWidth / 2 - 2, canvas.y + 16, labelWidth + 4, 14);
-                ctx.fillStyle = 'rgba(255, 180, 120, 1)';
+                ctx.fillStyle = getCanvasTextColor();
                 ctx.textAlign = 'center';
                 ctx.fillText(pole.label, canvas.x, canvas.y + 26);
             }

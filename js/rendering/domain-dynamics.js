@@ -21,6 +21,7 @@ import {
     requireInteger
 } from '../utils/numeric-contracts.js';
 import { clonePlain } from '../utils/clone-utils.js';
+import { signal } from '@preact/signals';
 
 const TILE_SIZE = 64;
 const MAX_WORKERS = 16;
@@ -236,7 +237,6 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         polynomialN,
         polynomialCoeffs: clonePlain(runtimeState.polynomialCoeffs),
         fractionalPowerN,
-        branchCutType: runtimeState.branchCutType,
         branchCutAngle,
         zetaContinuationEnabled: runtimeState.zetaContinuationEnabled,
         taylor: taylorSnapshot(runtimeState, functionKey),
@@ -251,8 +251,7 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
         viewport: domainViewportSnapshot(planeParams, width, height)
     };
 
-    if (snapshot.polynomialCoeffs.length !== snapshot.polynomialN + 1 ||
-        (snapshot.branchCutType !== 'draw' && snapshot.branchCutType !== 'ray')) {
+    if (snapshot.polynomialCoeffs.length !== snapshot.polynomialN + 1) {
         throw new Error('Domain dynamics received invalid native map or style parameters.');
     }
 
@@ -309,19 +308,11 @@ function snapshotViewport(viewport) {
     return Object.freeze({ ...viewport });
 }
 
+export const domainProcessing = signal(false);
+
 function setDomainProcessing(isProcessing) {
     runtime.rendering.processingDomainDynamics = isProcessing;
-
-    if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
-        const indicator = document.getElementById('z_plane_rendering_indicator');
-        if (indicator) {
-            if (isProcessing) {
-                indicator.classList.remove('hidden');
-            } else {
-                indicator.classList.add('hidden');
-            }
-        }
-    }
+    domainProcessing.value = isProcessing;
 }
 
 class WorkerNativeDomainDynamicsBackend {

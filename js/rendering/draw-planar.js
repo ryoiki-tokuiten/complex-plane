@@ -2,13 +2,14 @@ import { state as appState, zPlaneParams } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
 import {
-    COLOR_PROBE_MARKER, COLOR_PROBE_NEIGHBORHOOD, COLOR_TEXT_ON_CANVAS,
+    COLOR_PROBE_MARKER, COLOR_PROBE_NEIGHBORHOOD,
     COLOR_CAUCHY_CONTOUR_Z, COLOR_CAUCHY_CONTOUR_W,
     COLOR_PARTICLE, COLOR_FOCI,
     COLOR_PROBE_CONFORMAL_LINE_W_H, COLOR_PROBE_CONFORMAL_LINE_W_V,
     COLOR_PROBE_CONFORMAL_LINE_Z_H, COLOR_PROBE_CONFORMAL_LINE_Z_V,
     STREAMLINE_COLOR_MIN_MAG, STREAMLINE_COLOR_MAX_MAG
 } from '../constants/colors.js';
+import { getCanvasTextColor } from '../frontend/theme.js';
 import {
     TWO_PI, DEFAULT_POINTS_PER_LINE, PROBE_CROSSHAIR_SIZE_FACTOR
 } from '../constants/numerical.js';
@@ -325,10 +326,8 @@ function buildAdaptiveTransformedPolyline(planeParams, mappedTransform, points, 
         toleranceSq: tuning.toleranceSq,
         maxSegmentSq: tuning.maxSegmentSq,
         maxDepth: tuning.maxDepth,
-        hasBranchCuts: baseExpressionHasBranches(appState),
-        branchCutType: appState.branchCutType,
-        branchCutAngle: appState.branchCutAngle,
-        branchCutPoints: appState.branchCutPoints
+        hasBranchCuts: baseExpressionHasBranches(appState) || appState.currentFunction === 'power',
+        branchCutAngle: appState.branchCutAngle
     });
 }
 
@@ -563,10 +562,8 @@ function buildTransformGridGeometry(mappedTransform, start, end, sampleCount, pl
         renderLimit,
         jumpThresholdSq,
         toleranceSq,
-        hasBranchCuts: baseExpressionHasBranches(appState),
-        branchCutType: appState.branchCutType,
-        branchCutAngle: appState.branchCutAngle,
-        branchCutPoints: appState.branchCutPoints
+        hasBranchCuts: baseExpressionHasBranches(appState) || appState.currentFunction === 'power',
+        branchCutAngle: appState.branchCutAngle
     });
 }
 
@@ -632,10 +629,8 @@ function prepareNativeLinearGeometries(planeParams, mappedTransform, pointSets, 
         renderLimit,
         jumpThresholdSq,
         toleranceSq: tuning.toleranceSq,
-        hasBranchCuts: baseExpressionHasBranches(appState),
-        branchCutType: appState.branchCutType,
-        branchCutAngle: appState.branchCutAngle,
-        branchCutPoints: appState.branchCutPoints
+        hasBranchCuts: baseExpressionHasBranches(appState) || appState.currentFunction === 'power',
+        branchCutAngle: appState.branchCutAngle
     });
     if (cache.size + geometries.length >= 2048) cache.clear();
     for (let index = 0; index < geometries.length; index += 1) {
@@ -1364,7 +1359,7 @@ function drawFunctionFociOverlay(ctx, planeParams) {
 
         ctx.font = "10px 'SF Pro Text',sans-serif";
         ctx.textAlign = 'center';
-        ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
+        ctx.fillStyle = getCanvasTextColor();
         ctx.fillText(
             'Foci: ±1',
             planeParams.origin.x,
@@ -1400,12 +1395,19 @@ export function drawPlanarInputOverlays(ctx, planeParams) {
             strokeComplexArrayOnPlane(ctx, planeParams, points);
         });
     };
-    if (appState.branchCutType === 'draw') {
-        drawOverlayPath(appState.branchCutPoints, '#fb7185', [7, 5]);
+    const xRange = getPlaneXRanges(planeParams);
+    const yRange = getPlaneYRanges(planeParams);
+    const length = Math.max(Math.abs(xRange[0]), Math.abs(xRange[1]), Math.abs(yRange[0]), Math.abs(yRange[1])) * 2;
+    const fn = appState.currentFunction;
+    if (fn === 'asin') {
+        drawOverlayPath([{ re: 1, im: 0 }, { re: length, im: 0 }], '#fb7185', [7, 5]);
+        drawOverlayPath([{ re: -1, im: 0 }, { re: -length, im: 0 }], '#fb7185', [7, 5]);
+    } else if (fn === 'atan') {
+        drawOverlayPath([{ re: 0, im: 1 }, { re: 0, im: length }], '#fb7185', [7, 5]);
+        drawOverlayPath([{ re: 0, im: -1 }, { re: 0, im: -length }], '#fb7185', [7, 5]);
+    } else if (fn === 'loggamma') {
+        drawOverlayPath([{ re: 0, im: 0 }, { re: -length, im: 0 }], '#fb7185', [7, 5]);
     } else if (Number.isFinite(appState.branchCutAngle)) {
-        const xRange = getPlaneXRanges(planeParams);
-        const yRange = getPlaneYRanges(planeParams);
-        const length = Math.max(Math.abs(xRange[0]), Math.abs(xRange[1]), Math.abs(yRange[0]), Math.abs(yRange[1])) * 2;
         drawOverlayPath([
             { re: 0, im: 0 },
             { re: length * Math.cos(appState.branchCutAngle), im: length * Math.sin(appState.branchCutAngle) }

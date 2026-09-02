@@ -1,4 +1,4 @@
-import { state } from '../store/state.js';
+import { state } from './state.js';
 
 export function initializePolynomialCoeffs(n, preserveExisting = false) {
     const previous = preserveExisting ? state.polynomialCoeffs : [];

@@ -46,29 +46,8 @@ static int ray_crossing(ce_complex a, ce_complex b, double angle) {
     return ar + (br - ar) * t > CE_CROSSING_EPSILON;
 }
 
-static int segment_crossing(ce_complex a, ce_complex b, ce_complex c, ce_complex d) {
-    if (!finite_point(a) || !finite_point(b) || !finite_point(c) || !finite_point(d)) return 0;
-    const double path_re = b.re - a.re;
-    const double path_im = b.im - a.im;
-    const double cut_re = d.re - c.re;
-    const double cut_im = d.im - c.im;
-    const double denominator = path_re * cut_im - path_im * cut_re;
-    if (fabs(denominator) <= CE_CROSSING_EPSILON) return 0;
-    const double offset_re = c.re - a.re;
-    const double offset_im = c.im - a.im;
-    const double path_t = (offset_re * cut_im - offset_im * cut_re) / denominator;
-    const double cut_t = (offset_re * path_im - offset_im * path_re) / denominator;
-    return path_t > CE_CROSSING_EPSILON && path_t <= 1.0 + CE_CROSSING_EPSILON &&
-        cut_t >= -CE_CROSSING_EPSILON && cut_t <= 1.0 + CE_CROSSING_EPSILON;
-}
-
-static int crosses_cut(ce_complex a, ce_complex b, uint32_t is_drawn, double angle,
-                       const ce_complex *points, uint32_t point_count) {
-    if (!is_drawn || !points || point_count < 2) return ray_crossing(a, b, angle);
-    for (uint32_t index = 1; index < point_count; ++index) {
-        if (segment_crossing(a, b, points[index - 1], points[index])) return 1;
-    }
-    return 0;
+static int crosses_cut(ce_complex a, ce_complex b, double angle) {
+    return ray_crossing(a, b, angle);
 }
 
 static int chord_fits(const ce_complex *source, uint32_t start, uint32_t end,
@@ -149,19 +128,15 @@ int32_t ce_build_planar_line(const ce_map_config *config,
                              uint32_t sample_count,
                              double scale_x, double scale_y, double render_limit,
                              double jump_threshold_sq, double tolerance_sq,
-                             uint32_t has_branch_cuts, uint32_t branch_cut_is_drawn,
-                             double branch_cut_angle, const ce_complex *branch_cut_points,
-                             uint32_t branch_cut_point_count, ce_complex *output,
-                             uint32_t output_capacity) {
+                             uint32_t has_branch_cuts, double branch_cut_angle,
+                             ce_complex *output, uint32_t output_capacity) {
     if (!config || !output || !sample_count || sample_count > 1000000u ||
         !isfinite(start_re) || !isfinite(start_im) || !isfinite(end_re) || !isfinite(end_im) ||
         !isfinite(scale_x) || scale_x == 0.0 || !isfinite(scale_y) || scale_y == 0.0 ||
         !isfinite(render_limit) || !(render_limit > 0.0) ||
         !isfinite(jump_threshold_sq) || jump_threshold_sq < 0.0 ||
         !isfinite(tolerance_sq) || tolerance_sq < 0.0 ||
-        has_branch_cuts > 1u || branch_cut_is_drawn > 1u || !isfinite(branch_cut_angle) ||
-        (has_branch_cuts && branch_cut_is_drawn &&
-         (!branch_cut_points || branch_cut_point_count < 2u)) ||
+        has_branch_cuts > 1u || !isfinite(branch_cut_angle) ||
         !ensure_scratch(sample_count + 1u)) return -1;
     const ce_complex start = {start_re, start_im};
     const ce_complex end = {end_re, end_im};
@@ -193,8 +168,7 @@ int32_t ce_build_planar_line(const ce_map_config *config,
                 const double dre = mapped.re - previous.re;
                 const double dim = mapped.im - previous.im;
                 usable = dre * dre + dim * dim <= jump_threshold_sq &&
-                    (!has_branch_cuts || !crosses_cut(previous_source, source, branch_cut_is_drawn,
-                        branch_cut_angle, branch_cut_points, branch_cut_point_count));
+                    (!has_branch_cuts || !crosses_cut(previous_source, source, branch_cut_angle));
             }
         }
         if (!usable) {
@@ -223,26 +197,21 @@ int32_t ce_build_planar_lines(const ce_map_config *config,
                               const uint32_t *sample_counts, uint32_t line_count,
                               double scale_x, double scale_y, double render_limit,
                               double jump_threshold_sq, double tolerance_sq,
-                              uint32_t has_branch_cuts, uint32_t branch_cut_is_drawn,
-                              double branch_cut_angle, const ce_complex *branch_cut_points,
-                              uint32_t branch_cut_point_count, ce_complex *output,
-                              uint32_t output_capacity, uint32_t *line_offsets) {
+                              uint32_t has_branch_cuts, double branch_cut_angle,
+                              ce_complex *output, uint32_t output_capacity, uint32_t *line_offsets) {
     if (!config || !starts || !ends || !sample_counts || !line_count || !output || !line_offsets ||
         !isfinite(scale_x) || scale_x == 0.0 || !isfinite(scale_y) || scale_y == 0.0 ||
         !isfinite(render_limit) || !(render_limit > 0.0) ||
         !isfinite(jump_threshold_sq) || jump_threshold_sq < 0.0 ||
         !isfinite(tolerance_sq) || tolerance_sq < 0.0 || has_branch_cuts > 1u ||
-        branch_cut_is_drawn > 1u || !isfinite(branch_cut_angle) ||
-        (has_branch_cuts && branch_cut_is_drawn &&
-         (!branch_cut_points || branch_cut_point_count < 2u))) return -1;
+        !isfinite(branch_cut_angle)) return -1;
     uint32_t output_count = 0;
     line_offsets[0] = 0;
     for (uint32_t line = 0; line < line_count; ++line) {
         const int32_t count = ce_build_planar_line(
             config, starts[line].re, starts[line].im, ends[line].re, ends[line].im,
             sample_counts[line], scale_x, scale_y, render_limit, jump_threshold_sq,
-            tolerance_sq, has_branch_cuts, branch_cut_is_drawn, branch_cut_angle,
-            branch_cut_points, branch_cut_point_count, output + output_count,
+            tolerance_sq, has_branch_cuts, branch_cut_angle, output + output_count,
             output_capacity - output_count
         );
         if (count < 0) return count;
@@ -316,10 +285,8 @@ int32_t ce_build_planar_polyline(const ce_map_config *config,
                                  double scale_x, double scale_y, double render_limit,
                                  double jump_threshold_sq, double tolerance_sq,
                                  double max_segment_sq, uint32_t max_depth,
-                                 uint32_t has_branch_cuts, uint32_t branch_cut_is_drawn,
-                                 double branch_cut_angle, const ce_complex *branch_cut_points,
-                                 uint32_t branch_cut_point_count, ce_complex *output,
-                                 uint32_t output_capacity) {
+                                 uint32_t has_branch_cuts, double branch_cut_angle,
+                                 ce_complex *output, uint32_t output_capacity) {
     if (!config || !input || !input_count || !output || !output_capacity ||
         !isfinite(origin_x) || !isfinite(origin_y) ||
         !isfinite(scale_x) || scale_x == 0.0 || !isfinite(scale_y) || scale_y == 0.0 ||
@@ -327,9 +294,7 @@ int32_t ce_build_planar_polyline(const ce_map_config *config,
         !isfinite(jump_threshold_sq) || jump_threshold_sq < 0.0 ||
         !isfinite(tolerance_sq) || tolerance_sq < 0.0 ||
         !isfinite(max_segment_sq) || !(max_segment_sq > 0.0) || max_depth > 20u ||
-        has_branch_cuts > 1u || branch_cut_is_drawn > 1u || !isfinite(branch_cut_angle) ||
-        (has_branch_cuts && branch_cut_is_drawn &&
-         (!branch_cut_points || branch_cut_point_count < 2u))) return -1;
+        has_branch_cuts > 1u || !isfinite(branch_cut_angle)) return -1;
     adaptive_job job = {config, origin_x, origin_y, scale_x, scale_y, render_limit,
                         tolerance_sq, max_segment_sq, max_depth, output, output_capacity, 0, 0};
     int has_previous = 0;
@@ -344,8 +309,7 @@ int32_t ce_build_planar_polyline(const ce_map_config *config,
             job.open = 0;
             continue;
         }
-        if (has_previous && has_branch_cuts && crosses_cut(previous_source, source, branch_cut_is_drawn,
-                branch_cut_angle, branch_cut_points, branch_cut_point_count)) {
+        if (has_previous && has_branch_cuts && crosses_cut(previous_source, source, branch_cut_angle)) {
             has_previous = 0;
             job.open = 0;
         }

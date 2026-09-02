@@ -1,4 +1,4 @@
-import { state, context, zPlaneParams, wPlaneParams } from './store/state.js';
+import { state, zPlaneParams, wPlaneParams } from './store/state.js';
 import { runtime } from './store/runtime.js';
 import { requestDomainRedraw } from './rendering/redraw-scheduler.js';
 import { ROCKET_DATA_URIS } from './rocket-assets.js';
@@ -9,9 +9,8 @@ import { drawPlanarTransformedLine, drawComplexLineSetOnPlane } from './renderin
 import { isFiniteComplex } from './utils/numeric-contracts.js';
 import { getMediaDisplayDimensions } from './utils/raster-media.js';
 
-const { controls } = context;
-
 const NAVIGATION_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const NAVIGATION_KEYS_LIST = [...NAVIGATION_KEYS];
 let navigationAnimationFrame = null;
 
 // ── Rocket image assets ────────────────────────────────────────────────────────
@@ -59,22 +58,6 @@ function isNavigationFormTarget(target) {
     return !!(target && target.closest && target.closest('input, select, textarea, button, [contenteditable="true"]'));
 }
 
-export function initializeNavigationStateFromControls() {
-    state.navigationSize ||= 0.55;
-    state.navigationOpacity ||= 0.9;
-    state.navigationSpeed ||= 1.1;
-    state.navigationTrailLength ||= 0;
-    syncNavigationControls();
-}
-
-export function syncNavigationControls() {
-    const inSpecialMode = state.laplaceModeEnabled;
-    const keyhintOverlay = document.getElementById('navigation_keyhint_overlay');
-    if (keyhintOverlay) {
-        keyhintOverlay.classList.toggle('hidden', !state.navigationModeEnabled || inSpecialMode);
-    }
-}
-
 export function setNavigationModeEnabled(enabled) {
     if (enabled && state.laplaceModeEnabled) {
         enabled = false;
@@ -86,14 +69,12 @@ export function setNavigationModeEnabled(enabled) {
     if (enabled) {
         state.manifold3dViewEnabled = false;
         state.manifoldTransformationEnabled = false;
-        if (controls.enableManifoldTransformationCb) controls.enableManifoldTransformationCb.checked = false;
         followNavigationViewports();
     } else {
         runtime.navigation.keys = {};
+        state.navigationPressedKeys = [];
         stopNavigationLoop();
     }
-
-    syncNavigationControls();
 }
 
 function getNavigationInputVector() {
@@ -122,16 +103,7 @@ export function setNavigationKey(event, pressed) {
 
     event.preventDefault();
     runtime.navigation.keys[event.key] = pressed;
-
-    // Visual feedback on the keyhint widget
-    const keyToDirection = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
-    const dir = keyToDirection[event.key];
-    if (dir) {
-        const el = document.querySelector(`.keyhint-key [data-lucide="arrow-${dir}"]`);
-        if (el && el.parentElement) {
-            el.parentElement.classList.toggle('active', pressed);
-        }
-    }
+    state.navigationPressedKeys = NAVIGATION_KEYS_LIST.filter(key => runtime.navigation.keys[key]);
 
     if (pressed) startNavigationLoop();
     return true;

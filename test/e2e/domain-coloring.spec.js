@@ -45,7 +45,7 @@ async function setZZoomExponentBurst(page, exponents) {
 test.describe('Domain Coloring Rendering', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto('./');
-        await page.waitForFunction(() => document.getElementById('preloader')?.style.display === 'none');
+        await page.waitForFunction(() => window.__state && document.getElementById('z_plane_canvas')?.width > 0);
     });
 
     test('renders domain coloring for polynomial function', async ({ page }) => {

@@ -3,7 +3,7 @@ import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
 
 const { animationStates } = context;
 
-export function toggleAnimation(sliderElement, stateUpdateFn, playButton, speedSelector, isPolyCoeff = false, polyCoeffIndex = -1, polyCoeffPart = '') {
+export function toggleAnimation(sliderElement, stateUpdateFn, _playButton, speedSelector, isPolyCoeff = false, polyCoeffIndex = -1, polyCoeffPart = '') {
     const sliderId = sliderElement.id;
     if (!animationStates[sliderId]) {
         animationStates[sliderId] = {
@@ -18,8 +18,6 @@ export function toggleAnimation(sliderElement, stateUpdateFn, playButton, speedS
     if (animState.animating) {
         animState.animating = false;
         if (animState.frameId) cancelAnimationFrame(animState.frameId);
-        playButton.textContent = 'Play';
-        playButton.classList.remove('active');
     } else {
         animState.animating = true;
         animState.currentAnimatedValue = parseFloat(sliderElement.value); 
@@ -30,9 +28,6 @@ export function toggleAnimation(sliderElement, stateUpdateFn, playButton, speedS
         if (animState.currentAnimatedValue >= max) animState.direction = -1;
         else if (animState.currentAnimatedValue <= min) animState.direction = 1;
         else animState.direction = animState.direction || 1; 
-
-        playButton.textContent = 'Pause';
-        playButton.classList.add('active');
 
         function animationLoop() {
             if (!animState.animating) return;
@@ -56,7 +51,6 @@ export function toggleAnimation(sliderElement, stateUpdateFn, playButton, speedS
 
             const precision = sliderElement.step.includes('.') ? sliderElement.step.split('.')[1].length : 0;
             const displayValue = currentValue.toFixed(precision);
-            sliderElement.value = displayValue; 
             const newNumericValue = parseFloat(displayValue); 
 
             if (isPolyCoeff) {
@@ -73,4 +67,5 @@ export function toggleAnimation(sliderElement, stateUpdateFn, playButton, speedS
         }
         animationLoop();
     }
+    state.animationRevision += 1;
 }

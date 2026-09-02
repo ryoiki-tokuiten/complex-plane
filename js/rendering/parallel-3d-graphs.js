@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { disposeThreeObject } from './three-utils.js';
+import { getCanvasBackgroundColor } from '../frontend/theme.js';
 
 function addLights(scene) {
     scene.add(new THREE.AmbientLight(0xffffff, 0.34));
@@ -38,7 +39,7 @@ export function createOrthographicSceneHost(container, {
         stencil: false,
         preserveDrawingBuffer: true
     });
-    renderer.setClearColor(background);
+    renderer.setClearColor(new THREE.Color(getCanvasBackgroundColor()));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;

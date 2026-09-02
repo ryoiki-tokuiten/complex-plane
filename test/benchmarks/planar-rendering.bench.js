@@ -58,9 +58,7 @@ export async function runPlanarRenderingBenchmarks() {
                 jumpThresholdSq: 65536,
                 toleranceSq: 0.01,
                 hasBranchCuts: false,
-                branchCutType: 'ray',
-                branchCutAngle: Math.PI,
-                branchCutPoints: []
+                branchCutAngle: Math.PI
             });
             for (const geometry of geometries) {
                 for (let index = 0; index < geometry.length; index += 2) {

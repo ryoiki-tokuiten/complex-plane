@@ -35,7 +35,6 @@ subscribeState(() => {
     'polynomialN',
     'polynomialCoeffs',
     'fractionalPowerN',
-    'branchCutType',
     'branchCutAngle',
     'zetaContinuationEnabled',
     'taylorSeriesEnabled',

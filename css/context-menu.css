@@ -1,0 +1,596 @@
+/* Custom Plane Context Menu */
+.plane-context-menu {
+    position: fixed;
+    z-index: 10000;
+    min-width: 200px;
+    padding: 0.35rem 0;
+    background: color-mix(in srgb, var(--card-bg-color, #1e1e28) 92%, var(--bg-color, #12121a));
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid color-mix(in srgb, var(--border-color, #333) 80%, var(--accent-purple, #8c70d0) 20%);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    user-select: none;
+    animation: contextMenuFadeIn 0.12s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.plane-context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: calc(100% - 0.4rem);
+    margin: 0 0.2rem;
+    padding: 0.45rem 0.85rem;
+    background: transparent;
+    border: none;
+    color: var(--text-color, #e0e0e8);
+    font-family: var(--font-family, inherit);
+    font-size: 0.82rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    border-radius: 6px;
+}
+
+.plane-context-menu-item:hover:not(.disabled) {
+    background: color-mix(in srgb, var(--accent-purple, #8c70d0) 25%, transparent);
+    color: var(--text-color);
+}
+
+.plane-context-menu-item.checked {
+    color: color-mix(in srgb, var(--accent-purple, #a68be0) 80%, white);
+}
+
+.plane-context-menu-item.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.plane-context-menu-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--text-secondary-color, #999);
+    flex-shrink: 0;
+}
+
+.plane-context-menu-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--accent-purple, #8c70d0);
+    flex-shrink: 0;
+}
+
+.plane-context-menu-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plane-context-menu-divider {
+    height: 1px;
+    background: color-mix(in srgb, var(--border-color, #333) 80%, transparent);
+    margin: 0.3rem 0;
+}
+
+.plane-context-menu-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 0.5rem;
+    color: var(--text-secondary-color, #999);
+    flex-shrink: 0;
+}
+
+.plane-context-menu-item:hover:not(.disabled) .plane-context-menu-arrow {
+    color: var(--text-color);
+}
+
+.plane-context-submenu-bridge {
+    position: fixed;
+    z-index: 10000;
+    background: transparent;
+}
+
+.panel-snap-indicator {
+    position: absolute;
+    pointer-events: none;
+    border: 1.5px solid rgba(192, 132, 252, 0.45);
+    background: rgba(147, 51, 234, 0.08);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 14px;
+    z-index: 50;
+    transition: left 0.1s cubic-bezier(0.16, 1, 0.3, 1),
+                top 0.1s cubic-bezier(0.16, 1, 0.3, 1),
+                width 0.1s cubic-bezier(0.16, 1, 0.3, 1),
+                height 0.1s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.15s ease;
+    opacity: 0;
+    display: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.panel-snap-indicator.is-active {
+    display: block;
+    opacity: 1;
+}
+
+/* Canvas Shape Controls Overlay (Circle & Line) */
+.canvas-shape-controls-overlay,
+.canvas-radial-steps-overlay {
+    position: absolute;
+    bottom: 8px;
+    z-index: 85;
+    max-width: calc(100% - 16px);
+    background: var(--overlay-glass-bg);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--overlay-glass-border);
+    border-radius: 10px;
+    padding: 6px 10px;
+    box-shadow: var(--shadow-soft, 0 14px 36px rgba(0, 0, 0, 0.45)), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    pointer-events: auto;
+    font-size: 0.72rem;
+    color: var(--text-color);
+}
+
+.canvas-shape-controls-overlay {
+    width: 245px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.canvas-shape-controls-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.canvas-shape-controls-overlay .control-group {
+    margin-bottom: 0;
+}
+
+.canvas-shape-controls-overlay label,
+.canvas-radial-steps-overlay label {
+    font-size: 0.71rem;
+    font-weight: 500;
+    color: var(--text-color, #e2e8f0);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+.canvas-shape-controls-overlay label output,
+.canvas-radial-steps-overlay label output {
+    font-family: var(--font-mono, monospace);
+    font-weight: 600;
+    color: var(--accent-purple, #a78bfa);
+}
+
+.canvas-shape-controls-overlay .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.canvas-shape-controls-overlay .slider-container input[type="range"] {
+    flex: 1;
+    height: 4px;
+}
+
+.canvas-shape-controls-overlay .slider-container button {
+    padding: 1px 6px;
+    font-size: 0.68rem;
+    height: 20px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--accent-purple) 15%, transparent);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.canvas-shape-controls-overlay .slider-container button:hover {
+    background: color-mix(in srgb, var(--accent-purple) 25%, transparent);
+    border-color: var(--accent-purple);
+}
+
+.canvas-shape-controls-overlay .animation-speed-selector {
+    padding: 0 2px;
+    font-size: 0.66rem;
+    height: 20px;
+    border-radius: 5px;
+    background: var(--card-bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    cursor: pointer;
+}
+
+/* Canvas Grid Tuning Overlay */
+.canvas-grid-controls-overlay {
+    position: absolute;
+    z-index: 86;
+    width: 245px;
+    height: fit-content;
+    max-width: calc(100% - 16px);
+    max-height: calc(100% - 16px);
+    overflow-y: auto;
+    background: var(--overlay-glass-bg);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--overlay-glass-border);
+    border-radius: 10px;
+    padding: 7px 10px;
+    box-shadow: var(--shadow-soft, 0 14px 36px rgba(0, 0, 0, 0.45)), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    pointer-events: auto;
+    font-size: 0.72rem;
+    color: var(--text-color);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(167, 139, 250, 0.45) transparent;
+}
+
+.canvas-grid-controls-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-color, #e2e8f0);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.canvas-grid-controls-kicker {
+    color: var(--text-secondary-color, #94a3b8);
+    font-size: 0.62rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.canvas-grid-controls-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+}
+
+.canvas-grid-controls-overlay .control-group {
+    margin-bottom: 0;
+    gap: 3px;
+}
+
+.canvas-grid-controls-overlay label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1px;
+    color: var(--text-color, #e2e8f0);
+    font-size: 0.69rem;
+    font-weight: 500;
+}
+
+.canvas-grid-controls-overlay label output {
+    color: var(--accent-purple, #a78bfa);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.67rem;
+    font-weight: 600;
+}
+
+.canvas-grid-controls-overlay .slider-container,
+.canvas-radial-steps-overlay .slider-container {
+    display: flex;
+    align-items: center;
+}
+
+.canvas-grid-controls-overlay input[type="range"],
+.canvas-radial-steps-overlay .slider-container input[type="range"] {
+    width: 100%;
+    height: 4px;
+}
+
+/* Canvas Radial Discrete Steps Overlay */
+.canvas-radial-steps-overlay {
+    width: 205px;
+}
+
+.canvas-shape-controls-overlay[data-position="bottom-right"],
+.canvas-grid-controls-overlay[data-position="bottom-right"],
+.canvas-radial-steps-overlay[data-position="bottom-right"],
+.canvas-vector-flow-overlay[data-position="bottom-right"] {
+    inset: auto 8px 8px auto;
+}
+
+.canvas-shape-controls-overlay[data-position="bottom-left"],
+.canvas-grid-controls-overlay[data-position="bottom-left"],
+.canvas-radial-steps-overlay[data-position="bottom-left"],
+.canvas-vector-flow-overlay[data-position="bottom-left"] {
+    inset: auto auto 8px 8px;
+}
+
+.canvas-shape-controls-overlay[data-position="top-left"],
+.canvas-grid-controls-overlay[data-position="top-left"],
+.canvas-radial-steps-overlay[data-position="top-left"],
+.canvas-vector-flow-overlay[data-position="top-left"] {
+    inset: 8px auto auto 8px;
+}
+
+.canvas-shape-controls-overlay[data-position="top-right"],
+.canvas-grid-controls-overlay[data-position="top-right"],
+.canvas-radial-steps-overlay[data-position="top-right"],
+.canvas-vector-flow-overlay[data-position="top-right"] {
+    inset: 8px 8px auto auto;
+}
+
+/* Plane Context Submenu Rich Controls & Taylor Series Panel */
+.plane-context-submenu {
+    position: fixed;
+    z-index: 10001;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(167, 139, 250, 0.4) rgba(15, 18, 28, 0.4);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.plane-context-submenu::-webkit-scrollbar {
+    width: 4px;
+}
+
+.plane-context-submenu::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.plane-context-submenu::-webkit-scrollbar-thumb {
+    background: rgba(167, 139, 250, 0.4);
+    border-radius: 4px;
+}
+
+.plane-context-submenu::-webkit-scrollbar-thumb:hover {
+    background: rgba(167, 139, 250, 0.7);
+}
+
+#plane_context_submenu #domain_coloring_options_div,
+#plane_context_submenu #manifold_options_div,
+#plane_context_submenu #riemann_surface_options_div {
+    width: 380px;
+    max-width: min(420px, 92vw);
+    padding: 10px 14px;
+    margin: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+#plane_context_submenu #domain_coloring_options_div .viz-settings-grid,
+#plane_context_submenu #riemann_surface_options_div .viz-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem 1rem;
+}
+
+#plane_context_submenu #domain_coloring_options_div .viz-control-span-2,
+#plane_context_submenu #riemann_surface_options_div .viz-control-span-2 {
+    grid-column: 1 / -1;
+}
+
+#plane_context_submenu #domain_coloring_options_div label.slider-label {
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#plane_context_submenu .range-control {
+    min-width: 0;
+}
+
+#plane_context_submenu .range-control .slider-container,
+#plane_context_submenu .range-control input[type="range"] {
+    width: 100%;
+    min-width: 0;
+}
+
+#plane_context_submenu #riemann_surface_options_div .riemann-surface-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#plane_context_submenu #manifold_options_div .control-group {
+    margin-bottom: 8px;
+}
+
+#plane_context_submenu .taylor-series-panel {
+    width: 290px;
+    max-width: 90vw;
+    padding: 8px 10px;
+    margin: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+#plane_context_submenu .taylor-series-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#plane_context_submenu .taylor-series-title {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 0;
+    letter-spacing: -0.01em;
+}
+
+#plane_context_submenu .taylor-series-center-status {
+    padding: 0;
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: transparent;
+    border: none;
+    color: #c084fc;
+    font-family: 'SF Mono', 'Roboto Mono', monospace;
+    max-width: 55%;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#plane_context_submenu .taylor-series-card {
+    margin-bottom: 6px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#plane_context_submenu .taylor-series-section-label {
+    font-size: 0.76rem;
+    font-weight: 500;
+    color: #cbd5e1;
+    margin-bottom: 4px;
+}
+
+#plane_context_submenu .taylor-series-preset-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+#plane_context_submenu .taylor-series-preset-btn {
+    padding: 3px 7px;
+    font-size: 0.74rem;
+    font-weight: 500;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--text-color) 6%, transparent);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#plane_context_submenu .taylor-series-preset-btn:hover {
+    background: color-mix(in srgb, var(--accent-purple) 20%, transparent);
+    border-color: var(--accent-purple);
+    color: var(--text-color);
+}
+
+#plane_context_submenu .taylor-series-preset-btn.toggle-active {
+    background: color-mix(in srgb, var(--accent-purple) 35%, transparent);
+    border-color: var(--accent-purple);
+    color: var(--text-color) !important;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent-purple) 35%, transparent);
+}
+
+#plane_context_submenu .taylor-series-input-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+#plane_context_submenu .taylor-series-input-caption {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-secondary-color);
+    margin-bottom: 2px;
+}
+
+#plane_context_submenu .taylor-series-text-input {
+    width: 100%;
+    padding: 4px 6px;
+    font-size: 0.74rem;
+    border-radius: 6px;
+    background: var(--panel-inset-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+#plane_context_submenu .taylor-series-text-input:focus {
+    border-color: #a78bfa;
+    outline: none;
+}
+
+.taylor-pick-center-card {
+    margin-top: 4px;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}
+
+.taylor-pick-center-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 8px;
+    background: rgba(140, 112, 208, 0.16);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(140, 112, 208, 0.35);
+    color: var(--text-color);
+    cursor: pointer;
+    transition: all 0.18s ease;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.taylor-pick-center-btn:hover {
+    background: rgba(140, 112, 208, 0.28);
+    border-color: rgba(167, 139, 250, 0.6);
+    box-shadow: 0 0 16px rgba(167, 139, 250, 0.35);
+}
+
+.taylor-pick-center-btn.is-picking {
+    background: rgba(147, 51, 234, 0.38);
+    border-color: #c084fc;
+    color: var(--text-color);
+    box-shadow: 0 0 14px rgba(192, 132, 252, 0.4), inset 0 0 10px rgba(192, 132, 252, 0.2);
+}

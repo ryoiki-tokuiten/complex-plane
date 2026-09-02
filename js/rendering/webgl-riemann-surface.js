@@ -1,4 +1,5 @@
 import { state, zPlaneParams } from '../store/state.js';
+import { getCanvasBackgroundColor } from '../frontend/theme.js';
 import { computeTaylorSeriesCoefficients } from '../native/map-runtime.js';
 import { ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
@@ -40,6 +41,7 @@ import {
   requireFiniteNumber,
   requireInteger
 } from '../utils/numeric-contracts.js';
+import { publishRiemannSurfaceHud } from './riemann-surface-hud-state.js';
 
 const DEFAULT_CAMERA = Object.freeze({ rotX: -0.82, rotY: 0.62, distance: 3.8 });
 
@@ -74,7 +76,6 @@ const SURFACE_COMPONENT_IDS = Object.freeze({
 });
 
 const ALGEBRAIC_C_FUNCTION_ID = -1;
-const MAX_DRAWN_BRANCH_CUT_POINTS = 32;
 const TAYLOR_MAX_ORDER = 15;
 const TAYLOR_COEFFICIENT_COUNT = TAYLOR_MAX_ORDER + 1;
 
@@ -100,7 +101,6 @@ const UNIFORM_NAMES = Object.freeze({
   uLogBase: 'u_logBase',
   uBesselOrder: 'u_besselOrder',
   uBranchCutAngle: 'u_branchCutAngle',
-  uBranchCutPointCount: 'u_branchCutPointCount',
   uContourParams: 'u_contourParams'
 });
 
@@ -117,8 +117,6 @@ uniform vec2 u_polyCoeffs[11];
 uniform vec2 u_chainSeed;
 uniform vec2 u_taylorCenter;
 uniform vec2 u_taylorCoefficients[${TAYLOR_COEFFICIENT_COUNT}];
-uniform vec2 u_branchCutPoints[${MAX_DRAWN_BRANCH_CUT_POINTS}];
-uniform int u_branchCutPointCount;
 #define u_functionId u_functionParams.x
 #define u_zetaContinuationEnabled u_functionParams.y
 #define u_zetaReflectionBoundary u_functionParams.z
@@ -153,8 +151,7 @@ uniform int u_branchCutPointCount;
 
 const ARRAY_UNIFORMS = Object.freeze([
   { key: 'uPolyCoeffs', name: 'u_polyCoeffs', length: 11 },
-  { key: 'uTaylorCoefficients', name: 'u_taylorCoefficients', length: TAYLOR_COEFFICIENT_COUNT },
-  { key: 'uBranchCutPoints', name: 'u_branchCutPoints', length: MAX_DRAWN_BRANCH_CUT_POINTS }
+  { key: 'uTaylorCoefficients', name: 'u_taylorCoefficients', length: TAYLOR_COEFFICIENT_COUNT }
 ]);
 
 // Immutable CPU-side mesh data is shared across renderers; GPU buffers remain renderer-owned.
@@ -411,23 +408,8 @@ function buildAlgebraicBranchBody(appState) {
 
 const SURFACE_MATH_GLSL = Object.freeze({
   complexLnOnSheet: {
-    source: `float branchSegmentDistance(vec2 point, vec2 a, vec2 b) {
-  vec2 delta = b - a;
-  float lengthSquared = dot(delta, delta);
-  float t = lengthSquared > 1.0e-20 ? clamp(dot(point - a, delta) / lengthSquared, 0.0, 1.0) : 0.0;
-  return length(point - (a + t * delta));
-}
-bool pointTouchesDrawnBranchCut(vec2 z, float branchCutWidth) {
-  if (u_branchCutPointCount < 2 || branchCutWidth <= 0.0) return false;
-  for (int index = 1; index < ${MAX_DRAWN_BRANCH_CUT_POINTS}; index++) {
-    if (index >= u_branchCutPointCount) break;
-    if (branchSegmentDistance(z, u_branchCutPoints[index - 1], u_branchCutPoints[index]) < branchCutWidth) return true;
-  }
-  return false;
-}
-bool pointTouchesActiveBranchCut(vec2 z, float branchCutWidth) {
+    source: `bool pointTouchesActiveBranchCut(vec2 z, float branchCutWidth) {
   if (branchCutWidth <= 0.0) return false;
-  if (u_branchCutPointCount >= 2) return pointTouchesDrawnBranchCut(z, branchCutWidth);
   vec2 ray = vec2(cos(u_branchCutAngle), sin(u_branchCutAngle));
   vec2 rotated = vec2(dot(z, ray), -z.x * ray.y + z.y * ray.x);
   return rotated.x > 0.0 && abs(rotated.y) < branchCutWidth;
@@ -486,13 +468,11 @@ bool complexLnOnSheet(vec2 z, float branchIndex, float branchCutWidth, out vec2 
     return complexLnOnSheet(z, branchIndex, branchCutWidth, mapped);
   }` : ''}
   ${(!usedFids || usedFids.has(15)) ? `if (abs(fId - 15.0) < 0.5) {
-    float nearestInteger = floor(fracPower + 0.5);
-    bool isIntegerPower = abs(fracPower - nearestInteger) < 1.0e-5;
     return complexPowRealOnSheet(
       z,
       fracPower,
-      isIntegerPower ? 0.0 : branchIndex,
-      isIntegerPower ? 0.0 : branchCutWidth,
+      branchIndex,
+      branchCutWidth,
       mapped
     );
   }` : ''}
@@ -1664,12 +1644,6 @@ function createOverlayCanvas() {
   return canvas;
 }
 
-function createHud() {
-  const hud = document.createElement('div');
-  hud.className = 'riemann-surface-hud hidden';
-  return hud;
-}
-
 function getWebGLContext(canvas) {
   const gl = canvas.getContext('webgl', {
     antialias: true,
@@ -1777,30 +1751,7 @@ function uploadComplexFunctionUniforms(gl, locations, appState, renderer) {
   gl.uniform2f(locations.uExpBase, complexRe(expBase), complexIm(expBase));
   gl.uniform2f(locations.uLogBase, complexRe(logBase), complexIm(logBase));
   gl.uniform2f(locations.uBesselOrder, complexRe(besselOrder), complexIm(besselOrder));
-  gl.uniform1f(locations.uBranchCutAngle,
-    appState.branchCutType === 'ray'
-      ? requireFiniteNumber(appState.branchCutAngle, 'Riemann branch-cut angle')
-      : Math.PI
-  );
-  const drawnCut = appState.branchCutType === 'draw' && Array.isArray(appState.branchCutPoints)
-    ? appState.branchCutPoints
-    : EMPTY_ARRAY;
-  const cutCount = Math.min(MAX_DRAWN_BRANCH_CUT_POINTS, drawnCut.length);
-  gl.uniform1i(locations.uBranchCutPointCount, cutCount);
-  const cutData = renderer.branchCutUniformData;
-  cutData.fill(0);
-  if (cutCount > 0) {
-    const sourceStep = cutCount > 1 ? (drawnCut.length - 1) / (cutCount - 1) : 0;
-    for (let index = 0; index < cutCount; index += 1) {
-      const point = requireFiniteComplex(
-        drawnCut[Math.round(index * sourceStep)],
-        `Riemann branch-cut point ${index}`
-      );
-      cutData[index * 2] = complexRe(point);
-      cutData[index * 2 + 1] = complexIm(point);
-    }
-    uploadComplexUniformArray(gl, locations.uBranchCutPoints, cutData);
-  }
+  gl.uniform1f(locations.uBranchCutAngle, requireFiniteNumber(appState.branchCutAngle, 'Riemann branch-cut angle'));
 
   const mobiusA = requireFiniteComplex(appState.mobiusA, 'Riemann Möbius coefficient a');
   const mobiusB = requireFiniteComplex(appState.mobiusB, 'Riemann Möbius coefficient b');
@@ -1936,7 +1887,6 @@ function setCommonUniforms(renderer, options) {
 }
 
 function updateHud(renderer, branchIndices, hasBranches, stage) {
-  const backendLabel = renderer.backendLabel;
   const component = state.riemannSurfaceComponent;
   let componentLabel = HUD_COMPONENT_LABEL_CACHE.get(component);
   if (!componentLabel) {
@@ -1952,8 +1902,8 @@ function updateHud(renderer, branchIndices, hasBranches, stage) {
   }
 
   const stageLabel = state.chainingEnabled ? (CHAIN_STAGE_LABELS[stage] || `iteration ${stage}`) : 'output';
-  const text = `${stageLabel} | ${componentLabel} | ${branchLabel} | GPU: ${backendLabel}`;
-  if (renderer.hud.textContent !== text) renderer.hud.textContent = text;
+  const text = `${stageLabel} | ${componentLabel} | ${branchLabel}`;
+  publishRiemannSurfaceHud(renderer.planeIndex, { text });
 }
 
 function ensureCurrentProgram(renderer, signature = getRiemannSurfaceProgramSignature(state)) {
@@ -1990,9 +1940,13 @@ function configureDrawState(renderer) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.disable(gl.CULL_FACE);
-    gl.clearColor(0.027, 0.031, 0.063, 1);
     renderer.drawStateConfigured = true;
   }
+  const hex = getCanvasBackgroundColor();
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  gl.clearColor(r, g, b, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 }
 
@@ -2068,7 +2022,7 @@ function drawRenderer(renderer, options = renderer.lastOptions, signature = getR
   bindGridAttribute(renderer);
   setCommonUniforms(renderer, options);
 
-  const hasBranches = baseExpressionHasBranches(state);
+  const hasBranches = baseExpressionHasBranches(state) || state.currentFunction === 'power';
   const branchIndices = getCachedBranchIndices(
     state.riemannSurfaceSheets,
     state.riemannSurfaceBranchCenter,
@@ -2094,14 +2048,14 @@ function showRenderer(renderer) {
   if (renderer.visible) return;
   renderer.visible = true;
   renderer.canvas.classList.remove('hidden');
-  renderer.hud.classList.remove('hidden');
+  publishRiemannSurfaceHud(renderer.planeIndex, { visible: true });
 }
 
 function hideRenderer(renderer) {
   if (!renderer.visible) return;
   renderer.visible = false;
   renderer.canvas.classList.add('hidden');
-  renderer.hud.classList.add('hidden');
+  publishRiemannSurfaceHud(renderer.planeIndex, { visible: false });
 }
 
 function resetRendererCamera(renderer) {
@@ -2125,6 +2079,7 @@ class RiemannSurfaceRendererFactory {
     const renderer = this.#ensure(baseCanvas);
     if (!renderer) return false;
 
+    renderer.planeIndex = Number.isInteger(options.planeIndex) ? options.planeIndex : 0;
     showRenderer(renderer);
     const frameOptions = renderer.frameOptions;
     frameOptions.stage = normalizeStage(options.stage);
@@ -2169,7 +2124,7 @@ class RiemannSurfaceRendererFactory {
     if (renderer.continuationBuffer) gl.deleteBuffer(renderer.continuationBuffer);
 
     renderer.canvas.remove();
-    renderer.hud.remove();
+    publishRiemannSurfaceHud(renderer.planeIndex, { visible: false, text: '' });
     this.#activeRenderers.delete(renderer);
     this.#rendererByBaseCanvas.delete(baseCanvas);
   }
@@ -2203,14 +2158,12 @@ class RiemannSurfaceRendererFactory {
     const gl = getWebGLContext(canvas);
     if (!gl) return null;
 
-    const hud = createHud();
     parent.appendChild(canvas);
-    parent.appendChild(hud);
 
     const renderer = {
       baseCanvas,
       canvas,
-      hud,
+      planeIndex: 0,
       gl,
       program: null,
       programSignature: null,
@@ -2222,7 +2175,6 @@ class RiemannSurfaceRendererFactory {
       projectionMatrix: new Float32Array(16),
       polyCoeffUniformData: new Float32Array(22),
       taylorCoeffUniformData: new Float32Array(TAYLOR_COEFFICIENT_COUNT * 2),
-      branchCutUniformData: new Float32Array(MAX_DRAWN_BRANCH_CUT_POINTS * 2),
       continuationData: new Float32Array(4096 * 3),
       continuationProgram: null,
       continuationLocations: null,
@@ -2266,7 +2218,6 @@ class RiemannSurfaceRendererFactory {
     if (!rebuildProgram(renderer)) {
       renderer.disposeInteraction();
       canvas.remove();
-      hud.remove();
       return null;
     }
 

@@ -1,11 +1,12 @@
 /** @jsxImportSource preact */
 import { Fragment } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { getStateSignal, state } from '../../store/state.js';
+import { state } from '../../store/state.js';
+import { useAppState } from '../state-hooks.js';
 import {
     applyDynamicPlottingPresetFromUI,
     updateDynamicPlotting
-} from '../../ui/dynamic-plotting-state.js';
+} from '../dynamic-plotting-state.js';
 import {
     getDynamicPlotResult,
     getDynamicPlottingPresets,
@@ -120,7 +121,7 @@ function DynamicExampleCount() {
 }
 
 function DynamicExampleGallery() {
-    const active = getStateSignal('dynamicPlotting').value.preset;
+    const active = useAppState('dynamicPlotting').preset;
     return getDynamicPlottingPresets().filter(item => item.id !== 'custom').map(preset => (
         <button key={preset.id} type="button" class={`dynamic-example-button${active === preset.id ? ' is-active' : ''}`}
             data-dynamic-preset={preset.id} onClick={event => {
@@ -177,7 +178,7 @@ function ProductFactor({ factor, index, factors }) {
 }
 
 function DynamicTermFactors() {
-    const dynamic = getStateSignal('dynamicPlotting').value;
+    const dynamic = useAppState('dynamicPlotting');
     if (dynamic.term?.kind !== 'expression') return null;
     let factors;
     try {
@@ -280,7 +281,7 @@ function bindingPreview(symbol) {
 }
 
 function SequenceBinding({ binding, index }) {
-    const dynamic = getStateSignal('dynamicPlotting').value;
+    const dynamic = useAppState('dynamicPlotting');
     const setKind = kind => updateBinding(index, (target, bindings) => {
         if (kind === 'parameter' || kind === 'parameter_real') {
             bindings.forEach(other => {
@@ -309,28 +310,22 @@ function SequenceBinding({ binding, index }) {
 }
 
 function DynamicSequenceBindings() {
-    getStateSignal('dynamicPlotting').value;
+    useAppState('dynamicPlotting');
     return getDynamicTermBindings().map((binding, index) => (
         <SequenceBinding key={binding.id} binding={binding} index={index} />
     ));
 }
 
 function MathNode({ class: className = '', errorClass = 'dynamic-math-error', build, fallback = '' }) {
-    const target = useRef(null);
-    useEffect(() => {
-        const element = target.current;
-        if (!element) return;
-        element.replaceChildren();
-        try {
-            const nodes = build();
-            element.append(...(Array.isArray(nodes) ? nodes : [nodes]));
-            element.classList.remove(errorClass);
-        } catch (error) {
-            element.textContent = fallback || error?.message || '';
-            element.classList.add(errorClass);
-        }
-    }, [build, errorClass, fallback]);
-    return <div ref={target} class={className} />;
+    try {
+        const nodes = build();
+        const html = (Array.isArray(nodes) ? nodes : [nodes])
+            .map(node => node?.outerHTML || String(node?.textContent || ''))
+            .join('');
+        return <div class={className} dangerouslySetInnerHTML={{ __html: html }} />;
+    } catch (error) {
+        return <div class={`${className} ${errorClass}`.trim()}>{fallback || error?.message || ''}</div>;
+    }
 }
 
 function FormulaInput({ id, value, update, ...props }) {
@@ -561,8 +556,8 @@ function playbackCount(dynamic, result) {
 }
 
 export function DynamicPlottingStudio() {
-    const dynamic = getStateSignal('dynamicPlotting').value;
-    const currentFunction = getStateSignal('currentFunction').value;
+    const dynamic = useAppState('dynamicPlotting');
+    const currentFunction = useAppState('currentFunction');
     const [minimized, setMinimized] = useState(false);
     const [helpOpen, setHelpOpen] = useState(false);
     const bindings = getDynamicTermBindings();
@@ -594,11 +589,6 @@ export function DynamicPlottingStudio() {
     const setVisible = value => update(config => {
         config.playback.visibleCount = Math.max(0, Math.min(count, requireInteger(value, 'Dynamic visible count')));
     });
-
-    useEffect(() => {
-        document.body.classList.toggle('dynamic-studio-open', Boolean(dynamic.enabled));
-        return () => document.body.classList.remove('dynamic-studio-open');
-    }, [dynamic.enabled]);
 
     useEffect(() => {
         if (!dynamic.enabled || !dynamic.playback.playing) return undefined;

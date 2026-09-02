@@ -1,7 +1,5 @@
-import { state, context } from '../store/state.js';
+import { state } from '../store/state.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
-
-const { controls } = context;
 
 const GRID_DENSITY_LIMITS = Object.freeze({
     standard: 50,
@@ -24,17 +22,10 @@ function isExtendedGridDensityNeeded(source = state) {
 export function syncGridDensityControls(options = {}) {
     const {
         applyFoldDefault = false,
-        source = state,
-        slider = controls.gridDensitySlider,
-        valueDisplay = controls.gridDensityValueDisplay
+        source = state
     } = options;
 
-    if (!slider) return;
-
     const extended = isExtendedGridDensityNeeded(source);
-    slider.max = extended
-        ? String(GRID_DENSITY_LIMITS.extended)
-        : String(GRID_DENSITY_LIMITS.standard);
 
     if (source.graphLayerLockEnabled) {
         source.gridDensity = GRID_DENSITY_LIMITS.layerLock;
@@ -46,8 +37,9 @@ export function syncGridDensityControls(options = {}) {
         source.gridDensity = GRID_DENSITY_LIMITS.standard;
     }
 
-    slider.value = String(source.gridDensity);
-    if (valueDisplay) {
-        valueDisplay.textContent = String(source.gridDensity);
-    }
+    return extended ? GRID_DENSITY_LIMITS.extended : GRID_DENSITY_LIMITS.standard;
 }
+
+export const gridDensityMax = source => isExtendedGridDensityNeeded(source)
+    ? GRID_DENSITY_LIMITS.extended
+    : GRID_DENSITY_LIMITS.standard;

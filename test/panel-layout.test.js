@@ -7,8 +7,12 @@ import {
     computeRealPlotsLayout,
     findNextAvailableSlot,
     updateWorkspaceBounds,
-    resetAllPanelLayouts
+    resetAllPanelLayouts,
+    positionContour2DPanel,
+    positionNewPanel,
+    refreshPanelLayout
 } from '../js/ui/panel-layout-manager.js';
+import { state } from '../js/store/state.js';
 
 test('Normal Mode Layout fits perfectly inside container with no scrollbar overflow', () => {
     const containerWidth = 1200;
@@ -28,10 +32,10 @@ test('Normal Mode Layout fits perfectly inside container with no scrollbar overf
     const wTop = parseInt(layout.w_plane_column.top, 10);
     const wHeight = parseInt(layout.w_plane_column.height, 10);
 
-    // Padding is 24, gap is 24
-    assert.equal(zLeft, 24);
-    assert.equal(zTop, 24);
-    assert.equal(wTop, 24);
+    // Padding is 0, gap is 24
+    assert.equal(zLeft, 0);
+    assert.equal(zTop, 0);
+    assert.equal(wTop, 0);
     assert.equal(wLeft, zLeft + zWidth + 24);
 
     // Both panels fit strictly within container dimensions (NO overflow)
@@ -52,7 +56,7 @@ test('Normal Mode Layout scales responsibly under smaller or zoomed viewports wi
     const wWidth = parseInt(layout.w_plane_column.width, 10);
 
     assert.ok(wLeft + wWidth <= zoomedWidth, `w right edge (${wLeft + wWidth}) must fit within zoomed width (${zoomedWidth})`);
-    assert.ok(zHeight + 24 <= zoomedHeight, `z height must fit within zoomed height`);
+    assert.ok(zHeight <= zoomedHeight, `z height must fit within zoomed height`);
 });
 
 test('Laplace Mode Layout satisfies exact spatial arrangement specifications', () => {
@@ -105,8 +109,8 @@ test('Laplace Mode Layout satisfies exact spatial arrangement specifications', (
     };
 
     // Row 1: Time Domain (Track 1) and Complex Frequency Domain (Track 2) side by side taking screen height
-    assert.equal(z.top, 24);
-    assert.equal(w.top, 24);
+    assert.equal(z.top, 0);
+    assert.equal(w.top, 0);
     assert.equal(z.height, w.height);
     assert.equal(w.left, z.left + z.width + 24);
 
@@ -125,8 +129,8 @@ test('Laplace Mode Layout satisfies exact spatial arrangement specifications', (
 
     // Right Side: Laplace 3D to the right of Track 2 taking entire vertical space
     assert.equal(laplace3d.left, z.left + fourier.width + 24);
-    assert.equal(laplace3d.top, 24);
-    assert.ok(laplace3d.height >= (com.top + com.height - 24));
+    assert.equal(laplace3d.top, 0);
+    assert.ok(laplace3d.height >= (com.top + com.height));
 });
 
 test('findNextAvailableSlot positions panels cleanly to the far right in horizontal mode', () => {
@@ -208,7 +212,7 @@ test('Spawning dynamic contour_2d in Laplace mode allocates space to the absolut
 
     // In horizontal mode, must go to the right of the rightmost panel (Laplace 3D Surface)
     assert.equal(parseInt(slot.left, 10), laplace3dRight + 24);
-    assert.equal(parseInt(slot.top, 10), 24);
+    assert.equal(parseInt(slot.top, 10), 0);
 });
 
 test('resetAllPanelLayouts clears stored cookies/localStorage and resets container panels', () => {
@@ -227,12 +231,33 @@ test('resetAllPanelLayouts clears stored cookies/localStorage and resets contain
         removeItem(k) { store.delete(k); }
     };
 
+    const zPanel = { id: 'z_plane_column', offsetLeft: 100, offsetTop: 100, offsetWidth: 300, offsetHeight: 300, style: { left: '100px', top: '100px', width: '300px', height: '300px' }, classList: { contains: () => false }, dataset: { layoutInitialized: 'custom' } };
+    const wPanel = { id: 'w_plane_column', offsetLeft: 450, offsetTop: 100, offsetWidth: 300, offsetHeight: 300, style: { left: '450px', top: '100px', width: '300px', height: '300px' }, classList: { contains: () => false }, dataset: { layoutInitialized: 'custom' } };
+    const extender = { style: {} };
+    const container = {
+        clientWidth: 1200,
+        clientHeight: 700,
+        children: [zPanel, wPanel],
+        querySelector: sel => sel === '.workspace-bounds-extender' ? extender : null
+    };
+    globalThis.document = {
+        querySelector: sel => sel === '.canvas-row.two-column-layout' ? container : null,
+        body: { classList: { contains: () => false } }
+    };
+
     resetAllPanelLayouts();
+    delete globalThis.document;
+    delete globalThis.localStorage;
 
     assert.equal(store.has('complex_panelLayout_normal_v8'), false);
     assert.equal(store.has('complex_panelLayout_laplace_v8'), false);
     assert.equal(store.has('complex_panelLayout_normal_v7'), false);
     assert.equal(store.get('unrelated_key'), 'keep_me');
+
+    // Panels must be reset to default layout coordinates immediately (z at 0, w at width+gap)
+    assert.equal(parseInt(zPanel.style.left, 10), 0);
+    assert.equal(parseInt(zPanel.style.top, 10), 0);
+    assert.ok(parseInt(wPanel.style.left, 10) > parseInt(zPanel.style.left, 10));
 });
 
 test('Vertical Mode Layout transposes columns to rows with 100% width and 50% height', () => {
@@ -257,15 +282,15 @@ test('Vertical Mode Layout transposes columns to rows with 100% width and 50% he
     const wTop = parseInt(layout.w_plane_column.top, 10);
     const wWidth = parseInt(layout.w_plane_column.width, 10);
 
-    // In vertical mode: width is 100% available width (containerWidth - 48)
-    assert.equal(zWidth, 800 - 48);
-    assert.equal(wWidth, 800 - 48);
+    // In vertical mode: width is 100% available width (containerWidth)
+    assert.equal(zWidth, 800);
+    assert.equal(wWidth, 800);
 
-    // Stood vertically: z on top (top: 24), w below z (top: 24 + zHeight + 24)
-    assert.equal(zLeft, 24);
-    assert.equal(wLeft, 24);
-    assert.equal(zTop, 24);
-    assert.equal(wTop, 24 + zHeight + 24);
+    // Stood vertically: z on top (top: 0), w below z (top: zHeight + 24)
+    assert.equal(zLeft, 0);
+    assert.equal(wLeft, 0);
+    assert.equal(zTop, 0);
+    assert.equal(wTop, zHeight + 24);
 
     // Clean up document mock
     delete globalThis.document;
@@ -295,10 +320,10 @@ test('Real Plots standalone layout takes the entire available workspace', () => 
     const layout = computeRealPlotsLayout(containerWidth, containerHeight);
 
     assert.ok(layout.real_plots_column);
-    assert.equal(parseInt(layout.real_plots_column.left, 10), 24);
-    assert.equal(parseInt(layout.real_plots_column.top, 10), 24);
-    assert.equal(parseInt(layout.real_plots_column.width, 10), 1400 - 48);
-    assert.equal(parseInt(layout.real_plots_column.height, 10), 900 - 48);
+    assert.equal(parseInt(layout.real_plots_column.left, 10), 0);
+    assert.equal(parseInt(layout.real_plots_column.top, 10), 0);
+    assert.equal(parseInt(layout.real_plots_column.width, 10), 1400);
+    assert.equal(parseInt(layout.real_plots_column.height, 10), 900);
 });
 
 test('Chained columns in Normal Mode layout align side-by-side with uniform gaps', () => {
@@ -340,16 +365,232 @@ test('resolveCollisions supports vertical stacking in the same column without sh
 
     resolveCollisions(zPanel, container);
 
-    // Graph must remain in Column 1 (left: 24, top: 24)
-    assert.equal(parseInt(graphPanel.style.left, 10), 24);
-    assert.equal(parseInt(graphPanel.style.top, 10), 24);
+    // Graph must remain in Column 1 (left: 0, top: 0)
+    assert.equal(parseInt(graphPanel.style.left, 10), 0);
+    assert.equal(parseInt(graphPanel.style.top, 10), 0);
 
-    // Z plane must remain in Column 1 (left: 24, top: 398)
-    assert.equal(parseInt(zPanel.style.left, 10), 24);
-    assert.equal(parseInt(zPanel.style.top, 10), 398);
+    // Z plane must remain in Column 1 (left: 0, top: 374)
+    assert.equal(parseInt(zPanel.style.left, 10), 0);
+    assert.equal(parseInt(zPanel.style.top, 10), 374);
 
-    // W plane is to the right of zPanel (zPanel right: 24+700 = 724 -> wPanel left: 748)
-    assert.equal(parseInt(wPanel.style.left, 10), 748);
-    assert.equal(parseInt(wPanel.style.top, 10), 24);
+    // W plane is to the right of zPanel (zPanel right: 0+700 = 700 -> wPanel left: 724)
+    assert.equal(parseInt(wPanel.style.left, 10), 724);
+    assert.equal(parseInt(wPanel.style.top, 10), 0);
 });
+
+test('positionContour2DPanel places contour_2d to absolute right in horizontal mode', () => {
+    const zPanel = { id: 'z_plane_column', offsetLeft: 24, offsetTop: 24, offsetWidth: 500, offsetHeight: 700, style: { left: '24px', top: '24px', width: '500px', height: '700px' }, classList: { contains: () => false } };
+    const wPanel = { id: 'w_plane_column', offsetLeft: 548, offsetTop: 24, offsetWidth: 500, offsetHeight: 700, style: { left: '548px', top: '24px', width: '500px', height: '700px' }, classList: { contains: () => false } };
+    const contourPanel = { id: 'contour_2d_column', style: {}, classList: { contains: () => false } };
+    const extender = { style: {} };
+
+    const container = {
+        clientWidth: 1400,
+        clientHeight: 800,
+        children: [zPanel, wPanel, contourPanel],
+        querySelector: sel => sel === '#contour_2d_column' ? contourPanel : (sel === '.workspace-bounds-extender' ? extender : null)
+    };
+
+    positionContour2DPanel(container);
+
+    // In horizontal mode, contour_2d must go to the absolute right of wPanel (524 + 500 + 24 = 1048)
+    assert.equal(parseInt(contourPanel.style.left, 10), 1048);
+    assert.equal(parseInt(contourPanel.style.top, 10), 0);
+});
+
+test('positionContour2DPanel places contour_2d to absolute bottom in vertical mode', () => {
+    globalThis.document = {
+        body: { classList: { contains: cls => cls === 'vertical-layout' } }
+    };
+
+    const zPanel = { id: 'z_plane_column', offsetLeft: 24, offsetTop: 24, offsetWidth: 800, offsetHeight: 350, style: { left: '24px', top: '24px', width: '800px', height: '350px' }, classList: { contains: () => false } };
+    const wPanel = { id: 'w_plane_column', offsetLeft: 24, offsetTop: 398, offsetWidth: 800, offsetHeight: 350, style: { left: '24px', top: '398px', width: '800px', height: '350px' }, classList: { contains: () => false } };
+    const contourPanel = { id: 'contour_2d_column', style: {}, classList: { contains: () => false } };
+    const extender = { style: {} };
+
+    const container = {
+        clientWidth: 900,
+        clientHeight: 1000,
+        children: [zPanel, wPanel, contourPanel],
+        querySelector: sel => sel === '#contour_2d_column' ? contourPanel : (sel === '.workspace-bounds-extender' ? extender : null)
+    };
+
+    positionContour2DPanel(container);
+    delete globalThis.document;
+
+    // In vertical mode, contour_2d must go to the absolute bottom of wPanel
+    assert.equal(parseInt(contourPanel.style.left, 10), 0);
+    assert.equal(parseInt(contourPanel.style.top, 10), 748);
+});
+
+test('positionNewPanel automatically positions any new panel to absolute right and resolves collisions', () => {
+    const zPanel = { id: 'z_plane_column', offsetLeft: 24, offsetTop: 24, offsetWidth: 500, offsetHeight: 700, style: { left: '24px', top: '24px', width: '500px', height: '700px' }, classList: { contains: () => false } };
+    const wPanel = { id: 'w_plane_column', offsetLeft: 548, offsetTop: 24, offsetWidth: 500, offsetHeight: 700, style: { left: '548px', top: '24px', width: '500px', height: '700px' }, classList: { contains: () => false } };
+    const graphPanel = { id: 'graph_column', style: {}, classList: { contains: () => false } };
+    const extender = { style: {} };
+
+    const container = {
+        clientWidth: 1800,
+        clientHeight: 800,
+        children: [zPanel, wPanel, graphPanel],
+        querySelector: sel => sel === '.workspace-bounds-extender' ? extender : null
+    };
+
+    positionNewPanel(graphPanel, container);
+
+    // graph_column must be placed to the right of wPanel (524 + 500 + 24 = 1048)
+    assert.equal(parseInt(graphPanel.style.left, 10), 1048);
+    assert.equal(parseInt(graphPanel.style.top, 10), 0);
+});
+
+test('switching between horizontal and vertical layout properly resets panel geometry without leaking', () => {
+    const zPanel = { id: 'z_plane_column', offsetLeft: 24, offsetTop: 24, offsetWidth: 500, offsetHeight: 700, style: { left: '24px', top: '24px', width: '500px', height: '700px' }, classList: { contains: () => false }, dataset: {} };
+    const wPanel = { id: 'w_plane_column', offsetLeft: 548, offsetTop: 24, offsetWidth: 500, offsetHeight: 700, style: { left: '548px', top: '24px', width: '500px', height: '700px' }, classList: { contains: () => false }, dataset: {} };
+    const extender = { style: {} };
+
+    const container = {
+        clientWidth: 1000,
+        clientHeight: 1200,
+        children: [zPanel, wPanel],
+        querySelector: sel => sel === '.workspace-bounds-extender' ? extender : null
+    };
+
+    globalThis.document = {
+        querySelector: sel => sel === '.canvas-row.two-column-layout' ? container : (sel === '.workspace-bounds-extender' ? extender : null),
+        body: { classList: { contains: cls => cls === 'vertical-layout' } }
+    };
+
+    // Trigger layout refresh in vertical mode
+    refreshPanelLayout();
+
+    delete globalThis.document;
+
+    // In vertical mode (width=1000, pad=0): panel width should be 1000 (not the old horizontal 500px)
+    assert.equal(parseInt(zPanel.style.width, 10), 1000);
+    assert.equal(parseInt(wPanel.style.width, 10), 1000);
+
+    // Panels must stack vertically (left: 0, wPanel below zPanel)
+    assert.equal(parseInt(zPanel.style.left, 10), 0);
+    assert.equal(parseInt(wPanel.style.left, 10), 0);
+    assert.ok(parseInt(wPanel.style.top, 10) > parseInt(zPanel.style.top, 10));
+});
+
+test('positionNewPanel automatically positions any new panel to absolute bottom in vertical mode', () => {
+    globalThis.document = {
+        body: { classList: { contains: cls => cls === 'vertical-layout' } }
+    };
+
+    const zPanel = { id: 'z_plane_column', offsetLeft: 24, offsetTop: 24, offsetWidth: 800, offsetHeight: 350, style: { left: '24px', top: '24px', width: '800px', height: '350px' }, classList: { contains: () => false } };
+    const wPanel = { id: 'w_plane_column', offsetLeft: 24, offsetTop: 398, offsetWidth: 800, offsetHeight: 350, style: { left: '24px', top: '398px', width: '800px', height: '350px' }, classList: { contains: () => false } };
+    const graphPanel = { id: 'graph_column', style: {}, classList: { contains: () => false } };
+    const extender = { style: {} };
+
+    const container = {
+        clientWidth: 900,
+        clientHeight: 1000,
+        children: [zPanel, wPanel, graphPanel],
+        querySelector: sel => sel === '.workspace-bounds-extender' ? extender : null
+    };
+
+    positionNewPanel(graphPanel, container);
+    delete globalThis.document;
+
+    // In vertical mode, graphPanel must go below wPanel
+    assert.equal(parseInt(graphPanel.style.left, 10), 0);
+    assert.equal(parseInt(graphPanel.style.top, 10), 748);
+});
+
+test('Laplace and Real Plots modes maintain pristine layouts independently from custom Normal mode panels', () => {
+    const store = new Map();
+    // Simulate user messing up Normal mode panels and saving to localStorage
+    store.set('complex_panelLayout_normal_horiz_v8', JSON.stringify({
+        z_plane_column: { left: '333px', top: '222px', width: '250px', height: '250px' },
+        w_plane_column: { left: '666px', top: '222px', width: '250px', height: '250px' }
+    }));
+
+    globalThis.localStorage = {
+        get length() { return store.size; },
+        key(i) { return Array.from(store.keys())[i]; },
+        getItem(k) { return store.get(k); },
+        setItem(k, v) { store.set(k, v); },
+        removeItem(k) { store.delete(k); }
+    };
+
+    const zPanel = { id: 'z_plane_column', offsetLeft: 333, offsetTop: 222, offsetWidth: 250, offsetHeight: 250, style: { left: '333px', top: '222px', width: '250px', height: '250px' }, classList: { contains: () => false }, dataset: {} };
+    const wPanel = { id: 'w_plane_column', offsetLeft: 666, offsetTop: 222, offsetWidth: 250, offsetHeight: 250, style: { left: '666px', top: '222px', width: '250px', height: '250px' }, classList: { contains: () => false }, dataset: {} };
+    const fourierPanel = { id: 'fourier_3d_column', style: {}, classList: { contains: cls => cls === 'hidden' }, dataset: {} };
+    const comPanel = { id: 'laplace_com_column', style: {}, classList: { contains: cls => cls === 'hidden' }, dataset: {} };
+    const specPanel = { id: 'laplace_spectrum_column', style: {}, classList: { contains: cls => cls === 'hidden' }, dataset: {} };
+    const l3dPanel = { id: 'laplace_3d_column', style: {}, classList: { contains: cls => cls === 'hidden' }, dataset: {} };
+    const realPlotsPanel = { id: 'real_plots_column', style: {}, classList: { contains: cls => cls === 'hidden' }, dataset: {} };
+    const extender = { style: {} };
+
+    const container = {
+        clientWidth: 1400,
+        clientHeight: 900,
+        children: [zPanel, wPanel, fourierPanel, comPanel, specPanel, l3dPanel, realPlotsPanel],
+        querySelector: sel => sel === '.workspace-bounds-extender' ? extender : null
+    };
+
+    globalThis.document = {
+        querySelector: sel => sel === '.canvas-row.two-column-layout' ? container : (sel === '.workspace-bounds-extender' ? extender : null),
+        body: { classList: { contains: () => false } }
+    };
+
+    // 1. Switch to Laplace mode: unhide Laplace panels
+    state.laplaceModeEnabled = true;
+    fourierPanel.classList.contains = () => false;
+    comPanel.classList.contains = () => false;
+    specPanel.classList.contains = () => false;
+    l3dPanel.classList.contains = () => false;
+
+    refreshPanelLayout();
+
+    // In Laplace mode: zPanel and wPanel must NOT have the old 333px/666px custom Normal positions
+    const laplaceDefault = computeLaplaceModeLayout(1400, 900);
+    assert.equal(zPanel.style.left, laplaceDefault.z_plane_column.left);
+    assert.equal(zPanel.style.top, laplaceDefault.z_plane_column.top);
+    assert.equal(wPanel.style.left, laplaceDefault.w_plane_column.left);
+    assert.equal(fourierPanel.style.left, laplaceDefault.fourier_3d_column.left);
+    assert.equal(fourierPanel.style.top, laplaceDefault.fourier_3d_column.top);
+    assert.equal(l3dPanel.style.left, laplaceDefault.laplace_3d_column.left);
+
+    // 2. Switch to Real Plots mode: hide Laplace and Normal, unhide Real Plots
+    state.laplaceModeEnabled = false;
+    state.realPlotsEnabled = true;
+    zPanel.classList.contains = cls => cls === 'hidden';
+    wPanel.classList.contains = cls => cls === 'hidden';
+    fourierPanel.classList.contains = cls => cls === 'hidden';
+    comPanel.classList.contains = cls => cls === 'hidden';
+    specPanel.classList.contains = cls => cls === 'hidden';
+    l3dPanel.classList.contains = cls => cls === 'hidden';
+    realPlotsPanel.classList.contains = () => false;
+
+    refreshPanelLayout();
+
+    // Real Plots must fill the workspace completely (width = 1400, height = 900)
+    assert.equal(parseInt(realPlotsPanel.style.left, 10), 0);
+    assert.equal(parseInt(realPlotsPanel.style.top, 10), 0);
+    assert.equal(parseInt(realPlotsPanel.style.width, 10), 1400);
+    assert.equal(parseInt(realPlotsPanel.style.height, 10), 900);
+
+    // 3. Switch back to Normal mode: custom 250px width/height layout must be cleanly restored
+    state.laplaceModeEnabled = false;
+    state.realPlotsEnabled = false;
+    zPanel.classList.contains = () => false;
+    wPanel.classList.contains = () => false;
+    realPlotsPanel.classList.contains = cls => cls === 'hidden';
+
+    refreshPanelLayout();
+
+    assert.equal(zPanel.style.width, '250px');
+    assert.equal(zPanel.style.height, '250px');
+    assert.equal(wPanel.style.width, '250px');
+    assert.equal(wPanel.style.height, '250px');
+
+    delete globalThis.document;
+    delete globalThis.localStorage;
+});
+
+
 

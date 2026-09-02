@@ -1,6 +1,5 @@
 import { state } from '../store/state.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
-import { syncLaplacePlayPauseButton } from '../ui/ui-updates.js';
 import { requireFiniteNumber } from '../utils/numeric-contracts.js';
 
 // Laplace Transform Animation Controller
@@ -19,7 +18,6 @@ function startLaplaceAnimation() {
     
     state.laplaceAnimationPlaying = true;
     state.laplaceAnimationTime = 0; // Start from beginning
-    syncLaplacePlayPauseButton();
     laplaceLastFrameTime = performance.now();
     
     function animateFrame(timestamp) {
@@ -69,7 +67,6 @@ export function stopLaplaceAnimation() {
         cancelAnimationFrame(laplaceAnimationHandle);
         laplaceAnimationHandle = null;
     }
-    syncLaplacePlayPauseButton();
 }
 
 /**
@@ -89,7 +86,6 @@ export function toggleLaplaceAnimation() {
 export function resetLaplaceAnimation() {
     stopLaplaceAnimation();
     state.laplaceAnimationTime = 0;
-    syncLaplacePlayPauseButton();
     requestUiRedraw();
 }
 
@@ -99,6 +95,5 @@ export function resetLaplaceAnimation() {
 export function showFullLaplaceSpiral() {
     stopLaplaceAnimation();
     state.laplaceAnimationTime = 1.0;
-    syncLaplacePlayPauseButton();
     requestUiRedraw();
 }

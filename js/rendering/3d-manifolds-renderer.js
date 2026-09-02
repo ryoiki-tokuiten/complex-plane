@@ -8,8 +8,8 @@ import { getManifold, DEFAULT_MANIFOLD_ID } from './manifold-registry.js';
 import { buildNativeFoldPreimageMarkers } from '../native/complex-engine.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { getMediaDisplayDimensions } from '../utils/raster-media.js';
+import { getCanvasBackgroundColor } from '../frontend/theme.js';
 
-const COLOR_BACKGROUND = 0x07070d;
 const CANONICAL_SURFACE_RES = 48;
 
 export class ThreeManifoldsRenderer {
@@ -52,8 +52,9 @@ export class ThreeManifoldsRenderer {
     }
 
     initScene() {
+        const initialBg = new THREE.Color(getCanvasBackgroundColor());
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(COLOR_BACKGROUND, 0.009);
+        this.scene.fog = new THREE.FogExp2(initialBg, 0.009);
 
         const aspect = this.container.clientWidth / this.container.clientHeight || 1;
         this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
@@ -62,7 +63,7 @@ export class ThreeManifoldsRenderer {
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight, false);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        this.renderer.setClearColor(COLOR_BACKGROUND);
+        this.renderer.setClearColor(initialBg);
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
         this.container.replaceChildren();
@@ -1129,6 +1130,9 @@ export class ThreeManifoldsRenderer {
 
     render() {
         if (!this.renderer || !this.scene || !this.camera) return;
+        const bg = new THREE.Color(getCanvasBackgroundColor());
+        this.renderer.setClearColor(bg);
+        if (this.scene.fog) this.scene.fog.color = bg;
         this.renderer.render(this.scene, this.camera);
         this.renderDirty = false;
     }

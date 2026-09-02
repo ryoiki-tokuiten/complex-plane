@@ -306,17 +306,17 @@ static ce_complex ce_log_gamma(ce_complex z) {
                    product.im - t.im + log_sum.im);
 }
 
-static ce_complex ce_bessel(ce_complex z, ce_complex order) {
+static ce_complex ce_bessel(ce_complex z, ce_complex order, const ce_function_config *config) {
     if (fabs(order.im) < 1e-14 && floor(order.re) == order.re && order.re < 0.0) {
         const double sign = fmod(fabs(order.re), 2.0) ? -1.0 : 1.0;
-        ce_complex value = ce_bessel(z, ce_make(-order.re, 0.0));
+        ce_complex value = ce_bessel(z, ce_make(-order.re, 0.0), config);
         return ce_make(sign * value.re, sign * value.im);
     }
     if (z.re == 0.0 && z.im == 0.0) {
         if (order.re == 0.0 && order.im == 0.0) return ce_make(1.0, 0.0);
         return order.re > 0.0 ? ce_make(0.0, 0.0) : ce_make(NAN, NAN);
     }
-    ce_complex half_log = ce_log(ce_make(z.re * 0.5, z.im * 0.5), NULL);
+    ce_complex half_log = ce_log(ce_make(z.re * 0.5, z.im * 0.5), config);
     ce_complex log_gamma = ce_log_gamma(ce_make(order.re + 1.0, order.im));
     ce_complex term = ce_exp(ce_sub(ce_mul(order, half_log), log_gamma));
     ce_complex sum = term;
@@ -689,7 +689,7 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
         case CE_FN_ATAN: return ce_atan(z);
         case CE_FN_GAMMA: return ce_gamma(z);
         case CE_FN_LOG_GAMMA: return ce_log_gamma(z);
-        case CE_FN_BESSEL: return ce_bessel(z, config->bessel_order);
+        case CE_FN_BESSEL: return ce_bessel(z, config->bessel_order, config);
         case CE_FN_POWER: return ce_pow(z, ce_make(config->fractional_power, 0.0));
         case CE_FN_MOBIUS: return ce_div(ce_add(ce_mul(config->mobius_a, z), config->mobius_b),
                                         ce_add(ce_mul(config->mobius_c, z), config->mobius_d));
@@ -1214,20 +1214,6 @@ int32_t ce_evaluate_sheets(const ce_map_config *config, const ce_complex *input,
     return 0;
 }
 
-static int ce_segment_crossing(ce_complex a, ce_complex b, ce_complex c, ce_complex d,
-                               double *path_t) {
-    const double path_re = b.re - a.re, path_im = b.im - a.im;
-    const double cut_re = d.re - c.re, cut_im = d.im - c.im;
-    const double denominator = path_re * cut_im - path_im * cut_re;
-    if (fabs(denominator) <= 1e-9) return 0;
-    const double offset_re = c.re - a.re, offset_im = c.im - a.im;
-    const double t = (offset_re * cut_im - offset_im * cut_re) / denominator;
-    const double cut_t = (offset_re * path_im - offset_im * path_re) / denominator;
-    if (t <= 1e-9 || t > 1.0 + 1e-9 || cut_t < -1e-9 || cut_t > 1.0 + 1e-9) return 0;
-    *path_t = t;
-    return (cut_re * path_im - cut_im * path_re) >= 0.0 ? 1 : -1;
-}
-
 static int ce_ray_crossing(ce_complex a, ce_complex b, double angle) {
     const double cosine = cos(angle), sine = sin(angle);
     const double ar = a.re * cosine + a.im * sine;
@@ -1241,27 +1227,11 @@ static int ce_ray_crossing(ce_complex a, ce_complex b, double angle) {
     return delta > 0.0 ? 1 : -1;
 }
 
-int32_t ce_continuation_sheets(const ce_complex *path, uint32_t point_count,
-                               uint32_t drawn_cut, double cut_angle,
-                               const ce_complex *cut_points, uint32_t cut_point_count) {
-    if (!path || point_count < 2u || (drawn_cut && (!cut_points || cut_point_count < 2u))) return 0;
+int32_t ce_continuation_sheets(const ce_complex *path, uint32_t point_count, double cut_angle) {
+    if (!path || point_count < 2u) return 0;
     int32_t sheet = 0;
     for (uint32_t segment = 1; segment < point_count; ++segment) {
-        if (!drawn_cut) {
-            sheet += ce_ray_crossing(path[segment - 1u], path[segment], cut_angle);
-            continue;
-        }
-        double previous_t = -1.0;
-        for (uint32_t cut = 1; cut < cut_point_count; ++cut) {
-            double t = 0.0;
-            const int crossing = ce_segment_crossing(
-                path[segment - 1u], path[segment], cut_points[cut - 1u], cut_points[cut], &t
-            );
-            if (crossing && fabs(t - previous_t) > 1e-8) {
-                sheet += crossing;
-                previous_t = t;
-            }
-        }
+        sheet += ce_ray_crossing(path[segment - 1u], path[segment], cut_angle);
     }
     return sheet;
 }

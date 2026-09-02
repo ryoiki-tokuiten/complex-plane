@@ -1,4 +1,9 @@
 import { COLOR_AXES, COLOR_TEXT_ON_CANVAS } from '../constants/colors.js';
+import {
+    getCanvasAxesColor,
+    getCanvasTextColor,
+    getCanvasGridColors
+} from '../frontend/theme.js';
 import { TWO_PI } from '../constants/numerical.js';
 import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_THICK } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
@@ -141,8 +146,9 @@ export function drawGrid(ctx, params, options = {}) {
         minorStepY = stepY / 4;
     }
 
-    const minorColor = options.minorColor ?? 'rgba(40, 60, 80, 0.15)';
-    const majorColor = options.majorColor ?? 'rgba(60, 80, 100, 0.3)';
+    const defaultGridColors = getCanvasGridColors();
+    const minorColor = options.minorColor ?? defaultGridColors.minorColor;
+    const majorColor = options.majorColor ?? defaultGridColors.majorColor;
 
     // Extract alpha opacities from rgba strings
     let minorAlpha = 0.15;
@@ -155,6 +161,10 @@ export function drawGrid(ctx, params, options = {}) {
     if (majorMatch) {
         majorAlpha = parseFloat(majorMatch[1]);
     }
+    const gridOpacity = state.backgroundGridOpacity ?? 1.0;
+    if (gridOpacity <= 0) return;
+    minorAlpha = Math.min(1, minorAlpha * gridOpacity);
+    majorAlpha = Math.min(1, majorAlpha * gridOpacity);
 
     // Dynamic fade-out based on pixel spacing
     const scaleX = Math.abs(requireFiniteNumber(params.scale?.x, 'Canvas x scale'));
@@ -199,7 +209,7 @@ function normalizeAxesOptions(labelOrOptions, maybeYLabel) {
             showTicks: true,
             showTickLabels: true,
             showOriginDot: false,
-            color: COLOR_AXES,
+            color: getCanvasAxesColor(),
             lineWidth: LINE_WIDTH_THIN
         };
     }
@@ -213,7 +223,7 @@ function normalizeAxesOptions(labelOrOptions, maybeYLabel) {
         showTickLabels: options.tickLabels === true,
         showOriginDot: options.originDot !== false,
         glow: !!options.glow,
-        color: options.color || 'rgba(100, 180, 255, 0.6)',
+        color: options.color || getCanvasAxesColor(),
         lineWidth: options.lineWidth || LINE_WIDTH_NORMAL
     };
 }
@@ -226,7 +236,7 @@ export function drawAxes(ctx, params, labelOrOptions, maybeYLabel) {
     ctx.save();
     if (ctx.imageSmoothingEnabled !== undefined) ctx.imageSmoothingEnabled = false;
     ctx.strokeStyle = options.color;
-    ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
+    ctx.fillStyle = getCanvasTextColor();
     ctx.lineWidth = options.lineWidth;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';

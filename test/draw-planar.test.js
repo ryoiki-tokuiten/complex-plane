@@ -7,6 +7,7 @@ import {
     getPointSetEndpoints
 } from '../js/rendering/draw-planar.js';
 import { getMappedTransformProfile, transformFunctions } from '../js/native/map-runtime.js';
+import { buildNativePlanarPolyline, nativeMapOptions } from '../js/native/complex-engine.js';
 import { state, zPlaneParams } from '../js/store/state.js';
 
 const IDENTITY_MAP = Object.freeze({
@@ -189,4 +190,25 @@ test('transformed grid sampling cannot certify oscillatory cos lines as flat', (
     } finally {
         state.currentFunction = previousFunction;
     }
+});
+
+test('native adaptive polylines keep subdivision within their output budget', () => {
+    const points = buildNativePlanarPolyline({
+        map: nativeMapOptions(state, { functionKey: 'identity', chainingEnabled: false }),
+        points: [{ re: 0, im: 0 }, { re: 1, im: 0 }],
+        originX: 0,
+        originY: 0,
+        scaleX: 1,
+        scaleY: 1,
+        renderLimit: 10,
+        jumpThresholdSq: 100,
+        toleranceSq: 0,
+        maxSegmentSq: 1e-20,
+        maxDepth: 16,
+        hasBranchCuts: false,
+        branchCutAngle: 0
+    });
+
+    assert.equal(points.length, (2 ** 16 + 1) * 2);
+    assert.ok(points.every(Number.isFinite));
 });

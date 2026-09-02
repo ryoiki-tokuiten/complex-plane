@@ -601,9 +601,6 @@ function requirePlanarRenderOptions(options) {
         throw new Error('Native planar scale, render limit, and squared tolerances are invalid.');
     }
     requireBoolean(options.hasBranchCuts, 'Native planar hasBranchCuts');
-    if (options.branchCutType !== 'ray' && options.branchCutType !== 'draw') {
-        throw new Error(`Unsupported native planar branch-cut type: ${options.branchCutType}.`);
-    }
     requireFiniteNumber(options.branchCutAngle, 'Native planar branch-cut angle');
 }
 
@@ -738,12 +735,9 @@ function writeMapConfig(pointer, options, allocations) {
     if (!Number.isFinite(fractionalPower) || !Number.isFinite(branchCutAngle)) {
         throw new Error('Native map configuration requires finite power and branch-cut parameters.');
     }
-    if (options.branchCutType !== 'ray' && options.branchCutType !== 'draw') {
-        throw new Error(`Unsupported native branch-cut type: ${options.branchCutType}.`);
-    }
     view.setFloat64(pointer + FUNCTION_FRACTIONAL_POWER, fractionalPower, true);
     view.setFloat64(pointer + FUNCTION_BRANCH_ANGLE, branchCutAngle, true);
-    view.setUint32(pointer + FUNCTION_BRANCH_RAY, options.branchCutType === 'ray' ? 1 : 0, true);
+    view.setUint32(pointer + FUNCTION_BRANCH_RAY, 1, true);
     view.setUint32(pointer + FUNCTION_ZETA_CONTINUATION, options.zetaContinuationEnabled ? 1 : 0, true);
     if (functionKey === 'algebraic_chaining') writeAlgebraicConfig(view, pointer, options, allocations);
     const taylor = options.taylor;
@@ -1115,28 +1109,13 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
     });
 }
 
-export function continuationNativeSheet(path, branchCutType, branchCutAngle, branchCutPoints = []) {
+export function continuationNativeSheet(path, branchCutAngle) {
     if (!Array.isArray(path) || path.length < 2) return 0;
-    if (branchCutType !== 'ray' && branchCutType !== 'draw') {
-        throw new Error(`Unsupported native continuation cut: ${branchCutType}.`);
-    }
     const angle = requireFiniteNumber(branchCutAngle, 'Native continuation branch angle');
     return withAllocations((allocations, allocate) => {
         const pathPointer = trackAlloc(allocations, path.length * 16);
         writePointBuffer(pathPointer, path);
-        const drawn = branchCutType === 'draw';
-        let cutPointer = 0;
-        if (drawn) {
-            if (!Array.isArray(branchCutPoints) || branchCutPoints.length < 2) {
-                throw new Error('Drawn native branch cuts require at least two points.');
-            }
-            cutPointer = trackAlloc(allocations, branchCutPoints.length * 16);
-            writePointBuffer(cutPointer, branchCutPoints);
-        }
-        return wasm.ce_continuation_sheets(
-            pathPointer, path.length, drawn ? 1 : 0, angle,
-            cutPointer, drawn ? branchCutPoints.length : 0
-        );
+        return wasm.ce_continuation_sheets(pathPointer, path.length, angle);
     });
 }
 
@@ -1201,7 +1180,6 @@ export function nativeMapOptions(runtimeState, overrides = {}) {
         polynomialN: runtimeState.polynomialN,
         polynomialCoeffs: runtimeState.polynomialCoeffs,
         fractionalPowerN: runtimeState.fractionalPowerN,
-        branchCutType: runtimeState.branchCutType,
         branchCutAngle: runtimeState.branchCutAngle,
         zetaContinuationEnabled: runtimeState.zetaContinuationEnabled,
         algebraicChainingTerms: runtimeState.algebraicChainingTerms,
@@ -1217,16 +1195,7 @@ export function nativeMapOptions(runtimeState, overrides = {}) {
     };
 }
 
-function writeBranchCutPoints(points, allocations) {
-    if (!Array.isArray(points)) throw new Error('Native branch-cut points must be an array.');
-    if (!points.length) return { pointer: 0, count: 0 };
-    if (points.length < 2) throw new Error('A drawn native branch cut requires at least two points.');
-    points.forEach((point, index) => requireFiniteComplex(point, `Native branch-cut point ${index}`));
-    const pointer = alloc(points.length * 16);
-    allocations.push(pointer);
-    writePointBuffer(pointer, points);
-    return { pointer, count: points.length };
-}
+
 
 function readComplexBuffer(pointer, count) {
     return copyComplexBuffer(pointer, count);
@@ -1436,15 +1405,14 @@ export function buildNativePlanarLine(options) {
     return withAllocations((allocations, allocate) => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
-        const cut = writeBranchCutPoints(options.branchCutPoints, allocations);
         const outputPointer = trackAlloc(allocations, outputCapacity * 16);
         const count = wasm.ce_build_planar_line(
             configPointer,
             options.start.re, options.start.im, options.end.re, options.end.im, sampleCount,
             options.scaleX, options.scaleY, options.renderLimit,
             options.jumpThresholdSq, options.toleranceSq,
-            options.hasBranchCuts ? 1 : 0, options.branchCutType === 'draw' ? 1 : 0,
-            options.branchCutAngle, cut.pointer, cut.count, outputPointer, outputCapacity
+            options.hasBranchCuts ? 1 : 0, options.branchCutAngle,
+            outputPointer, outputCapacity
         );
         if (count < 0) throw new Error(`Native planar line job failed with status ${count}.`);
         return readComplexBuffer(outputPointer, count);
@@ -1476,14 +1444,12 @@ export function buildNativePlanarLines(options) {
             lineView.setUint32(countsPointer + index * 4, sampleCount, true);
             outputCapacity += (sampleCount + 1) * 2 + 2;
         });
-        const cut = writeBranchCutPoints(options.branchCutPoints, allocations);
         const outputPointer = trackAlloc(allocations, outputCapacity * 16);
         const total = wasm.ce_build_planar_lines(
             configPointer, startsPointer, endsPointer, countsPointer, lineCount,
             options.scaleX, options.scaleY, options.renderLimit,
             options.jumpThresholdSq, options.toleranceSq,
-            options.hasBranchCuts ? 1 : 0, options.branchCutType === 'draw' ? 1 : 0,
-            options.branchCutAngle, cut.pointer, cut.count,
+            options.hasBranchCuts ? 1 : 0, options.branchCutAngle,
             outputPointer, outputCapacity, offsetsPointer
         );
         if (total < 0) throw new Error(`Native planar lines job failed with status ${total}.`);
@@ -1504,8 +1470,16 @@ export function buildNativePlanarPolyline(options) {
     requireFiniteNumber(options.originY, 'Native planar-polyline y origin');
     const maxSegmentSq = requireFiniteNumber(options.maxSegmentSq, 'Native planar-polyline segment limit');
     if (maxSegmentSq <= 0) throw new Error('Native planar-polyline segment limit must be positive.');
-    const theoretical = options.points.length * 2 ** Math.min(maxDepth, 12);
-    const outputCapacity = Math.min(1_000_000, Math.max(4096, theoretical));
+    const inputCount = options.points.length;
+    const outputLimit = 1_000_000;
+    if (inputCount * 2 - 1 > outputLimit) {
+        throw new Error('Native planar polyline input exceeds the one-million-point output budget.');
+    }
+    const safeSubdivisions = Math.max(1, Math.floor((outputLimit - inputCount * 2) / Math.max(1, inputCount - 1)));
+    const safeDepth = Math.max(0, Math.floor(Math.log2(safeSubdivisions)));
+    const effectiveMaxDepth = Math.min(maxDepth, safeDepth);
+    const theoretical = inputCount * 2 + Math.max(0, inputCount - 1) * 2 ** effectiveMaxDepth;
+    const outputCapacity = Math.min(outputLimit, Math.max(4096, theoretical));
     return withAllocations((allocations, allocate) => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
@@ -1516,15 +1490,13 @@ export function buildNativePlanarPolyline(options) {
             inputView.setFloat64(offset, Number.isFinite(point?.re) ? point.re : NaN, true);
             inputView.setFloat64(offset + 8, Number.isFinite(point?.im) ? point.im : NaN, true);
         });
-        const cut = writeBranchCutPoints(options.branchCutPoints, allocations);
         const outputPointer = trackAlloc(allocations, outputCapacity * 16);
         const count = wasm.ce_build_planar_polyline(
             configPointer, inputPointer, options.points.length,
             options.originX, options.originY, options.scaleX, options.scaleY,
             options.renderLimit, options.jumpThresholdSq, options.toleranceSq,
-            options.maxSegmentSq, maxDepth,
-            options.hasBranchCuts ? 1 : 0, options.branchCutType === 'draw' ? 1 : 0,
-            options.branchCutAngle, cut.pointer, cut.count,
+            options.maxSegmentSq, effectiveMaxDepth,
+            options.hasBranchCuts ? 1 : 0, options.branchCutAngle,
             outputPointer, outputCapacity
         );
         if (count < 0) throw new Error(`Native planar polyline job failed with status ${count}.`);

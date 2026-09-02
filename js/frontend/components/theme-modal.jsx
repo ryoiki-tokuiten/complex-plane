@@ -1,10 +1,12 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef } from 'preact/hooks';
-import { getStateSignal, state } from '../../store/state.js';
+import { state } from '../../store/state.js';
+import { useAppState } from '../state-hooks.js';
 import { requestDomainRedraw, requestUiRedraw } from '../../rendering/redraw-scheduler.js';
-import { persistThemePreferences } from '../../ui/theme-manager.js';
+import { persistThemePreferences } from '../theme.js';
 import { refreshPanelEdgeHandles } from '../../ui/panel-layout-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
+import { gridDensityMax } from '../grid-density.js';
 
 import { isThemeModalOpen, closeThemeModal } from '../theme-state.js';
 
@@ -13,7 +15,7 @@ function refreshLayout() {
 }
 
 function GridColor({ index, stateKey }) {
-    const color = getStateSignal(stateKey).value;
+    const color = useAppState(stateKey);
     return (
         <div class="circle-color-picker-wrapper">
             <div class="circle-color-picker" id={`grid_color_${index}_picker_wrapper`} style={{ backgroundColor: color }}>
@@ -28,17 +30,17 @@ function GridColor({ index, stateKey }) {
     );
 }
 
-function GridDensityControl() {
-    const density = getStateSignal('gridDensity').value ?? 15;
+function GridDensityControl({ model, revision }) {
+    const density = state.gridDensity ?? 15;
     return (
         <div class="control-group theme-modal-slider-group">
             <label for="grid_density_slider" class="theme-slider-label">
                 <span>Grid Density:</span>
-                <output id="grid_density_value_display" class="theme-slider-output">{density}</output>
+                <output id="grid_density_value_display" class="theme-slider-output" key={density}>{density}</output>
             </label>
             <div class="slider-container theme-slider-container">
                 <input type="range" id="grid_density_slider" name="grid_density_slider"
-                    min="5" max="50" step="1" value={density}
+                    min="5" max={gridDensityMax(state)} step="1" value={density}
                     data-tooltip="Number of lines in the z-plane input grid"
                     onInput={event => {
                         const val = parseInt(event.currentTarget.value, 10);
@@ -51,7 +53,7 @@ function GridDensityControl() {
 }
 
 function ProbeNeighborhoodControl() {
-    const size = getStateSignal('probeNeighborhoodSize').value ?? 0.2;
+    const size = useAppState('probeNeighborhoodSize') ?? 0.2;
     return (
         <div class="control-group theme-modal-slider-group">
             <label for="neighborhood_size_slider" class="theme-slider-label">
@@ -72,9 +74,30 @@ function ProbeNeighborhoodControl() {
     );
 }
 
-export function ThemeModal() {
-    const vertical = getStateSignal('verticalLayoutEnabled').value;
-    const canvasZoomControls = getStateSignal('canvasZoomControlsEnabled').value;
+function GridOpacityControl() {
+    const opacity = useAppState('backgroundGridOpacity') ?? 1.0;
+    return (
+        <div class="control-group theme-modal-slider-group">
+            <label for="background_grid_opacity_slider" class="theme-slider-label">
+                <span>Grid Opacity:</span>
+                <output id="background_grid_opacity_value_display" class="theme-slider-output">{Math.round(opacity * 100)}%</output>
+            </label>
+            <div class="slider-container theme-slider-container">
+                <input type="range" id="background_grid_opacity_slider" name="background_grid_opacity_slider"
+                    min="0" max="2.5" step="0.05" value={opacity}
+                    data-tooltip="Background grid opacity across all canvases"
+                    onInput={event => {
+                        state.backgroundGridOpacity = parseFloat(event.currentTarget.value);
+                        requestDomainRedraw(true);
+                    }} />
+            </div>
+        </div>
+    );
+}
+
+export function ThemeModal({ model, revision }) {
+    const vertical = useAppState('verticalLayoutEnabled');
+    const canvasZoomControls = useAppState('canvasZoomControlsEnabled');
     const layoutApplied = useRef(false);
 
     useEffect(() => {
@@ -82,8 +105,11 @@ export function ThemeModal() {
             state.verticalLayoutEnabled = localStorage.getItem('complex_verticalLayoutEnabled') === 'true';
             return;
         }
-        document.body.classList.toggle('vertical-layout', vertical);
         localStorage.setItem('complex_verticalLayoutEnabled', String(vertical));
+        if (typeof document !== 'undefined') {
+            document.body?.classList?.toggle('vertical-layout', Boolean(vertical));
+            document.querySelector?.('.application-root')?.classList?.toggle('vertical-layout', Boolean(vertical));
+        }
         refreshPanelEdgeHandles(true);
         const needsRefresh = vertical || layoutApplied.current;
         layoutApplied.current = true;
@@ -91,7 +117,6 @@ export function ThemeModal() {
     }, [vertical]);
 
     useEffect(() => {
-        document.body.classList.toggle('canvas-zoom-controls-enabled', Boolean(canvasZoomControls));
         if (typeof localStorage !== 'undefined') {
             localStorage.setItem('complex_canvasZoomControlsEnabled', String(Boolean(canvasZoomControls)));
         }
@@ -112,7 +137,8 @@ export function ThemeModal() {
 
                 <div class="theme-modal-section">
                     <div class="theme-modal-sliders-row">
-                        <GridDensityControl />
+                        <GridDensityControl model={model} revision={revision} />
+                        <GridOpacityControl />
                         <ProbeNeighborhoodControl />
                     </div>
                 </div>

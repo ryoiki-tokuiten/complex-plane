@@ -3,7 +3,6 @@ import { findZerosAndPoles, findCriticalPoints } from '../analysis/feature-detec
 import { updateTaylorSeriesCenterAndRadius } from '../native/map-runtime.js';
 import { performCauchyAnalysis } from '../analysis/cauchy.js';
 import { drawZPlaneContent, drawWPlaneContent } from './renderer.js';
-import { updateProbeInfo } from '../ui/ui-updates.js';
 import { drawLaplaceSpectrum, drawLaplaceComGraph } from './draw-laplace-panels.js';
 import { drawFourier3DPipeline, disposeFourier3DPipeline } from './fourier-3d-pipeline.js';
 import {
@@ -32,6 +31,7 @@ import { refreshPanelEdgeHandles } from '../ui/panel-layout-manager.js';
 
 const { controls } = context;
 let surfaceRedrawFrame = null;
+const optionalRendererVisibility = new Map();
 
 function zoomLaplaceSurfaceCoordinates(event) {
     const surface = state.laplaceSurface;
@@ -85,10 +85,10 @@ function requestSurfaceRedraw() {
     if (!surfaceRedrawFrame) surfaceRedrawFrame = requestAnimationFrame(runSurfaceRedraw);
 }
 
-function syncOptionalColumn(column, shouldHide, onHide) {
-    if (!column || column.classList.contains('hidden') === shouldHide) return;
-    column.classList.toggle('hidden', shouldHide);
-    if (shouldHide) onHide?.();
+function syncOptionalRenderer(key, visible, onHide) {
+    if (optionalRendererVisibility.get(key) === visible) return;
+    optionalRendererVisibility.set(key, visible);
+    if (!visible) onHide?.();
 
     refreshPanelEdgeHandles(true);
 
@@ -126,24 +126,17 @@ export function renderApplicationFrame(timestamp) {
             draw2DContourPlot(controls.contour2DCanvas);
         }
     }
-    updateProbeInfo();
 
-    syncOptionalColumn(
-        controls.laplace3DColumn,
-        !state.laplaceModeEnabled || state.laplaceHide3DSurface,
+    syncOptionalRenderer(
+        'laplace-3d',
+        state.laplaceModeEnabled && !state.laplaceHide3DSurface,
         () => disposeScalarSurface('laplace_3d_container')
     );
-    syncOptionalColumn(
-        controls.laplaceSpectrumColumn,
-        !state.laplaceModeEnabled || !state.laplaceShowSpectrum
-    );
-    syncOptionalColumn(
-        controls.laplaceComColumn,
-        !state.laplaceModeEnabled || !state.laplaceShowComGraph
-    );
-    syncOptionalColumn(
-        controls.fourier3DColumn,
-        !state.laplaceModeEnabled || !state.laplaceShowFourier3D,
+    syncOptionalRenderer('laplace-spectrum', state.laplaceModeEnabled && state.laplaceShowSpectrum);
+    syncOptionalRenderer('laplace-com', state.laplaceModeEnabled && state.laplaceShowComGraph);
+    syncOptionalRenderer(
+        'fourier-3d',
+        state.laplaceModeEnabled && state.laplaceShowFourier3D,
         disposeFourier3DPipeline
     );
     if (state.laplaceModeEnabled) {
@@ -161,12 +154,12 @@ export function renderApplicationFrame(timestamp) {
         }
     }
 
-    syncOptionalColumn(controls.realPlotsColumn, !state.realPlotsEnabled);
+    syncOptionalRenderer('real-plots', state.realPlotsEnabled);
     requestSurfaceRedraw();
 
-    syncOptionalColumn(
-        controls.graphColumn,
-        !graphActive || state.realPlotsEnabled || !isGraphViewSupported(),
+    syncOptionalRenderer(
+        'graph',
+        graphActive && !state.realPlotsEnabled && isGraphViewSupported(),
         disposeTransformationGraphRenderer
     );
     if (graphActive && !state.realPlotsEnabled) drawTransformationGraph();

@@ -20,35 +20,26 @@ function evaluateOnSheet(functionKey, point, sheet, runtimeState) {
     return result.valid[0] ? result.values[0] : { re: NaN, im: NaN };
 }
 
-test('continuation counts oriented crossings of ray and drawn branch cuts', () => {
+test('continuation counts oriented crossings of ray branch cuts', () => {
     const path = [{ re: -1, im: -1 }, { re: -1, im: 1 }];
-    assert.equal(Math.abs(continuationNativeSheet(path, 'ray', Math.PI, [])), 1);
-    assert.equal(Math.abs(continuationNativeSheet(path, 'draw', Math.PI, [{ re: -2, im: 0 }, { re: 0, im: 0 }])), 1);
-});
-
-test('drawn-cut crossings are stable at polyline vertices', () => {
-    const cut = [{ re: -1, im: -1 }, { re: 0, im: 0 }, { re: 1, im: -1 }];
-    const crossing = continuationNativeSheet(
-        [{ re: 0, im: -1 }, { re: 0, im: 1 }], 'draw', Math.PI, cut
-    );
-    assert.equal(Math.abs(crossing), 1);
+    assert.equal(Math.abs(continuationNativeSheet(path, Math.PI)), 1);
 });
 
 test('continued logarithm changes by one sheet increment', () => {
-    const baseState = { logBase: { re: Math.E, im: 0 }, branchCutType: 'ray', branchCutAngle: Math.PI, chainingEnabled: false };
+    const baseState = { logBase: { re: Math.E, im: 0 }, branchCutAngle: Math.PI, chainingEnabled: false };
     const principal = evaluateOnSheet('ln', { re: 1, im: 0 }, 0, completeRuntimeState(baseState));
     const next = evaluateOnSheet('ln', { re: 1, im: 0 }, 1, completeRuntimeState(baseState));
     assert.ok(Math.abs(next.im - principal.im - Math.PI * 2) < 1e-10);
 });
 
 test('continued logarithm uses the selected ray as its argument boundary', () => {
-    const runtimeState = { logBase: { re: Math.E, im: 0 }, branchCutType: 'ray', branchCutAngle: 0, chainingEnabled: false };
+    const runtimeState = { logBase: { re: Math.E, im: 0 }, branchCutAngle: 0, chainingEnabled: false };
     const value = evaluateOnSheet('ln', { re: 0, im: 1 }, 0, completeRuntimeState(runtimeState));
     assert.ok(Math.abs(value.im + Math.PI * 1.5) < 1e-10);
 });
 
 test('continued inverse sine alternates reflected sheets', () => {
-    const runtimeState = { branchCutType: 'ray', branchCutAngle: Math.PI, chainingEnabled: false };
+    const runtimeState = { branchCutAngle: Math.PI, chainingEnabled: false };
     const z = { re: 0.25, im: 0.4 };
     const principal = evaluateOnSheet('asin', z, 0, completeRuntimeState(runtimeState));
     const adjacent = evaluateOnSheet('asin', z, 1, completeRuntimeState(runtimeState));
@@ -67,7 +58,6 @@ test('continued algebraic maps preserve custom input expressions and recursive c
         chainingEnabled: true,
         chainingMode: 'recursion',
         chainCount: 2,
-        branchCutType: 'ray',
         branchCutAngle: Math.PI
     };
     const value = evaluateOnSheet('algebraic_chaining', { re: 2, im: 0 }, 0, completeRuntimeState(runtimeState));
@@ -80,7 +70,6 @@ test('continued algebraic custom expressions use the active sheet', () => {
         algebraicChainingZExpr: 'sqrt(z) + ln(z)',
         algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'cos', power: 1 }] }],
         chainingEnabled: false,
-        branchCutType: 'ray',
         branchCutAngle: Math.PI,
         logBase: { re: Math.E, im: 0 }
     };

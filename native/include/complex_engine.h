@@ -139,9 +139,7 @@ int32_t ce_evaluate_algebraic_points(const ce_map_config *config, const ce_compl
 int32_t ce_evaluate_sheets(const ce_map_config *config, const ce_complex *input,
                            const int32_t *sheets, uint32_t count,
                            ce_complex *output, uint8_t *valid);
-int32_t ce_continuation_sheets(const ce_complex *path, uint32_t point_count,
-                               uint32_t drawn_cut, double cut_angle,
-                               const ce_complex *cut_points, uint32_t cut_point_count);
+int32_t ce_continuation_sheets(const ce_complex *path, uint32_t point_count, double cut_angle);
 int32_t ce_evaluate_dynamic(const ce_map_config *config, double parameter_re, double parameter_im,
                             ce_complex *point_values, ce_complex *term_values,
                             uint8_t *errors, uint8_t *reduction_status,
@@ -200,29 +198,23 @@ int32_t ce_build_planar_line(const ce_map_config *config,
                              uint32_t sample_count,
                              double scale_x, double scale_y, double render_limit,
                              double jump_threshold_sq, double tolerance_sq,
-                             uint32_t has_branch_cuts, uint32_t branch_cut_is_drawn,
-                             double branch_cut_angle, const ce_complex *branch_cut_points,
-                             uint32_t branch_cut_point_count, ce_complex *output,
-                             uint32_t output_capacity);
+                             uint32_t has_branch_cuts, double branch_cut_angle,
+                             ce_complex *output, uint32_t output_capacity);
 int32_t ce_build_planar_lines(const ce_map_config *config,
                               const ce_complex *starts, const ce_complex *ends,
                               const uint32_t *sample_counts, uint32_t line_count,
                               double scale_x, double scale_y, double render_limit,
                               double jump_threshold_sq, double tolerance_sq,
-                              uint32_t has_branch_cuts, uint32_t branch_cut_is_drawn,
-                              double branch_cut_angle, const ce_complex *branch_cut_points,
-                              uint32_t branch_cut_point_count, ce_complex *output,
-                              uint32_t output_capacity, uint32_t *line_offsets);
+                              uint32_t has_branch_cuts, double branch_cut_angle,
+                              ce_complex *output, uint32_t output_capacity, uint32_t *line_offsets);
 int32_t ce_build_planar_polyline(const ce_map_config *config,
                                  const ce_complex *input, uint32_t input_count,
                                  double origin_x, double origin_y,
                                  double scale_x, double scale_y, double render_limit,
                                  double jump_threshold_sq, double tolerance_sq,
                                  double max_segment_sq, uint32_t max_depth,
-                                 uint32_t has_branch_cuts, uint32_t branch_cut_is_drawn,
-                                 double branch_cut_angle, const ce_complex *branch_cut_points,
-                                 uint32_t branch_cut_point_count, ce_complex *output,
-                                 uint32_t output_capacity);
+                                 uint32_t has_branch_cuts, double branch_cut_angle,
+                                 ce_complex *output, uint32_t output_capacity);
 ce_domain_render_context *ce_create_domain_render_context(
                               const ce_map_config *config,
                               const char *center_re, const char *center_im,

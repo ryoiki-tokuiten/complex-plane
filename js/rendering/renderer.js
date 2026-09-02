@@ -1,13 +1,16 @@
 import { state, context, zPlaneParams as defaultZPlaneParams, wPlaneParams as defaultWPlaneParams } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import {
-    COLOR_CANVAS_BACKGROUND,
-    COLOR_TEXT_ON_CANVAS,
     COLOR_CRITICAL_POINT_Z,
     COLOR_CRITICAL_VALUE_W,
     COLOR_FTA_C_MARKER,
     COLOR_W_ORIGIN_GLOW
 } from '../constants/colors.js';
+import {
+    getCanvasBackgroundColor,
+    getCanvasTextColor,
+    getCanvasGridColors
+} from '../frontend/theme.js';
 import { MAX_POLY_DEGREE, ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
     ORIGIN_GLOW_DURATION_MS,
@@ -140,7 +143,7 @@ const PLANAR_STATE_DEPENDENCIES = Object.freeze([
     'a0', 'b0', 'circleR', 'themeId',
     'arbitraryShapeMode', 'arbitraryShapeExpression', 'arbitraryShapeTMin', 'arbitraryShapeTMax',
     'arbitraryShapeClosed', 'arbitraryShapePoints',
-    'branchCutType', 'branchCutAngle', 'branchCutPoints',
+    'branchCutAngle',
     'mediaSize', 'mediaOpacity', 'mediaAspectRatio', 'mediaVersion',
     'cauchyIntegralModeEnabled', 'graphViewEnabled', 'graphFullGridEnabled', 'graphGridFamily',
     'graphLayerLockEnabled',
@@ -151,8 +154,7 @@ const DOMAIN_STATE_DEPENDENCIES = Object.freeze([
     'domainSaturation', 'domainLightnessCycles'
 ]);
 const TAYLOR_LAYER_DEPENDENCIES = Object.freeze([
-    'taylorSeriesOrder', 'taylorSeriesConvergenceRadius',
-    'taylorSeriesColorAxisX', 'taylorSeriesColorAxisY'
+    'taylorSeriesOrder', 'taylorSeriesConvergenceRadius'
 ]);
 
 function beginDependencyScan(tracker) {
@@ -553,7 +555,7 @@ function fillCanvasBackground(ctx, planeParams) {
         return;
     }
 
-    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(0, 0, planeParams.width, planeParams.height);
 }
 
@@ -637,12 +639,14 @@ function drawTaylorConvergenceOverlay(ctx, planeParams) {
         }
 
         withCanvasState(ctx, () => {
-            ctx.fillStyle = state.taylorSeriesColorConvergenceDiskFill;
-            ctx.strokeStyle = state.taylorSeriesColorConvergenceDiskStroke;
+            ctx.fillStyle = state.gridColor2;
+            ctx.strokeStyle = state.gridColor2;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.arc(centerCanvas.x, centerCanvas.y, radiusCanvas, 0, 2 * Math.PI);
+            ctx.globalAlpha = 0.2;
             ctx.fill();
+            ctx.globalAlpha = 0.5;
             ctx.stroke();
         });
 
@@ -651,7 +655,8 @@ function drawTaylorConvergenceOverlay(ctx, planeParams) {
 
     if (radius === 0) {
         withCanvasState(ctx, () => {
-            ctx.fillStyle = state.taylorSeriesColorConvergenceDiskStroke;
+            ctx.fillStyle = state.gridColor2;
+            ctx.globalAlpha = 0.5;
             ctx.beginPath();
             ctx.arc(centerCanvas.x, centerCanvas.y, 2, 0, 2 * Math.PI);
             ctx.fill();
@@ -660,7 +665,7 @@ function drawTaylorConvergenceOverlay(ctx, planeParams) {
 }
 
 function drawTaylorPickerReticle(ctx, planeParams, isZ) {
-    if (!state.taylorSeriesCanvasClickCenterEnabled || !state.taylorSeriesHoverPoint) return;
+    if ((!state.taylorSeriesCanvasClickCenterEnabled && !state.canvasClickPickerTarget) || !state.taylorSeriesHoverPoint) return;
     if (state.taylorSeriesHoverPoint.isZ !== isZ) return;
 
     const { world } = state.taylorSeriesHoverPoint;
@@ -672,11 +677,14 @@ function drawTaylorPickerReticle(ctx, planeParams, isZ) {
         const radius = 24;
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
+        ctx.fillStyle = state.gridColor2;
+        ctx.globalAlpha = 0.2;
         ctx.fill();
         ctx.lineWidth = 2;
-        ctx.strokeStyle = 'rgba(192, 132, 252, 0.95)';
+        ctx.strokeStyle = state.gridColor2;
+        ctx.globalAlpha = 0.95;
         ctx.stroke();
+        ctx.globalAlpha = 1;
 
         // Inner center dot
         ctx.beginPath();
@@ -684,7 +692,7 @@ function drawTaylorPickerReticle(ctx, planeParams, isZ) {
         ctx.fillStyle = '#ffffff';
         ctx.fill();
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#9333ea';
+        ctx.strokeStyle = state.gridColor2;
         ctx.stroke();
 
         // Subtle crosshairs
@@ -697,9 +705,11 @@ function drawTaylorPickerReticle(ctx, planeParams, isZ) {
         ctx.lineTo(pt.x, pt.y - 10);
         ctx.moveTo(pt.x, pt.y + 10);
         ctx.lineTo(pt.x, pt.y + 32);
-        ctx.strokeStyle = 'rgba(192, 132, 252, 0.7)';
+        ctx.strokeStyle = state.gridColor2;
+        ctx.globalAlpha = 0.7;
         ctx.lineWidth = 1;
         ctx.stroke();
+        ctx.globalAlpha = 1;
 
         // Coordinate text badge
         const reVal = Number(world.x);
@@ -714,7 +724,7 @@ function drawTaylorPickerReticle(ctx, planeParams, isZ) {
         const badgeX = pt.x + 18;
         const badgeY = pt.y - 18;
 
-        ctx.fillStyle = 'rgba(10, 12, 20, 0.92)';
+        ctx.fillStyle = getCanvasBackgroundColor();
         ctx.strokeStyle = 'rgba(168, 85, 247, 0.7)';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -722,7 +732,7 @@ function drawTaylorPickerReticle(ctx, planeParams, isZ) {
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = getCanvasTextColor();
         ctx.fillText(text, badgeX, badgeY);
     });
 }
@@ -750,7 +760,7 @@ function drawPolynomialOriginMarkerOverlay(ctx, planeParams) {
         ctx.arc(canvasPoint.x, canvasPoint.y, 5, 0, 2 * Math.PI);
         ctx.fill();
 
-        ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
+        ctx.fillStyle = getCanvasTextColor();
         ctx.font = "10px 'SF Pro Text', sans-serif";
         ctx.textAlign = 'center';
         ctx.fillText('P(0)', canvasPoint.x, canvasPoint.y - 10);
@@ -877,10 +887,11 @@ export function drawZPlaneContent(timestamp) {
         && !state.vectorFieldEnabled
         && !state.streamlineFlowEnabled
         && state.currentInputShape !== 'empty_grid') {
+        const gridColors = getCanvasGridColors();
         drawGrid(zCtx, zPlaneParams, {
             targetCount: state.gridDensity,
-            minorColor: 'rgba(128, 137, 255, 0.04)',
-            majorColor: 'rgba(128, 137, 255, 0.12)'
+            minorColor: gridColors.minorColor,
+            majorColor: gridColors.majorColor
         });
     }
 
@@ -950,7 +961,7 @@ export function drawZPlaneContent(timestamp) {
     if (state.preimageExplorerEnabled && state.preimageRoots.length) {
         drawCanvasLayer(zCtx, layerCtx => drawPreimageMarkers(layerCtx, zPlaneParams, state.preimageRoots));
     }
-    if (state.taylorSeriesCanvasClickCenterEnabled) {
+    if (state.taylorSeriesCanvasClickCenterEnabled || state.canvasClickPickerTarget) {
         drawCanvasLayer(zCtx, layerCtx => drawTaylorPickerReticle(layerCtx, zPlaneParams, true));
     }
 
@@ -971,12 +982,10 @@ function ensureWPlaneCache(index) {
 
 function setWThreeHidden(hidden) {
     const container = controls.wPlaneThreeContainer;
-    container?.classList?.toggle('hidden', hidden);
     if (hidden) wStaticThreeRenderers.get(container)?.stopAnimationLoop();
 }
 
 function setWPresentation(mode) {
-    wCanvas?.classList?.toggle('hidden', mode !== 'canvas');
     setWThreeHidden(mode !== 'three');
     if (mode === 'three') {
         const container = controls.wPlaneThreeContainer;
@@ -1004,7 +1013,6 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
     try {
         if (!wCtx || !wPlaneParams) return;
         if (isSpecialMode) {
-            controls.wPlaneFoldsOverlay?.classList.add('hidden');
             hideRiemannSurface(wCanvas);
             setWPresentation('canvas');
             if (state.laplaceModeEnabled) {
@@ -1020,38 +1028,34 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             return;
         }
         if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) {
-            controls.wPlaneFoldsOverlay?.classList.add('hidden');
             return;
         }
         if (state.manifoldTransformationEnabled || state.manifold3dViewEnabled) {
-            controls.wPlaneFoldsOverlay?.classList.add('hidden');
             setWPresentation('hidden');
             return;
         }
         if (state.foldSurface3dEnabled) {
             if (isMediaInputShape(state.currentInputShape)) {
-                controls.wPlaneFoldsOverlay?.classList.remove('hidden');
                 renderThreeWRasterSurface(map);
                 return;
             }
             if (isFoldableInputShape(state.currentInputShape)) {
-                controls.wPlaneFoldsOverlay?.classList.remove('hidden');
                 renderThreeWGridFold(map);
                 return;
             }
         }
 
-        controls.wPlaneFoldsOverlay?.classList.add('hidden');
         setWPresentation('canvas');
         fillCanvasBackground(wCtx, wPlaneParams);
         drawAxes(wCtx, wPlaneParams, 'Re(w)', 'Im(w)');
         drawPolynomialOriginMarkerOverlay(wCtx, wPlaneParams);
         drawWOriginGlowOverlay(wCtx, wPlaneParams);
         if (!state.navigationModeEnabled && state.currentInputShape !== 'empty_grid') {
+            const gridColors = getCanvasGridColors();
             drawGrid(wCtx, wPlaneParams, {
                 targetCount: state.gridDensity,
-                minorColor: 'rgba(128, 137, 255, 0.04)',
-                majorColor: 'rgba(128, 137, 255, 0.12)'
+                minorColor: gridColors.minorColor,
+                majorColor: gridColors.majorColor
             });
         }
 
@@ -1107,7 +1111,7 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 drawConformalIndicatrices(layerCtx, wPlaneParams, indicatrices, 'mapped');
             });
         }
-        if (state.taylorSeriesCanvasClickCenterEnabled) {
+        if (state.taylorSeriesCanvasClickCenterEnabled || state.canvasClickPickerTarget) {
             drawCanvasLayer(wCtx, layerCtx => drawTaylorPickerReticle(layerCtx, wPlaneParams, false));
         }
         if (index === 0) updateWindingNumberDisplay();
@@ -1132,14 +1136,11 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
         setWPresentation('canvas');
         fillCanvasBackground(wCtx, wPlaneParams);
         wCtx.save();
-        wCtx.fillStyle = COLOR_TEXT_ON_CANVAS;
+        wCtx.fillStyle = getCanvasTextColor();
         wCtx.font = '13px sans-serif';
         wCtx.textAlign = 'center';
         wCtx.fillText('Riemann surface is unavailable beyond GPU precision.', wPlaneParams.width * 0.5, 28);
         wCtx.restore();
-        if (controls.riemannSurfaceStatus) {
-            controls.riemannSurfaceStatus.textContent = 'Unsupported at arbitrary precision (GPU surface)';
-        }
         return true;
     }
 
@@ -1151,7 +1152,7 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
         : index + 1;
     context.riemannSurfaceContourPipeline = { index, stage, map };
     if (!wCanvas) throw new Error('Riemann surface rendering requires a W-plane canvas.');
-    renderRiemannSurface(wCanvas, { stage, map });
+    renderRiemannSurface(wCanvas, { stage, map, planeIndex: index });
     wCanvas.classList?.toggle('hidden', true);
     return true;
 }
@@ -1289,8 +1290,8 @@ function drawTaylorApproximationLayer(ctx) {
         state.currentFunction,
         state.taylorSeriesCenter,
         state.taylorSeriesOrder,
-        state.taylorSeriesColorAxisX,
-        state.taylorSeriesColorAxisY,
+        state.gridColor2,
+        state.gridColor1,
         { includeAxes: false }
     );
 }

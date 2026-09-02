@@ -22,6 +22,7 @@ import { requestUiRedraw } from './redraw-scheduler.js';
 import { clearThreeGroup, createCanvasTextSprite, disposeThreeObject } from './three-utils.js';
 import { requireVisibleViewport } from '../utils/viewport.js';
 import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
+import { getCanvasBackgroundColor } from '../frontend/theme.js';
 
 const BACKGROUND = 0x070812;
 const DEFAULT_CAMERA = Object.freeze({ x: 6.0, y: 5.0, z: 8.0 });
@@ -214,8 +215,9 @@ class ScalarSurfaceRenderer {
     constructor(container, options = {}) {
         this.container = container;
         this.options = options;
+        const initialBg = new THREE.Color(getCanvasBackgroundColor());
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(BACKGROUND, 0.028);
+        this.scene.fog = new THREE.FogExp2(initialBg, 0.028);
 
         this.camera = new THREE.PerspectiveCamera(38, 1, 0.08, 120);
         this.camera.position.set(DEFAULT_CAMERA.x, DEFAULT_CAMERA.y, DEFAULT_CAMERA.z);
@@ -227,7 +229,7 @@ class ScalarSurfaceRenderer {
             stencil: false,
             depth: true
         });
-        this.renderer.setClearColor(BACKGROUND);
+        this.renderer.setClearColor(initialBg);
         this.#syncPixelRatio();
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.shadowMap.enabled = true;
@@ -506,6 +508,9 @@ class ScalarSurfaceRenderer {
     }
 
     render() {
+        const bg = new THREE.Color(getCanvasBackgroundColor());
+        this.renderer.setClearColor(bg);
+        if (this.scene.fog) this.scene.fog.color = bg;
         this.renderer.render(this.scene, this.camera);
     }
 

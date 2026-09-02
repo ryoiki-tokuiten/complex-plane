@@ -1,5 +1,6 @@
 /** @jsxImportSource preact */
-import { getStateSignal, mutateState } from '../../store/state.js';
+import { mutateState } from '../../store/state.js';
+import { useAppState } from '../state-hooks.js';
 import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 
 const FUNCTION_OPTIONS = [
@@ -177,6 +178,6 @@ function Term({ term, index, termCount }) {
 }
 
 export function AlgebraicTermEditor() {
-    const terms = getStateSignal('algebraicChainingTerms').value;
+    const terms = useAppState('algebraicChainingTerms');
     return terms.map((term, index) => <Term key={index} term={term} index={index} termCount={terms.length} />);
 }

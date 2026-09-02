@@ -16,7 +16,7 @@ const STATE_KEYS = [
     'manifold3dViewEnabled', 'selectedManifold', 'manifoldTransformationEnabled',
     'riemannSurfaceEnabled', 'foldSurface3dEnabled',
     'taylorSeriesEnabled', 'taylorSeriesCenter', 'taylorSeriesOrder',
-    'taylorSeriesConvergenceRadius', 'taylorSeriesColorAxisX', 'taylorSeriesColorAxisY',
+    'taylorSeriesConvergenceRadius', 'gridColor1', 'gridColor2',
     'chainingEnabled', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
     'algebraicChainingTerms', 'cauchyIntegralModeEnabled',
     'laplaceModeEnabled', 'conformalGridEnabled', 'dynamicPlotting',
@@ -162,13 +162,13 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             taylorSeriesCenter: { re: 0, im: 0 },
             taylorSeriesOrder: 2,
             taylorSeriesConvergenceRadius: 1,
-            taylorSeriesColorAxisX: '#111',
-            taylorSeriesColorAxisY: '#222'
+            gridColor1: '#111111',
+            gridColor2: '#222222'
         });
         drawWPlaneContent();
         assert.equal(counters.clear, 5);
 
-        state.taylorSeriesColorAxisX = '#333';
+        state.gridColor2 = '#333333';
         drawWPlaneContent();
         assert.equal(counters.clear, 6);
 

@@ -12,16 +12,12 @@ import {
     RESIDUE_CALC_EPSILON_RADIUS,
     RESIDUE_BOUNDARY_CHECK_FACTOR
 } from '../constants/numerical.js';
-import { createSafeMarkupFragment } from '../ui/dom-components.js';
 import { buildInputShapeGeometryConfig, generateInputShapePointSets } from '../rendering/shape-generators.js';
 
 const { controls } = context;
 
-const cauchyDisplayCache = {
-    element: null,
-    key: null,
-    hidden: null
-};
+let cauchyDisplay = { key: null, text: '', html: null, hidden: true };
+let windingDisplay = '';
 let cauchyAnalysisCache = null;
 
 export function isPointInsideContour(point, contourType, params) {
@@ -74,27 +70,16 @@ function cauchyAnalysisKey(isZPlanar) {
 }
 
 function publishCauchyResult(key, { text = null, html = null, hidden = false } = {}) {
-    const element = controls.cauchyIntegralResultsInfo;
-    if (!element) return;
+    if (cauchyDisplay.key === key && cauchyDisplay.hidden === hidden) return;
+    cauchyDisplay = { key, text: text || '', html, hidden };
+}
 
-    const elementChanged = cauchyDisplayCache.element !== element;
-    const visibilityChanged = elementChanged || cauchyDisplayCache.hidden !== hidden;
-    const outputChanged = elementChanged || cauchyDisplayCache.key !== key;
+export function getCauchyDisplay() {
+    return cauchyDisplay;
+}
 
-    if (visibilityChanged) element.classList.toggle('hidden', hidden);
-    if (!outputChanged) return;
-
-    if (hidden) {
-        element.replaceChildren();
-    } else if (html !== null) {
-        element.replaceChildren(createSafeMarkupFragment(html));
-    } else {
-        element.textContent = text || '';
-    }
-
-    cauchyDisplayCache.element = element;
-    cauchyDisplayCache.key = key;
-    cauchyDisplayCache.hidden = hidden;
+export function getWindingDisplay() {
+    return windingDisplay;
 }
 
 export function resolveCauchyContour(state, { planeParams = null, curvePoints = NUM_INTEGRAL_STEPS } = {}) {
@@ -129,7 +114,6 @@ export function resolveCauchyContour(state, { planeParams = null, curvePoints = 
 }
 
 export function performCauchyAnalysis() {
-    if (!controls.cauchyIntegralResultsInfo) return;
     const isZPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
     const analysisKey = cauchyAnalysisKey(isZPlanar);
     const active = state.cauchyIntegralModeEnabled && isZPlanar;
@@ -265,7 +249,7 @@ export function performCauchyAnalysis() {
 }
 
 export function updateWindingNumberDisplay() {
-    controls.wPlaneAnalysisInfo.replaceChildren();
+    windingDisplay = '';
     let contourC_points = null;
     const N_winding_num_pts = 150;
     const wIsPlanar = !state.manifold3dViewEnabled;
@@ -294,7 +278,7 @@ export function updateWindingNumberDisplay() {
             state.poles.forEach(pole => {if (isPointInsideContour(pole, contourParams.type, contourParams)) P_in_C++;});
             argumentPrincipleText = ` (Z-P in C = ${Z_in_C}-${P_in_C} = ${Z_in_C - P_in_C})`;
         }
-        controls.wPlaneAnalysisInfo.textContent = `W(f(C),0): ${windingNumber}${argumentPrincipleText}`;
+        windingDisplay = `W(f(C),0): ${windingNumber}${argumentPrincipleText}`;
         const windingChanged = !pathCrossesOrigin && !pathHasNaN &&
             typeof windingNumber === 'number' &&
             runtime.rendering.previousWindingNumber !== null &&
@@ -302,7 +286,6 @@ export function updateWindingNumberDisplay() {
         if (windingChanged) runtime.rendering.wOriginGlowTime = Date.now();
         runtime.rendering.previousWindingNumber = (typeof windingNumber === 'number') ? windingNumber : null;
     } else {
-        controls.wPlaneAnalysisInfo.replaceChildren();
         runtime.rendering.previousWindingNumber = null;
     }
 }

@@ -123,7 +123,6 @@ function configureDynamics(overrides = {}) {
         mobiusC: { re: 0, im: 0 },
         mobiusD: { re: 1, im: 0 },
         fractionalPowerN: 0.5,
-        branchCutType: 'ray',
         branchCutAngle: Math.PI,
         zetaContinuationEnabled: false,
         taylorSeriesEnabled: false,
@@ -315,7 +314,6 @@ function makeAlgebraicDynamicsSnapshot(overrides = {}) {
         mobiusC: { re: 0, im: 0 },
         mobiusD: { re: 1, im: 0 },
         fractionalPowerN: 0.5,
-        branchCutType: 'ray',
         branchCutAngle: Math.PI,
         zetaContinuationEnabled: false,
         style: {

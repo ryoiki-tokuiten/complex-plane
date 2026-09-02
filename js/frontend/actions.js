@@ -1,8 +1,8 @@
 import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, laplaceComPlaneParams, laplaceSpectrumPlaneParams, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import { setupVisualParameters, updateChainingColumns } from '../utils/dom-utils.js';
-import { loadUploadedMediaFile, toggleUploadedVideoPlayback, pauseUploadedVideoPlayback, startVideoProcessingLoop, syncVideoPlaybackUI, getMediaSource, isMediaInputShape } from '../utils/raster-media.js';
-import { initPlaneContextMenu, hidePlaneContextMenu } from './plane-context-menu.js';
+import { setupVisualParameters } from '../utils/dom-utils.js';
+import { loadUploadedMediaFile, pauseUploadedVideoPlayback, startVideoProcessingLoop, publishVideoPlaybackStatus, isMediaInputShape } from '../utils/raster-media.js';
+import { hidePlaneContextMenu, openPlaneContextMenu } from './plane-context-menu-state.js';
 import { updatePlaneViewportRanges, mapCanvasToWorldCoords, setPlaneViewport } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import { clonePlain } from '../utils/clone-utils.js';
@@ -17,30 +17,19 @@ import {
 } from '../analysis/laplace-transform.js';
 import { ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
 import {
-    updateDomainPaletteCirclePanel,
-    updateSurfacePaletteCirclePanel
-} from '../rendering/draw-palette-preview.js';
-import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncLaplacePlayPauseButton, updateCustomFormulaPreview, syncComplexParameterControls } from './ui-updates.js';
-import { syncGridDensityControls } from './grid-density-controls.js';
-import {
-    bindGridShapePicker,
-    initializeGridShapeControlsFromDOM,
-    positionGridShapeControls,
-    setGridShapeParameter
-} from './grid-shape-controls.js';
-import { GRID_SHAPE_PARAMETERS } from '../constants/grid-shapes.js';
+import { syncComplexParameterControls } from './view-model.js';
+import { syncGridDensityControls } from './grid-density.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
-import { setNavigationModeEnabled, setNavigationKey, stopNavigationLoop, initializeNavigationStateFromControls } from '../navigation-plane.js';
-import { toggleAnimation } from './animation.js';
-import { initializePolynomialCoeffs } from './polynomial-ui.js';
+import { setNavigationModeEnabled, setNavigationKey, stopNavigationLoop } from '../navigation-plane.js';
+import { toggleAnimation } from './animation-controller.js';
+import { initializePolynomialCoeffs } from '../store/polynomial-state.js';
 import { resizeScalarSurface } from '../rendering/real-plots-renderer.js';
-import { applyTheme, loadThemePreferences } from './theme-manager.js';
+import { applyTheme, loadThemePreferences } from './theme.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
-import { initPanelLayoutManager, refreshPanelEdgeHandles, refreshPanelLayout } from './panel-layout-manager.js';
+import { initPanelLayoutManager, refreshPanelEdgeHandles, refreshPanelLayout, positionContour2DPanel } from '../ui/panel-layout-manager.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { compileExpression } from '../math/expression/index.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
@@ -54,7 +43,7 @@ import {
 import { disposeRealPlotsRenderer, disposeScalarSurface, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../math/algebraic-term-utils.js';
 import { openThemeModal } from '../frontend/theme-state.js';
-import { resetAllPanelLayouts } from './panel-layout-manager.js';
+import { resetAllPanelLayouts } from '../ui/panel-layout-manager.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import {
     continuationNativeSheet,
@@ -63,10 +52,11 @@ import {
     nativeMapOptions
 } from '../native/complex-engine.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
-import { getRiemannSurfaceCanvas, resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
+import { resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js';
 import { findNearestDynamicSample, formatDynamicSampleTooltip } from '../rendering/draw-dynamic-plotting.js';
 import { drawFourier3DPipeline } from '../rendering/fourier-3d-pipeline.js';
-import { showDynamicTooltip, hideDynamicTooltip } from './tooltip.js';
+import { showDynamicTooltip, hideDynamicTooltip } from './tooltip-state.js';
+import { controlKeyFromId } from '../ui/control-registry.js';
 
 const { controls = {} } = context;
 
@@ -94,12 +84,31 @@ const PASSIVE_CAPTURE_LISTENER_OPTIONS = Object.freeze({ passive: true, capture:
 const ACTIVE_LISTENER_OPTIONS = Object.freeze({ passive: false });
 const DEFAULT_FRAME_DELAY = 0;
 
-let palettePanelFrameId = 0;
-let pendingPalettePanelRefresh = false;
+const uiActions = new Map();
+
+const EVENT_PROP_NAMES = {
+    blur: 'onBlur', change: 'onChange', click: 'onClick', contextmenu: 'onContextMenu',
+    input: 'onInput', keydown: 'onKeyDown', keyup: 'onKeyUp', mousedown: 'onMouseDown',
+    mouseleave: 'onMouseLeave', mousemove: 'onMouseMove', mouseup: 'onMouseUp',
+    pointerdown: 'onPointerDown', pointermove: 'onPointerMove', pointerup: 'onPointerUp',
+    wheel: 'onWheel'
+};
+
+function registerUiAction(controlKey, eventName, handler) {
+    const prop = EVENT_PROP_NAMES[eventName];
+    if (!prop) throw new Error(`Unsupported Preact UI event: ${eventName}`);
+    const current = uiActions.get(controlKey) || {};
+    const previous = current[prop];
+    uiActions.set(controlKey, {
+        ...current,
+        [prop]: previous
+            ? event => { previous(event); handler(event, event.currentTarget); }
+            : event => handler(event, event.currentTarget)
+    });
+}
 
 const canvasInteractionContexts = { z: null, w: null };
 const canvasContextByElement = new WeakMap();
-const fullscreenOrigins = new WeakMap();
 const EMPTY_RECT = Object.freeze({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
 
 function createPointerSnapshot() {
@@ -173,8 +182,6 @@ const BINDERS = [
     bindVectorFieldControls,
     bindTaylorControls,
     bindRadialAndZetaControls,
-    bindGridShapeControls,
-    bindGridShapePicker,
     bindParticleControls,
     bindLaplaceControls,
     bindChainingControls,
@@ -209,45 +216,25 @@ function bindRequestedExplorerControls() {
     bindNumber('arbitraryShapeTMaxInput', 'arbitraryShapeTMax');
     bindControlListener('arbitraryShapeExpressionInput', 'input', (_event, input) => {
         state.arbitraryShapeExpression = input.value;
-        updateCustomFormulaPreview(input, controls.arbitraryShapeExpressionMath, { allowedVariables: ['t'] });
         requestUiRedraw();
-    });
-    updateCustomFormulaPreview(controls.arbitraryShapeExpressionInput, controls.arbitraryShapeExpressionMath, {
-        allowedVariables: ['t']
     });
     bindControlListener('clearArbitraryShapeBtn', 'click', () => {
         state.arbitraryShapePoints = [];
         requestUiRedraw();
     });
-    bindControlListener('branchCutTypeSelector', 'change', (_event, selector) => {
-        state.branchCutType = selector.value;
-        state.branchDrawMode = null;
-        resetContinuationForCutChange();
-        requestUiRedraw();
-    });
+
     bindControlListener('branchCutAngleSlider', 'input', (_event, slider) => {
         state.branchCutAngle = Number(slider.value);
         resetContinuationForCutChange();
         requestUiRedraw();
     });
-    bindControlListener('drawBranchCutBtn', 'click', () => {
-        state.branchCutType = 'draw';
-        state.branchDrawMode = 'cut';
-        resetContinuationForCutChange();
-        if (controls.branchCutTypeSelector) controls.branchCutTypeSelector.value = 'draw';
-        requestUiRedraw();
-    });
     bindControlListener('drawContinuationPathBtn', 'click', () => {
-        state.branchDrawMode = 'path';
+        state.branchDrawMode = state.branchDrawMode === 'path' ? null : 'path';
         requestUiRedraw();
     });
-    bindControlListener('clearContinuationPathBtn', 'click', () => {
+    bindControlListener('resetContinuationBtn', 'click', () => {
         state.branchDrawMode = null;
-        state.continuationPath = [];
-        state.continuationValues = [];
-        state.continuationSheet = 0;
-        state.continuationValue = null;
-        state.riemannSurfaceBranchCenter = 0;
+        resetContinuationForCutChange();
         requestUiRedraw();
     });
 }
@@ -257,15 +244,12 @@ function resetContinuationForCutChange() {
     state.continuationValues = [];
     state.continuationSheet = 0;
     state.continuationValue = null;
+    state.continuationAngle = null;
     state.riemannSurfaceBranchCenter = 0;
 }
 
 function parseInteger(value) {
     return parseInt(value, 10);
-}
-
-function $(id) {
-    return document.getElementById(id);
 }
 
 function clamp(value, min, max) {
@@ -278,29 +262,6 @@ function frame(callback) {
 
 function laterFrame(callback, delay = DEFAULT_FRAME_DELAY) {
     frame(() => setTimeout(callback, delay));
-}
-
-function setStyles(element, styles) {
-    if (element) Object.assign(element.style, styles);
-}
-
-function clearStyles(element, keys) {
-    if (!element) return;
-    keys.forEach(key => {
-        element.style[key] = '';
-    });
-}
-
-function hidden(element, shouldHide) {
-    if (element) element.classList.toggle('hidden', Boolean(shouldHide));
-}
-
-function display(element, visible) {
-    hidden(element, !visible);
-}
-
-function checked(controlKey, value) {
-    if (controls[controlKey]) controls[controlKey].checked = Boolean(value);
 }
 
 function setOrbitColoringMode(mode) {
@@ -318,30 +279,15 @@ function parseControlValue(control, parser = parseFloat) {
 
 function bindElementListener(element, eventName, handler, options) {
     if (!element) return;
-
+    if (element.id) {
+        registerUiAction(controlKeyFromId(element.id), eventName, handler);
+        return;
+    }
     element.addEventListener(eventName, event => handler(event, element), options);
 }
 
 function bindControlListener(controlKey, eventName, handler, options) {
-    bindElementListener(controls[controlKey], eventName, handler, options);
-}
-
-function readSliderState(controlKey, stateKey, parser = parseFloat) {
-    const control = controls[controlKey];
-    if (control) state[stateKey] = parseControlValue(control, parser);
-    return state[stateKey];
-}
-
-function readCheckboxState(controlKey, stateKey) {
-    const control = controls[controlKey];
-    if (control) state[stateKey] = control.checked;
-    return state[stateKey];
-}
-
-function readSelectorState(controlKey, stateKey) {
-    const control = controls[controlKey];
-    if (control) state[stateKey] = control.value;
-    return state[stateKey];
+    registerUiAction(controlKey, eventName, handler);
 }
 
 function shouldMarkDomainDirty(controlKey, stateKey) {
@@ -395,35 +341,17 @@ function bindSimpleControlRemainder() {
     SIMPLE_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => bindSelector(controlKey, stateKey));
 }
 
-function isDomainPalettePanelOpen() {
-    const panel = $('domain_palette_circle_panel');
-    return Boolean(panel && !panel.classList.contains('hidden'));
-}
-
-function flushPalettePanelRefresh() {
-    palettePanelFrameId = 0;
-    if (!pendingPalettePanelRefresh) return;
-
-    pendingPalettePanelRefresh = false;
-    updateDomainPaletteCirclePanel();
-}
-
-function scheduleRedraw(markDomainDirty = false, refreshPalettePanel = false) {
+function scheduleRedraw(markDomainDirty = false) {
     if (markDomainDirty) requestScheduledDomainRedraw();
     else requestScheduledUiRedraw();
-
-    if (refreshPalettePanel) {
-        pendingPalettePanelRefresh = true;
-        if (!palettePanelFrameId) palettePanelFrameId = frame(flushPalettePanelRefresh);
-    }
 }
 
 function requestUiRedraw() {
-    scheduleRedraw(false, false);
+    scheduleRedraw();
 }
 
 function requestDomainRedraw(markDomainDirty = false) {
-    scheduleRedraw(markDomainDirty, isDomainPalettePanelOpen());
+    scheduleRedraw(markDomainDirty);
 }
 
 function requestAlgebraicRedraw() {
@@ -431,33 +359,10 @@ function requestAlgebraicRedraw() {
 }
 
 function updateCategoryNavState(activeCategory) {
-    const complexBtn = document.getElementById('toggle_complex_functions_btn');
-    const customBtn = document.getElementById('select_custom_complex_btn');
-    const fractalsBtn = document.getElementById('toggle_fractals_btn');
-    const realPlotsBtn = document.getElementById('select_real_plots_btn');
-    const laplaceBtn = document.getElementById('select_laplace_btn');
-
-    if (complexBtn) complexBtn.classList.toggle('active', activeCategory === 'complex_functions');
-    if (customBtn) customBtn.classList.toggle('active', activeCategory === 'custom_complex');
-    if (fractalsBtn) fractalsBtn.classList.toggle('active', activeCategory === 'fractals');
-    if (realPlotsBtn) realPlotsBtn.classList.toggle('active', activeCategory === 'real_plots');
-    if (laplaceBtn) laplaceBtn.classList.toggle('active', activeCategory === 'laplace');
-
-    const complexGrid = document.getElementById('complex_functions_grid_container');
-    const fractalsGrid = document.getElementById('fractals_grid_container');
-    if (complexGrid) complexGrid.classList.toggle('hidden', activeCategory !== 'complex_functions');
-    if (fractalsGrid) fractalsGrid.classList.toggle('hidden', activeCategory !== 'fractals');
+    state.controlCategory = activeCategory;
 }
 
 function setActiveFunctionButton(activeKey) {
-    Object.entries(controls.funcButtons || {}).forEach(([key, button]) => {
-        if (!button) return;
-        const active = key === activeKey;
-        button.classList.toggle('active', active);
-        button.classList.toggle('btn-primary', active);
-        button.classList.toggle('btn-outline-secondary', !active);
-    });
-
     if (activeKey === 'laplace') {
         updateCategoryNavState('laplace');
     } else if (isFractalPresetKey(activeKey)) {
@@ -489,12 +394,6 @@ function disableOutputChaining() {
     if (!state.chainingEnabled) return;
 
     state.chainingEnabled = false;
-    updateChainingColumns(1);
-}
-
-function restoreNormalPlaneLayout() {
-    hidden(controls.zPlaneColumn, false);
-    hidden(controls.wPlaneColumn, false);
 }
 
 function refreshPlanesAfterLayoutChange() {
@@ -505,14 +404,12 @@ function refreshPlanesAfterLayoutChange() {
 }
 
 function disableRealPlots() {
-    hidden(controls.realPlotsControlsContainer, true);
     if (!state.realPlotsEnabled) return;
     state.realPlotsEnabled = false;
     if (!state.riemannSurfaceEnabled) {
         state.show2DContourPlot = false;
     }
     disposeRealPlotsRenderer();
-    restoreNormalPlaneLayout();
     refreshPlanesAfterLayoutChange();
 }
 
@@ -535,7 +432,6 @@ function disableGraphView() {
         controls.toggleFullscreenGraphBtn.click();
     }
 
-    hidden(controls.graphColumn, true);
     disposeTransformationGraphRenderer();
     refreshPlanesAfterLayoutChange();
     updateModePanels();
@@ -543,18 +439,10 @@ function disableGraphView() {
 
 function syncChainingControlsFromState() {
     if (state.chainingMode !== 'zero_seed') state.chainingMode = 'recursion';
-    updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
 }
 
 function syncAlgebraicControlsFromState() {
-    if (controls.algebraicChainingZInput) {
-        controls.algebraicChainingZInput.value = state.algebraicChainingZExpr || 'z';
-        updateCustomFormulaPreview(
-            controls.algebraicChainingZInput,
-            controls.algebraicChainingZMath,
-            { allowedVariables: ['z'] }
-        );
-    }
+    state.algebraicChainingZExpr ||= 'z';
 }
 
 function captureStateSnapshot() {
@@ -627,7 +515,6 @@ function activateFractalPreset(key) {
     if (leavingTransform) restoreNormalViewports();
     syncChainingControlsFromState();
     syncAlgebraicControlsFromState();
-    display(controls.algebraicChainingControlsContainer, true);
     updateModePanels();
     setActiveFunctionButton(key);
     requestDomainRedraw(true);
@@ -766,36 +653,6 @@ function complexState(key) {
     return requireFiniteComplex(state[key], `State ${key}`);
 }
 
-function initializeMobiusState() {
-    MOBIUS_PARAMS.forEach(param => {
-        const stateKey = `mobius${param}`;
-        const value = { ...complexState(stateKey) };
-        COMPLEX_PARTS.forEach(part => {
-            const slider = controls[`mobius${param}${part === 're' ? 'Re' : 'Im'}Slider`];
-            if (slider) value[part] = parseControlValue(slider, parseFloat);
-        });
-        state[stateKey] = value;
-    });
-}
-
-function initializeScalarBindings() {
-    sliderParamKeys.forEach(key => readSliderState(`${key}Slider`, key));
-    SIMPLE_SLIDER_BINDINGS.forEach(({ controlKey, stateKey, parser }) => readSliderState(controlKey, stateKey, parser));
-    SIMPLE_CHECKBOX_BINDINGS.forEach(({ controlKey, stateKey }) => readCheckboxState(controlKey, stateKey));
-    SIMPLE_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => readSelectorState(controlKey, stateKey));
-    initializeGridShapeControlsFromDOM();
-    initializeMobiusState();
-    initializeNavigationStateFromControls();
-}
-
-export function initializeStateFromControls() {
-    initializeScalarBindings();
-    syncGridDensityControls();
-    updateModePanels();
-    setActiveFunctionButton(state.currentFunction);
-    syncVideoPlaybackUI();
-}
-
 function bindAnimatedSlider(slider, updateState, playButton, speedSelector) {
     if (!slider || !playButton || !speedSelector) return;
     bindElementListener(playButton, 'click', () => toggleAnimation(slider, updateState, playButton, speedSelector));
@@ -812,21 +669,6 @@ function bindBaseParameterControls() {
             controls[`play${key[0].toUpperCase()}${key.slice(1)}Btn`],
             controls[`speed${key[0].toUpperCase()}${key.slice(1)}Selector`]
         );
-    });
-}
-
-function bindGridShapeControls() {
-    Object.entries(GRID_SHAPE_PARAMETERS).forEach(([shape, definition]) => {
-        definition.controls.forEach(controlDefinition => {
-            bindElementListener($(controlDefinition.controlId), 'input', (_event, slider) => {
-                setGridShapeParameter(
-                    shape,
-                    controlDefinition.key,
-                    parseControlValue(slider, parseFloat)
-                );
-                requestDomainRedraw(true);
-            });
-        });
     });
 }
 
@@ -903,13 +745,7 @@ function bindFunctionButtons() {
         state.algebraicChainingEnabled = true;
         state.currentFunction = 'algebraic_chaining';
         state.currentFunctionPreset = null;
-        checked('enableAlgebraicChainingCb', true);
-
         setActiveFunctionButton('custom_complex');
-        display(controls.algebraicChainingControlsContainer, true);
-        hidden(controls.algebraicChainingParams, false);
-        hidden(controls.realPlotsControlsContainer, true);
-        hidden(controls.laplaceSpecificControls, true);
         updateModePanels();
         syncComplexParameterControls();
         requestAlgebraicRedraw();
@@ -948,13 +784,6 @@ function bindFunctionButtons() {
             state.currentFunction = 'cos';
         }
 
-        hidden(controls.realPlotsControlsContainer, false);
-        hidden(controls.realPlotsColumn, false);
-        hidden(controls.zPlaneColumn, true);
-        hidden(controls.wPlaneColumn, true);
-        hidden(controls.laplaceSpecificControls, true);
-        hidden(controls.coreApplicationControls, true);
-
         updateCategoryNavState('real_plots');
         refreshPlanesAfterLayoutChange();
         requestUiRedraw();
@@ -982,10 +811,8 @@ function bindImageControls() {
 }
 
 function bindVideoControls() {
-    bindControlListener('videoPlayPauseBtn', 'click', () => toggleUploadedVideoPlayback());
-
     bindSlider('videoFpsSlider', 'videoProcessingFps', parseInteger, () => {
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         if (state.videoIsPlaying && isMediaInputShape()) startVideoProcessingLoop();
         requestUiRedraw();
     });
@@ -1006,17 +833,7 @@ function bindDomainColoringControls() {
 
 function disableRiemannSurface() {
     state.riemannSurfaceEnabled = false;
-    hidden(controls.riemannSurfaceOptionsDiv, true);
     state.show2DContourPlot = false;
-    hidden(controls.contour2DColumn, true);
-}
-
-function syncFoldSurfaceControls() {
-    const isFoldActive = Boolean(
-        state.foldSurface3dEnabled &&
-        (isFoldableInputShape(state.currentInputShape) || isMediaInputShape())
-    );
-    hidden(controls.wPlaneFoldsOverlay, !isFoldActive);
 }
 
 function syncGridFoldDensity(useFoldDefault = false) {
@@ -1026,7 +843,6 @@ function syncGridFoldDensity(useFoldDefault = false) {
 function disableFoldSurface3d() {
     state.foldSurface3dEnabled = false;
     syncGridFoldDensity();
-    syncFoldSurfaceControls();
 }
 
 function smoothZoomPlane(planeType, factor, steps = 10) {
@@ -1051,14 +867,11 @@ function smoothZoomPlane(planeType, factor, steps = 10) {
 function bindCanvasZoomControls() {
     const ZOOM_FACTOR = 1.35;
     const bindBtn = (id, planeType, factor) => {
-        const btn = document.getElementById(id);
-        if (btn) {
-            btn.addEventListener('click', event => {
-                event.preventDefault();
-                event.stopPropagation();
-                smoothZoomPlane(planeType, factor);
-            });
-        }
+        registerUiAction(controlKeyFromId(id), 'click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            smoothZoomPlane(planeType, factor);
+        });
     };
 
     bindBtn('zoom_in_z_btn', 'z', ZOOM_FACTOR);
@@ -1131,27 +944,13 @@ function bindVectorFieldControls() {
 
 function bindTaylorControls() {
     bindSlider('taylorSeriesOrderSlider', 'taylorSeriesOrder', parseInteger);
-
-    const pickBtn = document.getElementById('pick_taylor_center_canvas_btn');
-    if (pickBtn) {
-        pickBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            state.taylorSeriesCanvasClickCenterEnabled = !state.taylorSeriesCanvasClickCenterEnabled;
-            if (!state.taylorSeriesCanvasClickCenterEnabled) {
-                state.taylorSeriesHoverPoint = null;
-            } else {
-                hidePlaneContextMenu();
-            }
-            requestUiRedraw();
-        });
-    }
-
-    const taylorDiv = document.getElementById('taylor_series_options_detail_div');
-    if (taylorDiv) {
-        ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'input', 'change', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
-            taylorDiv.addEventListener(evt, e => e.stopPropagation());
-        });
-    }
+    bindControlListener('pickTaylorCenterCanvasBtn', 'click', event => {
+        event.stopPropagation();
+        state.taylorSeriesCanvasClickCenterEnabled = !state.taylorSeriesCanvasClickCenterEnabled;
+        if (!state.taylorSeriesCanvasClickCenterEnabled) state.taylorSeriesHoverPoint = null;
+        else hidePlaneContextMenu();
+        requestUiRedraw();
+    });
 }
 
 function bindPolynomialControls() {
@@ -1163,8 +962,10 @@ function bindPolynomialControls() {
 
 function bindRadialAndZetaControls() {
     bindSlider('radialDiscreteStepsCountSlider', 'radialDiscreteStepsCount', parseInteger);
-    bindControlListener('toggleZetaContinuationBtn', 'click', () => {
-        state.zetaContinuationEnabled = !state.zetaContinuationEnabled;
+    bindCheckbox('enableZetaContinuationCb', 'zetaContinuationEnabled', () => {
+        requestDomainRedraw(true);
+    });
+    bindCheckbox('enableZetaContinuationRealPlotsCb', 'zetaContinuationEnabled', () => {
         requestDomainRedraw(true);
     });
 }
@@ -1198,9 +999,6 @@ function bindLaplaceControls() {
         const stateKey = controlKey === 'laplaceSigmaSlider' ? 'laplaceSigma' : 'laplaceOmega';
         bindSlider(controlKey, stateKey, parseFloat, () => {
             if (stateKey === 'laplaceOmega') {
-                ['laplaceOmegaSlider', 'laplaceWindingFrequencySlider'].forEach(key => {
-                    if (controls[key]) controls[key].value = String(state.laplaceOmega);
-                });
             }
             if (state.laplaceModeEnabled) updateLaplaceEvaluationPoint();
             requestUiRedraw();
@@ -1209,7 +1007,6 @@ function bindLaplaceControls() {
 
     bindControlListener('laplaceFourierSliceBtn', 'click', () => {
         state.laplaceSigma = 0;
-        if (controls.laplaceSigmaSlider) controls.laplaceSigmaSlider.value = '0';
         if (state.laplaceModeEnabled) updateLaplaceEvaluationPoint();
         requestUiRedraw();
     });
@@ -1236,9 +1033,6 @@ function bindLaplaceControls() {
     ].forEach(([controlKey, stateKey]) => bindCheckbox(controlKey, stateKey));
 
     bindSlider('laplaceAnimationSpeedSlider', 'laplaceAnimationSpeed', parseFloat, () => {
-        if (controls.laplaceAnimationSpeedDisplay) {
-            controls.laplaceAnimationSpeedDisplay.textContent = state.laplaceAnimationSpeed.toFixed(1);
-        }
         syncLaplacePlayPauseButton();
     });
     bindSlider('laplaceAnimationTimeSlider', 'laplaceAnimationTime', parseFloat, () => {
@@ -1376,9 +1170,7 @@ function updateProbe(ctx, pos, active = true) {
     }
 
     const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
-    const probe = state.probeZ || (state.probeZ = { re: 0, im: 0 });
-    probe.re = world.x;
-    probe.im = world.y;
+    state.probeZ = { re: world.x, im: world.y };
     state.probeActive = true;
 }
 
@@ -1397,6 +1189,17 @@ function startPan(ctx, pos) {
     requestUiRedraw();
 }
 
+function getBaseBranchArgument(point, branchCutAngle) {
+    if (!point || !Number.isFinite(point.re) || !Number.isFinite(point.im)) return 0;
+    const isFixedCut = ['asin', 'atan', 'loggamma'].includes(state.currentFunction);
+    let arg = Math.atan2(point.im, point.re);
+    if (!isFixedCut && Number.isFinite(branchCutAngle)) {
+        while (arg > branchCutAngle) arg -= 2 * Math.PI;
+        while (arg <= branchCutAngle - 2 * Math.PI) arg += 2 * Math.PI;
+    }
+    return arg;
+}
+
 function evaluateSheetPoint(functionKey, point, sheet) {
     const map = nativeMapOptions(state, {
         functionKey,
@@ -1412,23 +1215,28 @@ function handleCanvasMoveNow(ctx, pointer) {
 
     if (ctx.isZ && ctx.drawingBranch) {
         const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
-        const key = ctx.drawingBranch === 'cut' ? 'branchCutPoints' : 'continuationPath';
-        const points = state[key];
+        const points = state.continuationPath;
         const last = points[points.length - 1];
         const sampleDistance = 2 / Math.max(Math.abs(ctx.params.scale.x), Math.abs(ctx.params.scale.y), 1);
         if (!last || Math.hypot(world.x - last.re, world.y - last.im) > sampleDistance) {
             const nextPoints = [...points, { re: world.x, im: world.y }];
-            state[key] = nextPoints;
+            state.continuationPath = nextPoints;
             ctx.hasDragged = true;
-            if (key === 'continuationPath') {
-                const delta = continuationNativeSheet(nextPoints.slice(-2), state.branchCutType, state.branchCutAngle, state.branchCutPoints);
-                const sheet = state.continuationSheet + delta;
-                const value = evaluateSheetPoint(state.currentFunction, nextPoints[nextPoints.length - 1], sheet);
-                state.continuationSheet = sheet;
-                state.continuationValue = value;
-                state.continuationValues = [...state.continuationValues, value];
-                state.riemannSurfaceBranchCenter = sheet;
-            }
+            const prev = points[points.length - 1];
+            const curr = nextPoints[nextPoints.length - 1];
+            let dTheta = Math.atan2(curr.im, curr.re) - Math.atan2(prev.im, prev.re);
+            while (dTheta > Math.PI) dTheta -= 2 * Math.PI;
+            while (dTheta <= -Math.PI) dTheta += 2 * Math.PI;
+            const nextAngle = (state.continuationAngle ?? getBaseBranchArgument(prev, state.branchCutAngle)) + dTheta;
+            state.continuationAngle = nextAngle;
+
+            const baseArg = getBaseBranchArgument(curr, state.branchCutAngle);
+            const sheet = Math.round((nextAngle - baseArg) / (2 * Math.PI));
+            const value = evaluateSheetPoint(state.currentFunction, curr, sheet);
+            state.continuationSheet = sheet;
+            state.continuationValue = value;
+            state.continuationValues = [...state.continuationValues, value];
+            state.riemannSurfaceBranchCenter = sheet;
             requestUiRedraw();
         }
         return;
@@ -1462,7 +1270,7 @@ function handleCanvasMoveNow(ctx, pointer) {
         requestUiRedraw();
     }
 
-    if (state.taylorSeriesCanvasClickCenterEnabled) {
+    if (state.taylorSeriesCanvasClickCenterEnabled || state.canvasClickPickerTarget) {
         const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
         state.taylorSeriesHoverPoint = {
             canvasX: pos.x,
@@ -1491,12 +1299,15 @@ function handleCanvasDown(ctx, event) {
     refreshCanvasRect(ctx);
     updatePointerSnapshot(ctx.pendingMove, event);
 
-    if (state.taylorSeriesCanvasClickCenterEnabled) {
+    const pickerTarget = state.canvasClickPickerTarget || (state.taylorSeriesCanvasClickCenterEnabled ? 'taylorSeriesCustomCenter' : null);
+    if (pickerTarget) {
         const pos = canvasPosition(ctx, ctx.pendingMove);
         const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
-        state.taylorSeriesCustomCenter = { re: world.x, im: world.y };
-        state.taylorSeriesCustomCenterEnabled = true;
-        state.taylorSeriesEnabled = true;
+        state[pickerTarget] = { re: world.x, im: world.y };
+        if (pickerTarget === 'taylorSeriesCustomCenter') {
+            state.taylorSeriesCustomCenterEnabled = true;
+            state.taylorSeriesEnabled = true;
+        }
         state.taylorSeriesHoverPoint = {
             canvasX: pos.x,
             canvasY: pos.y,
@@ -1508,23 +1319,16 @@ function handleCanvasDown(ctx, event) {
         requestUiRedraw();
         return;
     }
-    if (ctx.isZ && state.branchDrawMode) {
-        const mode = state.branchDrawMode;
+    if (ctx.isZ && state.branchDrawMode === 'path') {
         const pos = canvasPosition(ctx, ctx.pendingMove);
         const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
-        const key = mode === 'cut' ? 'branchCutPoints' : 'continuationPath';
         ctx.hasDragged = false;
-        if (mode === 'cut') {
-            state.branchCutType = 'draw';
-            resetContinuationForCutChange();
-        }
-        state[key] = [{ re: world.x, im: world.y }];
-        if (mode === 'path') {
-            state.continuationSheet = 0;
-            state.continuationValue = evaluateSheetPoint(state.currentFunction, state[key][0], 0);
-            state.continuationValues = [state.continuationValue];
-        }
-        ctx.drawingBranch = mode;
+        state.continuationPath = [{ re: world.x, im: world.y }];
+        state.continuationSheet = 0;
+        state.continuationAngle = getBaseBranchArgument(state.continuationPath[0], state.branchCutAngle);
+        state.continuationValue = evaluateSheetPoint(state.currentFunction, state.continuationPath[0], 0);
+        state.continuationValues = [state.continuationValue];
+        ctx.drawingBranch = 'path';
         requestUiRedraw();
         return;
     }
@@ -1599,7 +1403,7 @@ function handleCanvasLeave(ctx) {
     }
 
     updateProbe(ctx, null, false);
-    if (state.taylorSeriesCanvasClickCenterEnabled) {
+    if (state.taylorSeriesCanvasClickCenterEnabled || state.canvasClickPickerTarget) {
         state.taylorSeriesHoverPoint = null;
     }
     if (domainDirty) requestDomainRedraw(true);
@@ -1717,12 +1521,17 @@ function bindCanvasInteractions() {
         canvasInteractionContexts[planeType] = ctx;
         if (!ctx.canvas) return;
 
-        ctx.canvas.addEventListener('mousemove', onCanvasMouseMove, PASSIVE_LISTENER_OPTIONS);
-        ctx.canvas.addEventListener('mousedown', onCanvasMouseDown, PASSIVE_LISTENER_OPTIONS);
-        ctx.canvas.addEventListener('mouseup', onCanvasMouseUp, PASSIVE_LISTENER_OPTIONS);
-        ctx.canvas.addEventListener('mouseleave', onCanvasMouseLeave, PASSIVE_LISTENER_OPTIONS);
-        ctx.canvas.addEventListener('wheel', onCanvasWheel, ACTIVE_LISTENER_OPTIONS);
-        ctx.canvas.addEventListener('click', onCanvasClick, PASSIVE_LISTENER_OPTIONS);
+        const key = planeType === 'z' ? 'zPlaneCanvas' : 'wPlaneCanvas';
+        registerUiAction(key, 'mousemove', onCanvasMouseMove);
+        registerUiAction(key, 'mousedown', onCanvasMouseDown);
+        registerUiAction(key, 'mouseup', onCanvasMouseUp);
+        registerUiAction(key, 'mouseleave', onCanvasMouseLeave);
+        registerUiAction(key, 'wheel', onCanvasWheel);
+        registerUiAction(key, 'click', onCanvasClick);
+        const wrapperKey = planeType === 'z' ? 'zPlaneCanvasWrapper' : 'wPlaneCanvasWrapper';
+        registerUiAction(wrapperKey, 'contextmenu', event => {
+            if (event.target.closest?.('canvas')) openPlaneContextMenu(event, planeType);
+        });
     });
 
     bindElementListener(window, 'mouseup', event => {
@@ -1735,19 +1544,15 @@ function bindCanvasInteractions() {
     bindGenericPlaneInteractions(controls.laplaceSpectrumCanvas, laplaceSpectrumPlaneParams, requestUiRedraw);
 
     ['z_plane_shape_controls_overlay', 'grid_shape_controls_overlay', 'radial_discrete_steps_options_div'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'pointerdown', 'touchstart'].forEach(evtName => {
-                el.addEventListener(evtName, event => event.stopPropagation());
-            });
-        }
+        ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'pointerdown']
+            .forEach(eventName => registerUiAction(controlKeyFromId(id), eventName, event => event.stopPropagation()));
     });
 
     bindContourCanvasInteractions();
 }
 
 function bindContourCanvasInteractions() {
-    const contourCanvas = document.getElementById('contour_2d_canvas');
+    const contourCanvas = controls.contour2DCanvas;
     const getViewport = () => state.laplaceModeEnabled
         ? { xRange: state.laplaceSurface.sigmaRange, yRange: state.laplaceSurface.omegaRange, zoom: state.laplaceSurface.viewportZoom ?? 1 }
         : { xRange: zPlaneParams.currentVisXRange, yRange: zPlaneParams.currentVisYRange, zoom: state.zPlaneZoom };
@@ -1775,7 +1580,6 @@ function bindContourCanvasInteractions() {
 
 function refreshCanvasLayout() {
     refreshPanelLayout();
-    positionGridShapeControls();
     hidePlaneContextMenu();
     invalidateAllCanvasRects();
     setupVisualParameters(false, false);
@@ -1839,11 +1643,14 @@ function onCanvasClick(event) {
     refreshCanvasRect(ctx);
     updatePointerSnapshot(ctx.pendingMove, event);
     const pos = canvasPosition(ctx, ctx.pendingMove);
-    if (state.taylorSeriesCanvasClickCenterEnabled) {
+    const clickPickerTarget = state.canvasClickPickerTarget || (state.taylorSeriesCanvasClickCenterEnabled ? 'taylorSeriesCustomCenter' : null);
+    if (clickPickerTarget) {
         const target = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
-        state.taylorSeriesCustomCenter = { re: target.x, im: target.y };
-        state.taylorSeriesCustomCenterEnabled = true;
-        state.taylorSeriesEnabled = true;
+        state[clickPickerTarget] = { re: target.x, im: target.y };
+        if (clickPickerTarget === 'taylorSeriesCustomCenter') {
+            state.taylorSeriesCustomCenterEnabled = true;
+            state.taylorSeriesEnabled = true;
+        }
         state.taylorSeriesHoverPoint = {
             canvasX: pos.x,
             canvasY: pos.y,
@@ -1878,112 +1685,14 @@ function onCanvasClick(event) {
     }
 }
 
-function fullscreenStyles(backgroundColor) {
-    return {
-        position: 'fixed',
-        top: '0',
-        left: '0',
-        width: '100vw',
-        height: '100vh',
-        zIndex: '1000',
-        backgroundColor
-    };
-}
-
-function attachCloseButton(container, handler) {
-    if (!controls.closeFullscreenBtn || !container) return;
-    controls.closeFullscreenBtn.onclick = handler;
-    container.appendChild(controls.closeFullscreenBtn);
-    controls.closeFullscreenBtn.classList.remove('hidden');
-}
-
-function detachCloseButton(container) {
-    if (!controls.closeFullscreenBtn) return;
-    if (controls.closeFullscreenBtn.parentElement === container) container.removeChild(controls.closeFullscreenBtn);
-    controls.closeFullscreenBtn.classList.add('hidden');
-}
-
-function removeFromBody(element) {
-    if (element && element.parentElement === document.body) document.body.removeChild(element);
-}
-
-function resetFullscreenShell(container) {
-    if (!container) return;
-    container.classList.add('hidden');
-    removeFromBody(container);
-    detachCloseButton(container);
-    clearStyles(container, ['position', 'top', 'left', 'width', 'height', 'zIndex', 'backgroundColor']);
-}
-
-function rememberFullscreenOrigin(element) {
-    fullscreenOrigins.set(element, {
-        parent: element.parentElement,
-        width: element.style.width,
-        height: element.style.height
-    });
-}
-
-function restoreFullscreenOrigin(element, restoreSize = false) {
-    const origin = fullscreenOrigins.get(element);
-    if (!origin?.parent) throw new Error('Fullscreen element has no recorded origin.');
-    origin.parent.appendChild(element);
-    if (restoreSize) {
-        element.style.width = origin.width;
-        element.style.height = origin.height;
-    }
-    fullscreenOrigins.delete(element);
-}
-
-function toggleFullscreenContainer({
-    container,
-    card,
-    entering,
-    onClose,
-    backgroundColor = '#000',
-    restoreSize = false,
-    onResize = null
-}) {
-    const shell = controls.fullscreenContainer;
-    if (!container || !shell) return;
-
-    if (entering) {
-        rememberFullscreenOrigin(container);
-        setStyles(shell, fullscreenStyles(backgroundColor));
-        attachCloseButton(shell, onClose);
-        setStyles(container, { width: '100%', height: '100%' });
-        shell.appendChild(container);
-        document.body.appendChild(shell);
-        shell.classList.remove('hidden');
-        if (card) card.classList.add('hidden-visually');
-    } else {
-        restoreFullscreenOrigin(container, restoreSize);
-        setStyles(container, { width: '100%', height: '100%' });
-        resetFullscreenShell(shell);
-        if (card) card.classList.remove('hidden-visually');
-    }
-
-    if (typeof onResize === 'function') {
-        laterFrame(onResize, entering ? 150 : 100);
-    }
-}
-
-function toggleFullscreenPanel({ container, column, stateKey, closeButton, onResize }) {
-    if (!container || !controls.fullscreenContainer) return;
+function toggleFullscreenPanel({ stateKey, onResize }) {
     state[stateKey] = !state[stateKey];
-    toggleFullscreenContainer({
-        container,
-        card: column,
-        entering: state[stateKey],
-        onClose: () => closeButton.click(),
-        onResize
-    });
+    if (typeof onResize === 'function') laterFrame(onResize, state[stateKey] ? 150 : 100);
+    requestUiRedraw();
 }
 
 function bindFullscreenPanelToggle(buttonKey, options) {
-    bindControlListener(buttonKey, 'click', () => toggleFullscreenPanel({
-        ...options,
-        closeButton: controls[buttonKey]
-    }));
+    bindControlListener(buttonKey, 'click', () => toggleFullscreenPanel(options));
 }
 
 function bindFullscreenControls() {
@@ -2052,25 +1761,7 @@ function bindFullscreenControls() {
 }
 
 function syncTopControlsCollapseState() {
-    if (!controls.controlsOptionsSection || !controls.toggleTopControlsBtn || !controls.toggleTopControlsCollapsedBtn || !controls.topControlsCollapsedBar) {
-        return;
-    }
-
-    const collapsed = Boolean(state.topControlsCollapsed);
-    const expandedText = 'Minimize top half panels';
-    const collapsedText = 'Expand top half panels';
-
-    controls.controlsOptionsSection.classList.toggle('is-collapsed', collapsed);
-    controls.topControlsCollapsedBar.classList.toggle('hidden', !collapsed);
-
-    [
-        [controls.toggleTopControlsBtn, expandedText],
-        [controls.toggleTopControlsCollapsedBtn, collapsedText]
-    ].forEach(([button, text]) => {
-        button.dataset.tooltip = text;
-        button.title = text;
-        button.setAttribute('aria-label', text);
-    });
+    return state.topControlsCollapsed;
 }
 
 function bindTopControlsToggle() {
@@ -2086,58 +1777,30 @@ function bindTopControlsToggle() {
 
 
 
-export function setupEventListeners() {
+export function createFrontendActions() {
     zCanvas = context.zCanvas;
     wCanvas = context.wCanvas;
 
-    if (uiEventListenersBound) return;
+    if (uiEventListenersBound) return uiActions;
     uiEventListenersBound = true;
 
-    subscribeState(() => updateDomainPaletteCirclePanel(), 'domainPalette');
-    subscribeState(() => updateSurfacePaletteCirclePanel(), 'surfacePalette');
     BINDERS.forEach(fn => fn());
 
-    initPlaneContextMenu();
     syncTopControlsCollapseState();
     updateModePanels();
+    return uiActions;
 }
 
 function bindChainingControls() {
-    bindSelector('inputShapeSelector', 'currentInputShape', (_event, value) => {
-        if (value === 'navigate') {
-            setNavigationModeEnabled(true);
-        } else if (state.navigationModeEnabled) {
-            setNavigationModeEnabled(false);
-        }
-        if (!isMediaInputShape(value) && state.videoIsPlaying) {
-            pauseUploadedVideoPlayback();
-        } else if (isMediaInputShape(value) && runtime.media.video && state.videoIsPlaying) {
-            startVideoProcessingLoop();
-        }
-        if (state.graphFullGridEnabled && !isFullGridPerspectiveSupported(value)) {
-            state.graphFullGridEnabled = false;
-            state.graphLayerLockEnabled = false;
-        }
-        if (state.graphViewEnabled && !isGraphViewSupported(value)) {
-            state.graphViewEnabled = false;
-            state.graphFourierEnabled = false;
-            disposeTransformationGraphRenderer();
-        }
-        if (canvasInteractionContexts.z) canvasInteractionContexts.z.drawingArbitraryShape = false;
-        syncGridFoldDensity(state.foldSurface3dEnabled && isFoldableInputShape(value));
-        requestDomainRedraw(true);
-    });
+    bindControlListener('inputShapeSelector', 'change', (_event, selector) => selectInputShape(selector.value));
 
-    bindSlider('chainCountSlider', 'chainCount', parseInteger, value => {
-        if (controls.chainCountValueDisplay) controls.chainCountValueDisplay.textContent = value;
-        updateChainingColumns(state.chainingEnabled ? value : 1);
+    bindSlider('chainCountSlider', 'chainCount', parseInteger, () => {
         requestUiRedraw();
     });
 
     bindElementListener(controls.enableChainingCb, 'change', event => {
         state.chainingEnabled = event.target.checked;
         state.currentFunctionPreset = null;
-        updateChainingColumns(state.chainingEnabled ? state.chainCount : 1);
         requestUiRedraw();
     });
 
@@ -2148,52 +1811,35 @@ function bindChainingControls() {
     });
 }
 
+export function selectInputShape(value) {
+    state.currentInputShape = value;
+    if (value === 'navigate') setNavigationModeEnabled(true);
+    else if (state.navigationModeEnabled) setNavigationModeEnabled(false);
+    if (!isMediaInputShape(value) && state.videoIsPlaying) pauseUploadedVideoPlayback();
+    else if (isMediaInputShape(value) && runtime.media.video && state.videoIsPlaying) startVideoProcessingLoop();
+    if (state.graphFullGridEnabled && !isFullGridPerspectiveSupported(value)) {
+        state.graphFullGridEnabled = false;
+        state.graphLayerLockEnabled = false;
+    }
+    if (state.graphViewEnabled && !isGraphViewSupported(value)) {
+        state.graphViewEnabled = false;
+        state.graphFourierEnabled = false;
+        disposeTransformationGraphRenderer();
+    }
+    if (canvasInteractionContexts.z) canvasInteractionContexts.z.drawingArbitraryShape = false;
+    syncGridFoldDensity(state.foldSurface3dEnabled && isFoldableInputShape(value));
+    requestDomainRedraw(true);
+}
+
 function bindThemeControls() {
     loadThemePreferences();
     applyTheme(state.themeId, { preserveGridColors: true });
     bindControlListener('themeSelectorBtn', 'click', openThemeModal);
     bindControlListener('resetWorkspaceLayoutBtn', 'click', resetAllPanelLayouts);
-}
-
-function fullscreenTarget(planeType, index = 0) {
-    const isZ = planeType === 'z';
-    if (isZ) {
-        return {
-            isZ: true,
-            isThree: false,
-            element: controls.zPlaneCanvasWrapper || zCanvas,
-            card: controls.zPlaneColumn
-        };
+    if (typeof document !== 'undefined') {
+        const btn = document.getElementById('reset_workspace_layout_btn');
+        if (btn) btn.addEventListener('click', resetAllPanelLayouts);
     }
-
-    const canvas = (context.wCanvasList && context.wCanvasList[index]) || wCanvas;
-    const card = index === 0 ? controls.wPlaneColumn : document.getElementById(`w_plane_column_${index}`);
-    const threeContainer = (context.wPlaneThreeContainersList && context.wPlaneThreeContainersList[index]) || controls.wPlaneThreeContainer;
-    const surface = state.riemannSurfaceEnabled ? getRiemannSurfaceCanvas(canvas) : null;
-    const isThree = threeContainer && (
-        state.manifold3dViewEnabled ||
-        (state.foldSurface3dEnabled && (
-            isFoldableInputShape(state.currentInputShape) ||
-            (isMediaInputShape() && getMediaSource())
-        ))
-    );
-
-    let element = surface || (isThree ? threeContainer : canvas);
-    if (!surface && !isThree) {
-        if (index === 0 && controls.wPlaneCanvasWrapper) {
-            element = controls.wPlaneCanvasWrapper;
-        } else if (canvas && canvas.parentElement) {
-            element = canvas.parentElement;
-        }
-    }
-
-    return {
-        isZ: false,
-        isThree,
-        element,
-        card,
-        canvas
-    };
 }
 
 function setPlaneFullscreen(isZ, value, index = 0) {
@@ -2210,39 +1856,10 @@ function isPlaneFullscreen(isZ) {
 }
 
 function handleFullScreenToggle(planeType, index = 0) {
-    const target = fullscreenTarget(planeType, index);
-    if (!target.element) {
-        console.error('Fullscreen target element not found for plane:', planeType, 'index:', index);
-        return;
-    }
-
-    setPlaneFullscreen(target.isZ, !isPlaneFullscreen(target.isZ), index);
-    const entering = isPlaneFullscreen(target.isZ);
-
-    toggleFullscreenContainer({
-        container: target.element,
-        card: target.card,
-        entering,
-        onClose: () => handleFullScreenToggle(planeType, index),
-        backgroundColor: 'var(--color-background-dark)',
-        restoreSize: true
-    });
-
-    if (target.isThree && target.canvas) {
-        target.canvas.classList.toggle('hidden', entering);
-    }
+    const isZ = planeType === 'z';
+    setPlaneFullscreen(isZ, !isPlaneFullscreen(isZ), index);
     setupVisualParameters(false, false);
-
-    if (target.isThree) {
-        laterFrame(() => {
-            if (entering) {
-                target.element.classList.remove('hidden');
-                setStyles(target.element, { width: '100%', height: '100%' });
-            }
-            window.dispatchEvent(new Event('resize'));
-        }, entering ? 100 : 50);
-    }
-
+    laterFrame(() => window.dispatchEvent(new Event('resize')), isPlaneFullscreen(isZ) ? 100 : 50);
     requestDomainRedraw(true);
 }
 
@@ -2267,8 +1884,6 @@ function bindAlgebraicChainingControls() {
 
             state.algebraicChainingEnabled = enabled;
             state.currentFunctionPreset = null;
-            display(controls.algebraicChainingControlsContainer, state.algebraicChainingEnabled);
-
             state.currentFunction = enabled ? 'algebraic_chaining' : (algebraicChainingSourceFunction || 'cos');
             if (state.realPlotsEnabled) {
                 updateCategoryNavState('real_plots');
@@ -2285,11 +1900,8 @@ function bindAlgebraicChainingControls() {
         appendAlgebraicTerm();
     });
 
-    const updateAlgebraicZExpression = () => {
-        const input = controls.algebraicChainingZInput;
-        const preview = controls.algebraicChainingZMath;
+    const updateAlgebraicZExpression = (_event, input) => {
         const value = String(input?.value ?? '').trim() || 'z';
-        updateCustomFormulaPreview(input, preview, { allowedVariables: ['z'] });
         try {
             compileExpression(value, { allowedVariables: ['z'] });
         } catch {
@@ -2306,31 +1918,18 @@ function bindAlgebraicChainingControls() {
 }
 
 function bindDomainPaletteCirclePanelListeners() {
-    bindPalettePanel(
-        'view_palette_circle_btn',
-        'close_domain_palette_circle_btn',
-        'domain_palette_circle_panel',
-        updateDomainPaletteCirclePanel
-    );
+    bindPalettePanel('view_palette_circle_btn', 'domain_palette_circle_panel');
 }
 
 function bindSurfacePaletteCirclePanelListeners() {
-    bindPalettePanel(
-        'view_real_plots_palette_circle_btn',
-        'close_real_plots_palette_circle_btn',
-        'real_plots_palette_circle_panel',
-        updateSurfacePaletteCirclePanel
-    );
+    bindPalettePanel('view_real_plots_palette_circle_btn', 'real_plots_palette_circle_panel');
 }
 
-function bindPalettePanel(viewButtonId, closeButtonId, panelId, updatePanel) {
-    const panel = $(panelId);
-    bindElementListener($(viewButtonId), 'click', () => {
-        if (!panel) return;
-        panel.classList.remove('hidden');
-        updatePanel();
+function bindPalettePanel(viewButtonId, panelId) {
+    registerUiAction(controlKeyFromId(viewButtonId), 'click', () => {
+        if (panelId === 'domain_palette_circle_panel') state.domainPaletteGuideVisible = true;
+        else state.surfacePaletteGuideVisible = true;
     });
-    bindElementListener($(closeButtonId), 'click', () => hidden(panel, true));
 }
 
 function bindGraphControls() {
@@ -2361,33 +1960,16 @@ function bindGraphControls() {
 }
 
 function bindRealPlotsExpressionControls({ preset, input, expressionKey, customKey }) {
-    const showValidation = (field, message) => {
-        if (!field) return;
-        field.setCustomValidity?.(message || '');
-        const display = field.parentElement?.querySelector('.compact-formula-preview');
-        if (!display) return;
-        if (message) {
-            display.textContent = message;
-            display.classList.add('dynamic-math-error');
-        } else {
-            updateCustomFormulaPreview(field, display);
-        }
-    };
+    const errorKey = `${expressionKey.slice(0, -4)}Error`;
 
     const commit = (source, custom) => {
         const value = String(source ?? '').trim();
         const error = validateRealPlotExpression(value);
         const field = controls[input];
+        state[errorKey] = error || '';
+        field?.setCustomValidity?.(error || '');
         if (error) {
-            showValidation(field, error);
             return false;
-        }
-        if (custom) {
-            showValidation(field, null);
-        } else {
-            field?.setCustomValidity?.('');
-            const display = field?.parentElement?.querySelector('.compact-formula-preview');
-            display?.classList.remove('dynamic-math-error');
         }
         state[expressionKey] = value;
         state[customKey] = custom;
@@ -2444,6 +2026,11 @@ function bindContourControls() {
         bindControlListener(`${prefix}Show2DContourBtn`, 'click', () => {
             state.show2DContourPlot = !state.show2DContourPlot;
             requestUiRedraw();
+            if (state.show2DContourPlot) {
+                positionContour2DPanel();
+            } else if (state.realPlotsEnabled) {
+                refreshPanelLayout();
+            }
         });
     });
     bindFullscreenPanelToggle('toggleFullscreenContour2DBtn', {

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('GPU domain-dynamics helpers match the CPU contract fixtures', async ({ page }) => {
     await page.goto('./');
-    await page.waitForFunction(() => document.getElementById('preloader')?.style.display === 'none');
+    await page.waitForFunction(() => window.__state && document.getElementById('z_plane_canvas')?.width > 0);
 
     const result = await page.evaluate(async () => {
         const moduleUrl = new URL('js/constants/domain-dynamics.js', location.href).href;

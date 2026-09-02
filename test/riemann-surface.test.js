@@ -165,9 +165,9 @@ test('Riemann shaders specialize their static loop bound to the active chain dep
     assert.notEqual(getRiemannSurfaceProgramSignature(chainedState), before);
 });
 
-test('drawn branch-cut shader inputs declare their scalar uniforms', async () => {
+test('branch-cut shader inputs declare their scalar uniforms', async () => {
     const source = await readFile(new URL('../js/rendering/webgl-riemann-surface.js', import.meta.url), 'utf8');
-    assert.match(source, /uniform int u_branchCutPointCount;/);
+    assert.match(source, /uBranchCutAngle: 'u_branchCutAngle'/);
 });
 
 test('sheet-aware algebraic expressions use the active cut helpers', () => {

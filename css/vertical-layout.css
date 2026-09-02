@@ -1,0 +1,295 @@
+/* --- Vertical Layout (Desmos-like) --- */
+.application-root.vertical-layout main {
+    flex-direction: row;
+    height: 100vh;
+}
+
+.application-root.vertical-layout #controls_options_section {
+    flex-basis: 380px;
+    min-width: 380px;
+    max-width: 380px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 0.85rem;
+    overflow: hidden;
+    position: relative;
+    gap: 0;
+    background: var(--card-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25);
+    transition: flex-basis 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                min-width 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                max-width 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                padding 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+}
+
+.application-root.vertical-layout #controls_options_section::-webkit-scrollbar {
+    width: 6px;
+}
+
+.application-root.vertical-layout #controls_options_section::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.application-root.vertical-layout #controls_options_section::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 3px;
+}
+
+.application-root.vertical-layout #controls_options_section.is-collapsed {
+    flex-basis: 60px;
+    min-width: 60px;
+    max-width: 60px;
+    padding: 0.7rem 0.5rem;
+}
+
+.application-root.vertical-layout #controls_options_section.is-collapsed .controls-collapsed-bar {
+    flex-direction: column;
+}
+
+.application-root.vertical-layout #controls_options_section.is-collapsed .controls-collapsed-label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+}
+
+.application-root.vertical-layout #controls_panels_row {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    width: 100% !important;
+}
+
+.application-root.vertical-layout #controls_options_section.is-collapsed #controls_panels_row {
+    opacity: 0;
+    pointer-events: none;
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: none;
+}
+
+.application-root.vertical-layout #function-controls-panel {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 0.2rem 0 0 !important;
+    gap: 0.6rem !important;
+    scrollbar-width: thin !important;
+}
+
+.application-root.vertical-layout .panel-category-nav {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.35rem !important;
+    width: 100% !important;
+    padding-bottom: 0.5rem !important;
+    padding-right: 0 !important;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent) !important;
+    flex-shrink: 0 !important;
+}
+
+.application-root.vertical-layout .category-nav-btn-group {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.35rem !important;
+    width: 100% !important;
+}
+
+.application-root.vertical-layout .category-nav-btn {
+    width: 100% !important;
+    justify-content: flex-start !important;
+    padding: 0.5rem 0.85rem !important;
+    font-size: 0.84rem !important;
+}
+
+.application-root.vertical-layout .function-subgrid-container,
+.application-root.vertical-layout #real_plots_controls_container,
+.application-root.vertical-layout .panel-content-details {
+    width: 100% !important;
+    flex-shrink: 0 !important;
+}
+
+/* Spread functions vertically down the column and flow into next column dynamically */
+.application-root.vertical-layout .function-button-grid {
+    column-count: 2 !important;
+    column-gap: 0.45rem !important;
+    width: 100% !important;
+    display: block !important;
+}
+
+.application-root.vertical-layout .function-button-grid button {
+    display: block !important;
+    width: 100% !important;
+    min-height: 36px !important;
+    line-height: 22px !important;
+    padding: 0.4rem 0.6rem !important;
+    margin-bottom: 0.45rem !important;
+    font-size: 0.84rem !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+}
+
+/* Sidebar footer physically pinned at the bottom of the container */
+.application-root.vertical-layout .controls-panel-header-actions {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    flex-shrink: 0 !important;
+    height: 52px !important;
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 0.4rem 0.6rem !important;
+    margin-top: auto !important;
+    margin-bottom: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent) !important;
+    background: transparent !important;
+    z-index: 20 !important;
+}
+
+.application-root.vertical-layout #controls_options_section.is-collapsed .controls-panel-header-actions {
+    display: none !important;
+}
+
+/* Real Plots Palette & Slider Controls */
+.real-plots-palette-panel .viz-settings-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.85rem !important;
+    width: 100% !important;
+}
+
+.real-plots-palette-panel .viz-settings-grid .control-group {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.35rem !important;
+    width: 100% !important;
+    min-width: 0 !important;
+}
+
+.real-plots-palette-panel .viz-settings-grid .control-group label {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    width: 100% !important;
+    font-size: 0.84rem !important;
+    color: var(--text-secondary-color) !important;
+}
+
+.real-plots-palette-panel .viz-settings-grid .control-group label output {
+    font-size: 0.82rem !important;
+    font-family: var(--font-mono, monospace) !important;
+    color: var(--text-color) !important;
+}
+
+.real-plots-palette-panel .viz-settings-grid .slider-container {
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+}
+
+.real-plots-palette-panel .viz-settings-grid .slider-container input[type="range"] {
+    width: 100% !important;
+    flex: 1 1 100% !important;
+    margin: 0 !important;
+}
+
+.application-root.vertical-layout #canvases_section {
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+    padding: 0;
+}
+
+.application-root.vertical-layout #canvases_section::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.application-root.vertical-layout #canvases_section::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.application-root.vertical-layout #canvases_section::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 3px;
+}
+
+.application-root.vertical-layout #canvases_section .two-column-layout {
+    flex-direction: column;
+    overflow: auto !important;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    gap: 1.5rem;
+    min-height: 0 !important;
+    height: 100%;
+    max-height: 100%;
+    padding-bottom: 0 !important;
+}
+
+/* Force specific horizontal multi-column grids in sidebars to stack vertically */
+.application-root.vertical-layout #laplace_specific_controls {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+}
+
+/* Stack Möbius and Polynomial coefficient rows vertically */
+.application-root.vertical-layout #parameter-controls-panel .mobius-coeff-row,
+.application-root.vertical-layout #parameter-controls-panel .polynomial-coeff-row {
+    flex-direction: column !important;
+    gap: 0.95rem !important;
+    align-items: stretch !important;
+}
+
+.application-root.vertical-layout #parameter-controls-panel .mobius-coeff-row > .control-group,
+.application-root.vertical-layout #parameter-controls-panel .polynomial-coeff-row > .control-group {
+    width: 100% !important;
+}
+
+/* Stack slider controls inside narrow sidebars cleanly */
+.application-root.vertical-layout #controls_options_section .slider-container:has(button) {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+}
+
+.application-root.vertical-layout #controls_options_section .slider-container:has(button) input[type="range"] {
+    grid-column: span 2 !important;
+    width: 100% !important;
+    margin-top: 0.65rem !important;
+    margin-bottom: 0.65rem !important;
+}
+
+/* Stack multi-column slider grids in the sidebar */
+.application-root.vertical-layout #controls_options_section .viz-settings-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.9rem !important;
+}
+

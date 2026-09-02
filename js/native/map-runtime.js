@@ -24,18 +24,20 @@ const taylorCache = { key: null, coefficients: null };
 let cacheDirty = true;
 let activeTransformProvider = null;
 
+export const MAP_RUNTIME_STATE_KEYS = Object.freeze([
+    'currentFunction', 'mapPresentation', 'mobiusA', 'mobiusB', 'mobiusC', 'mobiusD',
+    'polynomialN', 'polynomialCoeffs', 'fractionalPowerN', 'expBase', 'logBase', 'besselOrder',
+    'branchCutAngle', 'zetaContinuationEnabled', 'chainingEnabled',
+    'chainingMode', 'chainSeed', 'chainCount', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
+    'algebraicChainingTerms', 'taylorSeriesEnabled', 'taylorSeriesOrder',
+    'taylorSeriesCenter', 'taylorSeriesConvergenceRadius', 'dynamicPlotting'
+]);
+
 subscribeState(() => {
     cacheDirty = true;
     profileCache.clear();
     chainedCache.clear();
-}, new Set([
-    'currentFunction', 'mapPresentation', 'mobiusA', 'mobiusB', 'mobiusC', 'mobiusD',
-    'polynomialN', 'polynomialCoeffs', 'fractionalPowerN', 'expBase', 'logBase', 'besselOrder',
-    'branchCutType', 'branchCutAngle', 'zetaContinuationEnabled', 'chainingEnabled',
-    'chainingMode', 'chainSeed', 'chainCount', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
-    'algebraicChainingTerms', 'taylorSeriesEnabled', 'taylorSeriesOrder',
-    'taylorSeriesCenter', 'taylorSeriesConvergenceRadius', 'dynamicPlotting'
-]));
+}, MAP_RUNTIME_STATE_KEYS);
 
 function asPoint(re, im) {
     return re && typeof re === 'object'
@@ -149,7 +151,7 @@ export function buildMappedTransformProfileKey(functionKey = state.currentFuncti
         `expBase:${mappedTransformComplexKey(state.expBase)}`,
         `logBase:${mappedTransformComplexKey(state.logBase)}`,
         `besselOrder:${mappedTransformComplexKey(state.besselOrder)}`,
-        `branch:${state.branchCutType}:${mappedTransformNumberKey(state.branchCutAngle)}`
+        `branch:${mappedTransformNumberKey(state.branchCutAngle)}`
     ];
     if (functionKey === 'mobius') appendMobius(parts);
     else if (functionKey === 'polynomial') appendPolynomial(parts);

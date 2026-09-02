@@ -68,7 +68,7 @@ const rawState = {
     expBase: { re: Math.E, im: 0 },
     logBase: { re: Math.E, im: 0 },
     besselOrder: { re: 0, im: 0 },
-    currentFunction: 'cos', 
+    currentFunction: 'cos',
     mapPresentation: 'function',
     conformalGridEnabled: false,
     currentInputShape: 'grid_cartesian',
@@ -105,9 +105,9 @@ const rawState = {
     zetaContinuationEnabled: false,
     vectorFieldEnabled: false,
     vectorFieldFunction: 'f(z)',
-    vectorFieldScale: 0.1,
+    vectorFieldScale: 1,
     vectorArrowThickness: 1.5,
-    vectorArrowHeadSize: 6,
+    vectorArrowHeadSize: 2,
     streamlineFlowEnabled: false,
     streamlineStepSize: 0.06,
     streamlineMaxLength: 400,
@@ -126,7 +126,12 @@ const rawState = {
     isWFullScreen: false,
     fullscreenWIndex: 0,
     topControlsCollapsed: false,
-    verticalLayoutEnabled: undefined,
+    controlCategory: 'complex_functions',
+    domainPaletteGuideVisible: false,
+    surfacePaletteGuideVisible: false,
+    contextMenuPanel: '',
+    animationRevision: 0,
+    verticalLayoutEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('complex_verticalLayoutEnabled') === 'true' : false,
 
     cauchyIntegralModeEnabled: false,
     arbitraryShapeMode: 'draw',
@@ -136,13 +141,12 @@ const rawState = {
     arbitraryShapeClosed: true,
     arbitraryShapePoints: [],
 
-    branchCutType: 'ray',
     branchCutAngle: Math.PI,
-    branchCutPoints: [],
     continuationPath: [],
     continuationValues: [],
     continuationSheet: 0,
     continuationValue: null,
+    continuationAngle: null,
     branchDrawMode: null,
 
     preimageExplorerEnabled: false,
@@ -159,21 +163,19 @@ const rawState = {
     themeId: 'rose',
     gridColor1: '#FB923C',
     gridColor2: '#C084FC',
+    backgroundGridOpacity: 1.0,
     radialDiscreteStepsEnabled: false,
-    radialDiscreteStepsCount: 200, 
+    radialDiscreteStepsCount: 200,
 
     taylorSeriesEnabled: false,
     taylorSeriesOrder: 3,
-    taylorSeriesCenter: { re: 0, im: 0 }, 
+    taylorSeriesCenter: { re: 0, im: 0 },
     taylorSeriesConvergenceRadius: Infinity,
     taylorSeriesCustomCenterEnabled: false,
     taylorSeriesCustomCenter: { re: 0, im: 0 },
     taylorSeriesCanvasClickCenterEnabled: false,
+    canvasClickPickerTarget: null,
     taylorSeriesHoverPoint: null,
-    taylorSeriesColorAxisX: 'rgba(200, 150, 255, 0.7)',
-    taylorSeriesColorAxisY: 'rgba(255, 150, 100, 0.7)',
-    taylorSeriesColorConvergenceDiskFill: 'rgba(150, 150, 150, 0.2)',
-    taylorSeriesColorConvergenceDiskStroke: 'rgba(150, 150, 150, 0.5)',
 
     particleAnimationEnabled: false,
     particleDensity: 150,
@@ -234,8 +236,10 @@ const rawState = {
     realPlotsEnabled: false,
     realPlotsInputExpr: 'x',
     realPlotsInputIsCustom: false,
+    realPlotsInputError: '',
     realPlotsImagExpr: '0',
     realPlotsImagIsCustom: false,
+    realPlotsImagError: '',
     realPlotsOutputComponent: 'real',
     surfacePalette: 'viridis',
     realPlotsColorMode: 'height',
@@ -320,6 +324,7 @@ const rawState = {
     },
 
     navigationModeEnabled: false,
+    navigationPressedKeys: [],
     navigationSize: 0.55,
     navigationOpacity: 0.9,
     navigationSpeed: 1.1,
@@ -328,9 +333,10 @@ const rawState = {
 
 const store = createObservableStore(rawState, {
     normalize(key, value, values) {
-        return key === 'probeActive' && value === true && values.chainingEnabled
-            ? false
-            : value;
+        if (key === 'probeActive' && value === true && values.chainingEnabled) return false;
+        if (key === 'show2DContourPlot' && value === true &&
+            !values.realPlotsEnabled && !values.riemannSurfaceEnabled && !values.laplaceModeEnabled) return false;
+        return value;
     }
 });
 
@@ -357,6 +363,21 @@ subscribeState(({ value }) => {
         state.domainColoringEnabled = false;
     }
 }, 'manifold3dViewEnabled');
+
+subscribeState(() => {
+    if (!state.realPlotsEnabled && !state.riemannSurfaceEnabled &&
+        !state.laplaceModeEnabled && state.show2DContourPlot) {
+        state.show2DContourPlot = false;
+    }
+}, ['realPlotsEnabled', 'riemannSurfaceEnabled', 'laplaceModeEnabled']);
+
+subscribeState(() => {
+    if (state.canvasClickPickerTarget || state.taylorSeriesCanvasClickCenterEnabled) {
+        state.canvasClickPickerTarget = null;
+        state.taylorSeriesCanvasClickCenterEnabled = false;
+        state.taylorSeriesHoverPoint = null;
+    }
+}, 'currentFunction');
 
 export const context = {
     zCanvas: null,

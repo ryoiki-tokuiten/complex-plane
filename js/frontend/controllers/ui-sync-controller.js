@@ -1,18 +1,17 @@
 import { state, subscribeState } from '../../store/state.js';
-import { updateTitlesAndGlobalUI } from '../../ui/ui-updates.js';
+import { buildViewModel } from '../view-model.js';
+import { refreshApplication } from '../application.jsx';
 
 // Render results and animation cursors never change the controls. Excluding them keeps
 // the DOM completely off hot drawing paths while every user-facing setting remains
 // automatically covered when the state schema grows.
 const NON_UI_STATE_KEYS = new Set([
     'criticalPoints', 'criticalValues', 'dynamicPlotting', 'laplaceSpectrum',
-    'fullscreenWIndex', 'graphSelectedLineIndex',
+    'graphSelectedLineIndex',
     'graphSelectedShape', 'graphSelectionRevision', 'mediaVersion',
-    'isContour2DFullScreen', 'isGraphFullScreen', 'isLaplace3DFullScreen',
-    'isRealPlotsFullScreen',
-    'isWFullScreen', 'isZFullScreen', 'laplaceAnimationTime', 'laplaceCurrentValue',
+    'laplaceAnimationTime', 'laplaceCurrentValue',
     'laplacePoles', 'laplaceROC', 'laplaceSurface', 'laplaceTimeDomainSignal',
-    'laplaceZeros', 'poles', 'polynomialCoeffs', 'probeZ',
+    'laplaceZeros', 'poles', 'polynomialCoeffs',
     'manifoldTransformationProgressW',
     'manifoldTransformationProgressZ', 'zeros'
 ]);
@@ -21,10 +20,17 @@ const UI_STATE_KEYS = Object.freeze(Object.keys(state).filter(key => !NON_UI_STA
 
 let pending = false;
 let unsubscribe = null;
+let revision = 0;
+let actions = new Map();
 
 function synchronize() {
     pending = false;
-    updateTitlesAndGlobalUI();
+    refreshApplication({ props: buildViewModel(), actions, revision: ++revision });
+}
+
+export function setUiActions(nextActions) {
+    actions = nextActions;
+    synchronize();
 }
 
 function schedule() {
