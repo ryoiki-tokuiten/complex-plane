@@ -12,3 +12,6 @@ temp/
 coverage/
 playwright-report/
 test-results/
+Experiment/
+.cache/
+bertbaron_mandelbrot/
