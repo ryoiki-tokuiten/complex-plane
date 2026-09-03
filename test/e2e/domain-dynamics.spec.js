@@ -2,12 +2,13 @@ import { expect, test } from '@playwright/test';
 
 test('GPU domain-dynamics helpers match the CPU contract fixtures', async ({ page }) => {
     await page.goto('./');
-    await page.waitForFunction(() => document.getElementById('preloader')?.style.display === 'none');
+    await page.waitForFunction(() => window.__state && document.getElementById('z_plane_canvas')?.width > 0);
 
     const result = await page.evaluate(async () => {
         const moduleUrl = new URL('js/constants/domain-dynamics.js', location.href).href;
         const {
             DOMAIN_DYNAMICS_GLSL,
+            DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
             domainDynamicsLogMagnitude,
             domainDynamicsSmoothIteration,
             isFiniteDomainDynamicsValue
@@ -124,11 +125,16 @@ test('GPU domain-dynamics helpers match the CPU contract fixtures', async ({ pag
         }
 
         gl.uniform1f(modeLocation, 1);
-        gl.uniform4f(fixtureLocation, 0, 0, 0, 1000);
+        gl.uniform4f(fixtureLocation, 0, 0, 0, DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-        return { supported: true, values, gpuLongChainLength: pixels[3] / 255 * 512 };
+        return {
+            supported: true,
+            values,
+            maximumChainLength: DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
+            gpuLongChainLength: pixels[3] / 255 * DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH
+        };
     });
 
     test.skip(!result.supported, 'WebGL is unavailable in this browser');
@@ -138,5 +144,5 @@ test('GPU domain-dynamics helpers match the CPU contract fixtures', async ({ pag
         expect(Math.abs(fixture.gpuLogMagnitude - fixture.cpuLogMagnitude)).toBeLessThan(0.5);
         expect(Math.abs(fixture.gpuSmoothIteration - fixture.cpuSmoothIteration)).toBeLessThan(2.5);
     }
-    expect(Math.abs(result.gpuLongChainLength - 512)).toBeLessThan(2.5);
+    expect(Math.abs(result.gpuLongChainLength - result.maximumChainLength)).toBeLessThan(5);
 });

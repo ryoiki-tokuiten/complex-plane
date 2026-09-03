@@ -7,13 +7,14 @@ import {
     buildTransformationGraphData
 } from '../js/rendering/transformation-graph.js';
 import { createPlanarTransformedShapeRenderJob } from '../js/rendering/draw-planar.js';
+import { resolveActiveMap } from '../js/math/active-map.js';
 
 const STATE_KEYS = [
     'currentFunction', 'currentInputShape', 'gridDensity', 'graphViewEnabled',
     'graphFullGridEnabled', 'graphGridFamily', 'graphFourierEnabled',
     'graphFocusBoxEnabled', 'graphLayerLockEnabled',
     'graphSelectedShape', 'graphSelectedLineIndex', 'graphSelectionRevision',
-    'fourierModeEnabled', 'laplaceModeEnabled'
+    'laplaceModeEnabled', 'expBase', 'logBase'
 ];
 
 test('full-grid perspective selects the expected Cartesian and polar families', () => {
@@ -21,7 +22,7 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
 
     try {
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             gridDensity: 12,
             graphViewEnabled: true,
@@ -30,7 +31,6 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
             graphGridFamily: 'primary',
             graphFocusBoxEnabled: true,
             graphFourierEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false
         });
 
@@ -44,7 +44,7 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
                 && curve.fourierReScale > 0 && curve.fourierImScale > 0
         ));
         assert.ok(horizontal.curves.every(curve => curve.label.startsWith('Im(z) = ')));
-        assert.ok(createPlanarTransformedShapeRenderJob(value => value).pointSets
+        assert.ok(createPlanarTransformedShapeRenderJob(resolveActiveMap()).pointSets
             .every(pointSet => pointSet.role === 'grid-horizontal'));
         const horizontalOffsets = horizontal.curves.map(curve => curve.samples[0].input.im);
         assert.deepEqual(horizontalOffsets, [...horizontalOffsets].sort((left, right) => left - right));
@@ -60,7 +60,7 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
         state.graphGridFamily = 'secondary';
         const vertical = buildFullGridTransformationGraphData(zPlaneParams);
         assert.ok(vertical.curves.every(curve => curve.role === 'grid-vertical'));
-        assert.ok(createPlanarTransformedShapeRenderJob(value => value).pointSets
+        assert.ok(createPlanarTransformedShapeRenderJob(resolveActiveMap()).pointSets
             .every(pointSet => pointSet.role === 'grid-vertical'));
 
         state.currentInputShape = 'grid_polar';
@@ -87,7 +87,6 @@ test('full-grid perspective selects the expected Cartesian and polar families', 
 
 test('locked layers connect the selected grid shape to the opposite family at exact mapped samples', () => {
     const previous = Object.fromEntries(STATE_KEYS.map(key => [key, state[key]]));
-
     const assertExactConnections = data => {
         assert.equal(data.mode, 'locked-grid');
         assert.equal(data.lockedCurve, data.curves[0]);
@@ -107,13 +106,12 @@ test('locked layers connect the selected grid shape to the opposite family at ex
             );
             assert.deepEqual(lockedSample.input, crossingSample.input);
             assert.deepEqual(lockedSample.output, crossingSample.output);
-            assert.equal(crossingCurve.intersectionT, intersection.t);
         });
     };
 
     try {
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             gridDensity: 8,
             graphViewEnabled: true,
@@ -122,7 +120,6 @@ test('locked layers connect the selected grid shape to the opposite family at ex
             graphGridFamily: 'primary',
             graphSelectedShape: '',
             graphFourierEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false
         });
 
@@ -130,7 +127,7 @@ test('locked layers connect the selected grid shape to the opposite family at ex
         assertExactConnections(horizontal);
         assert.equal(horizontal.lockedCurve.role, 'grid-horizontal');
         assert.ok(horizontal.curves.slice(1).every(curve => curve.role === 'grid-vertical'));
-        const horizontalInput = createPlanarTransformedShapeRenderJob(value => value).pointSets;
+        const horizontalInput = createPlanarTransformedShapeRenderJob(resolveActiveMap()).pointSets;
         assert.equal(horizontalInput.filter(set => set.role === 'grid-horizontal').length, 1);
         assert.equal(horizontalInput.filter(set => set.role === 'grid-vertical').length, state.gridDensity + 1);
 
@@ -152,7 +149,7 @@ test('locked layers connect the selected grid shape to the opposite family at ex
         assert.ok(Math.abs(exponentialAxis.reScale - 1) <= 1e-12);
         assert.ok(Math.abs(exponentialAxis.imScale - 1) <= 2e-5);
 
-        state.currentFunction = 'sin';
+        state.currentFunction = 'cos';
         state.currentInputShape = 'grid_polar';
         state.graphGridFamily = 'primary';
         state.graphSelectedShape = '';
@@ -172,22 +169,53 @@ test('locked layers connect the selected grid shape to the opposite family at ex
     }
 });
 
-test('standalone Fourier mode never produces transformation-graph data', () => {
+test('standalone transform-hub mode never produces transformation-graph data', () => {
     const previous = Object.fromEntries(STATE_KEYS.map(key => [key, state[key]]));
 
     try {
         Object.assign(state, {
-            currentFunction: 'fourier',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             graphViewEnabled: true,
             graphFullGridEnabled: false,
             graphLayerLockEnabled: false,
             graphFourierEnabled: false,
-            fourierModeEnabled: true,
-            laplaceModeEnabled: false
+            laplaceModeEnabled: true
         });
 
         assert.equal(buildTransformationGraphData(zPlaneParams), null);
+    } finally {
+        Object.assign(state, previous);
+    }
+});
+
+test('transformation graph cache identity follows configurable exp and ln bases', () => {
+    const previous = Object.fromEntries(STATE_KEYS.map(key => [key, state[key]]));
+
+    try {
+        Object.assign(state, {
+            currentFunction: 'exp',
+            currentInputShape: 'grid_cartesian',
+            graphViewEnabled: true,
+            graphFullGridEnabled: false,
+            graphLayerLockEnabled: false,
+            graphSelectedShape: '',
+            graphSelectedLineIndex: -1,
+            graphSelectionRevision: 0,
+            laplaceModeEnabled: false,
+            expBase: { re: 2, im: 0 }
+        });
+        const exponential = buildTransformationGraphData(zPlaneParams);
+        state.expBase = { re: 3, im: 0 };
+        const changedExponential = buildTransformationGraphData(zPlaneParams);
+        assert.notEqual(exponential.geometryKey, changedExponential.geometryKey);
+
+        state.currentFunction = 'ln';
+        state.logBase = { re: 2, im: 0 };
+        const logarithm = buildTransformationGraphData(zPlaneParams);
+        state.logBase = { re: 10, im: 0 };
+        const changedLogarithm = buildTransformationGraphData(zPlaneParams);
+        assert.notEqual(logarithm.geometryKey, changedLogarithm.geometryKey);
     } finally {
         Object.assign(state, previous);
     }
@@ -200,7 +228,7 @@ test('full-grid samples follow the live z-plane zoom while preserving the select
 
     try {
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'grid_cartesian',
             gridDensity: 6,
             graphViewEnabled: true,
@@ -208,7 +236,6 @@ test('full-grid samples follow the live z-plane zoom while preserving the select
             graphLayerLockEnabled: false,
             graphGridFamily: 'primary',
             graphFourierEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false
         });
         zPlaneParams.currentVisXRange = [-4, 4];

@@ -1,33 +1,36 @@
-import {
-    asBoolean,
-    asComplex,
-    compileExpression,
-    finiteComplex,
-    isPrimeInteger
-} from '../math/expression/index.js';
 import { MAX_POINTS_ADAPTIVE_DEFAULT } from '../constants/numerical.js';
+import { generateNativeDiscreteValues, EXPRESSION_ERROR_MESSAGES } from '../native/complex-engine.js';
+import {
+    requireFiniteComplex,
+    requireFiniteNumber,
+    requireInteger
+} from '../utils/numeric-contracts.js';
 
-const DEFAULT_COUNT = 50;
-const ZERO_TOLERANCE = 1e-12;
 export const MAX_DYNAMIC_SOURCE_COUNT = MAX_POINTS_ADAPTIVE_DEFAULT;
 const MAX_GENERATOR_ATTEMPTS = MAX_DYNAMIC_SOURCE_COUNT * 100;
 
-function clampInteger(value, min, max, fallback) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return fallback;
-    return Math.min(max, Math.max(min, Math.floor(numeric)));
-}
-
 function normalizeCount(value) {
-    return clampInteger(value, 0, MAX_DYNAMIC_SOURCE_COUNT, DEFAULT_COUNT);
+    const count = requireInteger(value, 'Discrete-source count');
+    if (count < 0 || count > MAX_DYNAMIC_SOURCE_COUNT) {
+        throw new Error(`Discrete-source count must be between 0 and ${MAX_DYNAMIC_SOURCE_COUNT}.`);
+    }
+    return count;
 }
 
-function record(ordinal, domainValue, label, metadata = {}) {
+function asComplex(value) {
+    if (typeof value === 'number') {
+        return { re: requireFiniteNumber(value, 'Discrete-source value'), im: 0 };
+    }
+    const point = requireFiniteComplex(value, 'Discrete-source value');
+    return { re: point.re, im: point.im };
+}
+
+function record(ordinal, domainValue, kind) {
     return {
         ordinal,
-        domainValue: asComplex(domainValue),
-        label: label ?? formatComplex(domainValue),
-        metadata
+        domainValue,
+        label: formatComplex(domainValue),
+        metadata: { sourceKind: kind }
     };
 }
 
@@ -37,370 +40,161 @@ export function formatComplex(value, digits = 6) {
         const normalized = Math.abs(number) < 1e-12 ? 0 : number;
         return Number(normalized.toFixed(digits)).toString();
     };
-
     if (z.im === 0) return clean(z.re);
     if (z.re === 0) {
         if (z.im === 1) return 'i';
         if (z.im === -1) return '-i';
         return `${clean(z.im)}i`;
     }
-
     const sign = z.im >= 0 ? '+' : '-';
     const magnitude = Math.abs(z.im);
-    const imaginary = magnitude === 1 ? 'i' : `${clean(magnitude)}i`;
-    return `${clean(z.re)}${sign}${imaginary}`;
-}
-
-export function generateIntegerValues(config = {}) {
-    const count = normalizeCount(config.count);
-    const start = Number.isFinite(Number(config.start)) ? Number(config.start) : 1;
-    const numericStep = Number(config.step);
-    const step = Number.isFinite(numericStep) && (numericStep !== 0 || config.allowZeroStep)
-        ? numericStep
-        : 1;
-    const ordering = config.ordering || 'ascending';
-    const values = [];
-
-    if (ordering === 'symmetric') {
-        const includeZero = Boolean(config.includeZero);
-        let radius = Math.max(1, Math.abs(start));
-        if (includeZero && values.length < count) values.push(0);
-
-        while (values.length < count) {
-            values.push(radius);
-            if (values.length < count) values.push(-radius);
-            radius += Math.abs(step);
-        }
-        return values;
-    }
-
-    for (let index = 0; index < count; index += 1) {
-        values.push(start + index * step);
-    }
-
-    return values;
-}
-
-export function generateGeometricValues(config = {}) {
-    const count = normalizeCount(config.count);
-    const first = Number.isFinite(Number(config.start)) ? Number(config.start) : 1;
-    const ratio = Number.isFinite(Number(config.ratio)) ? Number(config.ratio) : 2;
-    const values = [];
-    let current = first;
-
-    for (let index = 0; index < count; index += 1) {
-        values.push(current);
-        current *= ratio;
-    }
-
-    return values;
-}
-
-export function generateHarmonicValues(config = {}) {
-    const count = normalizeCount(config.count);
-    const firstDenominator = Number.isFinite(Number(config.start)) ? Number(config.start) : 1;
-    const difference = Number.isFinite(Number(config.step)) ? Number(config.step) : 1;
-    const values = [];
-
-    for (let index = 0; index < count; index += 1) {
-        const denominator = firstDenominator + index * difference;
-        values.push(Math.abs(denominator) <= ZERO_TOLERANCE
-            ? { re: NaN, im: NaN }
-            : 1 / denominator);
-    }
-
-    return values;
-}
-
-export function generatePrimeValues(config = {}) {
-    const count = normalizeCount(config.count);
-    if (count === 0) return [];
-    const min = Math.max(2, Math.floor(Number(config.min) || 2));
-    const hasMaximum = config.max !== '' && config.max !== null &&
-        config.max !== undefined && Number.isFinite(Number(config.max));
-    const maxValue = hasMaximum ? Math.floor(Number(config.max)) : Number.MAX_SAFE_INTEGER;
-    const primeTarget = config.includeNegative ? Math.ceil(count / 2) : count;
-    const primes = [];
-    let candidate = min <= 2 ? 2 : min % 2 === 0 ? min + 1 : min;
-
-    while (primes.length < primeTarget && candidate <= maxValue) {
-        if (isPrimeInteger(candidate)) primes.push(candidate);
-        candidate = candidate === 2 ? 3 : candidate + 2;
-    }
-
-    if (!config.includeNegative) return primes;
-
-    const signed = [];
-    for (const prime of primes) {
-        signed.push(prime);
-        if (signed.length < count) signed.push(-prime);
-        if (signed.length >= count) break;
-    }
-    return signed;
-}
-
-export function isGaussianPrime(a, b) {
-    if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || (a === 0 && b === 0)) {
-        return false;
-    }
-
-    if (a !== 0 && b !== 0) {
-        return isPrimeInteger(a * a + b * b);
-    }
-
-    const axisValue = Math.abs(a || b);
-    return isPrimeInteger(axisValue) && axisValue % 4 === 3;
-}
-
-function gaussianSort(left, right) {
-    const leftNorm = left.re * left.re + left.im * left.im;
-    const rightNorm = right.re * right.re + right.im * right.im;
-    if (leftNorm !== rightNorm) return leftNorm - rightNorm;
-
-    const leftAngle = Math.atan2(left.im, left.re);
-    const rightAngle = Math.atan2(right.im, right.re);
-    if (leftAngle !== rightAngle) return leftAngle - rightAngle;
-    if (left.re !== right.re) return left.re - right.re;
-    return left.im - right.im;
-}
-
-function isCanonicalAssociate(a, b, includeConjugates) {
-    if (includeConjugates) {
-        return a > 0 || (a === 0 && b > 0);
-    }
-    return a > 0 && b >= 0;
-}
-
-export function generateGaussianIntegerValues(config = {}) {
-    const initialBound = Math.max(1, Math.floor(Number(config.bound) || 8));
-    const count = normalizeCount(config.count);
-    if (count === 0) return [];
-    const normBound = config.boundType === 'norm';
-    let searchBound = Math.max(initialBound, Math.ceil(Math.sqrt(count)));
-
-    while (true) {
-        const values = [];
-        for (let a = -searchBound; a <= searchBound; a += 1) {
-            for (let b = -searchBound; b <= searchBound; b += 1) {
-                if (!config.includeZero && a === 0 && b === 0) continue;
-                if (normBound && a * a + b * b > searchBound * searchBound) continue;
-                values.push({ re: a, im: b });
-            }
-        }
-
-        values.sort(gaussianSort);
-        if (values.length >= count) return values.slice(0, count);
-        searchBound *= 2;
-    }
-}
-
-export function generateGaussianPrimeValues(config = {}) {
-    const count = normalizeCount(config.count);
-    if (count === 0) return [];
-    const initialBound = Math.max(1, Math.floor(Number(config.bound) || 12));
-    const allAssociates = config.associatePolicy !== 'representatives';
-    const includeConjugates = config.includeConjugates !== false;
-    const normBound = config.boundType !== 'square';
-    let searchBound = Math.max(initialBound, Math.ceil(Math.sqrt(count)));
-
-    while (true) {
-        const values = [];
-        for (let a = -searchBound; a <= searchBound; a += 1) {
-            for (let b = -searchBound; b <= searchBound; b += 1) {
-                if (normBound && a * a + b * b > searchBound * searchBound) continue;
-                if (!isGaussianPrime(a, b)) continue;
-                if (!allAssociates && !isCanonicalAssociate(a, b, includeConjugates)) continue;
-                if (!includeConjugates && b < 0) continue;
-                values.push({ re: a, im: b });
-            }
-        }
-
-        values.sort(gaussianSort);
-        if (values.length >= count) return values.slice(0, count);
-        searchBound *= 2;
-    }
+    return `${clean(z.re)}${sign}${magnitude === 1 ? 'i' : `${clean(magnitude)}i`}`;
 }
 
 function parseCustomPoint(value) {
-    if (finiteComplex(value)) return asComplex(value);
     if (Array.isArray(value) && value.length >= 2) {
-        const point = { re: Number(value[0]), im: Number(value[1]) };
-        return finiteComplex(point) ? point : null;
+        return {
+            re: requireFiniteNumber(value[0], 'Custom-point real component'),
+            im: requireFiniteNumber(value[1], 'Custom-point imaginary component')
+        };
     }
-    return null;
+    return asComplex(value);
 }
 
 export function parseCustomPointText(text) {
     const source = String(text ?? '').trim();
     if (!source) return [];
-
-    return source
-        .split(/[\n;]+/)
-        .map(entry => entry.trim())
-        .filter(Boolean)
-        .map(entry => {
-            const imaginaryCoefficient = value => {
-                if (value === '' || value === '+') return 1;
-                if (value === '-') return -1;
-                return Number(value);
-            };
-            const commaParts = entry.split(',').map(part => Number(part.trim()));
-            if (commaParts.length === 2 && commaParts.every(Number.isFinite)) {
-                return { re: commaParts[0], im: commaParts[1] };
-            }
-
-            const normalized = entry.replace(/\s+/g, '');
-            const match = normalized.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))?([+-](?:\d+(?:\.\d*)?|\.\d+)?)i$/i);
-            if (match) {
-                return {
-                    re: match[1] ? Number(match[1]) : 0,
-                    im: imaginaryCoefficient(match[2])
-                };
-            }
-
-            const imaginaryOnly = normalized.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)i$/i);
-            if (imaginaryOnly) {
-                return { re: 0, im: imaginaryCoefficient(imaginaryOnly[1]) };
-            }
-
-            const real = Number(normalized);
-            return Number.isFinite(real) ? { re: real, im: 0 } : null;
-        })
-        .filter(Boolean);
-}
-
-function generateExpressionValues(config, runtime = {}) {
-    const count = normalizeCount(config.count);
-    const expression = compileExpression(String(config.generatorExpression ?? 'j'), {
-        allowedVariables: ['j', ...Object.keys(runtime.parameters || {})]
+    return source.split(/[\n;]+/).map(entry => entry.trim()).filter(Boolean).map(entry => {
+        const imaginaryCoefficient = value => value === '' || value === '+' ? 1 : value === '-' ? -1 : Number(value);
+        const commaParts = entry.split(',').map(part => Number(part.trim()));
+        if (commaParts.length === 2 && commaParts.every(Number.isFinite)) {
+            return { re: commaParts[0], im: commaParts[1] };
+        }
+        const normalized = entry.replace(/\s+/g, '');
+        const cartesian = normalized.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))?([+-](?:\d+(?:\.\d*)?|\.\d+)?)i$/i);
+        if (cartesian) {
+            return { re: cartesian[1] ? Number(cartesian[1]) : 0, im: imaginaryCoefficient(cartesian[2]) };
+        }
+        const imaginary = normalized.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)i$/i);
+        if (imaginary) return { re: 0, im: imaginaryCoefficient(imaginary[1]) };
+        const real = Number(normalized);
+        if (!Number.isFinite(real)) throw new Error(`Invalid custom complex point: ${entry}.`);
+        return { re: real, im: 0 };
     });
-    const predicateSource = String(config.filterExpression || '').trim();
-    const predicate = predicateSource
-        ? compileExpression(predicateSource, {
-            allowedVariables: ['d', 'j', ...Object.keys(runtime.parameters || {})]
-        })
-        : null;
-    const attemptLimit = clampInteger(
-        config.maxAttempts,
-        count,
-        MAX_GENERATOR_ATTEMPTS,
-        Math.max(count * 100, MAX_DYNAMIC_SOURCE_COUNT)
-    );
-    const values = [];
-    const evaluationDiagnostics = [];
-    let attempts = 0;
-
-    while (values.length < count && attempts < attemptLimit) {
-        const environment = {
-            ...runtime.parameters,
-            j: { re: attempts, im: 0 }
-        };
-        try {
-            const value = asComplex(expression(environment));
-
-            if (finiteComplex(value)) {
-                const keep = !predicate || asBoolean(predicate({
-                    ...environment,
-                    d: value
-                }));
-                if (keep) values.push(value);
-            }
-        } catch (error) {
-            const message = `j=${attempts}: ${error?.message || String(error)}`;
-            if (!evaluationDiagnostics.includes(message) && evaluationDiagnostics.length < 3) {
-                evaluationDiagnostics.push(message);
-            }
-        }
-
-        attempts += 1;
-    }
-
-    return {
-        values,
-        diagnostics: [
-            ...evaluationDiagnostics,
-            ...(values.length < count
-                ? [`Generated ${values.length} of ${count} requested values after ${attempts} attempts.`]
-                : [])
-        ]
-    };
 }
 
-export function generateDiscreteSource(config = {}, runtime = {}) {
-    const kind = config.kind || 'integers';
-    let values;
-    let diagnostics = [];
-
-    switch (kind) {
-        case 'naturals':
-            values = generateIntegerValues({ ...config, start: Math.max(0, Number(config.start) || 0) });
-            break;
-        case 'integers':
-            values = generateIntegerValues(config);
-            break;
-        case 'arithmetic':
-            values = generateIntegerValues({ ...config, allowZeroStep: true });
-            break;
-        case 'geometric':
-            values = generateGeometricValues(config);
-            break;
-        case 'harmonic':
-            values = generateHarmonicValues(config);
-            break;
-        case 'primes':
-            values = generatePrimeValues(config);
-            break;
-        case 'gaussian_integers':
-            values = generateGaussianIntegerValues(config);
-            break;
-        case 'gaussian_primes':
-            values = generateGaussianPrimeValues(config);
-            break;
-        case 'custom_points':
-            values = [
-                ...(Array.isArray(config.points) ? config.points.map(parseCustomPoint).filter(Boolean) : []),
-                ...parseCustomPointText(config.pointsText)
-            ];
-            values = values.slice(0, normalizeCount(config.count));
-            break;
-        case 'expression': {
-            const generated = generateExpressionValues(config, runtime);
-            values = generated.values;
-            diagnostics = generated.diagnostics;
-            break;
+function nativeConfig(config, kind, count) {
+    const normalized = {
+        start: 0,
+        step: 1,
+        ratio: 1,
+        min: 2,
+        max: Number.MAX_SAFE_INTEGER,
+        bound: 1,
+        maxAttempts: count,
+        kind,
+        count
+    };
+    if (kind === 'naturals') {
+        normalized.start = requireFiniteNumber(config.start, 'Natural-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Natural-source step');
+        if (normalized.start < 0 || normalized.step === 0) {
+            throw new Error('Natural sources require a non-negative start and non-zero step.');
         }
-        default:
-            throw new Error(`Unknown discrete source kind "${kind}"`);
+    } else if (kind === 'integers') {
+        normalized.start = requireFiniteNumber(config.start, 'Integer-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Integer-source step');
+        if (normalized.step === 0) throw new Error('Integer-source step must be non-zero.');
+        normalized.ordering = config.ordering;
+        normalized.includeZero = Boolean(config.includeZero);
+        normalized.includeNegative = Boolean(config.includeNegative);
+    } else if (kind === 'arithmetic') {
+        normalized.start = requireFiniteNumber(config.start, 'Arithmetic-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Arithmetic-source step');
+    } else if (kind === 'geometric') {
+        normalized.start = requireFiniteNumber(config.start, 'Geometric-source start');
+        normalized.ratio = requireFiniteNumber(config.ratio, 'Geometric-source ratio');
+    } else if (kind === 'harmonic') {
+        normalized.start = requireFiniteNumber(config.start, 'Harmonic-source start');
+        normalized.step = requireFiniteNumber(config.step, 'Harmonic-source step');
+    } else if (kind === 'primes') {
+        normalized.min = requireInteger(config.min, 'Prime-source minimum');
+        if (normalized.min < 2) throw new Error('Prime-source minimum must be at least 2.');
+        normalized.max = config.max === '' || config.max === null || config.max === undefined
+            ? Number.MAX_SAFE_INTEGER
+            : requireInteger(config.max, 'Prime-source maximum');
+        normalized.includeNegative = Boolean(config.includeNegative);
+    } else if (kind === 'gaussian_integers') {
+        normalized.bound = requireInteger(config.bound, 'Gaussian-integer bound');
+        if (normalized.bound < 1) throw new Error('Gaussian-integer bound must be positive.');
+        normalized.boundType = config.boundType;
+        normalized.associatePolicy = config.associatePolicy;
+        normalized.includeConjugates = Boolean(config.includeConjugates);
+    } else if (kind === 'gaussian_primes') {
+        normalized.bound = requireInteger(config.bound, 'Gaussian-prime bound');
+        if (normalized.bound < 1) throw new Error('Gaussian-prime bound must be positive.');
+        normalized.boundType = config.boundType;
+        normalized.associatePolicy = config.associatePolicy;
+        normalized.includeConjugates = Boolean(config.includeConjugates);
+    } else if (kind === 'expression') {
+        if (typeof config.generatorExpression !== 'string' || !config.generatorExpression.trim()) {
+            throw new Error('Expression sources require a generator expression.');
+        }
+        if (config.filterExpression !== undefined && typeof config.filterExpression !== 'string') {
+            throw new Error('Expression-source filters must be strings.');
+        }
+        normalized.generatorExpression = config.generatorExpression;
+        normalized.filterExpression = config.filterExpression?.trim() ?? '';
+        normalized.maxAttempts = config.maxAttempts === undefined
+            ? Math.min(MAX_GENERATOR_ATTEMPTS, Math.max(count * 100, MAX_DYNAMIC_SOURCE_COUNT))
+            : requireInteger(config.maxAttempts, 'Expression-source attempt limit');
+        if (normalized.maxAttempts < count || normalized.maxAttempts > MAX_GENERATOR_ATTEMPTS) {
+            throw new Error(`Expression-source attempt limit must be between ${count} and ${MAX_GENERATOR_ATTEMPTS}.`);
+        }
+    } else {
+        throw new Error(`Unsupported discrete-source kind: ${kind}.`);
+    }
+    return normalized;
+}
+
+export function generateDiscreteSource(config, runtime = { parameters: {} }) {
+    if (!config || typeof config !== 'object') throw new Error('Discrete-source configuration is required.');
+    const kind = config.kind;
+    if (typeof kind !== 'string' || !kind) throw new Error('Discrete-source kind is required.');
+    const count = normalizeCount(config.count);
+    if (kind === 'custom_points') {
+        if (!Array.isArray(config.points)) throw new Error('Custom-point sources require a points array.');
+        const values = [
+            ...config.points.map(parseCustomPoint),
+            ...parseCustomPointText(config.pointsText)
+        ].slice(0, count);
+        return { kind, records: values.map((value, ordinal) => record(ordinal, value, kind)), diagnostics: [] };
     }
 
-    const generatedCount = values.length;
-    values = values.filter(finiteComplex);
-    const invalidCount = generatedCount - values.length;
-    if (invalidCount > 0) {
+    const native = generateNativeDiscreteValues(nativeConfig(config, kind, count), runtime);
+    const diagnostics = [];
+    let reported = 0;
+    for (let attempt = 0; attempt < native.attemptErrors.length && reported < 3; ++attempt) {
+        const error = native.attemptErrors[attempt];
+        if (!error) continue;
+        diagnostics.push(`j=${attempt}: ${EXPRESSION_ERROR_MESSAGES[error] || `Native expression error ${error}`}`);
+        ++reported;
+    }
+    if (kind === 'expression' && native.values.length < count) {
+        diagnostics.push(`Generated ${native.values.length} of ${count} requested values after ${native.attempts} attempts.`);
+    }
+    if (native.invalidCount) {
         diagnostics.push(
-            `${invalidCount} source value${invalidCount === 1 ? ' was' : 's were'} undefined or outside the numeric range and ${invalidCount === 1 ? 'was' : 'were'} omitted.`
+            `${native.invalidCount} source value${native.invalidCount === 1 ? ' was' : 's were'} undefined or outside the numeric range and ${native.invalidCount === 1 ? 'was' : 'were'} omitted.`
         );
     }
-
-    const requestedCount = normalizeCount(config.count);
-    if (
-        kind === 'primes' &&
-        config.max !== '' &&
-        config.max !== null &&
-        config.max !== undefined &&
-        values.length < requestedCount
-    ) {
-        diagnostics.push(`The selected prime interval contains ${values.length} values.`);
+    if (kind === 'primes' && config.max !== '' && config.max !== null &&
+        config.max !== undefined && native.values.length < count) {
+        diagnostics.push(`The selected prime interval contains ${native.values.length} values.`);
     }
-
     return {
         kind,
-        records: values.map((value, ordinal) => record(
-            ordinal,
-            value,
-            formatComplex(value),
-            { sourceKind: kind }
-        )),
+        records: native.values.map((value, ordinal) => record(ordinal, value, kind)),
         diagnostics
     };
 }

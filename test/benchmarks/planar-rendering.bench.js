@@ -2,16 +2,9 @@ import assert from 'node:assert/strict';
 
 import { runBenchmark } from './utils.js';
 import { state } from '../../js/store/state.js';
-import {
-    evaluateMappedTransform,
-    getChainedTransformFunction,
-    getMappedTransformProfile
-} from '../../js/math-utils.js';
 import { generateCurrentInputShapePointSets } from '../../js/rendering/shape-generators.js';
-import {
-    calculateDynamicPointsForSegment,
-    preparePointSetForMappedPlane
-} from '../../js/rendering/draw-planar.js';
+import { getPointSetEndpoints } from '../../js/rendering/draw-planar.js';
+import { buildNativePlanarLines, nativeMapOptions } from '../../js/native/complex-engine.js';
 
 const GRID_DENSITIES = Object.freeze({
     smoke: 12,
@@ -23,7 +16,7 @@ export async function runPlanarRenderingBenchmarks() {
     console.log('\n[Benchmark] Planar transformed-grid preparation and mapping\n');
 
     await runBenchmark(
-        'prepare and map Cartesian grid through w = exp(z)',
+        'build final Cartesian grid geometry through w = exp(z)',
         ({ profile }) => {
             Object.assign(state, {
                 currentFunction: 'exp',
@@ -35,7 +28,6 @@ export async function runPlanarRenderingBenchmarks() {
             if (state.dynamicPlotting) state.dynamicPlotting.enabled = false;
 
             const gridDensity = GRID_DENSITIES[profile];
-            const transform = getChainedTransformFunction('exp');
             const planeParams = {
                 currentVisXRange: [-Math.PI, Math.PI],
                 currentVisYRange: [-Math.PI, Math.PI]
@@ -48,30 +40,35 @@ export async function runPlanarRenderingBenchmarks() {
                     curvePoints: 96
                 });
 
-            return {
-                pointSets,
-                transform,
-                profile: getMappedTransformProfile('exp', transform)
-            };
+            const lines = pointSets.map(pointSet => {
+                const endpoints = getPointSetEndpoints(pointSet);
+                return { ...endpoints, sampleCount: 512 };
+            });
+            return { pointSets, lines, map: nativeMapOptions(state, { functionKey: 'exp' }) };
         },
-        ({ pointSets, transform, profile }) => {
+        ({ lines, map }) => {
             let pointCount = 0;
             let checksum = 0;
-
-            for (const pointSet of pointSets) {
-                const prepared = preparePointSetForMappedPlane(pointSet, transform, {
-                    sampleCountResolver: calculateDynamicPointsForSegment
-                });
-
-                for (const point of prepared.points) {
-                    if (!point || !Number.isFinite(point.re) || !Number.isFinite(point.im)) continue;
-                    const mapped = evaluateMappedTransform(profile, point.re, point.im, 'exp');
-                    if (!mapped) continue;
+            const geometries = buildNativePlanarLines({
+                map,
+                lines,
+                scaleX: 80,
+                scaleY: 80,
+                renderLimit: 128,
+                jumpThresholdSq: 65536,
+                toleranceSq: 0.01,
+                hasBranchCuts: false,
+                branchCutAngle: Math.PI
+            });
+            for (const geometry of geometries) {
+                for (let index = 0; index < geometry.length; index += 2) {
+                    const re = geometry[index];
+                    const im = geometry[index + 1];
+                    if (!Number.isFinite(re) || !Number.isFinite(im)) continue;
                     pointCount += 1;
-                    checksum += mapped.re * 0.125 + mapped.im * 0.25;
+                    checksum += re * 0.125 + im * 0.25;
                 }
             }
-
             return { pointCount, checksum };
         },
         {
@@ -82,7 +79,7 @@ export async function runPlanarRenderingBenchmarks() {
             },
             verify: ({ pointCount, checksum }, { pointSets }) => {
                 assert.ok(pointSets.length > 0);
-                assert.ok(pointCount >= pointSets.length * 64);
+                assert.ok(pointCount >= pointSets.length * 2);
                 assert.ok(Number.isFinite(checksum));
             }
         }

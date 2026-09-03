@@ -4,16 +4,15 @@ import assert from 'node:assert/strict';
 import { state } from '../js/store/state.js';
 import {
     applyDynamicPlottingPreset,
-    evaluateDynamicAggregateAt,
     getDynamicPlotResult,
     initializeDynamicPlottingEngine,
     invalidateDynamicPlotting
 } from '../js/analysis/dynamic-plotting.js';
 import { buildDynamicAggregateGLSL, compileCustomExpressionToGLSL } from '../js/math/expression/glsl.js';
-import { getGLSLComplexMathLibrary } from '../js/rendering/webgl-shared.js';
+import { transformFunctions } from '../js/native/map-runtime.js';
 import {
     dynamicExpressionHasBranches,
-    surfaceStageHasBranches
+    baseExpressionHasBranches
 } from '../js/analysis/riemann-surface.js';
 
 function configure(overrides) {
@@ -31,14 +30,12 @@ function configure(overrides) {
         term: { kind: 'expression', expression: '1/d^2' },
         reduction: { kind: 'sum', invalidPolicy: 'stop' },
         aggregateParameter: { re: 2, im: 0 },
-        parameters: [],
         playback: {
             visibleCount: 10,
             playing: false,
             speed: 10,
             loop: false
         },
-        display: {},
         ...overrides
     });
     invalidateDynamicPlotting();
@@ -53,8 +50,13 @@ test('dynamic mapping keeps source, input, term, and partial values synchronized
         playback: { visibleCount: 2, playing: false, speed: 10, loop: false }
     });
 
-    const transform = (re, im) => ({ re: re * re - im * im, im: 2 * re * im });
-    const result = getDynamicPlotResult({ transform });
+    const previousN = state.polynomialN;
+    const previousCoefficients = state.polynomialCoeffs;
+    state.polynomialN = 2;
+    state.polynomialCoeffs = [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }];
+    const result = getDynamicPlotResult({ transform: transformFunctions.polynomial });
+    state.polynomialN = previousN;
+    state.polynomialCoeffs = previousCoefficients;
     assert.equal(result.visibleSamples.length, 2);
     assert.deepEqual(result.samples.map(sample => sample.termValue), [
         { re: 1, im: 0 },
@@ -96,16 +98,6 @@ test('visible-term playback reports the visible prefix and empty identities', ()
     assert.equal(result.reduction.product.logAbs, 0);
 });
 
-test('WebGL library cache observes in-place dynamic expression edits', () => {
-    configure({ term: { kind: 'expression', expression: 'd' } });
-    const linearLibrary = getGLSLComplexMathLibrary(state);
-
-    state.dynamicPlotting.term.expression = 'd^2';
-    const squaredLibrary = getGLSLComplexMathLibrary(state);
-
-    assert.notEqual(squaredLibrary, linearLibrary);
-});
-
 test('large aggregates retain exact evaluation beyond the former background threshold', () => {
     configure({
         source: { kind: 'integers', count: 100, start: 1, step: 1, ordering: 'ascending' },
@@ -125,8 +117,7 @@ test('point formulas can use s and selected-function mode ignores inactive formu
         playback: { visibleCount: 2, playing: false, speed: 10, loop: false }
     });
 
-    const identity = (re, im) => ({ re, im });
-    const result = getDynamicPlotResult({ transform: identity });
+    const result = getDynamicPlotResult({ transform: transformFunctions.identity });
     assert.deepEqual(result.visibleSamples.map(sample => sample.inputPoint), [
         { re: 3, im: 0 },
         { re: 4, im: 0 }
@@ -146,10 +137,10 @@ test('Basel and Euler presets evaluate finite approximations accurately', () => 
     state.dynamicPlotting.enabled = true;
     state.dynamicPlotting.playback.visibleCount = 80;
     invalidateDynamicPlotting();
-    const euler = evaluateDynamicAggregateAt(
-        { re: 2, im: 0 },
-        (re, im) => ({ re, im })
-    );
+    const euler = getDynamicPlotResult({
+        aggregateParameter: { re: 2, im: 0 },
+        transform: transformFunctions.identity
+    }).reduction.finalValue;
     assert.ok(Math.abs(euler.re - Math.PI ** 2 / 6) < 0.01);
     assert.ok(Math.abs(euler.im) < 1e-10);
 });
@@ -192,10 +183,6 @@ test('aggregate reductions skip isolated singular terms without losing later val
 
     assert.deepEqual(result.samples.map(sample => sample.reductionStatus), ['included', 'skipped', 'included']);
     assert.deepEqual(result.reduction.finalValue, { re: 0, im: 0 });
-    assert.deepEqual(
-        evaluateDynamicAggregateAt({ re: 2, im: 0 }, (re, im) => ({ re, im })),
-        { re: 0, im: 0 }
-    );
 });
 
 test('exponential-series preset exposes x as a free parameter and converges to exp(x)', () => {
@@ -220,7 +207,7 @@ test('active transform provider exposes aggregate functions to existing transfor
     });
     initializeDynamicPlottingEngine();
 
-    const { getEffectiveBaseTransformFunction } = await import('../js/math-utils.js');
+    const { getEffectiveBaseTransformFunction } = await import('../js/native/map-runtime.js');
     const transform = getEffectiveBaseTransformFunction('cos');
     const value = transform(0.5, 0);
     assert.ok(Math.abs(value.re - 0.9375) < 1e-12);
@@ -232,7 +219,7 @@ test('dynamic expression branch analysis informs Riemann-surface sheets', () => 
         term: { kind: 'expression', expression: 'd^(-s) + ln(s)' }
     });
     assert.equal(dynamicExpressionHasBranches(state), true);
-    assert.equal(surfaceStageHasBranches(state, 1), true);
+    assert.equal(baseExpressionHasBranches(state), true);
 
     state.dynamicPlotting.term.expression = '1/d^2';
     invalidateDynamicPlotting();
@@ -248,9 +235,9 @@ test('GLSL compiler emits finite-domain and sheet-aware aggregate evaluators', (
     });
 
     const functionIds = {
-        cos: 1, sin: 2, tan: 3, sec: 4, exp: 5, ln: 6,
-        reciprocal: 7, mobius: 8, polynomial: 9, poincare: 10,
-        zeta: 11, sinh: 12, cosh: 13, tanh: 14, power: 15
+        cos: 1, tan: 3, sec: 4, exp: 5, ln: 6,
+        mobius: 8, polynomial: 9,
+        zeta: 11, sinh: 12, tanh: 14, power: 15
     };
     const compiled = buildDynamicAggregateGLSL(state, name => functionIds[name] || 0);
 
@@ -262,8 +249,8 @@ test('GLSL compiler emits finite-domain and sheet-aware aggregate evaluators', (
     assert.match(compiled.source, /complexMul\(accumulator, termValue\)/);
 });
 
-test('invalid custom GLSL z expressions do not compile as identity', () => {
-    assert.equal(compileCustomExpressionToGLSL('bad +', () => 0), null);
+test('invalid custom GLSL z expressions fail compilation', () => {
+    assert.throws(() => compileCustomExpressionToGLSL('bad +', () => 0), /Expected a value/);
 });
 
 test('GPU aggregate compilation uses the complete visible term count', () => {
@@ -282,7 +269,49 @@ test('GPU aggregate compilation uses the complete visible term count', () => {
     state.dynamicPlotting.source.count = 10;
     state.dynamicPlotting.playback.visibleCount = 10;
     state.dynamicPlotting.term.expression = 'isPrime(d) ? d : 0';
-    const exactPredicate = buildDynamicAggregateGLSL(state, name => functionIds[name] || 0);
-    assert.match(exactPredicate.error, /exact CPU backend/);
-    assert.equal(exactPredicate.source, '');
+    assert.throws(
+        () => buildDynamicAggregateGLSL(state, name => functionIds[name] || 0),
+        /exact CPU backend/
+    );
+});
+
+test('dynamic aggregate branch continuation evaluates branch sheets natively', async () => {
+    const { evaluateNativeSheets, compileNativeDynamicAggregate, nativeMapOptions } = await import('../js/native/complex-engine.js');
+    const dynamicAggregate = compileNativeDynamicAggregate({
+        pointExpression: 'd',
+        term: { kind: 'expression', expression: 'ln(s)' },
+        reductionKind: 'sum',
+        invalidPolicy: 'stop',
+        bindings: [],
+        bindingSeries: {},
+        sourceRecords: [{ ordinal: 1, domainValue: { re: 1, im: 0 } }]
+    });
+
+    const options = nativeMapOptions(state, { dynamicAggregate });
+    const points = [{ re: 1, im: 0 }, { re: 1, im: 0 }, { re: 1, im: 0 }];
+    const sheets = [0, 1, -1];
+    const { values } = evaluateNativeSheets(options, points, sheets);
+
+    assert.equal(values.length, 3);
+    assert.ok(Math.abs(values[0].re) < 1e-10);
+    assert.ok(Math.abs(values[0].im) < 1e-10);
+    assert.ok(Math.abs(values[1].re) < 1e-10);
+    assert.ok(Math.abs(values[1].im - 2 * Math.PI) < 1e-10);
+    assert.ok(Math.abs(values[2].re) < 1e-10);
+    assert.ok(Math.abs(values[2].im + 2 * Math.PI) < 1e-10);
+});
+
+test('native dynamic aggregates compile mathematical constants as constants', async () => {
+    const { compileNativeDynamicAggregate } = await import('../js/native/complex-engine.js');
+    const dynamicAggregate = compileNativeDynamicAggregate({
+        pointExpression: 'd',
+        term: { kind: 'expression', expression: 'i*d + pi + e' },
+        reductionKind: 'sum',
+        invalidPolicy: 'stop',
+        bindings: [],
+        bindingSeries: {},
+        sourceRecords: [{ ordinal: 1, domainValue: { re: 1, im: 0 } }]
+    });
+
+    assert.deepEqual(dynamicAggregate.variableNames, ['d']);
 });

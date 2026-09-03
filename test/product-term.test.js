@@ -42,7 +42,7 @@ test('product-term decomposition preserves powers, factorials, and denominator p
 
 test('product-term decomposition round-trips semantic values across wrappers and denominators', () => {
     const terms = [
-        'z^2', 'sin(z)', '(x+1)^n', 'cos(theta)^2', 'abs(z)'
+        'z^2', 'tan(z)', '(x+1)^n', 'cos(theta)^2', 'abs(z)'
     ];
     const environment = {
         z: { re: 1.2, im: -0.4 },

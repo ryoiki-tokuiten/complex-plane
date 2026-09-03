@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 
 import { runBenchmark } from './utils.js';
-import {
-    calculateStreamline,
-    getVectorEvaluator
-} from '../../js/analysis/streamline.js';
+import { traceStreamlines } from '../../js/analysis/streamline.js';
 import { state } from '../../js/store/state.js';
-import { getChainedTransformFunction } from '../../js/math-utils.js';
+import { nativeMapOptions } from '../../js/native/complex-engine.js';
 
 const BATCH_SEED_COUNTS = Object.freeze({
     smoke: 4,
@@ -59,13 +56,11 @@ export async function runStreamlineTracingBenchmarks() {
                 streamlineStepSize: 0.006,
                 streamlineMaxLength: 400
             };
-            const map = { evaluate: getChainedTransformFunction('zeta') };
-            const evaluator = getVectorEvaluator(map, '1/f(z)');
-
-            return { planeParams, streamlineState, evaluator };
+            return { planeParams, streamlineState, map: nativeMapOptions(state) };
         },
-        ({ planeParams, streamlineState, evaluator }) =>
-            calculateStreamline(0.5, 14.1, evaluator, planeParams, streamlineState),
+        ({ planeParams, streamlineState, map }) =>
+            traceStreamlines([{ x: 0.5, y: 14.1 }], map, planeParams,
+                { ...streamlineState, vectorFieldFunction: '1/f(z)' })[0],
         {
             profiles: {
                 smoke: { iterations: 2, warmup: 1 },
@@ -104,8 +99,6 @@ export async function runStreamlineTracingBenchmarks() {
                 chainCount: 8
             });
 
-            const map = getChainedTransformFunction('algebraic_chaining');
-            const vectorEvaluator = getVectorEvaluator({ evaluate: map }, 'f(z)');
             return {
                 seeds: makeCircularSeeds(BATCH_SEED_COUNTS[profile]),
                 planeParams: {
@@ -116,15 +109,15 @@ export async function runStreamlineTracingBenchmarks() {
                     streamlineStepSize: 0.006,
                     streamlineMaxLength: 240
                 },
-                evaluator: vectorEvaluator
+                map: nativeMapOptions(state)
             };
         },
-        ({ seeds, planeParams, streamlineState, evaluator }) => {
+        ({ seeds, planeParams, streamlineState, map }) => {
             let totalPoints = 0;
             let checksum = 0;
-
-            for (const seed of seeds) {
-                const path = calculateStreamline(seed.x, seed.y, evaluator, planeParams, streamlineState);
+            const paths = traceStreamlines(seeds, map, planeParams,
+                { ...streamlineState, vectorFieldFunction: 'f(z)' });
+            for (const path of paths) {
                 totalPoints += path.length;
                 for (const point of path) checksum += point.x * 0.5 + point.y * 0.25;
             }

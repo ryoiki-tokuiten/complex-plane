@@ -1,48 +1,24 @@
-import { state, context } from '../store/state.js';
+import { state } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import { eventBus } from '../store/events.js';
-const { controls } = context;
+import { requestDomainRedraw, requestRedrawAll } from '../rendering/redraw-scheduler.js';
+import { signal } from '@preact/signals';
 
-function requestDomainRedraw() {
-    eventBus.emit('redraw:domain');
-}
-function requestRedrawAll() {
-    eventBus.emit('redraw:all');
-}
-
-const RASTER_INPUT_SHAPES = new Set(['image', 'video']);
 const RASTER_MEDIA_TIME_EPSILON = 1e-4;
 
-
-
-export function isRasterInputShape(shape = state.currentInputShape) {
-    return RASTER_INPUT_SHAPES.has(shape);
+export function isMediaInputShape(shape = state.currentInputShape) {
+    return shape === 'media';
 }
 
-export function getRasterSourceForShape(shape = state.currentInputShape) {
-    return shape === 'video' ? runtime.media.video : runtime.media.image;
+export function getMediaSource() {
+    return runtime.media.video || runtime.media.image;
 }
 
-
-
-export function getRasterSizeForShape(shape = state.currentInputShape) {
-    return shape === 'video' ? state.videoSize : state.imageSize;
-}
-
-export function getRasterOpacityForShape(shape = state.currentInputShape) {
-    return shape === 'video' ? state.videoOpacity : state.imageOpacity;
-}
-
-export function getRasterAspectRatioForShape(shape = state.currentInputShape) {
-    const aspectRatio = shape === 'video' ? state.videoAspectRatio : state.imageAspectRatio;
+function getMediaAspectRatio() {
+    const aspectRatio = state.mediaAspectRatio;
     return Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1;
 }
 
-export function getRasterVersionTokenForShape(shape = state.currentInputShape) {
-    return shape === 'video' ? state.videoFrameVersion : state.imageContentVersion;
-}
-
-export function getRasterSourceDimensions(source) {
+function getRasterSourceDimensions(source) {
     if (!source) {
         return { width: 0, height: 0, aspectRatio: 1 };
     }
@@ -67,9 +43,8 @@ export function getRasterSourceDimensions(source) {
     };
 }
 
-export function getRasterDisplayDimensions(shape = state.currentInputShape) {
-    const size = Math.max(0.1, getRasterSizeForShape(shape) || 2.0);
-    const aspectRatio = getRasterAspectRatioForShape(shape);
+export function getMediaDisplayDimensions(size = state.mediaSize, aspectRatio = getMediaAspectRatio()) {
+    size = Math.max(0.1, size);
 
     if (aspectRatio >= 1) {
         return {
@@ -84,23 +59,35 @@ export function getRasterDisplayDimensions(shape = state.currentInputShape) {
     };
 }
 
+export function getActiveMediaRaster() {
+    const source = getMediaSource();
+    if (!source || !isMediaInputShape()) return null;
+    return {
+        source,
+        token: state.mediaVersion,
+        center: { re: state.a0, im: state.b0 },
+        size: getMediaDisplayDimensions(),
+        opacity: state.mediaOpacity
+    };
+}
 
 
 
 
-export function processUploadedImageSource(img) {
+
+function processUploadedImageSource(img) {
     if (!img) {
         return false;
     }
 
     runtime.media.image = img;
     const { aspectRatio } = getRasterSourceDimensions(img);
-    state.imageAspectRatio = aspectRatio;
-    state.imageContentVersion += 1;
+    state.mediaAspectRatio = aspectRatio;
+    state.mediaVersion += 1;
     return true;
 }
 
-export function processUploadedVideoFrame(force = false) {
+function processUploadedVideoFrame(force = false) {
     const video = runtime.media.video;
     if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         return false;
@@ -112,17 +99,14 @@ export function processUploadedVideoFrame(force = false) {
     }
 
     const { aspectRatio } = getRasterSourceDimensions(video);
-    state.videoAspectRatio = aspectRatio;
-
-
-
-    state.videoFrameVersion += 1;
+    state.mediaAspectRatio = aspectRatio;
+    state.mediaVersion += 1;
     runtime.media.lastProcessedMediaTime = currentTime;
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
     return true;
 }
 
-export function formatMediaClockTime(totalSeconds) {
+function formatMediaClockTime(totalSeconds) {
     if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
         return '--:--';
     }
@@ -139,7 +123,7 @@ export function formatMediaClockTime(totalSeconds) {
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function buildVideoStatusText() {
+function buildVideoStatusText() {
     if (!runtime.media.video) {
         return state.videoStatusMessage || 'No video loaded.';
     }
@@ -155,29 +139,32 @@ export function buildVideoStatusText() {
     return `${statusLabel} · ${currentTime} / ${duration}${dims} · ${fps} FPS`;
 }
 
-export function syncVideoPlaybackUI() {
-    if (controls.videoPlayPauseBtn) {
-        controls.videoPlayPauseBtn.disabled = !runtime.media.video;
-        controls.videoPlayPauseBtn.textContent = state.videoIsPlaying ? '⏸ Pause' : '▶ Play';
-    }
+export const videoPlaybackUi = signal({
+    available: false,
+    label: '▶ Play',
+    status: 'No video loaded.'
+});
 
-    if (controls.videoStatusDisplay) {
-        controls.videoStatusDisplay.textContent = buildVideoStatusText();
-    }
+export function publishVideoPlaybackStatus() {
+    videoPlaybackUi.value = {
+        available: Boolean(runtime.media.video),
+        label: state.videoIsPlaying ? '⏸ Pause' : '▶ Play',
+        status: buildVideoStatusText()
+    };
 }
 
-export function stopVideoProcessingLoop() {
+function stopVideoProcessingLoop() {
     if (runtime.media.processingFrame) {
         cancelAnimationFrame(runtime.media.processingFrame);
         runtime.media.processingFrame = null;
     }
 }
 
-export function runVideoProcessingLoop(now) {
+function runVideoProcessingLoop(now) {
     runtime.media.processingFrame = null;
 
-    if (!runtime.media.video || !state.videoIsPlaying || state.currentInputShape !== 'video') {
-        syncVideoPlaybackUI();
+    if (!runtime.media.video || !state.videoIsPlaying || !isMediaInputShape()) {
+        publishVideoPlaybackStatus();
         return;
     }
 
@@ -190,7 +177,7 @@ export function runVideoProcessingLoop(now) {
             runtime.media.lastProcessedWallTime = now;
             requestDomainRedraw(false);
         } else {
-            syncVideoPlaybackUI();
+            publishVideoPlaybackStatus();
         }
     }
 
@@ -200,14 +187,14 @@ export function runVideoProcessingLoop(now) {
 export function startVideoProcessingLoop() {
     stopVideoProcessingLoop();
 
-    if (!runtime.media.video || !state.videoIsPlaying || state.currentInputShape !== 'video') {
-        syncVideoPlaybackUI();
+    if (!runtime.media.video || !state.videoIsPlaying || !isMediaInputShape()) {
+        publishVideoPlaybackStatus();
         return;
     }
 
     runtime.media.lastProcessedWallTime = performance.now() - (1000 / Math.max(1, state.videoProcessingFps || 24));
     runtime.media.processingFrame = requestAnimationFrame(runVideoProcessingLoop);
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 }
 
 export function pauseUploadedVideoPlayback() {
@@ -221,38 +208,38 @@ export function pauseUploadedVideoPlayback() {
         state.videoStatusMessage = 'Paused';
     }
     stopVideoProcessingLoop();
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 
     requestRedrawAll();
 }
 
-export function startUploadedVideoPlayback() {
+function startUploadedVideoPlayback() {
     const video = runtime.media.video;
     if (!video) {
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         return Promise.resolve(false);
     }
 
     state.videoStatusMessage = 'Starting playback';
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 
     return video.play().then(() => {
         state.videoIsPlaying = true;
         state.videoStatusMessage = 'Playing';
-        if (state.currentInputShape === 'video') {
+        if (isMediaInputShape()) {
             startVideoProcessingLoop();
         } else {
             stopVideoProcessingLoop();
         }
 
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         requestRedrawAll();
         return true;
     }).catch(error => {
         state.videoIsPlaying = false;
         state.videoStatusMessage = 'Ready to play';
         stopVideoProcessingLoop();
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         console.warn('Video playback could not start automatically:', error);
         return false;
     });
@@ -267,15 +254,15 @@ export function toggleUploadedVideoPlayback() {
     startUploadedVideoPlayback();
 }
 
-export function cleanupUploadedVideo() {
+function cleanupUploadedVideo() {
     const previousVideo = runtime.media.video;
     const previousUrl = runtime.media.videoUrl;
 
     runtime.media.video = null;
     runtime.media.videoUrl = '';
     state.videoIsPlaying = false;
-    state.videoAspectRatio = 1.0;
-    state.videoFrameVersion += 1;
+    state.mediaAspectRatio = 1.0;
+    state.mediaVersion += 1;
     runtime.media.lastProcessedWallTime = 0;
     runtime.media.lastProcessedMediaTime = -1;
     state.videoStatusMessage = 'No video loaded.';
@@ -285,21 +272,17 @@ export function cleanupUploadedVideo() {
     if (previousVideo) {
         previousVideo.pause();
         previousVideo.removeAttribute('src');
-        try {
-            previousVideo.load();
-        } catch (error) {
-            console.warn('Unable to fully reset previous video element:', error);
-        }
+        previousVideo.load();
     }
 
     if (previousUrl) {
         URL.revokeObjectURL(previousUrl);
     }
 
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 }
 
-export function loadUploadedVideoFile(file) {
+function loadUploadedVideoFile(file) {
     cleanupUploadedVideo();
 
     if (!file) {
@@ -317,7 +300,7 @@ export function loadUploadedVideoFile(file) {
     runtime.media.video = video;
     runtime.media.videoUrl = objectUrl;
     state.videoStatusMessage = 'Loading video';
-    syncVideoPlaybackUI();
+    publishVideoPlaybackStatus();
 
     const handleReady = () => {
         if (runtime.media.video !== video) {
@@ -326,11 +309,11 @@ export function loadUploadedVideoFile(file) {
 
         processUploadedVideoFrame(true);
         state.videoStatusMessage = 'Ready to play';
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
 
         requestRedrawAll();
 
-        if (state.currentInputShape === 'video') {
+        if (isMediaInputShape()) {
             startUploadedVideoPlayback();
         }
     };
@@ -342,10 +325,10 @@ export function loadUploadedVideoFile(file) {
         }
         state.videoIsPlaying = true;
         state.videoStatusMessage = 'Playing';
-        if (state.currentInputShape === 'video') {
+        if (isMediaInputShape()) {
             startVideoProcessingLoop();
         }
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
     });
     video.addEventListener('pause', () => {
         if (runtime.media.video !== video) {
@@ -355,7 +338,7 @@ export function loadUploadedVideoFile(file) {
         state.videoStatusMessage = 'Paused';
         stopVideoProcessingLoop();
         processUploadedVideoFrame(true);
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
         requestRedrawAll();
     });
     video.addEventListener('error', () => {
@@ -365,9 +348,31 @@ export function loadUploadedVideoFile(file) {
         state.videoIsPlaying = false;
         state.videoStatusMessage = 'Could not load video.';
         stopVideoProcessingLoop();
-        syncVideoPlaybackUI();
+        publishVideoPlaybackStatus();
     });
 
     video.src = objectUrl;
     video.load();
+}
+
+export function loadUploadedMediaFile(file) {
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|ogg|m4v|avi|mkv)$/i.test(file.name);
+    if (isVideo) {
+        runtime.media.image = null;
+        loadUploadedVideoFile(file);
+    } else {
+        cleanupUploadedVideo();
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        img.onload = () => {
+            processUploadedImageSource(img);
+            URL.revokeObjectURL(objectUrl);
+            requestRedrawAll();
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+        };
+        img.src = objectUrl;
+    }
 }

@@ -1,390 +1,97 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { state, zPlaneParams } from '../store/state.js';
-import { buildMappedTransformProfileKey, getChainedTransformFunction } from '../math-utils.js';
-import { compileExpression } from '../math/expression/evaluator.js';
+import { state, context, zPlaneParams } from '../store/state.js';
+import { buildMappedTransformProfileKey, getMappedTransformProfile } from '../native/map-runtime.js';
+import { parseExpression } from '../math/expression/parser.js';
+import {
+    buildNativeRealSurface,
+    compileNativeExpressionProgram,
+    nativeMapOptions,
+    renderNativeRealContour
+} from '../native/complex-engine.js';
 import {
     MAX_STATE_ZOOM_LEVEL,
     MIN_STATE_ZOOM_LEVEL,
-    POLE_MAGNITUDE_THRESHOLD,
     ZOOM_IN_FACTOR,
     ZOOM_OUT_FACTOR
 } from '../constants/numerical.js';
+import { REAL_SURFACE_FRAME } from '../constants/surface-rendering.js';
+import { paletteLutFor } from '../constants/surface-palettes.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
-import { disposeThreeObject } from './three-utils.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
+import { clearThreeGroup, createCanvasTextSprite, disposeThreeObject } from './three-utils.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
+import { getCanvasBackgroundColor } from '../frontend/theme.js';
 
 const BACKGROUND = 0x070812;
-const CAMERA_HOME = Object.freeze({ x: 6.0, y: 5.0, z: 8.0 });
-const SURFACE_SIZE = 6.0;
-const SURFACE_HEIGHT = 3.5;
-const DEFAULT_SAMPLE_SEGMENTS = 96;
-const RENDER_SEGMENTS = 192;
-const HALF_SURFACE = SURFACE_SIZE * 0.5;
-const HALF_HEIGHT = SURFACE_HEIGHT * 0.5;
-const CLAMP_LIMIT = 8.0;
-const INV_TWO_PI = 1 / (2 * Math.PI);
-const PALETTE_LUT_SIZE = 1024;
-const PALETTE_LUT_MASK = PALETTE_LUT_SIZE - 1;
-const COMPLEX_ZERO_EPSILON = 1e-15;
-const RECIPROCAL_POLE_CAP = POLE_MAGNITUDE_THRESHOLD * 2;
-const HYPOT_FAST_OVERFLOW_GUARD = Math.sqrt(Number.MAX_VALUE / 2);
-const INPUT_EVALUATOR_CACHE_LIMIT = 64;
-const SCALAR_FIELD_CACHE_LIMIT = 8;
-
-const INPUT_PRESET = Object.freeze({
-    GENERIC: 0,
-    X: 1,
-    Y: 2,
-    ZERO: 3,
-    X_PLUS_Y: 4,
-    X_MINUS_Y: 5,
-    X_TIMES_Y: 6,
-    TWO_X_PLUS_Y: 7,
-    SIN_X_PLUS_COS_Y: 8,
-    X2_MINUS_Y2: 9
+const DEFAULT_CAMERA = Object.freeze({ x: 6.0, y: 5.0, z: 8.0 });
+const DEFAULT_CAMERA_TARGET = Object.freeze({ x: 0, y: 0, z: 0 });
+const DEFAULT_FRAME = Object.freeze({
+    width: 6,
+    depth: 6,
+    yMin: -1.75,
+    yMax: 1.75,
+    floorY: -1.75
 });
+const rendererByContainer = new WeakMap();
 
-const OUTPUT_COMPONENT = Object.freeze({
-    REAL: 0,
-    IMAG: 1,
-    MAGNITUDE: 2
-});
+export function applySurfaceCoordinateZoom(event, currentZoom, updateZoom) {
+    event.preventDefault();
+    const deltaY = Number(event.deltaY);
+    if (!Number.isFinite(deltaY) || deltaY === 0) return;
 
-const TRANSFORM_KERNEL = Object.freeze({
-    CALL: 0,
-    IDENTITY: 1,
-    SQUARE: 2,
-    RECIPROCAL: 3,
-    EXP: 4,
-    SIN: 5,
-    COS: 6
-});
-
-const PALETTE_HEX = Object.freeze({
-    ocean: [0x001b2e, 0x005f73, 0x0a9396, 0x94d2bd, 0xe9d8a6],
-    cyberpunk: [0x11001c, 0x3a0ca3, 0xf72585, 0x4cc9f0, 0xfaff00],
-    copper: [0x170f0a, 0x5c2e12, 0xb85c24, 0xf6aa52, 0xffecd1],
-    forest: [0x03190e, 0x0b3d20, 0x2d6a4f, 0x95d5b2, 0xfff3b0],
-    viridis: [0x440154, 0x3b528b, 0x21908d, 0x5dc963, 0xfde725],
-    sunset: [0x12001f, 0x3c096c, 0x9d174d, 0xf97316, 0xfef3c7]
-});
-
-export let active3DRenderer = null;
-
-function isFiniteNumber(value) {
-    return typeof value === 'number' && value === value && value !== Infinity && value !== -Infinity;
+    const oldZoom = requireFiniteNumber(currentZoom, 'Surface coordinate zoom');
+    if (oldZoom <= 0) throw new Error('Surface coordinate zoom must be positive.');
+    const factor = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
+    const nextZoom = Math.max(
+        MIN_STATE_ZOOM_LEVEL,
+        Math.min(MAX_STATE_ZOOM_LEVEL, oldZoom * factor)
+    );
+    if (nextZoom !== oldZoom) updateZoom(nextZoom, oldZoom);
 }
 
-function clamp01(value) {
-    return value <= 0 ? 0 : value >= 1 ? 1 : value;
+function makeAxisLabel(text, color, scale = [1.35, 0.5, 1]) {
+    return createCanvasTextSprite(THREE, text, {
+        color,
+        scale,
+        fontSize: 58,
+        shadowColor: 'rgba(0, 0, 0, 0.55)',
+        shadowBlur: 14
+    });
 }
 
-function hexChannel(hex, shift) {
-    return ((hex >> shift) & 255) / 255;
+function formatCoord(value) {
+    if (Math.abs(value) < 1e-10) return '0';
+    if (Math.abs(value) >= 1000 || Math.abs(value) < 0.01) return value.toExponential(2);
+    const text = value.toFixed(2);
+    return text.endsWith('.00') ? text.slice(0, -3) : text;
 }
 
-function writeInterpolatedHex(target, offset, a, b, t) {
-    const ar = hexChannel(a, 16);
-    const ag = hexChannel(a, 8);
-    const ab = hexChannel(a, 0);
-    target[offset] = ar + (hexChannel(b, 16) - ar) * t;
-    target[offset + 1] = ag + (hexChannel(b, 8) - ag) * t;
-    target[offset + 2] = ab + (hexChannel(b, 0) - ab) * t;
-}
-
-function createPaletteLut(hexStops) {
-    const lut = new Float32Array(PALETTE_LUT_SIZE * 3);
-    if (!hexStops || hexStops.length === 0) return lut;
-    if (hexStops.length === 1) {
-        for (let i = 0, offset = 0; i < PALETTE_LUT_SIZE; i += 1, offset += 3) {
-            writeInterpolatedHex(lut, offset, hexStops[0], hexStops[0], 0);
-        }
-        return lut;
+function normalizeArray(value, Type, label) {
+    if (!(value instanceof Type)) {
+        throw new Error(`${label} must be a ${Type.name}.`);
     }
-
-    const lastSegment = hexStops.length - 1;
-    for (let i = 0, offset = 0; i < PALETTE_LUT_SIZE; i += 1, offset += 3) {
-        const scaled = i / (PALETTE_LUT_SIZE - 1) * lastSegment;
-        const segment = Math.min(lastSegment - 1, scaled | 0);
-        writeInterpolatedHex(lut, offset, hexStops[segment], hexStops[segment + 1], scaled - segment);
-    }
-    return lut;
-}
-
-const PALETTE_LUTS = Object.freeze(Object.fromEntries(
-    Object.entries(PALETTE_HEX).map(([name, stops]) => [name, createPaletteLut(stops)])
-));
-
-export function paletteLutFor(name) {
-    return PALETTE_LUTS[name] || PALETTE_LUTS.sunset;
-}
-
-function writePaletteColor(lut, ratio, colors, offset) {
-    const lutOffset = ((clamp01(ratio) * PALETTE_LUT_MASK + 0.5) | 0) * 3;
-    colors[offset] = lut[lutOffset];
-    colors[offset + 1] = lut[lutOffset + 1];
-    colors[offset + 2] = lut[lutOffset + 2];
-}
-
-function makeAxisLabel(text, color) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 384;
-    canvas.height = 144;
-    const context = canvas.getContext('2d');
-    context.font = '700 58px "STIX Two Math", "Cambria Math", serif';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.shadowColor = 'rgba(0, 0, 0, 0.55)';
-    context.shadowBlur = 14;
-    context.fillStyle = color;
-    context.fillText(text, 192, 72);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        depthWrite: false
-    }));
-    sprite.scale.set(1.35, 0.5, 1);
-    return sprite;
-}
-
-function canonicalExpression(expression) {
-    return String(expression ?? '')
-        .toLowerCase()
-        .replace(/[\s_]+/g, '')
-        .replace(/−/g, '-')
-        .replace(/\*\*/g, '^')
-        .replace(/²/g, '^2')
-        .replace(/·/g, '*');
-}
-
-function presetType(expr) {
-    switch (canonicalExpression(expr)) {
-        case 'x': return INPUT_PRESET.X;
-        case 'y': return INPUT_PRESET.Y;
-        case '0': return INPUT_PRESET.ZERO;
-        case 'x+y': case 'y+x': return INPUT_PRESET.X_PLUS_Y;
-        case 'x-y': return INPUT_PRESET.X_MINUS_Y;
-        case 'x*y': case 'xy': return INPUT_PRESET.X_TIMES_Y;
-        case '2x+y': case '2*x+y': case 'x+x+y': case 'y+2x': case 'y+2*x': return INPUT_PRESET.TWO_X_PLUS_Y;
-        case 'sin(x)+cos(y)': case 'cos(y)+sin(x)': return INPUT_PRESET.SIN_X_PLUS_COS_Y;
-        case 'x*x-y*y': case 'x^2-y^2': return INPUT_PRESET.X2_MINUS_Y2;
-        default: return INPUT_PRESET.GENERIC;
-    }
-}
-
-const inputEvaluatorCache = new Map();
-
-class InputEvaluator {
-    static for(expression) {
-        const key = expression === undefined || expression === null ? 'x' : String(expression);
-        let evaluator = inputEvaluatorCache.get(key);
-        if (!evaluator) {
-            evaluator = new InputEvaluator(key);
-            if (inputEvaluatorCache.size >= INPUT_EVALUATOR_CACHE_LIMIT) {
-                inputEvaluatorCache.delete(inputEvaluatorCache.keys().next().value);
-            }
-        } else {
-            inputEvaluatorCache.delete(key);
-        }
-        inputEvaluatorCache.set(key, evaluator);
-        return evaluator;
-    }
-
-    constructor(expression) {
-        this.expression = expression === undefined || expression === null ? 'x' : String(expression);
-        this.type = presetType(this.expression);
-        this.compiled = null;
-        if (this.type === INPUT_PRESET.GENERIC) {
-            try {
-                this.compiled = compileExpression(this.expression, { allowedVariables: ['x', 'y'] });
-            } catch {
-                this.compiled = null;
-            }
-        }
-        this.scope = {
-            x: { re: 0, im: 0 },
-            y: { re: 0, im: 0 }
-        };
-    }
-
-    write(x, y, out) {
-        if (this.type !== INPUT_PRESET.GENERIC) {
-            out[0] = evalScalarInput(this.type, x, y);
-            out[1] = 0;
-            return;
-        }
-        this.writeCompiled(x, y, out);
-    }
-
-    writeCompiled(x, y, out) {
-        const compiled = this.compiled;
-        if (!compiled) {
-            out[0] = NaN;
-            out[1] = NaN;
-            return;
-        }
-
-        const scope = this.scope;
-        scope.x.re = x;
-        scope.x.im = 0;
-        scope.y.re = y;
-        scope.y.im = 0;
-
-        try {
-            const result = compiled(scope);
-            if (typeof result === 'number') {
-                if (!isFiniteNumber(result)) {
-                    out[0] = NaN;
-                    out[1] = NaN;
-                    return;
-                }
-                out[0] = result;
-                out[1] = 0;
-            } else if (result && typeof result === 'object') {
-                const re = result.re;
-                const im = result.im;
-                if (!isFiniteNumber(re) || !isFiniteNumber(im)) {
-                    out[0] = NaN;
-                    out[1] = NaN;
-                    return;
-                }
-                out[0] = re;
-                out[1] = im;
-            } else {
-                out[0] = NaN;
-                out[1] = NaN;
-            }
-        } catch {
-            out[0] = NaN;
-            out[1] = NaN;
-        }
-    }
-}
-
-export function validateRealPlotExpression(expression) {
-    const source = String(expression ?? '').trim();
-    if (!source) return 'Expression cannot be empty';
-    try {
-        compileExpression(source, { allowedVariables: ['x', 'y'] });
-        return null;
-    } catch (error) {
-        return error instanceof Error ? error.message : 'Invalid expression';
-    }
-}
-
-class StaticSurfaceTopology {
-    constructor(segments = DEFAULT_SAMPLE_SEGMENTS) {
-        this.segments = Math.max(1, segments | 0);
-        this.stride = this.segments + 1;
-        this.vertexCount = this.stride * this.stride;
-        const indexCount = this.segments * this.segments * 6;
-        const IndexArray = this.vertexCount > 65535 ? Uint32Array : Uint16Array;
-        this.indices = new IndexArray(indexCount);
-        this.gridX = new Float32Array(this.vertexCount);
-        this.gridZ = new Float32Array(this.vertexCount);
-        this.#buildGrid();
-        this.#buildIndices();
-    }
-
-    #buildGrid() {
-        const scale = SURFACE_SIZE / this.segments;
-        let index = 0;
-        for (let j = 0; j <= this.segments; j += 1) {
-            const z = j * scale - HALF_SURFACE;
-            for (let i = 0; i <= this.segments; i += 1) {
-                this.gridX[index] = i * scale - HALF_SURFACE;
-                this.gridZ[index] = z;
-                index += 1;
-            }
-        }
-    }
-
-    #buildIndices() {
-        let write = 0;
-        const stride = this.stride;
-        for (let j = 0; j < this.segments; j += 1) {
-            const row = j * stride;
-            const next = row + stride;
-            for (let i = 0; i < this.segments; i += 1) {
-                const a = row + i;
-                const b = a + 1;
-                const c = next + i;
-                const d = c + 1;
-                this.indices[write++] = a;
-                this.indices[write++] = c;
-                this.indices[write++] = b;
-                this.indices[write++] = b;
-                this.indices[write++] = c;
-                this.indices[write++] = d;
-            }
-        }
-    }
-}
-
-const topologyCache = new Map();
-
-function topologyFor(segments) {
-    const safeSegments = Math.max(1, Math.floor(Number(segments) || DEFAULT_SAMPLE_SEGMENTS));
-    let topology = topologyCache.get(safeSegments);
-    if (!topology) {
-        topology = new StaticSurfaceTopology(safeSegments);
-        topologyCache.set(safeSegments, topology);
-    }
-    return topology;
+    return value;
 }
 
 class SurfaceMeshStore {
-    constructor(segments = RENDER_SEGMENTS) {
-        this.topology = topologyFor(segments);
-        this.segments = this.topology.segments;
-        this.vertexCount = this.topology.vertexCount;
-        this.indices = this.topology.indices;
-        this.positions = new Float32Array(this.vertexCount * 3);
-        this.normals = new Float32Array(this.vertexCount * 3);
-        this.colors = new Float32Array(this.vertexCount * 3);
-        this.rawValues = new Float32Array(this.vertexCount);
-        this.values = new Float64Array(this.vertexCount);
-        this.phases = new Float32Array(this.vertexCount);
-        this.u = new Float64Array(2);
-        this.v = new Float64Array(2);
-
+    constructor() {
         this.contourUniforms = {
             uContoursEnabled: { value: 0.0 },
             uContourInterval: { value: 0.5 },
             uContourThickness: { value: 1.5 }
         };
-
-        this.geometry = this.#createGeometry();
+        this.geometry = null;
         this.material = this.#createSurfaceMaterial();
         this.wireMaterial = this.#createWireMaterial();
-        this.mesh = new THREE.Mesh(this.geometry, this.material);
-        this.wireframe = new THREE.Mesh(this.geometry, this.wireMaterial);
+        const initialGeometry = new THREE.BufferGeometry();
+        this.geometry = initialGeometry;
+        this.mesh = new THREE.Mesh(initialGeometry, this.material);
+        this.wireframe = new THREE.Mesh(initialGeometry, this.wireMaterial);
         this.mesh.castShadow = true;
         this.mesh.receiveShadow = true;
         this.wireframe.renderOrder = 2;
-    }
-
-    #createGeometry() {
-        const geometry = new THREE.BufferGeometry();
-        const position = new THREE.BufferAttribute(this.positions, 3);
-        const normal = new THREE.BufferAttribute(this.normals, 3);
-        const color = new THREE.BufferAttribute(this.colors, 3);
-        const rawValue = new THREE.BufferAttribute(this.rawValues, 1);
-        position.setUsage?.(THREE.DynamicDrawUsage);
-        normal.setUsage?.(THREE.DynamicDrawUsage);
-        color.setUsage?.(THREE.DynamicDrawUsage);
-        rawValue.setUsage?.(THREE.DynamicDrawUsage);
-        geometry.setAttribute('position', position);
-        geometry.setAttribute('normal', normal);
-        geometry.setAttribute('color', color);
-        geometry.setAttribute('rawValue', rawValue);
-        geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
-        return geometry;
     }
 
     #createSurfaceMaterial() {
@@ -405,12 +112,14 @@ class SurfaceMeshStore {
             envMapIntensity: 1.35
         });
 
-        material.onBeforeCompile = (shader) => {
+        material.onBeforeCompile = shader => {
             shader.uniforms.uContoursEnabled = contourUniforms.uContoursEnabled;
             shader.uniforms.uContourInterval = contourUniforms.uContourInterval;
             shader.uniforms.uContourThickness = contourUniforms.uContourThickness;
 
-            shader.vertexShader = 'attribute float rawValue;\nvarying float v_heightVal;\nvarying vec3 v_worldNormalFast;\n' + shader.vertexShader;
+            shader.vertexShader =
+                'attribute float contourValue;\nvarying float v_contourValue;\nvarying vec3 v_worldNormalFast;\n' +
+                shader.vertexShader;
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <beginnormal_vertex>',
                 `#include <beginnormal_vertex>
@@ -419,10 +128,12 @@ class SurfaceMeshStore {
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <begin_vertex>',
                 `#include <begin_vertex>
-                v_heightVal = rawValue;`
+                v_contourValue = contourValue;`
             );
 
-            shader.fragmentShader = 'varying float v_heightVal;\nvarying vec3 v_worldNormalFast;\nuniform float uContoursEnabled;\nuniform float uContourInterval;\nuniform float uContourThickness;\n' + shader.fragmentShader;
+            shader.fragmentShader =
+                'varying float v_contourValue;\nvarying vec3 v_worldNormalFast;\nuniform float uContoursEnabled;\nuniform float uContourInterval;\nuniform float uContourThickness;\n' +
+                shader.fragmentShader;
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <dithering_fragment>',
                 `#include <dithering_fragment>
@@ -430,10 +141,10 @@ class SurfaceMeshStore {
                 float fresnelBoost = pow(1.0 - clamp(abs(viewRimNormal.z), 0.0, 1.0), 2.6);
                 gl_FragColor.rgb += vec3(0.08, 0.13, 0.20) * fresnelBoost;
                 if (uContoursEnabled > 0.5) {
-                    float valDeriv = length(vec2(dFdx(v_heightVal), dFdy(v_heightVal)));
+                    float valDeriv = length(vec2(dFdx(v_contourValue), dFdy(v_contourValue)));
                     if (valDeriv > 1.0e-6) {
                         float safeInterval = max(uContourInterval, 1.0e-6);
-                        float contourCoord = v_heightVal / safeInterval;
+                        float contourCoord = v_contourValue / safeInterval;
                         float distToContour = abs(contourCoord - floor(contourCoord + 0.5)) * safeInterval;
                         float pixelDist = distToContour / valDeriv;
                         float lineIntensity = 1.0 - smoothstep(max(0.0, uContourThickness - 0.8), uContourThickness + 0.8, pixelDist);
@@ -444,13 +155,11 @@ class SurfaceMeshStore {
                 }`
             );
         };
-
         return material;
     }
 
     #createWireMaterial() {
-        const MaterialCtor = THREE.MeshBasicMaterial || THREE.LineBasicMaterial;
-        return new MaterialCtor({
+        return new THREE.MeshBasicMaterial({
             color: 0xf4f8ff,
             transparent: true,
             opacity: 0.04,
@@ -459,617 +168,59 @@ class SurfaceMeshStore {
         });
     }
 
-    setIndices(indices) {
-        if (!indices || indices === this.indices) return;
-        this.indices = indices;
-        this.geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    setData(data) {
+        const positions = normalizeArray(data.positions, Float32Array, 'Surface positions');
+        const normals = normalizeArray(data.normals, Float32Array, 'Surface normals');
+        const colors = normalizeArray(data.colors, Float32Array, 'Surface colors');
+        const contourValues = normalizeArray(data.contourValues, Float32Array, 'Surface contour values');
+        const indices = normalizeArray(data.indices, Uint32Array, 'Surface indices');
+        if (!positions.length || positions.length % 3 || normals.length !== positions.length ||
+            colors.length !== positions.length || contourValues.length !== positions.length / 3) {
+            throw new Error('Surface geometry attribute lengths are inconsistent.');
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('contourValue', new THREE.BufferAttribute(contourValues, 1));
+        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+        geometry.computeBoundingSphere?.();
+
+        this.geometry?.dispose?.();
+        this.geometry = geometry;
+        this.mesh.geometry = geometry;
+        this.wireframe.geometry = geometry;
     }
 
-    markDirty() {
-        const geometry = this.geometry;
-        geometry.getAttribute('position').needsUpdate = true;
-        geometry.getAttribute('normal').needsUpdate = true;
-        geometry.getAttribute('color').needsUpdate = true;
-        geometry.getAttribute('rawValue').needsUpdate = true;
-        geometry.computeBoundingSphere?.();
+    setContours({ enabled, interval, thickness }) {
+        const contourInterval = requireFiniteNumber(interval, 'Surface contour interval');
+        const contourThickness = requireFiniteNumber(thickness, 'Surface contour thickness');
+        if (contourInterval <= 0 || contourThickness <= 0) {
+            throw new Error('Surface contour interval and thickness must be positive.');
+        }
+        this.contourUniforms.uContoursEnabled.value = enabled ? 1.0 : 0.0;
+        this.contourUniforms.uContourInterval.value = contourInterval;
+        this.contourUniforms.uContourThickness.value = contourThickness;
     }
 
     dispose() {
-        this.geometry.dispose?.();
+        this.geometry?.dispose?.();
         this.material.dispose?.();
         this.wireMaterial.dispose?.();
     }
 }
 
-function formatCoord(value) {
-    if (Math.abs(value) < 1e-10) return '0';
-    if (Math.abs(value) >= 1000 || Math.abs(value) < 0.01) return value.toExponential(2);
-    const text = value.toFixed(2);
-    return text.endsWith('.00') ? text.slice(0, -3) : text;
-}
-
-function outputComponentMode(component) {
-    if (component === 'imag') return OUTPUT_COMPONENT.IMAG;
-    if (component === 'magnitude') return OUTPUT_COMPONENT.MAGNITUDE;
-    return OUTPUT_COMPONENT.REAL;
-}
-
-function outputAxisLabel(component) {
-    if (component === 'imag') return 'z = Im(f)';
-    if (component === 'magnitude') return 'z = |f|';
-    return 'z = Re(f)';
-}
-
-function realPlotSurfaceKey() {
-    const xRange = zPlaneParams.currentVisXRange || [];
-    const yRange = zPlaneParams.currentVisYRange || [];
-    return [
-        buildMappedTransformProfileKey(state.currentFunction),
-        buildMappedTransformProfileKey('mobius'),
-        buildMappedTransformProfileKey('polynomial'),
-        state.chainingEnabled ? 1 : 0,
-        state.chainCount,
-        state.chainingMode,
-        state.taylorSeriesEnabled ? 1 : 0,
-        state.taylorSeriesOrder,
-        state.taylorSeriesCenter?.re,
-        state.taylorSeriesCenter?.im,
-        state.realPlotsInputExpr,
-        state.realPlotsImagExpr,
-        state.realPlotsOutputComponent,
-        state.realPlotsPalette,
-        state.realPlotsColorMode,
-        state.realPlotsHeightScale,
-        xRange[0],
-        xRange[1],
-        yRange[0],
-        yRange[1]
-    ].join('|');
-}
-
-function isScalarInputType(type) {
-    return type !== INPUT_PRESET.GENERIC;
-}
-
-function evalScalarInput(type, x, y) {
-    switch (type) {
-        case INPUT_PRESET.X: return x;
-        case INPUT_PRESET.Y: return y;
-        case INPUT_PRESET.ZERO: return 0;
-        case INPUT_PRESET.X_PLUS_Y: return x + y;
-        case INPUT_PRESET.X_MINUS_Y: return x - y;
-        case INPUT_PRESET.X_TIMES_Y: return x * y;
-        case INPUT_PRESET.TWO_X_PLUS_Y: return 2 * x + y;
-        case INPUT_PRESET.SIN_X_PLUS_COS_Y: return Math.sin(x) + Math.cos(y);
-        case INPUT_PRESET.X2_MINUS_Y2: return x * x - y * y;
-        default: return x;
-    }
-}
-
-function softClampHeight(value) {
-    const abs = Math.abs(value);
-    if (abs <= CLAMP_LIMIT) return value;
-    return (value < 0 ? -1 : 1) * (CLAMP_LIMIT + Math.tanh(abs - CLAMP_LIMIT));
-}
-
-function expSafeForPlot(value) {
-    if (value > 700) return Math.exp(700);
-    if (value < -745) return 0;
-    return Math.exp(value);
-}
-
-function writeReciprocalKernel(re, im, out) {
-    if (re === 0 && im === 0) {
-        out[0] = NaN;
-        out[1] = NaN;
-        return out;
-    }
-
-    const absRe = Math.abs(re);
-    const absIm = Math.abs(im);
-    const scale = Math.max(absRe, absIm);
-
-    if (scale < COMPLEX_ZERO_EPSILON) {
-        const normalizedMagnitude = Math.hypot(re / scale, im / scale);
-        if (!(normalizedMagnitude > 0)) {
-            out[0] = NaN;
-            out[1] = NaN;
-            return out;
-        }
-        out[0] = (re / scale / normalizedMagnitude) * RECIPROCAL_POLE_CAP;
-        out[1] = (-im / scale / normalizedMagnitude) * RECIPROCAL_POLE_CAP;
-        return out;
-    }
-
-    if (absRe >= absIm) {
-        const ratio = im / re;
-        const divisor = re + im * ratio;
-        out[0] = 1 / divisor;
-        out[1] = -ratio / divisor;
-        return out;
-    }
-
-    const ratio = re / im;
-    const divisor = im + re * ratio;
-    out[0] = ratio / divisor;
-    out[1] = -1 / divisor;
-    return out;
-}
-
-function transformKernelKind(transformFunc) {
-    const meta = transformFunc?.realPlotsKernel ?? transformFunc?.realPlotKernel ?? transformFunc?.kernel;
-    const kind = typeof meta === 'string' ? meta : meta?.kind;
-    switch (String(kind || '').toLowerCase()) {
-        case 'identity': case 'id': return TRANSFORM_KERNEL.IDENTITY;
-        case 'square': case 'z2': return TRANSFORM_KERNEL.SQUARE;
-        case 'reciprocal': case 'inverse': case 'inv': return TRANSFORM_KERNEL.RECIPROCAL;
-        case 'exp': case 'exponential': return TRANSFORM_KERNEL.EXP;
-        case 'sin': return TRANSFORM_KERNEL.SIN;
-        case 'cos': return TRANSFORM_KERNEL.COS;
-        default: break;
-    }
-
-    const name = String(transformFunc?.name || '').toLowerCase();
-    if (name === 'identity' || name === 'id') return TRANSFORM_KERNEL.IDENTITY;
-    if (name === 'square' || name === 'z2') return TRANSFORM_KERNEL.SQUARE;
-    if (name === 'reciprocal' || name === 'inverse' || name === 'complexreciprocal') return TRANSFORM_KERNEL.RECIPROCAL;
-    if (name === 'expc' || name === 'exp' || name === 'complexexp') return TRANSFORM_KERNEL.EXP;
-    if (name === 'complexsin') return TRANSFORM_KERNEL.SIN;
-    if (name === 'complexcos') return TRANSFORM_KERNEL.COS;
-    return TRANSFORM_KERNEL.CALL;
-}
-
-function writeHeightfieldNormals(positions, normals, segments, gridStep) {
-    const stride = segments + 1;
-    for (let j = 0; j <= segments; j += 1) {
-        const row = j * stride;
-        const prevRow = (j === 0 ? 0 : j - 1) * stride;
-        const nextRow = (j === segments ? segments : j + 1) * stride;
-        for (let i = 0; i <= segments; i += 1) {
-            const iPrev = i === 0 ? 0 : i - 1;
-            const iNext = i === segments ? segments : i + 1;
-            const index = row + i;
-            const centerOffset = index * 3;
-            const xDivisor = i === 0 || i === segments ? gridStep : 2 * gridStep;
-            const zDivisor = j === 0 || j === segments ? gridStep : 2 * gridStep;
-            const nx = -(positions[(row + iNext) * 3 + 1] - positions[(row + iPrev) * 3 + 1]) / xDivisor;
-            const nz = -(positions[(nextRow + i) * 3 + 1] - positions[(prevRow + i) * 3 + 1]) / zDivisor;
-            const invLen = 1 / Math.hypot(nx, nz, 1);
-            normals[centerOffset] = nx * invLen;
-            normals[centerOffset + 1] = invLen;
-            normals[centerOffset + 2] = nz * invLen;
-        }
-    }
-}
-
-function selectRawValue(re, im, outputMode) {
-    if (outputMode === OUTPUT_COMPONENT.IMAG) return im;
-    if (outputMode === OUTPUT_COMPONENT.MAGNITUDE) {
-        const magnitude = Math.abs(re) <= HYPOT_FAST_OVERFLOW_GUARD && Math.abs(im) <= HYPOT_FAST_OVERFLOW_GUARD
-            ? Math.sqrt(re * re + im * im)
-            : Math.hypot(re, im);
-        return magnitude < Infinity ? magnitude : NaN;
-    }
-    return re;
-}
-
-function validSurfaceIndices(topology, values, finiteResultCount) {
-    if (finiteResultCount === topology.vertexCount) return topology.indices;
-
-    const segments = topology.segments;
-    const stride = segments + 1;
-    const IndexArray = topology.indices instanceof Uint32Array ? Uint32Array : Uint16Array;
-    const indices = new IndexArray(topology.indices.length);
-    let write = 0;
-    for (let j = 0; j < segments; j += 1) {
-        const row = j * stride;
-        const next = row + stride;
-        for (let i = 0; i < segments; i += 1) {
-            const a = row + i;
-            const b = a + 1;
-            const c = next + i;
-            const d = c + 1;
-            if (!isFiniteNumber(values[a]) || !isFiniteNumber(values[b]) ||
-                !isFiniteNumber(values[c]) || !isFiniteNumber(values[d])) continue;
-            indices[write++] = a;
-            indices[write++] = c;
-            indices[write++] = b;
-            indices[write++] = b;
-            indices[write++] = c;
-            indices[write++] = d;
-        }
-    }
-    return indices.subarray(0, write);
-}
-
-function finishSampleGeometry({ segments, vertexCount, topology, positions, normals, colors, rawValues, values, phases, minZ, maxZ, usePhaseColor, paletteLut, heightFactor }) {
-    const spanZ = maxZ - minZ || 1.0;
-    const inverseSpanZ = 1 / spanZ;
-    for (let index = 0, offset = 0; index < vertexCount; index += 1, offset += 3) {
-        const rawValue = values[index];
-        rawValues[index] = rawValue;
-        positions[offset] = topology.gridX[index];
-        positions[offset + 2] = topology.gridZ[index];
-        if (!isFiniteNumber(rawValue)) {
-            positions[offset + 1] = 0;
-            continue;
-        }
-        positions[offset + 1] = softClampHeight(rawValue) * heightFactor;
-        writePaletteColor(
-            paletteLut,
-            usePhaseColor ? phases[index] : (rawValue - minZ) * inverseSpanZ,
-            colors,
-            offset
-        );
-    }
-    writeHeightfieldNormals(positions, normals, segments, SURFACE_SIZE / segments);
-}
-
-function sampleValuesPass(transformFunc, config, catchPerVertex) {
-    const {
-        segments, values, phases, u, v, xMin, yMin, xScale, yScale,
-        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
-        kernelKind
-    } = config;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    let finiteResultCount = 0;
-    let vertex = 0;
-    const fastXY = scalarInputs && inputUType === INPUT_PRESET.X && inputVType === INPUT_PRESET.Y;
-    const fastX0 = scalarInputs && inputUType === INPUT_PRESET.X && inputVType === INPUT_PRESET.ZERO;
-    const fastInputFinite = (fastXY || fastX0) &&
-        isFiniteNumber(xMin) && isFiniteNumber(yMin) &&
-        isFiniteNumber(xScale) && isFiniteNumber(yScale);
-    const hasKernel = kernelKind !== TRANSFORM_KERNEL.CALL;
-    const kernelOut = hasKernel ? (config.kernelOut || (config.kernelOut = new Float64Array(2))) : null;
-
-    for (let j = 0; j <= segments; j += 1) {
-        const yVal = yMin + j * yScale;
-        for (let i = 0; i <= segments; i += 1) {
-            const xVal = xMin + i * xScale;
-            let zInRe;
-            let zInIm;
-            if (fastXY) {
-                zInRe = xVal;
-                zInIm = yVal;
-            } else if (fastX0) {
-                zInRe = xVal;
-                zInIm = 0;
-            } else if (scalarInputs) {
-                zInRe = evalScalarInput(inputUType, xVal, yVal);
-                zInIm = evalScalarInput(inputVType, xVal, yVal);
-            } else {
-                inputU.write(xVal, yVal, u);
-                inputV.write(xVal, yVal, v);
-                zInRe = u[0] - v[1];
-                zInIm = u[1] + v[0];
-            }
-
-            let rawValue = NaN;
-            let phase = 0.5;
-            const inputValid = fastInputFinite || (isFiniteNumber(zInRe) && isFiniteNumber(zInIm));
-            let resultRe;
-            let resultIm;
-            if (inputValid && hasKernel) {
-                switch (kernelKind) {
-                    case TRANSFORM_KERNEL.IDENTITY:
-                        resultRe = zInRe; resultIm = zInIm; break;
-                    case TRANSFORM_KERNEL.SQUARE:
-                        resultRe = zInRe * zInRe - zInIm * zInIm; resultIm = 2 * zInRe * zInIm; break;
-                    case TRANSFORM_KERNEL.RECIPROCAL: {
-                        writeReciprocalKernel(zInRe, zInIm, kernelOut);
-                        resultRe = kernelOut[0];
-                        resultIm = kernelOut[1];
-                        break;
-                    }
-                    case TRANSFORM_KERNEL.EXP: {
-                        const expRe = expSafeForPlot(zInRe);
-                        resultRe = expRe * Math.cos(zInIm); resultIm = expRe * Math.sin(zInIm); break;
-                    }
-                    case TRANSFORM_KERNEL.SIN:
-                        resultRe = Math.sin(zInRe) * Math.cosh(zInIm); resultIm = Math.cos(zInRe) * Math.sinh(zInIm); break;
-                    case TRANSFORM_KERNEL.COS:
-                        resultRe = Math.cos(zInRe) * Math.cosh(zInIm); resultIm = -Math.sin(zInRe) * Math.sinh(zInIm); break;
-                    default:
-                        resultRe = 0; resultIm = 0;
-                }
-            } else if (inputValid) {
-                if (catchPerVertex) {
-                    try {
-                        const result = transformFunc(zInRe, zInIm);
-                        resultRe = result?.re;
-                        resultIm = result?.im;
-                    } catch {
-                        resultRe = undefined;
-                        resultIm = undefined;
-                    }
-                } else {
-                    const result = transformFunc(zInRe, zInIm);
-                    resultRe = result?.re;
-                    resultIm = result?.im;
-                }
-            }
-
-            if (isFiniteNumber(resultRe) && isFiniteNumber(resultIm)) {
-                rawValue = selectRawValue(resultRe, resultIm, outputMode);
-                if (rawValue === rawValue) {
-                    finiteResultCount += 1;
-                    phase = (Math.atan2(resultIm, resultRe) + Math.PI) * INV_TWO_PI;
-                }
-            }
-
-            values[vertex] = rawValue;
-            if (phases) phases[vertex] = phase;
-            if (rawValue === rawValue) {
-                if (rawValue < minZ) minZ = rawValue;
-                if (rawValue > maxZ) maxZ = rawValue;
-            }
-            vertex += 1;
-        }
-    }
-
-    return { minZ, maxZ, finiteResultCount };
-}
-
-const transformFieldIds = new WeakMap();
-let nextTransformFieldId = 1;
-const scalarFieldCache = new Map();
-
-function transformFieldKey(transformFunc) {
-    if (typeof transformFunc !== 'function') return 'transform:invalid';
-
-    let id = transformFieldIds.get(transformFunc);
-    if (id === undefined) {
-        id = nextTransformFieldId++;
-        transformFieldIds.set(transformFunc, id);
-    }
-
-    let profile = '';
-    try {
-        profile = buildMappedTransformProfileKey(state.currentFunction);
-    } catch {
-        profile = String(state.currentFunction || '');
-    }
-    return `${profile}|transform:${id}`;
-}
-
-function scalarFieldBaseKey(transformFunc, inputExpr, imagExpr, outputMode, xRange, yRange) {
-    return [
-        transformFieldKey(transformFunc),
-        String(inputExpr ?? 'x'),
-        String(imagExpr ?? '0'),
-        outputMode,
-        xRange[0],
-        xRange[1],
-        yRange[0],
-        yRange[1]
-    ].join('|');
-}
-
-function touchScalarField(entry) {
-    scalarFieldCache.delete(entry.key);
-    scalarFieldCache.set(entry.key, entry);
-    return entry;
-}
-
-function rememberScalarField(entry) {
-    const existing = scalarFieldCache.get(entry.key);
-    if (existing) return touchScalarField(existing);
-
-    if (scalarFieldCache.size >= SCALAR_FIELD_CACHE_LIMIT) {
-        scalarFieldCache.delete(scalarFieldCache.keys().next().value);
-    }
-    scalarFieldCache.set(entry.key, entry);
-    return entry;
-}
-
-function copyScalarField(entry, values, phases) {
-    values.set(entry.values);
-    if (phases && entry.phases) phases.set(entry.phases);
-    return {
-        minZ: entry.minValue,
-        maxZ: entry.maxValue,
-        finiteResultCount: entry.finiteResultCount
-    };
-}
-
-function getReusableScalarField(baseKey, segments, values, phases) {
-    const exactKey = `${baseKey}|segments:${segments}`;
-    const exact = scalarFieldCache.get(exactKey);
-    if (exact) return copyScalarField(touchScalarField(exact), values, phases);
-
-    let source = null;
-    for (const entry of scalarFieldCache.values()) {
-        if (entry.baseKey !== baseKey || entry.segments <= segments) continue;
-        if (!source || entry.segments < source.segments) source = entry;
-    }
-    if (!source) return null;
-
-    const sourceStride = source.segments + 1;
-    const targetStride = segments + 1;
-    const derivedValues = new Float64Array(targetStride * targetStride);
-    const derivedPhases = new Float32Array(targetStride * targetStride);
-    for (let row = 0; row < targetStride; row += 1) {
-        const sourceY = row * source.segments / segments;
-        const sourceRow0 = Math.floor(sourceY);
-        const sourceRow1 = Math.min(source.segments, sourceRow0 + 1);
-        const yWeight = sourceY - sourceRow0;
-        for (let column = 0; column < targetStride; column += 1) {
-            const targetIndex = row * targetStride + column;
-            const sourceX = column * source.segments / segments;
-            const sourceColumn0 = Math.floor(sourceX);
-            const sourceColumn1 = Math.min(source.segments, sourceColumn0 + 1);
-            const xWeight = sourceX - sourceColumn0;
-            const topLeft = source.values[sourceRow0 * sourceStride + sourceColumn0];
-            const topRight = source.values[sourceRow0 * sourceStride + sourceColumn1];
-            const bottomLeft = source.values[sourceRow1 * sourceStride + sourceColumn0];
-            const bottomRight = source.values[sourceRow1 * sourceStride + sourceColumn1];
-            if ([topLeft, topRight, bottomLeft, bottomRight].every(isFiniteNumber)) {
-                const top = topLeft + (topRight - topLeft) * xWeight;
-                const bottom = bottomLeft + (bottomRight - bottomLeft) * xWeight;
-                derivedValues[targetIndex] = top + (bottom - top) * yWeight;
-            } else {
-                derivedValues[targetIndex] = NaN;
-            }
-
-            const nearestRow = Math.round(sourceY);
-            const nearestColumn = Math.round(sourceX);
-            derivedPhases[targetIndex] = source.phases[nearestRow * sourceStride + nearestColumn];
-        }
-    }
-
-    const derived = rememberScalarField({
-        key: exactKey,
-        baseKey,
-        segments,
-        values: derivedValues,
-        phases: derivedPhases,
-        minValue: NaN,
-        maxValue: NaN,
-        finiteResultCount: 0
-    });
-    let finiteResultCount = 0;
-    let minValue = Infinity;
-    let maxValue = -Infinity;
-    for (const value of derived.values) {
-        if (!isFiniteNumber(value)) continue;
-        finiteResultCount += 1;
-        minValue = Math.min(minValue, value);
-        maxValue = Math.max(maxValue, value);
-    }
-    derived.finiteResultCount = finiteResultCount;
-    derived.minValue = finiteResultCount ? minValue : NaN;
-    derived.maxValue = finiteResultCount ? maxValue : NaN;
-    return copyScalarField(touchScalarField(derived), values, phases);
-}
-
-
-export function sampleRealPlotSurface(transformFunc, options = {}) {
-    const segments = Math.max(1, Math.floor(Number(options.segments) || DEFAULT_SAMPLE_SEGMENTS));
-    const valuesOnly = options.valuesOnly === true;
-    const topology = valuesOnly ? null : options.topology || topologyFor(segments);
-    const stride = segments + 1;
-    const vertexCount = valuesOnly ? stride * stride : topology.vertexCount;
-    const positions = valuesOnly ? null : options.positions || new Float32Array(vertexCount * 3);
-    const normals = valuesOnly ? null : options.normals || new Float32Array(vertexCount * 3);
-    const colors = valuesOnly ? null : options.colors || new Float32Array(vertexCount * 3);
-    const rawValues = valuesOnly ? null : options.rawValues || new Float32Array(vertexCount);
-    const values = options.values || new Float64Array(vertexCount);
-    const phases = valuesOnly ? null : options.phases || new Float32Array(vertexCount);
-    const sampledPhases = phases || new Float32Array(vertexCount);
-    const u = options.u || new Float64Array(2);
-    const v = options.v || new Float64Array(2);
-    const xRange = options.xRange || zPlaneParams.currentVisXRange;
-    const yRange = options.yRange || zPlaneParams.currentVisYRange;
-    const xMin = xRange[0];
-    const yMin = yRange[0];
-    const xScale = (xRange[1] - xMin) / segments;
-    const yScale = (yRange[1] - yMin) / segments;
-    const inputU = InputEvaluator.for(options.inputExpr ?? state.realPlotsInputExpr);
-    const inputV = InputEvaluator.for(options.imagExpr ?? state.realPlotsImagExpr);
-    const inputUType = inputU.type;
-    const inputVType = inputV.type;
-    const scalarInputs = isScalarInputType(inputUType) && isScalarInputType(inputVType);
-    const outputMode = outputComponentMode(options.outputComponent ?? state.realPlotsOutputComponent);
-    const heightScale = options.heightScale !== undefined
-        ? options.heightScale
-        : state.realPlotsHeightScale !== undefined ? state.realPlotsHeightScale : 1.0;
-    const usePhaseColor = (options.colorMode ?? state.realPlotsColorMode) === 'phase';
-    const paletteLut = paletteLutFor(options.palette || state.realPlotsPalette || 'sunset');
-    const heightFactor = (HALF_HEIGHT * heightScale) / CLAMP_LIMIT;
-    const kernelKind = transformKernelKind(transformFunc);
-    const baseScalarKey = scalarFieldBaseKey(
-        transformFunc,
-        options.inputExpr ?? state.realPlotsInputExpr,
-        options.imagExpr ?? state.realPlotsImagExpr,
-        outputMode,
-        xRange,
-        yRange
-    );
-    const cachedSample = getReusableScalarField(baseScalarKey, segments, values, sampledPhases);
-
-    const config = {
-        segments, values, phases: sampledPhases, u, v, xMin, yMin, xScale, yScale,
-        inputU, inputV, inputUType, inputVType, scalarInputs, outputMode,
-        kernelKind
-    };
-
-    let sample = cachedSample;
-    if (!sample) {
-        try {
-            sample = sampleValuesPass(transformFunc, config, false);
-        } catch {
-            sample = sampleValuesPass(transformFunc, config, true);
-        }
-
-        rememberScalarField({
-            key: `${baseScalarKey}|segments:${segments}`,
-            baseKey: baseScalarKey,
-            segments,
-            values: values.slice(),
-            phases: sampledPhases.slice(),
-            minValue: sample.finiteResultCount > 0 ? sample.minZ : NaN,
-            maxValue: sample.finiteResultCount > 0 ? sample.maxZ : NaN,
-            finiteResultCount: sample.finiteResultCount
-        });
-    }
-
-    const minValue = sample.finiteResultCount > 0 ? sample.minZ : NaN;
-    const maxValue = sample.finiteResultCount > 0 ? sample.maxZ : NaN;
-
-    if (valuesOnly) {
-        return {
-            segments,
-            vertexCount,
-            values,
-            minValue,
-            maxValue,
-            finiteResultCount: sample.finiteResultCount
-        };
-    }
-
-    const indices = validSurfaceIndices(topology, values, sample.finiteResultCount);
-    finishSampleGeometry({
-        segments,
-        vertexCount,
-        topology,
-        positions,
-        normals,
-        colors,
-        rawValues,
-        values,
-        phases: sampledPhases,
-        minZ: sample.finiteResultCount > 0 ? sample.minZ : 0,
-        maxZ: sample.finiteResultCount > 0 ? sample.maxZ : 0,
-        usePhaseColor,
-        paletteLut,
-        heightFactor
-    });
-
-    return {
-        segments,
-        vertexCount,
-        positions,
-        normals,
-        colors,
-        values,
-        rawValues,
-        phases,
-        indices,
-        minValue,
-        maxValue,
-        finiteResultCount: sample.finiteResultCount
-    };
-}
-
-class RealPlots3DRenderer {
-    constructor(container) {
+class ScalarSurfaceRenderer {
+    constructor(container, options = {}) {
         this.container = container;
+        this.options = options;
+        const initialBg = new THREE.Color(getCanvasBackgroundColor());
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(BACKGROUND, 0.028);
+        this.scene.fog = new THREE.FogExp2(initialBg, 0.028);
 
         this.camera = new THREE.PerspectiveCamera(38, 1, 0.08, 120);
-        this.camera.position.set(CAMERA_HOME.x, CAMERA_HOME.y, CAMERA_HOME.z);
+        this.camera.position.set(DEFAULT_CAMERA.x, DEFAULT_CAMERA.y, DEFAULT_CAMERA.z);
 
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
@@ -1078,11 +229,11 @@ class RealPlots3DRenderer {
             stencil: false,
             depth: true
         });
-        this.renderer.setClearColor(BACKGROUND);
+        this.renderer.setClearColor(initialBg);
         this.#syncPixelRatio();
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.08;
         this.container.replaceChildren(this.renderer.domElement);
@@ -1090,120 +241,41 @@ class RealPlots3DRenderer {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;
         this.controls.enablePan = true;
-        // Wheel zoom changes the mathematical viewport below, never the camera.
-        this.controls.enableZoom = false;
-        this.controls.target.set(0, 0, 0);
+        this.controls.enableZoom = options.coordinateWheelZoom ? false : true;
+        this.controls.target.set(DEFAULT_CAMERA_TARGET.x, DEFAULT_CAMERA_TARGET.y, DEFAULT_CAMERA_TARGET.z);
         this.controls.minDistance = 0.1;
         this.controls.maxDistance = 200;
         this.controls.update();
         this.controls.addEventListener('change', () => this.render());
 
-        this.coordinateWheelHandler = event => this.#zoomCoordinates(event);
-        this.renderer.domElement.addEventListener('wheel', this.coordinateWheelHandler, { passive: false });
+        this.coordinateWheelHandler = options.coordinateWheelZoom
+            ? event => options.coordinateWheelZoom(event)
+            : null;
+        if (this.coordinateWheelHandler) {
+            this.renderer.domElement.addEventListener('wheel', this.coordinateWheelHandler, { passive: false });
+        }
+        this.renderer.domElement.addEventListener('dblclick', () => this.resetCamera());
 
         this.surfaceGroup = new THREE.Group();
-        this.scene.add(this.surfaceGroup);
-        this.surfaceStore = new SurfaceMeshStore(RENDER_SEGMENTS);
+        this.frameGroup = new THREE.Group();
+        this.overlayGroup = new THREE.Group();
+        this.scene.add(this.surfaceGroup, this.frameGroup, this.overlayGroup);
+
+        this.surfaceStore = new SurfaceMeshStore();
         this.surfaceGroup.add(this.surfaceStore.mesh, this.surfaceStore.wireframe);
-
-        this.zLabelText = '';
-        this.coordBoundsKey = '';
-        this.addReferenceFrame();
-
+        this.frameKey = '';
+        this.overlayKey = '';
+        this.geometryKey = null;
         this.resizeObserver = new ResizeObserver(() => this.resize());
         this.resizeObserver.observe(container);
         this.resize();
-
+        this.#addLights();
         this.render();
     }
 
     #syncPixelRatio() {
         const ratio = window.devicePixelRatio || 1;
         this.renderer.setPixelRatio(Math.min(ratio, 2.75));
-    }
-
-    createCoordinateLabel(color) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 768;
-        canvas.height = 192;
-        const context = canvas.getContext('2d');
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.anisotropy = 4;
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: texture,
-            transparent: true,
-            depthWrite: false
-        }));
-        sprite.scale.set(2.15, 0.54, 1);
-
-        return {
-            sprite,
-            canvas,
-            context,
-            texture,
-            text: '',
-            updateText(text) {
-                if (text === this.text) return;
-                this.text = text;
-                context.clearRect(0, 0, canvas.width, canvas.height);
-                context.font = '600 64px "STIX Two Math", "Cambria Math", serif';
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                context.shadowColor = 'rgba(0, 0, 0, 0.65)';
-                context.shadowBlur = 18;
-                context.fillStyle = color;
-                context.fillText(text, 384, 96);
-                texture.needsUpdate = true;
-            }
-        };
-    }
-
-    addReferenceFrame() {
-        const grid = new THREE.GridHelper(8, 32, 0x5b5f92, 0x242846);
-        grid.position.y = -HALF_HEIGHT - 0.01;
-        this.scene.add(grid);
-
-        const floorGeo = new THREE.PlaneGeometry(34, 34);
-        const floorMat = new THREE.ShadowMaterial({ opacity: 0.32 });
-        const floor = new THREE.Mesh(floorGeo, floorMat);
-        floor.rotation.x = -Math.PI / 2;
-        floor.position.y = -HALF_HEIGHT - 0.025;
-        floor.receiveShadow = true;
-        this.scene.add(floor);
-
-        const xLabel = makeAxisLabel('x', 'rgba(232, 239, 255, 0.96)');
-        xLabel.position.set(HALF_SURFACE + 0.4, -HALF_HEIGHT, 0);
-
-        const yLabel = makeAxisLabel('y', 'rgba(232, 239, 255, 0.96)');
-        yLabel.position.set(0, -HALF_HEIGHT, HALF_SURFACE + 0.4);
-
-        this.zLabel = makeAxisLabel('z = Re(f)', 'rgba(232, 239, 255, 0.96)');
-        this.zLabel.position.set(0, HALF_HEIGHT + 0.4, 0);
-        this.zLabelText = 'z = Re(f)';
-        this.scene.add(xLabel, yLabel, this.zLabel);
-
-        this.coordLabels = {
-            bottomLeft: this.createCoordinateLabel('rgba(232, 239, 255, 0.68)'),
-            bottomRight: this.createCoordinateLabel('rgba(232, 239, 255, 0.68)'),
-            topLeft: this.createCoordinateLabel('rgba(232, 239, 255, 0.68)'),
-            topRight: this.createCoordinateLabel('rgba(232, 239, 255, 0.68)')
-        };
-
-        const yLevel = -HALF_HEIGHT - 0.05;
-        const offset = 0.55;
-        this.coordLabels.bottomLeft.sprite.position.set(-HALF_SURFACE - offset, yLevel, -HALF_SURFACE - offset);
-        this.coordLabels.bottomRight.sprite.position.set(HALF_SURFACE + offset, yLevel, -HALF_SURFACE - offset);
-        this.coordLabels.topLeft.sprite.position.set(-HALF_SURFACE - offset, yLevel, HALF_SURFACE + offset);
-        this.coordLabels.topRight.sprite.position.set(HALF_SURFACE + offset, yLevel, HALF_SURFACE + offset);
-        this.scene.add(
-            this.coordLabels.bottomLeft.sprite,
-            this.coordLabels.bottomRight.sprite,
-            this.coordLabels.topLeft.sprite,
-            this.coordLabels.topRight.sprite
-        );
-
-        this.#addLights();
     }
 
     #addLights() {
@@ -1240,8 +312,188 @@ class RealPlots3DRenderer {
         }
     }
 
-    render() {
-        this.renderer.render(this.scene, this.camera);
+    #buildFrame(frame = DEFAULT_FRAME) {
+        clearThreeGroup(this.frameGroup);
+        const width = requireFiniteNumber(frame.width, 'Surface frame width');
+        const depth = requireFiniteNumber(frame.depth, 'Surface frame depth');
+        const yMin = requireFiniteNumber(frame.yMin, 'Surface frame minimum height');
+        const yMax = requireFiniteNumber(frame.yMax, 'Surface frame maximum height');
+        const floorY = requireFiniteNumber(frame.floorY ?? yMin, 'Surface frame floor height');
+        if (width <= 0 || depth <= 0 || yMin >= yMax) throw new Error('Surface frame dimensions are invalid.');
+
+        const grid = new THREE.GridHelper(Math.max(width, depth) * 1.5, 32, 0x5b5f92, 0x242846);
+        grid.position.y = floorY - 0.01;
+        this.frameGroup.add(grid);
+
+        const floorGeometry = new THREE.PlaneGeometry(Math.max(width, depth) * 5.5, Math.max(width, depth) * 5.5);
+        const floor = new THREE.Mesh(floorGeometry, new THREE.ShadowMaterial({ opacity: 0.32 }));
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = floorY - 0.025;
+        floor.receiveShadow = true;
+        this.frameGroup.add(floor);
+
+        const axisLabels = frame.axisLabels ?? {};
+        const axisColor = 'rgba(232, 239, 255, 0.96)';
+        const xLabel = makeAxisLabel(axisLabels.x ?? 'x', axisColor);
+        xLabel.position.set(width * 0.5 + 0.4, floorY, 0);
+        const zLabel = makeAxisLabel(axisLabels.z ?? 'y', axisColor);
+        zLabel.position.set(0, floorY, depth * 0.5 + 0.4);
+        const yLabel = makeAxisLabel(axisLabels.y ?? 'z', axisColor);
+        yLabel.position.set(0, yMax + 0.4, 0);
+        this.frameGroup.add(xLabel, zLabel, yLabel);
+
+        const bounds = frame.coordinateBounds;
+        if (bounds?.xRange && bounds?.zRange) {
+            this.coordinateLabels = {
+                bottomLeft: this.#createCoordinateLabel('rgba(232, 239, 255, 0.68)'),
+                bottomRight: this.#createCoordinateLabel('rgba(232, 239, 255, 0.68)'),
+                topLeft: this.#createCoordinateLabel('rgba(232, 239, 255, 0.68)'),
+                topRight: this.#createCoordinateLabel('rgba(232, 239, 255, 0.68)')
+            };
+            const yLevel = floorY - 0.05;
+            const offset = 0.55;
+            this.coordinateLabels.bottomLeft.sprite.position.set(-width * 0.5 - offset, yLevel, -depth * 0.5 - offset);
+            this.coordinateLabels.bottomRight.sprite.position.set(width * 0.5 + offset, yLevel, -depth * 0.5 - offset);
+            this.coordinateLabels.topLeft.sprite.position.set(-width * 0.5 - offset, yLevel, depth * 0.5 + offset);
+            this.coordinateLabels.topRight.sprite.position.set(width * 0.5 + offset, yLevel, depth * 0.5 + offset);
+            Object.values(this.coordinateLabels).forEach(label => this.frameGroup.add(label.sprite));
+            this.coordinateBoundsKey = '';
+            this.#syncCoordinateLabels(bounds);
+        } else {
+            this.coordinateLabels = null;
+            this.coordinateBoundsKey = '';
+        }
+        this.frame = frame;
+    }
+
+    #createCoordinateLabel(color) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 768;
+        canvas.height = 192;
+        const context = canvas.getContext('2d');
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthWrite: false
+        }));
+        sprite.scale.set(2.15, 0.54, 1);
+        return {
+            sprite,
+            text: '',
+            updateText(text) {
+                if (text === this.text) return;
+                this.text = text;
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.font = '600 64px "STIX Two Math", "Cambria Math", serif';
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.shadowColor = 'rgba(0, 0, 0, 0.65)';
+                context.shadowBlur = 18;
+                context.fillStyle = color;
+                context.fillText(text, 384, 96);
+                texture.needsUpdate = true;
+            }
+        };
+    }
+
+    #syncCoordinateLabels(bounds) {
+        if (!this.coordinateLabels) return;
+        const xRange = bounds.xRange;
+        const zRange = bounds.zRange;
+        const boundsKey = `${xRange[0]}|${xRange[1]}|${zRange[0]}|${zRange[1]}`;
+        if (boundsKey === this.coordinateBoundsKey) return;
+        this.coordinateBoundsKey = boundsKey;
+        const xMin = formatCoord(xRange[0]);
+        const xMax = formatCoord(xRange[1]);
+        const zMin = formatCoord(zRange[0]);
+        const zMax = formatCoord(zRange[1]);
+        this.coordinateLabels.bottomLeft.updateText(`(${xMin}, ${zMin})`);
+        this.coordinateLabels.bottomRight.updateText(`(${xMax}, ${zMin})`);
+        this.coordinateLabels.topLeft.updateText(`(${xMin}, ${zMax})`);
+        this.coordinateLabels.topRight.updateText(`(${xMax}, ${zMax})`);
+    }
+
+    #addOverlays(overlays = []) {
+        clearThreeGroup(this.overlayGroup);
+        overlays.forEach(overlay => {
+            if (overlay.type === 'line') {
+                const geometry = new THREE.BufferGeometry().setFromPoints(
+                    overlay.points.map(point => new THREE.Vector3(point[0], point[1], point[2]))
+                );
+                const Material = overlay.dashed ? THREE.LineDashedMaterial : THREE.LineBasicMaterial;
+                const line = new THREE.Line(geometry, new Material({
+                    color: overlay.color,
+                    ...(overlay.dashed ? { dashSize: 0.15, gapSize: 0.09 } : {}),
+                    transparent: true,
+                    opacity: overlay.opacity ?? 0.8,
+                    depthWrite: false
+                }));
+                if (overlay.dashed) line.computeLineDistances();
+                this.overlayGroup.add(line);
+                return;
+            }
+            if (overlay.type === 'plane') {
+                const mesh = new THREE.Mesh(
+                    new THREE.PlaneGeometry(overlay.width, overlay.depth),
+                    new THREE.MeshBasicMaterial({
+                        color: overlay.color,
+                        transparent: true,
+                        opacity: overlay.opacity ?? 0.08,
+                        side: THREE.DoubleSide,
+                        depthWrite: false
+                    })
+                );
+                mesh.rotation.x = overlay.rotationX ?? -Math.PI / 2;
+                mesh.position.set(...overlay.position);
+                this.overlayGroup.add(mesh);
+                return;
+            }
+            if (overlay.type === 'marker') {
+                const geometry = overlay.shape === 'zero'
+                    ? new THREE.TorusGeometry(0.12, 0.032, 8, 20)
+                    : new THREE.OctahedronGeometry(0.14, 1);
+                const marker = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: overlay.color }));
+                if (overlay.shape === 'zero') marker.rotation.x = Math.PI * 0.5;
+                marker.position.set(...overlay.position);
+                this.overlayGroup.add(marker);
+            }
+        });
+    }
+
+    update(view) {
+        if (!view || typeof view.buildGeometry !== 'function') {
+            throw new Error('Scalar surface views require a geometry builder.');
+        }
+        if (view.geometryKey !== this.geometryKey) {
+            this.surfaceStore.setData(view.buildGeometry());
+            this.geometryKey = view.geometryKey;
+        }
+        if (view.frameKey !== this.frameKey) {
+            this.#buildFrame(view.frame);
+            this.frameKey = view.frameKey;
+        } else if (view.frame?.coordinateBounds) {
+            this.#syncCoordinateLabels(view.frame.coordinateBounds);
+        }
+        if (view.overlaysKey !== this.overlayKey) {
+            this.#addOverlays(view.overlays);
+            this.overlayKey = view.overlaysKey;
+        }
+        this.surfaceStore.setContours(view.contours ?? {
+            enabled: false,
+            interval: 0.5,
+            thickness: 1.5
+        });
+        this.render();
+    }
+
+    resetCamera() {
+        this.camera.position.set(DEFAULT_CAMERA.x, DEFAULT_CAMERA.y, DEFAULT_CAMERA.z);
+        this.controls.target.set(DEFAULT_CAMERA_TARGET.x, DEFAULT_CAMERA_TARGET.y, DEFAULT_CAMERA_TARGET.z);
+        this.controls.update();
+        this.render();
     }
 
     resize() {
@@ -1251,124 +503,281 @@ class RealPlots3DRenderer {
         this.#syncPixelRatio();
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height);
+        this.renderer.setSize(width, height, false);
         this.render();
     }
 
-    #zoomCoordinates(event) {
-        event.preventDefault();
-
-        const deltaY = Number(event.deltaY);
-        if (!Number.isFinite(deltaY) || deltaY === 0) return;
-
-        const oldZoom = Number(state.zPlaneZoom);
-        const currentZoom = Number.isFinite(oldZoom) && oldZoom > 0 ? oldZoom : 1;
-        const factor = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
-        const nextZoom = Math.max(
-            MIN_STATE_ZOOM_LEVEL,
-            Math.min(MAX_STATE_ZOOM_LEVEL, currentZoom * factor)
-        );
-        if (nextZoom === currentZoom) return;
-
-        state.zPlaneZoom = nextZoom;
-        // Use the same single viewport path as the z-plane slider. This keeps
-        // the state value, coordinate bounds, and surface samples consistent.
-        setupVisualParameters(true, false);
-        requestRedrawAll();
-    }
-
-    updateSurface(transformFunc, surfaceKey) {
-        const store = this.surfaceStore;
-        store.contourUniforms.uContoursEnabled.value = state.contoursEnabled ? 1.0 : 0.0;
-        store.contourUniforms.uContourInterval.value = state.contourInterval !== undefined ? +state.contourInterval : 0.5;
-        store.contourUniforms.uContourThickness.value = state.contourThickness !== undefined ? +state.contourThickness : 1.5;
-
-        if (surfaceKey && surfaceKey === this.surfaceKey) {
-            this.render();
-            return;
-        }
-
-        this.#syncOutputLabel();
-        this.#syncCoordinateLabels();
-        this.#sampleSurface(transformFunc);
-        this.surfaceKey = surfaceKey;
-        this.surfaceStore.markDirty();
-        this.render();
-    }
-
-    #syncOutputLabel() {
-        const labelText = outputAxisLabel(state.realPlotsOutputComponent);
-        if (labelText === this.zLabelText) return;
-        this.scene.remove(this.zLabel);
-        this.zLabel.material.map?.dispose?.();
-        this.zLabel.material.dispose?.();
-        this.zLabel = makeAxisLabel(labelText, 'rgba(232, 239, 255, 0.96)');
-        this.zLabel.position.set(0, HALF_HEIGHT + 0.4, 0);
-        this.zLabelText = labelText;
-        this.scene.add(this.zLabel);
-    }
-
-    #syncCoordinateLabels() {
-        const xMin = zPlaneParams.currentVisXRange[0];
-        const xMax = zPlaneParams.currentVisXRange[1];
-        const yMin = zPlaneParams.currentVisYRange[0];
-        const yMax = zPlaneParams.currentVisYRange[1];
-        const boundsKey = `${xMin}|${xMax}|${yMin}|${yMax}`;
-        if (boundsKey === this.coordBoundsKey) return;
-        this.coordBoundsKey = boundsKey;
-        const fXMin = formatCoord(xMin);
-        const fXMax = formatCoord(xMax);
-        const fYMin = formatCoord(yMin);
-        const fYMax = formatCoord(yMax);
-        this.coordLabels.bottomLeft.updateText(`(${fXMin}, ${fYMin})`);
-        this.coordLabels.bottomRight.updateText(`(${fXMax}, ${fYMin})`);
-        this.coordLabels.topLeft.updateText(`(${fXMin}, ${fYMax})`);
-        this.coordLabels.topRight.updateText(`(${fXMax}, ${fYMax})`);
-    }
-
-    #sampleSurface(transformFunc) {
-        const store = this.surfaceStore;
-        const result = sampleRealPlotSurface(transformFunc, {
-            segments: store.segments,
-            topology: store.topology,
-            positions: store.positions,
-            normals: store.normals,
-            colors: store.colors,
-            rawValues: store.rawValues,
-            values: store.values,
-            phases: store.phases,
-            u: store.u,
-            v: store.v
-        });
-        store.setIndices(result.indices);
-        store.minValue = result.minValue;
-        store.maxValue = result.maxValue;
+    render() {
+        const bg = new THREE.Color(getCanvasBackgroundColor());
+        this.renderer.setClearColor(bg);
+        if (this.scene.fog) this.scene.fog.color = bg;
+        this.renderer.render(this.scene, this.camera);
     }
 
     dispose() {
         this.resizeObserver?.disconnect();
-        this.renderer.domElement.removeEventListener('wheel', this.coordinateWheelHandler);
+        if (this.coordinateWheelHandler) {
+            this.renderer.domElement.removeEventListener('wheel', this.coordinateWheelHandler);
+        }
         this.controls.dispose();
-        this.surfaceStore?.dispose();
+        this.surfaceStore.dispose();
         disposeThreeObject(this.scene);
         this.renderer.dispose();
         this.renderer.domElement.remove();
     }
 }
 
-export function drawRealPlot() {
-    const container3d = document.getElementById('real_plots_3d_container');
-    if (!active3DRenderer && container3d) {
-        active3DRenderer = new RealPlots3DRenderer(container3d);
-    }
+function requireContainer(container) {
+    if (!container) throw new Error('A scalar surface container is required.');
+    return container;
+}
 
-    const transformFunc = getChainedTransformFunction(state.currentFunction);
-    active3DRenderer?.updateSurface(transformFunc, realPlotSurfaceKey());
+export function drawScalarSurface(container, view, rendererOptions = {}) {
+    const target = requireContainer(container);
+    let renderer = rendererByContainer.get(target);
+    if (!renderer) {
+        renderer = new ScalarSurfaceRenderer(target, rendererOptions);
+        rendererByContainer.set(target, renderer);
+    }
+    renderer.update(view);
+}
+
+export function resizeScalarSurface(container) {
+    if (container) rendererByContainer.get(container)?.resize();
+}
+
+export function disposeScalarSurface(container) {
+    if (!container) return;
+    const renderer = rendererByContainer.get(container);
+    if (!renderer) return;
+    renderer.dispose();
+    rendererByContainer.delete(container);
+}
+
+const DEFAULT_SAMPLE_SEGMENTS = 96;
+const RENDER_SEGMENTS = 192;
+
+const INPUT_PRESET = Object.freeze({
+    GENERIC: 0,
+    X: 1,
+    Y: 2,
+    ZERO: 3,
+    X_PLUS_Y: 4,
+    X_MINUS_Y: 5,
+    X_TIMES_Y: 6,
+    TWO_X_PLUS_Y: 7,
+    SIN_X_PLUS_COS_Y: 8,
+    X2_MINUS_Y2: 9
+});
+
+const OUTPUT_COMPONENT = Object.freeze({
+    REAL: 0,
+    IMAG: 1,
+    MAGNITUDE: 2
+});
+
+function canonicalExpression(expression) {
+    return String(expression ?? '')
+        .toLowerCase()
+        .replace(/[\s_]+/g, '')
+        .replace(/−/g, '-')
+        .replace(/\*\*/g, '^')
+        .replace(/²/g, '^2')
+        .replace(/·/g, '*');
+}
+
+function presetType(expr) {
+    switch (canonicalExpression(expr)) {
+        case 'x': return INPUT_PRESET.X;
+        case 'y': return INPUT_PRESET.Y;
+        case '0': return INPUT_PRESET.ZERO;
+        case 'x+y': case 'y+x': return INPUT_PRESET.X_PLUS_Y;
+        case 'x-y': return INPUT_PRESET.X_MINUS_Y;
+        case 'x*y': case 'xy': return INPUT_PRESET.X_TIMES_Y;
+        case '2x+y': case '2*x+y': case 'x+x+y': case 'y+2x': case 'y+2*x': return INPUT_PRESET.TWO_X_PLUS_Y;
+        case 'sin(x)+cos(y)': case 'cos(y)+sin(x)': return INPUT_PRESET.SIN_X_PLUS_COS_Y;
+        case 'x*x-y*y': case 'x^2-y^2': return INPUT_PRESET.X2_MINUS_Y2;
+        default: return INPUT_PRESET.GENERIC;
+    }
+}
+
+export function validateRealPlotExpression(expression) {
+    const source = String(expression ?? '').trim();
+    if (!source) return 'Expression cannot be empty';
+    try {
+        compileNativeExpressionProgram(parseExpression(source), ['x', 'y']);
+        return null;
+    } catch (error) {
+        return error instanceof Error ? error.message : 'Invalid expression';
+    }
+}
+
+function outputComponentMode(component) {
+    if (component === 'real') return OUTPUT_COMPONENT.REAL;
+    if (component === 'imag') return OUTPUT_COMPONENT.IMAG;
+    if (component === 'magnitude') return OUTPUT_COMPONENT.MAGNITUDE;
+    throw new Error(`Unsupported real-plot component: ${component}.`);
+}
+
+function outputAxisLabel(component) {
+    if (component === 'real') return 'z = Re(f)';
+    if (component === 'imag') return 'z = Im(f)';
+    if (component === 'magnitude') return 'z = |f|';
+    throw new Error(`Unsupported real-plot component: ${component}.`);
+}
+
+function realPlotSurfaceKey() {
+    requireVisibleViewport(zPlaneParams, 'Real-plot viewport');
+    const xRange = zPlaneParams.currentVisXRange;
+    const yRange = zPlaneParams.currentVisYRange;
+    const funcKey = state.algebraicChainingEnabled ? 'algebraic_chaining' : state.currentFunction;
+    return [
+        buildMappedTransformProfileKey(funcKey),
+        buildMappedTransformProfileKey('mobius'),
+        buildMappedTransformProfileKey('polynomial'),
+        buildMappedTransformProfileKey('algebraic_chaining'),
+        state.algebraicChainingEnabled ? 1 : 0,
+        state.chainingEnabled ? 1 : 0,
+        state.chainCount,
+        state.chainingMode,
+        state.chainSeed?.re,
+        state.chainSeed?.im,
+        state.taylorSeriesEnabled ? 1 : 0,
+        state.taylorSeriesOrder,
+        state.taylorSeriesCenter?.re,
+        state.taylorSeriesCenter?.im,
+        state.realPlotsInputExpr,
+        state.realPlotsImagExpr,
+        state.realPlotsOutputComponent,
+        state.surfacePalette,
+        state.realPlotsBrightness ?? 0.5,
+        state.realPlotsContrast ?? 1.0,
+        state.realPlotsSaturation ?? 1.0,
+        state.realPlotsColorMode,
+        state.realPlotsHeightScale,
+        xRange[0],
+        xRange[1],
+        yRange[0],
+        yRange[1]
+    ].join('|');
+}
+
+function expressionProgram(source, preset) {
+    if (preset !== INPUT_PRESET.GENERIC) return null;
+    return compileNativeExpressionProgram(parseExpression(String(source)), ['x', 'y']);
+}
+
+function resolveRealPlotDefinition(options) {
+    const inputExpr = options.inputExpr ?? state.realPlotsInputExpr;
+    const imagExpr = options.imagExpr ?? state.realPlotsImagExpr;
+    const inputUPreset = presetType(inputExpr);
+    const inputVPreset = presetType(imagExpr);
+    const funcKey = options.mapOptions?.functionKey ?? (state.algebraicChainingEnabled ? 'algebraic_chaining' : state.currentFunction);
+    const activeMap = getMappedTransformProfile(funcKey);
+    return {
+        mapOptions: nativeMapOptions(state, {
+            ...activeMap.nativeMapOptions,
+            functionKey: funcKey,
+            chainingEnabled: Boolean(state.chainingEnabled),
+            chainCount: state.chainingEnabled ? (state.chainCount || 1) : 1,
+            chainingMode: state.chainingMode || 'recursion',
+            chainSeed: state.chainSeed || { re: 0, im: 0 },
+            ...options.mapOptions
+        }),
+        xRange: options.xRange ?? zPlaneParams.currentVisXRange,
+        yRange: options.yRange ?? zPlaneParams.currentVisYRange,
+        inputUPreset,
+        inputVPreset,
+        inputUProgram: expressionProgram(inputExpr, inputUPreset),
+        inputVProgram: expressionProgram(imagExpr, inputVPreset),
+        component: outputComponentMode(options.outputComponent ?? state.realPlotsOutputComponent),
+        palette: paletteLutFor(options.palette ?? state.surfacePalette, {
+            brightness: options.brightness ?? state.realPlotsBrightness ?? 0.5,
+            contrast: options.contrast ?? state.realPlotsContrast ?? 1.0,
+            saturation: options.saturation ?? state.realPlotsSaturation ?? 1.0
+        })
+    };
+}
+
+export function buildRealPlotSurface(options = {}) {
+    const segments = requireInteger(options.segments ?? DEFAULT_SAMPLE_SEGMENTS, 'Real-plot segment count');
+    if (segments < 1) throw new Error('Real-plot segment count must be positive.');
+    const definition = resolveRealPlotDefinition(options);
+    const result = buildNativeRealSurface({
+        ...definition,
+        segments,
+        heightScale: options.heightScale ?? state.realPlotsHeightScale,
+        phaseColor: (options.colorMode ?? state.realPlotsColorMode) === 'phase',
+        valuesOnly: options.valuesOnly === true
+    });
+    return result.positions ? { ...result, contourValues: result.rawValues } : result;
+}
+
+export function renderRealPlotContour(options = {}) {
+    const contourInterval = requireFiniteNumber(
+        options.contourInterval ?? state.contourInterval,
+        'Real-plot contour interval'
+    );
+    const contourThickness = requireFiniteNumber(
+        options.contourThickness ?? state.contourThickness,
+        'Real-plot contour thickness'
+    );
+    if (contourInterval <= 0 || contourThickness <= 0) {
+        throw new Error('Real-plot contour interval and thickness must be positive.');
+    }
+    return renderNativeRealContour({
+        ...(options.scalarGrid ? {} : resolveRealPlotDefinition(options)),
+        scalarGrid: options.scalarGrid,
+        width: requireInteger(options.width, 'Real-plot contour width'),
+        height: requireInteger(options.height, 'Real-plot contour height'),
+        contoursEnabled: options.contoursEnabled ?? state.contoursEnabled,
+        contourInterval,
+        contourThickness
+    });
+}
+
+function zoomRealPlotCoordinates(event) {
+    applySurfaceCoordinateZoom(event, state.zPlaneZoom, nextZoom => {
+        state.zPlaneZoom = nextZoom;
+        setupVisualParameters(true, false);
+        requestUiRedraw();
+    });
+}
+
+export function drawRealPlot() {
+    const container = context.controls.realPlots3DContainer;
+    if (!container) return;
+    const xRange = [...zPlaneParams.currentVisXRange];
+    const yRange = [...zPlaneParams.currentVisYRange];
+    const frameKey = [
+        outputAxisLabel(state.realPlotsOutputComponent),
+        ...xRange,
+        ...yRange
+    ].join('|');
+
+    drawScalarSurface(container, {
+        geometryKey: realPlotSurfaceKey(),
+        buildGeometry: () => buildRealPlotSurface({ segments: RENDER_SEGMENTS }),
+        frameKey,
+        frame: {
+            ...REAL_SURFACE_FRAME,
+            axisLabels: {
+                x: 'x',
+                z: 'y',
+                y: outputAxisLabel(state.realPlotsOutputComponent)
+            },
+            coordinateBounds: { xRange, zRange: yRange }
+        },
+        overlaysKey: '',
+        overlays: [],
+        contours: {
+            enabled: state.contoursEnabled,
+            interval: state.contourInterval,
+            thickness: state.contourThickness
+        }
+    }, { coordinateWheelZoom: zoomRealPlotCoordinates });
 }
 
 export function disposeRealPlotsRenderer() {
-    if (active3DRenderer) {
-        active3DRenderer.dispose();
-        active3DRenderer = null;
-    }
+    disposeScalarSurface(context.controls.realPlots3DContainer);
 }

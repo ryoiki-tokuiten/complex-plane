@@ -3,6 +3,11 @@ import {
     parseExpression
 } from '../math/expression/index.js';
 import { generateDiscreteSource } from './discrete-sources.js';
+import {
+    requireFiniteComplex,
+    requireFiniteNumber,
+    requireInteger
+} from '../utils/numeric-contracts.js';
 
 const BUILT_IN_VARIABLES = new Set([
     'c', 'd', 'j', 'z', 's', 'i', 'pi', 'e', 'true', 'false'
@@ -45,23 +50,22 @@ const DEFAULT_BINDING = Object.freeze({
     associatePolicy: 'all',
     includeConjugates: true,
     generatorExpression: 'j + 1',
+    filterExpression: '',
     pointsText: '1; 2; 3'
 });
 
-function finiteNumber(value, fallback) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : fallback;
+function optionalFiniteNumber(value, defaultValue, label) {
+    return value === undefined ? defaultValue : requireFiniteNumber(value, label);
 }
 
-function complexValue(value, fallback = DEFAULT_VALUE) {
-    return {
-        re: finiteNumber(value?.re, fallback.re),
-        im: finiteNumber(value?.im, fallback.im)
-    };
+function optionalComplexValue(value, defaultValue = DEFAULT_VALUE, label = 'Sequence-binding value') {
+    if (value === undefined) return { re: defaultValue.re, im: defaultValue.im };
+    const complex = requireFiniteComplex(value, label);
+    return { re: complex.re, im: complex.im };
 }
 
 function normalizedSymbol(symbol) {
-    return String(symbol || '').trim();
+    return String(symbol ?? '').trim();
 }
 
 function isIndexLike(symbol) {
@@ -70,45 +74,67 @@ function isIndexLike(symbol) {
     return code === 110 || code === 107 || code === 109 || code === 114;
 }
 
-export function normalizeSequenceBinding(binding, symbol = binding?.symbol) {
-    const normalized = normalizedSymbol(symbol || binding?.symbol);
+function normalizeSequenceBinding(binding, symbol = binding?.symbol) {
+    const normalized = normalizedSymbol(symbol ?? binding?.symbol);
     const indexLike = isIndexLike(normalized);
-    const source = binding && typeof binding === 'object' ? binding : DEFAULT_BINDING;
+    if (binding !== undefined && (!binding || typeof binding !== 'object' || Array.isArray(binding))) {
+        throw new Error('Sequence bindings must be objects.');
+    }
+    const source = binding === undefined ? DEFAULT_BINDING : binding;
+    const kind = source.kind ?? (normalized.toLowerCase() === 'x' ? 'parameter' : indexLike ? 'naturals' : 'constant');
+    if (!SEQUENCE_BINDING_KINDS.some(candidate => candidate.id === kind)) {
+        throw new Error(`Unsupported sequence-binding kind: ${kind}.`);
+    }
+    const minimum = optionalFiniteNumber(source.min, 2, 'Sequence-binding prime minimum');
+    const bound = optionalFiniteNumber(source.bound, 12, 'Sequence-binding Gaussian bound');
+    if (!Number.isInteger(minimum) || minimum < 2) {
+        throw new Error('Sequence-binding prime minimum must be an integer of at least 2.');
+    }
+    if (!Number.isInteger(bound) || bound < 1) {
+        throw new Error('Sequence-binding Gaussian bound must be a positive integer.');
+    }
     return {
-        id: String(source.id || `binding-${normalized}`),
+        id: String(source.id ?? `binding-${normalized}`),
         symbol: normalized,
-        kind: source.kind || (normalized.toLowerCase() === 'x' ? 'parameter' : indexLike ? 'naturals' : 'constant'),
-        value: complexValue(source.value),
-        start: finiteNumber(source.start, indexLike ? 0 : 1),
-        step: finiteNumber(source.step, 1),
-        ratio: finiteNumber(source.ratio, 2),
-        ordering: source.ordering || 'ascending',
+        kind,
+        value: optionalComplexValue(source.value),
+        start: optionalFiniteNumber(source.start, indexLike ? 0 : 1, 'Sequence-binding start'),
+        step: optionalFiniteNumber(source.step, 1, 'Sequence-binding step'),
+        ratio: optionalFiniteNumber(source.ratio, 2, 'Sequence-binding ratio'),
+        ordering: source.ordering ?? 'ascending',
         includeZero: Boolean(source.includeZero),
         includeNegative: Boolean(source.includeNegative),
-        min: Math.max(2, Math.floor(finiteNumber(source.min, 2))),
+        min: minimum,
         max: source.max ?? '',
-        bound: Math.max(1, Math.floor(finiteNumber(source.bound, 12))),
-        boundType: source.boundType || 'norm',
-        associatePolicy: source.associatePolicy || 'all',
+        bound,
+        boundType: source.boundType ?? 'norm',
+        associatePolicy: source.associatePolicy ?? 'all',
         includeConjugates: source.includeConjugates !== undefined ? Boolean(source.includeConjugates) : true,
-        generatorExpression: source.generatorExpression || 'j + 1',
-        pointsText: source.pointsText || '1; 2; 3'
+        generatorExpression: source.generatorExpression ?? 'j + 1',
+        filterExpression: source.filterExpression ?? '',
+        pointsText: source.pointsText ?? '1; 2; 3'
     };
 }
 
-export function getBindableExpressionSymbols(source, parameterNames = []) {
-    const input = String(source ?? '');
-    const params = parameterNames || [];
+function getBindableExpressionSymbols(source, parameterNames = []) {
+    if (typeof source !== 'string') throw new Error('Bindable expression source must be a string.');
+    if (!Array.isArray(parameterNames)) throw new Error('Expression parameter names must be an array.');
+    const input = source;
+    const params = parameterNames;
     let key = input;
-    for (let index = 0; index < params.length; index++) key += `\u0000${String(params[index] || '').trim()}`;
+    for (let index = 0; index < params.length; index++) {
+        if (typeof params[index] !== 'string' || !params[index].trim()) {
+            throw new Error(`Expression parameter name ${index} must be a non-empty string.`);
+        }
+        key += `\u0000${params[index].trim()}`;
+    }
     const cached = BINDABLE_SYMBOL_CACHE.get(key);
     if (cached) return cached.slice();
 
     const dependencies = collectExpressionDependencies(parseExpression(input));
     const excluded = new Set(BUILT_IN_VARIABLES);
     for (let index = 0; index < params.length; index++) {
-        const name = String(params[index] || '').trim();
-        if (name) excluded.add(name);
+        excluded.add(params[index].trim());
     }
     const output = [];
     for (const name of dependencies.variables) {
@@ -121,12 +147,16 @@ export function getBindableExpressionSymbols(source, parameterNames = []) {
 }
 
 export function synchronizeSequenceBindings(source, bindings = [], parameterNames = []) {
+    if (!Array.isArray(bindings)) throw new Error('Sequence bindings must be an array.');
     const symbols = getBindableExpressionSymbols(source, parameterNames);
     const existing = new Map();
-    const list = bindings || [];
+    const list = bindings;
     for (let index = 0; index < list.length; index++) {
         const binding = list[index];
-        existing.set(binding?.symbol, binding);
+        if (!binding || typeof binding !== 'object' || typeof binding.symbol !== 'string') {
+            throw new Error(`Sequence binding ${index} is malformed.`);
+        }
+        existing.set(binding.symbol, binding);
     }
     const output = new Array(symbols.length);
     for (let index = 0; index < symbols.length; index++) {
@@ -137,7 +167,6 @@ export function synchronizeSequenceBindings(source, bindings = [], parameterName
 }
 
 
-const ENVIRONMENT_FACTORY_CACHE = new Map();
 const NORMALIZED_BINDING_CACHE = new WeakMap();
 
 function sameCachedBinding(cache, binding) {
@@ -147,7 +176,8 @@ function sameCachedBinding(cache, binding) {
         cache.includeNegative === binding.includeNegative && cache.min === binding.min && cache.max === binding.max &&
         cache.bound === binding.bound && cache.boundType === binding.boundType &&
         cache.associatePolicy === binding.associatePolicy && cache.includeConjugates === binding.includeConjugates &&
-        cache.generatorExpression === binding.generatorExpression && cache.pointsText === binding.pointsText &&
+        cache.generatorExpression === binding.generatorExpression && cache.filterExpression === binding.filterExpression &&
+        cache.pointsText === binding.pointsText &&
         cache.valueRe === binding.value?.re && cache.valueIm === binding.value?.im;
 }
 
@@ -164,59 +194,18 @@ function normalizeSequenceBindingCached(binding) {
         includeNegative: binding.includeNegative, min: binding.min, max: binding.max,
         bound: binding.bound, boundType: binding.boundType,
         associatePolicy: binding.associatePolicy, includeConjugates: binding.includeConjugates,
-        generatorExpression: binding.generatorExpression, pointsText: binding.pointsText,
+        generatorExpression: binding.generatorExpression, filterExpression: binding.filterExpression,
+        pointsText: binding.pointsText,
         normalized
     });
     return normalized;
 }
 
 
-function isArrayIndex(property, length) {
-    if (typeof property !== 'string' || property.length === 0) return -1;
-    const index = property >>> 0;
-    return String(index) === property && index < length ? index : -1;
-}
-
-function createLazyEnvironments(valueSets, symbols, count) {
-    const makeEnvironment = environmentFactory(symbols);
-    const target = new Array(count);
-    if (!makeEnvironment) {
-        for (let row = 0; row < count; row++) target[row] = {};
-        return target;
-    }
-    const materialize = row => target[row] || (target[row] = makeEnvironment(valueSets, row));
-    return new Proxy(target, {
-        get(array, property, receiver) {
-            const row = isArrayIndex(property, count);
-            return row >= 0 ? materialize(row) : Reflect.get(array, property, receiver);
-        },
-        has(array, property) {
-            return isArrayIndex(property, count) >= 0 || Reflect.has(array, property);
-        },
-        getOwnPropertyDescriptor(array, property) {
-            const row = isArrayIndex(property, count);
-            if (row < 0) return Reflect.getOwnPropertyDescriptor(array, property);
-            return { value: materialize(row), writable: true, enumerable: true, configurable: true };
-        },
-        ownKeys() {
-            const keys = new Array(count + 1);
-            for (let index = 0; index < count; index++) keys[index] = String(index);
-            keys[count] = 'length';
-            return keys;
-        }
-    });
-}
-
-function environmentFactory(symbols) {
-    if (!symbols.length) return null;
-    const key = symbols.join('\u0001');
-    const cached = ENVIRONMENT_FACTORY_CACHE.get(key);
-    if (cached) return cached;
-    const fields = symbols.map((symbol, index) => `${JSON.stringify(symbol)}: sets[${index}][row] || { re: NaN, im: NaN }`).join(',');
-    const factory = new Function('sets', 'row', `return ({${fields}});`);
-    ENVIRONMENT_FACTORY_CACHE.set(key, factory);
-    if (ENVIRONMENT_FACTORY_CACHE.size > 64) ENVIRONMENT_FACTORY_CACHE.delete(ENVIRONMENT_FACTORY_CACHE.keys().next().value);
-    return factory;
+function createEnvironments(valueSets, symbols, count) {
+    return Array.from({ length: count }, (_, row) => Object.fromEntries(
+        symbols.map((symbol, index) => [symbol, valueSets[index][row] ?? { re: NaN, im: NaN }])
+    ));
 }
 
 function repeatedComplex(re, im, count) {
@@ -242,19 +231,27 @@ function sourceConfig(binding, count) {
         associatePolicy: binding.associatePolicy,
         includeConjugates: binding.includeConjugates,
         generatorExpression: binding.generatorExpression,
+        filterExpression: binding.filterExpression,
         pointsText: binding.pointsText,
         points: []
     };
 }
 
 export function generateSequenceBindingSeries(bindings, count, runtime = {}) {
-    const normalizedCount = Math.max(0, Math.floor(finiteNumber(count, 0)));
-    const aggregateParameter = complexValue(runtime.aggregateParameter, { re: 0, im: 0 });
+    if (!Array.isArray(bindings)) throw new Error('Sequence bindings must be an array.');
+    const normalizedCount = requireInteger(count, 'Sequence-binding sample count');
+    if (normalizedCount < 0) throw new Error('Sequence-binding sample count must be non-negative.');
+    const requiresAggregateParameter = bindings.some(binding =>
+        binding?.kind === 'parameter' || binding?.kind === 'parameter_real'
+    );
+    const aggregateParameter = requiresAggregateParameter
+        ? requireFiniteComplex(runtime.aggregateParameter, 'Sequence aggregate parameter')
+        : { re: 0, im: 0 };
     const series = {};
     const diagnostics = [];
     const symbols = [];
     const valueSets = [];
-    const list = bindings || [];
+    const list = bindings;
 
     for (let index = 0; index < list.length; index++) {
         const binding = normalizeSequenceBindingCached(list[index]);
@@ -270,14 +267,14 @@ export function generateSequenceBindingSeries(bindings, count, runtime = {}) {
             values = repeatedComplex(binding.value.re, binding.value.im, normalizedCount);
         } else {
             const generated = generateDiscreteSource(sourceConfig(binding, normalizedCount), {
-                parameters: runtime.parameters || {}
+                parameters: runtime.parameters ?? {}
             });
-            const records = generated.records || [];
+            const records = generated.records;
             values = new Array(records.length);
             for (let valueIndex = 0; valueIndex < records.length; valueIndex++) {
                 values[valueIndex] = records[valueIndex].domainValue;
             }
-            const messages = generated.diagnostics || [];
+            const messages = generated.diagnostics;
             for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
                 diagnostics.push(`${symbol}: ${messages[messageIndex]}`);
             }
@@ -287,20 +284,17 @@ export function generateSequenceBindingSeries(bindings, count, runtime = {}) {
         valueSets.push(values);
     }
 
-    const environments = createLazyEnvironments(valueSets, symbols, normalizedCount);
+    const environments = createEnvironments(valueSets, symbols, normalizedCount);
 
     return { series, environments, diagnostics };
 }
 
 export function freeParameterSymbols(source, bindings = []) {
+    if (!Array.isArray(bindings)) throw new Error('Sequence bindings must be an array.');
     const symbols = [];
-    try {
-        const dependencies = collectExpressionDependencies(parseExpression(source));
-        if (dependencies.variables.has('s')) symbols.push('s');
-    } catch {
-        // Formula diagnostics are handled by the expression compiler.
-    }
-    const list = bindings || [];
+    const dependencies = collectExpressionDependencies(parseExpression(source));
+    if (dependencies.variables.has('s')) symbols.push('s');
+    const list = bindings;
     for (let index = 0; index < list.length; index++) {
         const binding = list[index];
         const symbol = binding?.symbol;

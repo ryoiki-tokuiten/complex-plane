@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { state, zPlaneParams } from '../store/state.js';
+import { state, context, zPlaneParams } from '../store/state.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { NUM_POINTS_CURVE } from '../constants/numerical.js';
 import { mapCanvasToWorldCoords, mapToCanvasCoords } from '../utils/canvas-utils.js';
@@ -8,8 +7,18 @@ import {
     buildInputShapeGeometryConfig,
     generateInputShapePointSets
 } from './shape-generators.js';
-import { disposeThreeObject } from './three-utils.js';
-import { buildFourierWinding } from '../analysis/fourier-transform.js';
+import {
+    addCanvasTextSprite,
+    addThreeLineSegments,
+    addThreePointCloud,
+    appendPolylineSegments,
+    disposeThreeObject,
+    scaleSignedOutput
+} from './three-utils.js';
+import { buildLaplaceWinding } from '../analysis/laplace-transform.js';
+import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
+import { CUSTOM_GRID_INPUT_SHAPES } from '../constants/grid-shapes.js';
+import { createOrthographicSceneHost } from './parallel-3d-graphs.js';
 
 const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -18,8 +27,8 @@ const GRAPHABLE_INPUT_SHAPES = new Set([
     'grid_logcartesian',
     'line',
     'circle',
-    'ellipse',
-    'arbitrary'
+    'arbitrary',
+    ...CUSTOM_GRID_INPUT_SHAPES
 ]);
 const GRID_INPUT_SHAPES = new Set([
     'grid_cartesian',
@@ -53,7 +62,7 @@ const GRID_RADIUS = 0.0045;
 const TRACE_RADIUS = 0.014;
 const FRUSTUM_HEIGHT = 6.3;
 const FRUSTUM_MIN_HALF_WIDTH = 5.65;
-const FULL_GRID_FRAME_SPACING = 8.25;
+const FULL_GRID_FRAME_SPACING = 7.5;
 const FOURIER_RING_RADIUS = 0.72;
 const EPSILON = 1e-10;
 
@@ -61,12 +70,9 @@ let activeGraphRenderer = null;
 let graphDataCache = null;
 let fullGridDataCache = null;
 
-function isFiniteComplex(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
-}
-
-function finitePoint(point) {
-    return point && Number.isFinite(point.re) && Number.isFinite(point.im);
+function pointSetPoints(pointSet, label = 'Transformation-graph point set') {
+    if (!Array.isArray(pointSet?.points)) throw new Error(`${label} requires a points array.`);
+    return pointSet.points;
 }
 
 function clamp(value, min, max) {
@@ -118,7 +124,6 @@ export function isFullGridPerspectiveSupported(shape = state.currentInputShape) 
 
 function graphModeActive() {
     return state.graphViewEnabled
-        && !state.fourierModeEnabled
         && !state.laplaceModeEnabled;
 }
 
@@ -129,8 +134,10 @@ function getGraphPointSets(planeParams = zPlaneParams, curvePoints = null) {
         curvePoints: curvePoints ?? Math.max(SAMPLE_COUNT * 2, Math.min(NUM_POINTS_CURVE, 1000))
     });
 
-    return generateInputShapePointSets(config)
-        .filter(set => Array.isArray(set?.points) && set.points.length > 1);
+    const pointSets = generateInputShapePointSets(config);
+    if (!Array.isArray(pointSets)) throw new Error('Input-shape generation must return point sets.');
+    pointSets.forEach((set, index) => pointSetPoints(set, `Transformation-graph point set ${index}`));
+    return pointSets.filter(set => set.points.length > 1);
 }
 
 function pointSegmentDistanceSq(point, start, end) {
@@ -153,13 +160,13 @@ function pointSegmentDistanceSq(point, start, end) {
 }
 
 function pointSetDistanceSq(point, pointSet) {
-    const points = pointSet?.points || [];
+    const points = pointSetPoints(pointSet);
     let best = Infinity;
 
     for (let index = 1; index < points.length; index += 1) {
         const start = points[index - 1];
         const end = points[index];
-        if (!finitePoint(start) || !finitePoint(end)) continue;
+        if (!isFiniteComplex(start) || !isFiniteComplex(end)) continue;
         best = Math.min(best, pointSegmentDistanceSq(point, start, end));
     }
 
@@ -231,7 +238,7 @@ export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = 
 
     const world = mapCanvasToWorldCoords(canvasX, canvasY, planeParams);
     const probe = { re: world.x, im: world.y };
-    if (!finitePoint(probe)) return false;
+    if (!isFiniteComplex(probe)) return false;
 
     const pointSets = getGraphPointSets(planeParams);
     const lockedIndex = selectedLineIndex(pointSets, false);
@@ -245,8 +252,10 @@ export function selectGraphInputFromCanvasPoint(canvasX, canvasY, planeParams = 
         });
     if (!candidates.length) return false;
 
-    const xRange = planeParams.currentVisXRange || planeParams.xRange || [-1, 1];
-    const worldPerPixel = Math.abs((xRange[1] - xRange[0]) / Math.max(1, planeParams.width || 1));
+    const xRange = planeParams.currentVisXRange;
+    const viewportWidth = requireFiniteNumber(planeParams.width, 'Transformation-graph viewport width');
+    if (viewportWidth <= 0) throw new Error('Transformation-graph viewport width must be positive.');
+    const worldPerPixel = Math.abs((xRange[1] - xRange[0]) / viewportWidth);
     const toleranceSq = (worldPerPixel * 14) ** 2;
 
     let bestIndex = -1;
@@ -280,14 +289,13 @@ export function drawGraphSelectionOverlay(ctx, planeParams = zPlaneParams) {
     const pointSets = getGraphPointSets(planeParams);
     const index = selectedLineIndex(pointSets, false);
     const selected = pointSets[index];
-    const points = selected?.points || [];
-
-    if (points.length < 2) return;
+    if (!selected) return;
+    const points = pointSetPoints(selected, 'Selected transformation-graph point set');
 
     const drawPath = () => {
         let started = false;
         points.forEach(point => {
-            if (!finitePoint(point)) {
+            if (!isFiniteComplex(point)) {
                 started = false;
                 return;
             }
@@ -327,7 +335,7 @@ function cumulativeDistances(points) {
     for (let index = 1; index < points.length; index += 1) {
         const previous = points[index - 1];
         const current = points[index];
-        const distance = finitePoint(previous) && finitePoint(current)
+        const distance = isFiniteComplex(previous) && isFiniteComplex(current)
             ? Math.hypot(current.re - previous.re, current.im - previous.im)
             : 0;
         total += distance;
@@ -338,7 +346,7 @@ function cumulativeDistances(points) {
 }
 
 function resamplePolyline(points, count = SAMPLE_COUNT) {
-    const safePoints = points.filter(finitePoint);
+    const safePoints = points.filter(isFiniteComplex);
     if (safePoints.length === 0) return [];
     if (safePoints.length === 1 || count <= 1) return [safePoints[0]];
 
@@ -394,9 +402,9 @@ function normalizedComponentScale(samples, component) {
 }
 
 function pointSetLabel(pointSet) {
-    const points = pointSet?.points || [];
-    const first = points.find(finitePoint);
-    const last = [...points].reverse().find(finitePoint);
+    const points = pointSetPoints(pointSet);
+    const first = points.find(isFiniteComplex);
+    const last = [...points].reverse().find(isFiniteComplex);
     const role = String(pointSet?.role || '');
     if (!first) return role;
     if (role.includes('horizontal')) return `Im(z) = ${formatNumber(first.im)}`;
@@ -410,24 +418,20 @@ function pointSetLabel(pointSet) {
 }
 
 function evaluateSamples(inputSamples, map) {
+    const outputs = map.evaluateBatch(inputSamples);
     return inputSamples.map((input, index) => {
         const t = inputSamples.length <= 1 ? 0 : index / (inputSamples.length - 1);
-        return evaluateSample(input, t, map);
+        return { input: { re: input.re, im: input.im }, output: outputs[index], t };
     });
 }
 
 function evaluateSample(input, t, map) {
-    let output = { re: NaN, im: NaN };
-    try {
-        output = map.evaluate(input.re, input.im);
-    } catch {
-        output = { re: NaN, im: NaN };
-    }
+    const output = map.evaluate(input.re, input.im);
     return { input: { re: input.re, im: input.im }, output, t };
 }
 
 function polylineParameterAtPoint(points, target) {
-    const safePoints = points.filter(finitePoint);
+    const safePoints = points.filter(isFiniteComplex);
     if (safePoints.length < 2) return 0;
     const { distances, total } = cumulativeDistances(safePoints);
     if (total <= EPSILON) return 0;
@@ -476,8 +480,8 @@ function gridIntersectionPoint(leftSet, rightSet) {
     const vertical = leftRole.includes('vertical') ? leftSet
         : rightRole.includes('vertical') ? rightSet : null;
     if (horizontal && vertical) {
-        const horizontalPoint = horizontal.points.find(finitePoint);
-        const verticalPoint = vertical.points.find(finitePoint);
+        const horizontalPoint = horizontal.points.find(isFiniteComplex);
+        const verticalPoint = vertical.points.find(isFiniteComplex);
         if (horizontalPoint && verticalPoint) {
             return { re: verticalPoint.re, im: horizontalPoint.im };
         }
@@ -488,9 +492,9 @@ function gridIntersectionPoint(leftSet, rightSet) {
     const ray = leftRole.includes('angular') ? leftSet
         : rightRole.includes('angular') ? rightSet : null;
     if (!circle || !ray) return null;
-    const circlePoint = circle.points.find(finitePoint);
+    const circlePoint = circle.points.find(isFiniteComplex);
     const direction = [...ray.points].reverse().find(point =>
-        finitePoint(point) && Math.hypot(point.re, point.im) > EPSILON
+        isFiniteComplex(point) && Math.hypot(point.re, point.im) > EPSILON
     );
     if (!circlePoint || !direction) return null;
     const radius = Math.hypot(circlePoint.re, circlePoint.im);
@@ -508,7 +512,7 @@ function selectEvenly(items, maximum) {
     );
 }
 
-export function pointSetMatchesGridFamily(
+function pointSetMatchesGridFamily(
     pointSet,
     shape = state.currentInputShape,
     family = state.graphGridFamily
@@ -541,14 +545,14 @@ export function filterGraphFullGridPointSets(pointSets) {
 }
 
 function gridFamilySortValue(pointSet) {
-    const first = pointSet?.points?.find(finitePoint);
+    const first = pointSetPoints(pointSet).find(isFiniteComplex);
     if (!first) return 0;
     const role = String(pointSet.role || '');
     if (role.includes('horizontal')) return first.im;
     if (role.includes('vertical')) return first.re;
     if (role.includes('radial')) return Math.hypot(first.re, first.im);
     if (role.includes('angular')) {
-        const direction = [...pointSet.points].reverse().find(finitePoint) || first;
+        const direction = [...pointSet.points].reverse().find(isFiniteComplex) || first;
         const angle = Math.atan2(direction.im, direction.re);
         return angle < 0 ? angle + Math.PI * 2 : angle;
     }
@@ -557,8 +561,8 @@ function gridFamilySortValue(pointSet) {
 
 function visibleInputBounds(planeParams = zPlaneParams) {
     return {
-        xRange: planeParams.currentVisXRange || planeParams.xRange || [-1, 1],
-        yRange: planeParams.currentVisYRange || planeParams.yRange || [-1, 1]
+        xRange: planeParams.currentVisXRange,
+        yRange: planeParams.currentVisYRange
     };
 }
 
@@ -726,8 +730,8 @@ export function buildFullGridTransformationGraphData(planeParams = zPlaneParams)
 }
 
 function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
-    const xRange = planeParams.currentVisXRange || planeParams.xRange || [];
-    const yRange = planeParams.currentVisYRange || planeParams.yRange || [];
+    const xRange = planeParams.currentVisXRange;
+    const yRange = planeParams.currentVisYRange;
     return [
         map.signature,
         state.currentInputShape,
@@ -735,11 +739,10 @@ function makeGraphInputKey(map, lineIndex, planeParams = zPlaneParams) {
         lineIndex,
         state.graphSelectionRevision || 0,
         state.gridDensity,
+        JSON.stringify(state.gridParameters),
         state.a0,
         state.b0,
         state.circleR,
-        state.ellipseA,
-        state.ellipseB,
         SAMPLE_COUNT,
         xRange[0],
         xRange[1],
@@ -753,12 +756,12 @@ function makeGraphDisplayKey(inputKey) {
         inputKey,
         `trace:${state.graphTraceEnabled ? 1 : 0}`,
         `fourier:${state.graphFourierEnabled ? 1 : 0}`,
-        state.fourierFrequency,
-        state.fourierAmplitude,
-        state.fourierTimeWindow,
-        state.fourierSamples,
-        state.fourierWindingFrequency,
-        state.fourierWindingTime
+        state.laplaceFrequency,
+        state.laplaceAmplitude,
+        state.laplaceTimeWindow,
+        state.laplaceSamples,
+        state.laplaceOmega,
+        state.laplaceAnimationTime
     ].join('|');
 }
 
@@ -920,72 +923,9 @@ function addSegmentedPolyline(group, points, options = {}) {
     flush();
 }
 
-function addLineSegments(group, segments, {
-    color = GRID_COLOR,
-    opacity = 1,
-    vertexColors = null
-} = {}) {
-    if (!Array.isArray(segments) || segments.length === 0) return null;
-    const positions = new Float32Array(segments.length * 6);
-    const colors = vertexColors ? new Float32Array(segments.length * 6) : null;
-
-    segments.forEach(([start, end], index) => {
-        const offset = index * 6;
-        positions.set([start.x, start.y, start.z, end.x, end.y, end.z], offset);
-        if (!colors) return;
-        const [startColor, endColor = startColor] = vertexColors[index];
-        colors.set([
-            startColor.r, startColor.g, startColor.b,
-            endColor.r, endColor.g, endColor.b
-        ], offset);
-    });
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const material = new THREE.LineBasicMaterial({
-        color: colors ? 0xffffff : color,
-        vertexColors: Boolean(colors),
-        transparent: opacity < 1,
-        opacity,
-        depthWrite: opacity >= 0.85
-    });
-    const lines = new THREE.LineSegments(geometry, material);
-    group.add(lines);
-    return lines;
-}
-
-function appendPolylineSegments(target, points) {
-    let previous = null;
-    points.forEach(point => {
-        if (!point) {
-            previous = null;
-            return;
-        }
-        if (previous) target.push([previous, point]);
-        previous = point;
-    });
-}
-
-function addPointCloud(group, points, {
-    color,
-    size = 4,
-    opacity = 1
-} = {}) {
-    if (!points.length) return null;
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.PointsMaterial({
-        color,
-        size,
-        sizeAttenuation: false,
-        transparent: opacity < 1,
-        opacity,
-        depthWrite: opacity >= 0.85
-    });
-    const cloud = new THREE.Points(geometry, material);
-    group.add(cloud);
-    return cloud;
-}
+const addLineSegments = (group, segments, options = {}) =>
+    addThreeLineSegments(THREE, group, segments, { color: GRID_COLOR, ...options });
+const addPointCloud = (group, points, options) => addThreePointCloud(THREE, group, points, options);
 
 function addMarker(group, point, color, radius = 0.07) {
     const geometry = new THREE.SphereGeometry(radius, 18, 12);
@@ -1064,63 +1004,15 @@ function addPlane(group, width, height, position, rotation, color, opacity) {
     return mesh;
 }
 
-function makeTextSprite(text, {
-    color = 'rgba(236, 241, 255, 0.95)',
-    fontSize = 46,
-    height = 0.28,
-    weight = 600,
-    maxWidth = 768
-} = {}) {
-    const padding = 32;
-    const font = `${weight} ${fontSize}px "Inter", "Outfit", sans-serif`;
-    const measureCanvas = document.createElement('canvas');
-    const measureCtx = measureCanvas.getContext('2d');
-    measureCtx.font = font;
-    const measured = measureCtx.measureText(text);
-    const width = Math.min(maxWidth, Math.max(192, Math.ceil(measured.width + padding * 2)));
-    const canvasHeight = Math.ceil(fontSize + padding * 2);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = canvasHeight;
-    const context = canvas.getContext('2d');
-    context.font = font;
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillStyle = color;
-    context.shadowColor = 'rgba(0, 0, 0, 0.68)';
-    context.shadowBlur = 10;
-    context.fillText(text, width / 2, canvasHeight / 2, width - padding);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    const material = new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        depthWrite: false
-    });
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(height * (width / canvasHeight), height, 1);
-    return sprite;
-}
-
 function addLabel(group, text, position, options = {}) {
-    const sprite = makeTextSprite(text, options);
-    sprite.position.copy(position);
-    group.add(sprite);
-    return sprite;
-}
-
-function scaledOutputCoordinate(value, outputScale, halfExtent) {
-    if (!Number.isFinite(value)) return NaN;
-    const scale = Math.max(EPSILON, outputScale);
-    const ratio = value / scale;
-    const magnitude = Math.abs(ratio);
-    const signed = magnitude <= 1
-        ? ratio
-        : Math.sign(ratio) * (1 + Math.tanh((magnitude - 1) * 0.55) * 0.18);
-    return signed * halfExtent;
+    return addCanvasTextSprite(THREE, group, text, position, {
+        fontSize: 46,
+        height: 0.28,
+        weight: 600,
+        fontFamily: '"Inter", "Outfit", sans-serif',
+        shadowBlur: 10,
+        ...options
+    });
 }
 
 function graphPointFor(sample, scales, mode, zOffset = 0) {
@@ -1129,8 +1021,8 @@ function graphPointFor(sample, scales, mode, zOffset = 0) {
     const x = lerp(-INPUT_AXIS_HALF, INPUT_AXIS_HALF, sample.t);
     const reScale = scales?.reScale || 1;
     const imScale = scales?.imScale || 1;
-    const y = scaledOutputCoordinate(sample.output.re, reScale, OUTPUT_AXIS_HALF);
-    const z = zOffset + scaledOutputCoordinate(sample.output.im, imScale, DEPTH_AXIS_HALF);
+    const y = scaleSignedOutput(sample.output.re, reScale, OUTPUT_AXIS_HALF);
+    const z = zOffset + scaleSignedOutput(sample.output.im, imScale, DEPTH_AXIS_HALF);
 
     if (mode === 're') return new THREE.Vector3(x, y, zOffset);
     if (mode === 'im') return new THREE.Vector3(x, 0, z);
@@ -1168,13 +1060,13 @@ function graphPointsForSamples(samples, scales, mode, zOffset = 0) {
 function curveIsClosed(curve) {
     const first = curve?.samples?.[0]?.input;
     const last = curve?.samples?.at(-1)?.input;
-    return finitePoint(first) && finitePoint(last)
+    return isFiniteComplex(first) && isFiniteComplex(last)
         && Math.hypot(first.re - last.re, first.im - last.im) <= EPSILON;
 }
 
 function connectedLayerRatio(sample, curve) {
     if (curve.locked) return 0;
-    const anchor = clamp(Number(curve.anchorT) || 0, 0, 1);
+    const anchor = clamp(requireFiniteNumber(curve.anchorT, 'Connected graph anchor'), 0, 1);
     if (curveIsClosed(curve)) {
         let phase = sample.t - anchor;
         phase -= Math.round(phase);
@@ -1190,7 +1082,7 @@ function orderedConnectedSamples(samples, curve) {
     const ordered = samples.slice();
     const first = ordered[0]?.input;
     const last = ordered.at(-1)?.input;
-    if (finitePoint(first) && finitePoint(last)
+    if (isFiniteComplex(first) && isFiniteComplex(last)
         && Math.hypot(first.re - last.re, first.im - last.im) <= EPSILON) {
         ordered.pop();
     }
@@ -1207,14 +1099,14 @@ function connectedGraphPointFor(sample, curve, mode) {
     if (mode === 're') {
         return new THREE.Vector3(
             x,
-            scaledOutputCoordinate(sample.output.re, curve.reScale, OUTPUT_AXIS_HALF),
+            scaleSignedOutput(sample.output.re, curve.reScale, OUTPUT_AXIS_HALF),
             transverse * DEPTH_AXIS_HALF
         );
     }
     return new THREE.Vector3(
         x,
         transverse * OUTPUT_AXIS_HALF,
-        scaledOutputCoordinate(sample.output.im, curve.imScale, DEPTH_AXIS_HALF)
+        scaleSignedOutput(sample.output.im, curve.imScale, DEPTH_AXIS_HALF)
     );
 }
 
@@ -1249,25 +1141,36 @@ function ringPoints(center, radius, plane) {
 }
 
 function windingPointToVector(point, center, plane) {
-    const re = point.re * FOURIER_RING_RADIUS;
-    const im = point.im * FOURIER_RING_RADIUS;
+    const re = (point.real ?? point.re ?? 0) * FOURIER_RING_RADIUS;
+    const im = (point.imag ?? point.im ?? 0) * FOURIER_RING_RADIUS;
     if (plane === 're') return new THREE.Vector3(center.x + re, center.y + im, center.z);
     return new THREE.Vector3(center.x + re, center.y, center.z + im);
 }
 
+function windingReferenceRadius(winding) {
+    return Math.max(0.18, winding.maxRadius || 0);
+}
+
+function windingVectorStep(winding) {
+    return Math.max(1, Math.floor(winding.points.length / 50));
+}
+
 function graphFourierSignal(samples, component, scale) {
-    const requested = clamp(Math.floor(Number(state.fourierSamples) || 128), 32, 512);
+    const requested = clamp(requireInteger(state.laplaceSamples, 'Graph transform sample count'), 32, 512);
     let source = samples;
     const firstInput = source[0]?.input;
     const lastInput = source.at(-1)?.input;
-    if (finitePoint(firstInput) && finitePoint(lastInput)
+    if (isFiniteComplex(firstInput) && isFiniteComplex(lastInput)
         && Math.hypot(firstInput.re - lastInput.re, firstInput.im - lastInput.im) <= EPSILON) {
         source = source.slice(0, -1);
     }
     source = selectEvenly(source, requested);
-    const timeWindow = Math.max(EPSILON, Number(state.fourierTimeWindow) || 1);
-    const amplitudeScale = clamp(Number(state.fourierAmplitude) || 1, 0.1, 5);
-    const traversalFrequency = clamp(Number(state.fourierFrequency) || 1, 0.1, 10);
+    const timeWindow = Math.max(EPSILON,
+        requireFiniteNumber(state.laplaceTimeWindow, 'Graph transform time window'));
+    const amplitudeScale = clamp(
+        requireFiniteNumber(state.laplaceAmplitude, 'Graph transform amplitude'), 0.1, 5);
+    const traversalFrequency = clamp(
+        requireFiniteNumber(state.laplaceFrequency, 'Graph transform frequency'), 0.1, 10);
     const signal = [];
     for (let index = 0; index < requested; index += 1) {
         const normalizedTime = requested <= 1 ? 0 : index / (requested - 1);
@@ -1291,18 +1194,21 @@ function graphFourierSignal(samples, component, scale) {
 
 function graphFourierWinding(samples, component, scale) {
     const signal = graphFourierSignal(samples, component, scale);
-    return buildFourierWinding(signal, {
-        windingFrequency: Number(state.fourierWindingFrequency) || 0,
-        progress: Number(state.fourierWindingTime) || 0,
-        timeWindow: Math.max(EPSILON, Number(state.fourierTimeWindow) || 1)
+    if (signal.length < 2) return buildLaplaceWinding([]);
+    const sigma = Number.isFinite(state.laplaceSigma) ? state.laplaceSigma : 0;
+    return buildLaplaceWinding(signal, {
+        sigma,
+        omega: requireFiniteNumber(state.laplaceOmega, 'Graph winding omega'),
+        progress: requireFiniteNumber(state.laplaceAnimationTime, 'Graph winding progress')
     });
 }
 
 function graphFourierProgress(data) {
-    const rawProgress = Number(state.fourierWindingTime);
-    const progress = Number.isFinite(rawProgress) ? clamp(rawProgress, 0, 1) : 1;
-    const traversalFrequency = clamp(Number(state.fourierFrequency) || 1, 0.1, 10);
-    const timeWindow = Math.max(EPSILON, Number(state.fourierTimeWindow) || 1);
+    const progress = clamp(requireFiniteNumber(state.laplaceAnimationTime, 'Graph winding progress'), 0, 1);
+    const traversalFrequency = clamp(
+        requireFiniteNumber(state.laplaceFrequency, 'Graph transform frequency'), 0.1, 10);
+    const timeWindow = Math.max(EPSILON,
+        requireFiniteNumber(state.laplaceTimeWindow, 'Graph transform time window'));
     const traversed = progress * timeWindow * traversalFrequency;
     const phase = traversed - Math.floor(traversed);
     const cursorProgress = progress === 1 && Math.abs(phase) <= EPSILON ? 1 : phase;
@@ -1320,82 +1226,24 @@ function graphFourierProgress(data) {
 class TransformationGraphRenderer {
     constructor(container) {
         this.container = container;
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.OrthographicCamera(-5, 5, 3, -3, 0.08, 5000);
-        const cameraTarget = new THREE.Vector3(0.1, 0, 0);
-        const cameraOffset = new THREE.Vector3(6.7, 4.9, 6.5).normalize().multiplyScalar(2000);
-        this.camera.position.copy(cameraTarget).add(cameraOffset);
-
-        this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: false,
-            powerPreference: 'high-performance',
-            depth: true,
-            stencil: false,
-            preserveDrawingBuffer: true
-        });
-        this.renderer.setClearColor(BACKGROUND);
-        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.05;
-        this.syncPixelRatio();
-        this.container.replaceChildren(this.renderer.domElement);
-
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = false;
-        this.controls.enablePan = true;
-        this.controls.enableZoom = true;
-        this.controls.zoomToCursor = true;
-        this.controls.target.copy(cameraTarget);
-        this.controls.update();
-        this.controls.saveState();
-        this.controls.addEventListener('change', () => this.render());
-
-        this.contentGroup = new THREE.Group();
-        this.scene.add(this.contentGroup);
-        this.addLights();
-
-        this.resizeObserver = new ResizeObserver(() => this.resize());
-        this.resizeObserver.observe(container);
+        Object.assign(this, createOrthographicSceneHost(container, {
+            cameraBounds: [-5, 5, 3, -3, 0.08, 5000],
+            cameraTarget: [0.1, 0, 0],
+            cameraOffset: [6.7, 4.9, 6.5],
+            cameraDistance: 2000,
+            background: BACKGROUND,
+            getFrustum(aspect) {
+                let halfHeight = FRUSTUM_HEIGHT * 0.5;
+                let halfWidth = halfHeight * aspect;
+                if (halfWidth < FRUSTUM_MIN_HALF_WIDTH) {
+                    halfWidth = FRUSTUM_MIN_HALF_WIDTH;
+                    halfHeight = halfWidth / Math.max(0.1, aspect);
+                }
+                return { halfWidth, halfHeight };
+            },
+            render: () => this.render()
+        }));
         this.resize();
-    }
-
-    syncPixelRatio() {
-        const ratio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
-        this.renderer.setPixelRatio(Math.min(ratio, 2.5));
-    }
-
-    addLights() {
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.34));
-        this.scene.add(new THREE.HemisphereLight(0xe9f1ff, 0x050510, 1.55));
-
-        const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
-        keyLight.position.set(5, 7, 5);
-        this.scene.add(keyLight);
-
-        const rimLight = new THREE.DirectionalLight(0x8ed8ff, 1.15);
-        rimLight.position.set(-5, 3, -5);
-        this.scene.add(rimLight);
-    }
-
-    resize() {
-        const width = this.container.clientWidth || 1;
-        const height = this.container.clientHeight || 1;
-        const aspect = width / height;
-        let halfHeight = FRUSTUM_HEIGHT * 0.5;
-        let halfWidth = halfHeight * aspect;
-        if (halfWidth < FRUSTUM_MIN_HALF_WIDTH) {
-            halfWidth = FRUSTUM_MIN_HALF_WIDTH;
-            halfHeight = halfWidth / Math.max(0.1, aspect);
-        }
-        this.syncPixelRatio();
-        this.camera.left = -halfWidth;
-        this.camera.right = halfWidth;
-        this.camera.top = halfHeight;
-        this.camera.bottom = -halfHeight;
-        this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height, false);
-        this.render();
     }
 
     render() {
@@ -1417,12 +1265,12 @@ class TransformationGraphRenderer {
         const fourierKey = state.graphFourierEnabled
             ? [
                 geometryKey,
-                state.fourierFrequency,
-                state.fourierAmplitude,
-                state.fourierTimeWindow,
-                state.fourierSamples,
-                state.fourierWindingFrequency,
-                state.fourierWindingTime
+                state.laplaceFrequency,
+                state.laplaceAmplitude,
+                state.laplaceTimeWindow,
+                state.laplaceSamples,
+                state.laplaceOmega,
+                state.laplaceAnimationTime
             ].join('|')
             : `${geometryKey}|fourier:off`;
 
@@ -1966,8 +1814,8 @@ class TransformationGraphRenderer {
             const imWinding = graphFourierWinding(curve.samples, 'im', imScale);
             const maximumRadius = Math.max(
                 0.18,
-                reWinding.referenceRadius * FOURIER_RING_RADIUS,
-                imWinding.referenceRadius * FOURIER_RING_RADIUS
+                windingReferenceRadius(reWinding) * FOURIER_RING_RADIUS,
+                windingReferenceRadius(imWinding) * FOURIER_RING_RADIUS
             );
             const center = new THREE.Vector3(-INPUT_AXIS_HALF - maximumRadius - 0.34, 0, laneZ);
             origins.push(center);
@@ -1980,7 +1828,7 @@ class TransformationGraphRenderer {
                 { winding: reWinding, plane: 're' },
                 { winding: imWinding, plane: 'im' }
             ].forEach(({ winding, plane }) => {
-                const radius = Math.max(0.18, winding.referenceRadius * FOURIER_RING_RADIUS);
+                const radius = windingReferenceRadius(winding) * FOURIER_RING_RADIUS;
                 appendPolylineSegments(rings, ringPoints(center, radius, plane));
                 const points = winding.points.map(point => windingPointToVector(point, center, plane));
                 let gradientColors = gradientColorsByPointCount.get(points.length);
@@ -2000,7 +1848,7 @@ class TransformationGraphRenderer {
                     windingPath.push([points[index - 1], points[index]]);
                     windingColors.push(gradientColors[index - 1]);
                 }
-                for (let index = 0; index < points.length; index += winding.vectorStep) {
+                for (let index = 0; index < points.length; index += windingVectorStep(winding)) {
                     spokes.push([center, points[index]]);
                 }
                 const pointStep = Math.max(1, Math.floor(points.length / 90));
@@ -2008,11 +1856,11 @@ class TransformationGraphRenderer {
                     if (index % pointStep === 0) samplePoints.push(point);
                 });
 
-                const centerOfMass = windingPointToVector(winding.centerOfMass, center, plane);
-                centerOfMassPoints.push(centerOfMass);
-                if (center.distanceToSquared(centerOfMass) > EPSILON) {
-                    centerOfMassVectors.push([center, centerOfMass]);
-                    arrowHeads.push(...lineArrowHeadSegments(center, centerOfMass, plane));
+                const integral = windingPointToVector(winding.integral, center, plane);
+                centerOfMassPoints.push(integral);
+                if (center.distanceToSquared(integral) > EPSILON) {
+                    centerOfMassVectors.push([center, integral]);
+                    arrowHeads.push(...lineArrowHeadSegments(center, integral, plane));
                 }
             });
 
@@ -2055,8 +1903,8 @@ class TransformationGraphRenderer {
         const imWinding = graphFourierWinding(data.samples, 'im', data.fourierImScale);
         const maximumRadius = Math.max(
             0.18,
-            reWinding.referenceRadius * FOURIER_RING_RADIUS,
-            imWinding.referenceRadius * FOURIER_RING_RADIUS
+            windingReferenceRadius(reWinding) * FOURIER_RING_RADIUS,
+            windingReferenceRadius(imWinding) * FOURIER_RING_RADIUS
         );
         const center = new THREE.Vector3(-INPUT_AXIS_HALF - maximumRadius - 0.34, 0, 0);
 
@@ -2087,7 +1935,7 @@ class TransformationGraphRenderer {
     }
 
     addFourierWindingPlane(group, winding, { center, plane, label }) {
-        const radius = Math.max(0.18, winding.referenceRadius * FOURIER_RING_RADIUS);
+        const radius = windingReferenceRadius(winding) * FOURIER_RING_RADIUS;
         const ring = ringPoints(center, radius, plane);
         addSegmentedTube(group, ring, {
             color: 0x96b4ff,
@@ -2116,7 +1964,7 @@ class TransformationGraphRenderer {
         }
 
         const spokes = [];
-        for (let index = 0; index < points.length; index += winding.vectorStep) {
+        for (let index = 0; index < points.length; index += windingVectorStep(winding)) {
             spokes.push([center, points[index]]);
         }
         addLineSegments(group, spokes, { color: 0x64b4ff, opacity: 0.24 });
@@ -2126,9 +1974,9 @@ class TransformationGraphRenderer {
         addPointCloud(group, visiblePoints, { color: 0xff64c8, size: 7, opacity: 0.14 });
         addPointCloud(group, visiblePoints, { color: 0xffa6df, size: 3.2, opacity: 0.94 });
 
-        const centerOfMass = windingPointToVector(winding.centerOfMass, center, plane);
-        if (center.distanceToSquared(centerOfMass) > EPSILON) {
-            addSoftLine(group, center, centerOfMass, {
+        const integral = windingPointToVector(winding.integral, center, plane);
+        if (center.distanceToSquared(integral) > EPSILON) {
+            addSoftLine(group, center, integral, {
                 color: 0xffdc32,
                 radius: 0.018,
                 glowRadius: 0.048,
@@ -2138,10 +1986,10 @@ class TransformationGraphRenderer {
                 emissiveIntensity: 0.5,
                 roughness: 0.3
             });
-            addArrowHead(group, center, centerOfMass);
+            addArrowHead(group, center, integral);
         }
-        addGlowMarker(group, centerOfMass, 0xffdc32, 0.13, 0.2);
-        addMarker(group, centerOfMass, 0xffdc32, 0.055);
+        addGlowMarker(group, integral, 0xffdc32, 0.13, 0.2);
+        addMarker(group, integral, 0xffdc32, 0.055);
 
         const labelPosition = plane === 're'
             ? new THREE.Vector3(center.x, center.y + radius + 0.2, center.z)
@@ -2175,23 +2023,16 @@ class TransformationGraphRenderer {
     }
 
     dispose() {
-        this.resizeObserver?.disconnect();
-        this.controls?.dispose?.();
-        disposeThreeObject(this.scene);
-        this.renderer.dispose();
-        this.renderer.domElement.remove();
+        this.disposeSceneHost();
     }
 }
 
-export function drawTransformationGraph(containerId = 'graph_3d_container') {
-    if (typeof document === 'undefined') return;
+export function drawTransformationGraph() {
+    const container = context.controls.graph3DContainer;
+    const active = graphModeActive() && isGraphViewSupported();
 
-    const column = document.getElementById('graph_column');
-    const container = document.getElementById(containerId);
-    const columnHidden = column?.classList.contains('hidden');
-
-    if (!graphModeActive() || columnHidden || !container) {
-        if (!graphModeActive() || columnHidden) disposeTransformationGraphRenderer();
+    if (!active || !container) {
+        if (!active) disposeTransformationGraphRenderer();
         return;
     }
 

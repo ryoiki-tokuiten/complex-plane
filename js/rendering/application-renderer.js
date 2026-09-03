@@ -1,11 +1,24 @@
-import { state, context } from '../store/state.js';
+import { state, context, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
 import { findZerosAndPoles, findCriticalPoints } from '../analysis/feature-detection.js';
-import { updateTaylorSeriesCenterAndRadius } from '../math-utils.js';
+import { updateTaylorSeriesCenterAndRadius } from '../native/map-runtime.js';
 import { performCauchyAnalysis } from '../analysis/cauchy.js';
 import { drawZPlaneContent, drawWPlaneContent } from './renderer.js';
-import { updateProbeInfo } from '../ui/ui-updates.js';
-import { drawLaplace3DSurface } from './laplace-3d-surface.js';
-import { drawRealPlot } from './real-plots-renderer.js';
+import { drawLaplaceSpectrum, drawLaplaceComGraph } from './draw-laplace-panels.js';
+import { drawFourier3DPipeline, disposeFourier3DPipeline } from './fourier-3d-pipeline.js';
+import {
+    applySurfaceCoordinateZoom,
+    disposeScalarSurface,
+    drawRealPlot,
+    drawScalarSurface
+} from './real-plots-renderer.js';
+import {
+    buildLaplaceSurfaceGeometry,
+    buildLaplaceSurfaceOverlays,
+    laplaceSurfaceFrame,
+    laplaceSurfaceGeometryKey,
+    laplaceSurfaceOverlayKey,
+    scaleLaplaceSurfaceViewport
+} from '../analysis/laplace-transform.js';
 import {
     disposeTransformationGraphRenderer,
     drawTransformationGraph,
@@ -13,81 +26,87 @@ import {
 } from './transformation-graph.js';
 import { draw2DContourPlot } from './contour-2d.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
 
 const { controls } = context;
-const SURFACE_REDRAW_DELAY_MS = 90;
-const SURFACE_REDRAW_MAX_WAIT_MS = 240;
-let surfaceRedrawTimer = null;
 let surfaceRedrawFrame = null;
-let surfaceRedrawFirstRequestTime = 0;
+const optionalRendererVisibility = new Map();
+
+function zoomLaplaceSurfaceCoordinates(event) {
+    const surface = state.laplaceSurface;
+    if (!surface) return;
+    applySurfaceCoordinateZoom(event, surface.viewportZoom ?? 1, (nextZoom, oldZoom) => {
+        scaleLaplaceSurfaceViewport(oldZoom / nextZoom, nextZoom);
+        requestUiRedraw();
+    });
+}
+
+function drawLaplaceSurface() {
+    const surface = state.laplaceSurface;
+    if (!surface) return;
+    const mode = state.laplaceVizMode || 'magnitude';
+    const options = {
+        mode,
+        clipHeight: state.laplaceClipHeight,
+        palette: state.surfacePalette,
+        showPolesZeros: state.laplaceShowPolesZeros === true,
+        showFourierLine: state.laplaceShowFourierLine === true,
+        showROC: state.laplaceShowROC === true
+    };
+    drawScalarSurface(controls.laplace3DContainer, {
+        geometryKey: laplaceSurfaceGeometryKey(surface, options),
+        buildGeometry: () => buildLaplaceSurfaceGeometry(surface, options),
+        frameKey: [surface.revision, mode, ...surface.sigmaRange, ...surface.omegaRange].join('|'),
+        frame: laplaceSurfaceFrame(surface, mode),
+        overlaysKey: laplaceSurfaceOverlayKey(surface, options),
+        overlays: buildLaplaceSurfaceOverlays(surface, options),
+        contours: {
+            enabled: state.contoursEnabled,
+            interval: state.contourInterval,
+            thickness: state.contourThickness
+        }
+    }, { coordinateWheelZoom: zoomLaplaceSurfaceCoordinates });
+}
 
 function runSurfaceRedraw() {
     surfaceRedrawFrame = null;
-    surfaceRedrawFirstRequestTime = 0;
-    try {
-        if (state.riemannSurfaceEnabled && !state.realPlotsEnabled) {
-            drawWPlaneContent({ renderRiemannSurface: true });
-        }
-        if (state.realPlotsEnabled && state.show2DContourPlot) {
-            draw2DContourPlot(controls.contour2DCanvas);
-        }
-        if (state.realPlotsEnabled) drawRealPlot();
-        if (state.show2DContourPlot && !state.realPlotsEnabled && state.riemannSurfaceEnabled) {
-            draw2DContourPlot(controls.contour2DCanvas);
-        }
-    } catch (error) {
-        console.error('Error during deferred surface redraw:', error);
+    if (state.show2DContourPlot && state.laplaceModeEnabled) {
+        draw2DContourPlot(controls.contour2DCanvas);
+    }
+    if (state.realPlotsEnabled) {
+        drawRealPlot();
+        if (state.show2DContourPlot) draw2DContourPlot(controls.contour2DCanvas);
     }
 }
 
 function requestSurfaceRedraw() {
-    if (!state.realPlotsEnabled && !state.riemannSurfaceEnabled) return;
-
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    if (!surfaceRedrawFirstRequestTime) surfaceRedrawFirstRequestTime = now;
-    if (surfaceRedrawTimer) clearTimeout(surfaceRedrawTimer);
-    if (surfaceRedrawFrame) {
-        cancelAnimationFrame(surfaceRedrawFrame);
-        surfaceRedrawFrame = null;
-    }
-
-    const delay = now - surfaceRedrawFirstRequestTime >= SURFACE_REDRAW_MAX_WAIT_MS
-        ? 0
-        : SURFACE_REDRAW_DELAY_MS;
-    surfaceRedrawTimer = setTimeout(() => {
-        surfaceRedrawTimer = null;
-        surfaceRedrawFrame = requestAnimationFrame(runSurfaceRedraw);
-    }, delay);
+    if (!state.realPlotsEnabled && !(state.laplaceModeEnabled && state.show2DContourPlot)) return;
+    if (!surfaceRedrawFrame) surfaceRedrawFrame = requestAnimationFrame(runSurfaceRedraw);
 }
 
-function syncOptionalColumn(column, shouldHide, onHide) {
-    if (!column || column.classList.contains('hidden') === shouldHide) return;
-    column.classList.toggle('hidden', shouldHide);
-    if (shouldHide) onHide?.();
+function syncOptionalRenderer(key, visible, onHide) {
+    if (optionalRendererVisibility.get(key) === visible) return;
+    optionalRendererVisibility.set(key, visible);
+    if (!visible) onHide?.();
 
     const refreshPlanes = () => {
         setupVisualParameters(false, false);
-        requestRedrawAll();
+        requestUiRedraw();
     };
-    requestAnimationFrame(() => {
-        refreshPlanes();
-        setTimeout(refreshPlanes, 360);
-    });
+    requestAnimationFrame(refreshPlanes);
 }
 
 export function renderApplicationFrame(timestamp) {
     const graphActive = state.graphViewEnabled
-        && !state.fourierModeEnabled
         && !state.laplaceModeEnabled;
-    const zIsPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
-    if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar && state.currentFunction !== 'poincare') {
+    const zIsPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
+    if (state.showZerosPoles && !state.navigationModeEnabled && zIsPlanar) {
         findZerosAndPoles();
     } else {
         state.zeros = [];
         state.poles = [];
     }
-    if (state.showCriticalPoints && !state.navigationModeEnabled && zIsPlanar && state.currentFunction !== 'poincare') {
+    if (state.showCriticalPoints && !state.navigationModeEnabled && zIsPlanar) {
         findCriticalPoints();
     } else {
         state.criticalPoints = [];
@@ -99,19 +118,45 @@ export function renderApplicationFrame(timestamp) {
 
     if (!state.realPlotsEnabled) {
         drawZPlaneContent(timestamp);
-        drawWPlaneContent({ renderRiemannSurface: !state.riemannSurfaceEnabled });
+        drawWPlaneContent();
+        if (state.show2DContourPlot && state.riemannSurfaceEnabled) {
+            draw2DContourPlot(controls.contour2DCanvas);
+        }
     }
-    updateProbeInfo();
 
-    syncOptionalColumn(controls.laplace3DColumn, !state.laplaceModeEnabled);
-    if (state.laplaceModeEnabled) drawLaplace3DSurface('laplace_3d_container');
+    syncOptionalRenderer(
+        'laplace-3d',
+        state.laplaceModeEnabled && !state.laplaceHide3DSurface,
+        () => disposeScalarSurface(controls.laplace3DContainer)
+    );
+    syncOptionalRenderer('laplace-spectrum', state.laplaceModeEnabled && state.laplaceShowSpectrum);
+    syncOptionalRenderer('laplace-com', state.laplaceModeEnabled && state.laplaceShowComGraph);
+    syncOptionalRenderer(
+        'fourier-3d',
+        state.laplaceModeEnabled && state.laplaceShowFourier3D,
+        disposeFourier3DPipeline
+    );
+    if (state.laplaceModeEnabled) {
+        if (!state.laplaceHide3DSurface) drawLaplaceSurface();
+        if (state.laplaceShowSpectrum && controls.laplaceSpectrumCanvas) {
+            const ctx = controls.laplaceSpectrumCanvas.getContext('2d');
+            if (ctx) drawLaplaceSpectrum(ctx, state.laplaceSpectrum, laplaceSpectrumPlaneParams);
+        }
+        if (state.laplaceShowComGraph && controls.laplaceComCanvas) {
+            const ctx = controls.laplaceComCanvas.getContext('2d');
+            if (ctx) drawLaplaceComGraph(ctx, state.laplaceComSweep, laplaceComPlaneParams);
+        }
+        if (state.laplaceShowFourier3D) {
+            drawFourier3DPipeline();
+        }
+    }
 
-    syncOptionalColumn(controls.realPlotsColumn, !state.realPlotsEnabled);
+    syncOptionalRenderer('real-plots', state.realPlotsEnabled);
     requestSurfaceRedraw();
 
-    syncOptionalColumn(
-        controls.graphColumn,
-        !graphActive || state.realPlotsEnabled || !isGraphViewSupported(),
+    syncOptionalRenderer(
+        'graph',
+        graphActive && !state.realPlotsEnabled && isGraphViewSupported(),
         disposeTransformationGraphRenderer
     );
     if (graphActive && !state.realPlotsEnabled) drawTransformationGraph();

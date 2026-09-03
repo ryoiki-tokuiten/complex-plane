@@ -2,29 +2,14 @@ import { state } from '../store/state.js';
 import { COLOR_ZERO_MARKER, COLOR_POLE_MARKER, COLOR_POLE_INSIDE_CONTOUR_MARKER } from '../constants/colors.js';
 import { TWO_PI } from '../constants/numerical.js';
 import { LINE_WIDTH_THIN, LINE_WIDTH_NORMAL, LINE_WIDTH_THICK } from '../constants/rendering.js';
-import { isPointInsideContour } from '../math-utils.js';
+import { isPointInsideContour, resolveCauchyContour } from '../analysis/cauchy.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
-import { buildInputShapeGeometryConfig, generateArbitraryShapePointSets } from './shape-generators.js';
 
 export function drawZerosAndPolesMarkers(ctx, planeParams) {
     let contour = null;
-    if (
-        state.cauchyIntegralModeEnabled &&
-        (!state.riemannSphereViewEnabled || state.splitViewEnabled) &&
-        (state.currentInputShape === 'circle' || state.currentInputShape === 'ellipse' || state.currentInputShape === 'arbitrary')
-    ) {
-        if (state.currentInputShape === 'circle') {
-            contour = { type: 'circle', params: { cx: state.a0, cy: state.b0, r: state.circleR } };
-        } else if (state.currentInputShape === 'ellipse') {
-            contour = { type: 'ellipse', params: { cx: state.a0, cy: state.b0, a: state.ellipseA, b: state.ellipseB } };
-        } else if (state.arbitraryShapeClosed) {
-            const contours = generateArbitraryShapePointSets(buildInputShapeGeometryConfig(planeParams, {
-                currentInputShape: 'arbitrary'
-            })).map(pointSet => pointSet.points).filter(points => points.length >= 4);
-            if (contours.length) {
-                contour = { type: 'contours', params: { contours } };
-            }
-        }
+    if (state.cauchyIntegralModeEnabled && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)) {
+        const resolved = resolveCauchyContour(state, { planeParams, curvePoints: 0 });
+        if (resolved.valid) contour = { type: resolved.type, params: resolved.params };
     }
 
     state.zeros.forEach(zero => {

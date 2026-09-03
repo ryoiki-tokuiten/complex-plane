@@ -1,6 +1,6 @@
 import { state } from '../store/state.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
-import { syncLaplacePlayPauseButton } from '../ui/ui-updates.js';
+import { requestUiRedraw } from './redraw-scheduler.js';
+import { requireFiniteNumber } from '../utils/numeric-contracts.js';
 
 // Laplace Transform Animation Controller
 // Smooth progressive animation of winding spiral
@@ -11,14 +11,13 @@ let laplaceLastFrameTime = 0;
 /**
  * Start animating the Laplace winding visualization
  */
-export function startLaplaceAnimation() {
+function startLaplaceAnimation() {
     if (laplaceAnimationHandle) {
         return; // Already running
     }
     
     state.laplaceAnimationPlaying = true;
     state.laplaceAnimationTime = 0; // Start from beginning
-    syncLaplacePlayPauseButton();
     laplaceLastFrameTime = performance.now();
     
     function animateFrame(timestamp) {
@@ -32,7 +31,8 @@ export function startLaplaceAnimation() {
         laplaceLastFrameTime = timestamp;
         
         // Animation speed (0 to 1 over N seconds)
-        const animationDuration = state.laplaceAnimationSpeed || 3.0; // seconds
+        const animationDuration = requireFiniteNumber(state.laplaceAnimationSpeed, 'Laplace animation duration');
+        if (animationDuration <= 0) throw new Error('Laplace animation duration must be positive.');
         const increment = deltaTime / animationDuration;
         
         state.laplaceAnimationTime += increment;
@@ -49,7 +49,7 @@ export function startLaplaceAnimation() {
         }
         
         // Trigger redraw
-        requestRedrawAll();
+        requestUiRedraw();
         
         // Continue animation
         laplaceAnimationHandle = requestAnimationFrame(animateFrame);
@@ -67,7 +67,6 @@ export function stopLaplaceAnimation() {
         cancelAnimationFrame(laplaceAnimationHandle);
         laplaceAnimationHandle = null;
     }
-    syncLaplacePlayPauseButton();
 }
 
 /**
@@ -87,8 +86,7 @@ export function toggleLaplaceAnimation() {
 export function resetLaplaceAnimation() {
     stopLaplaceAnimation();
     state.laplaceAnimationTime = 0;
-    syncLaplacePlayPauseButton();
-    requestRedrawAll();
+    requestUiRedraw();
 }
 
 /**
@@ -97,6 +95,5 @@ export function resetLaplaceAnimation() {
 export function showFullLaplaceSpiral() {
     stopLaplaceAnimation();
     state.laplaceAnimationTime = 1.0;
-    syncLaplacePlayPauseButton();
-    requestRedrawAll();
+    requestUiRedraw();
 }

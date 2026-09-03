@@ -6,7 +6,7 @@ import {
     buildMappedTransformProfileKey,
     buildTaylorSeriesCoefficientCacheKey,
     getChainedTransformFunction
-} from '../js/math-utils.js';
+} from '../js/native/map-runtime.js';
 
 function snapshotState(keys) {
     return Object.fromEntries(keys.map(key => [key, state[key]]));
@@ -34,7 +34,7 @@ test('algebraic profile keys observe nested polynomial and Mobius dependencies',
         state.mobiusA = { re: 1, im: 0 };
         state.algebraicChainingTerms = [{
             coeff: { re: 1, im: 0 },
-            factors: [factor('polynomial'), factor('sin', 'mobius')]
+            factors: [factor('polynomial'), factor('cos', 'mobius')]
         }];
 
         const initial = buildMappedTransformProfileKey('algebraic_chaining');
@@ -58,26 +58,24 @@ test('Taylor coefficient keys observe the contour radius used for computation', 
     const keys = [
         'currentFunction', 'taylorSeriesEnabled', 'taylorSeriesCenter',
         'taylorSeriesOrder', 'taylorSeriesConvergenceRadius',
-        'riemannSphereViewEnabled', 'splitViewEnabled', 'chainingEnabled'
+        'chainingEnabled'
     ];
     const before = snapshotState(keys);
 
     try {
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             taylorSeriesEnabled: true,
             taylorSeriesCenter: { re: 0, im: 0 },
             taylorSeriesOrder: 4,
-            riemannSphereViewEnabled: false,
-            splitViewEnabled: false,
             chainingEnabled: false
         });
         state.taylorSeriesConvergenceRadius = 0.5;
-        const first = buildTaylorSeriesCoefficientCacheKey('sin', { re: 0, im: 0 }, 4);
-        const firstTransform = getChainedTransformFunction('sin');
+        const first = buildTaylorSeriesCoefficientCacheKey('cos', { re: 0, im: 0 }, 4);
+        const firstTransform = getChainedTransformFunction('cos');
         state.taylorSeriesConvergenceRadius = 1;
-        const second = buildTaylorSeriesCoefficientCacheKey('sin', { re: 0, im: 0 }, 4);
-        const secondTransform = getChainedTransformFunction('sin');
+        const second = buildTaylorSeriesCoefficientCacheKey('cos', { re: 0, im: 0 }, 4);
+        const secondTransform = getChainedTransformFunction('cos');
 
         assert.notEqual(second, first);
         assert.notEqual(secondTransform, firstTransform);

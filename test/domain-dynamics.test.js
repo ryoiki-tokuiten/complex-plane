@@ -5,28 +5,35 @@ import { applyFractalPreset } from '../js/analysis/fractal-presets.js';
 import { runtime } from '../js/store/runtime.js';
 import { context, state } from '../js/store/state.js';
 import {
-    evaluateDomainColoringMappedTransform,
     getEffectiveBaseTransformFunction,
     getMappedTransformProfile
-} from '../js/math-utils.js';
+} from '../js/native/map-runtime.js';
+import { completeNativeMapOptions, evaluateDomainColoringMappedTransform } from './helpers/native-map.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
     cancelPlanarDomainDynamics,
+    matchesPlanarDomainViewport,
     renderPlanarDomainDynamics,
     selectDomainDynamicsBackend
 } from '../js/rendering/domain-dynamics.js';
 import { renderPlanarDomainColoring } from '../js/rendering/domain-coloring.js';
 import {
-    colorDomainDynamicsPoint,
-    createDomainDynamicsTileRenderer,
-    evaluateDomainDynamicsValue,
-    renderDomainDynamicsTile
-} from '../js/rendering/domain-dynamics-core.js';
+    createDomainDynamicsTileRenderer
+} from '../js/native/domain-engine.js';
+import {
+    evaluateNativeAlgebraic,
+    evaluateNativePoints,
+    projectNativePrecisePixels
+} from '../js/native/complex-engine.js';
 import {
     DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
+    DOMAIN_COLOR_LOG_MAGNITUDE_MAX,
+    DOMAIN_COLOR_LOG_MAGNITUDE_MIN,
+    DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE,
     domainDynamicsLogMagnitude,
     domainDynamicsSmoothIteration,
     isFiniteDomainDynamicsValue,
+    normalizeDomainColorLogMagnitude,
     normalizeDomainDynamicsChainCount
 } from '../js/constants/domain-dynamics.js';
 
@@ -87,7 +94,7 @@ function restoreState(snapshot) {
 
 function configureDynamics(overrides = {}) {
     Object.assign(state, {
-        currentFunction: 'sin',
+        currentFunction: 'cos',
         currentFunctionPreset: null,
         domainColoringEnabled: true,
         domainBrightness: 1,
@@ -108,11 +115,15 @@ function configureDynamics(overrides = {}) {
             { re: 0, im: 0 },
             { re: 1, im: 0 }
         ],
+        expBase: { re: Math.E, im: 0 },
+        logBase: { re: Math.E, im: 0 },
+        besselOrder: { re: 0, im: 0 },
         mobiusA: { re: 1, im: 0 },
         mobiusB: { re: 0, im: 0 },
         mobiusC: { re: 0, im: 0 },
         mobiusD: { re: 1, im: 0 },
         fractionalPowerN: 0.5,
+        branchCutAngle: Math.PI,
         zetaContinuationEnabled: false,
         taylorSeriesEnabled: false,
         ...overrides
@@ -126,8 +137,43 @@ function approxComplex(actual, expected, epsilon = 1e-10) {
     assert.ok(Math.abs(actual.im - expected.im) < epsilon, `${actual.im} ~= ${expected.im}`);
 }
 
-function makeFakeCanvasEnvironment(targetCtx) {
-    const previousDocument = globalThis.document;
+function evaluateDomainDynamicsValue(snapshot, re, im) {
+    const point = { re, im };
+    const result = snapshot.functionKey === 'algebraic_chaining'
+        ? evaluateNativeAlgebraic(snapshot, [point], [point])
+        : evaluateNativePoints(snapshot, [point]);
+    return result.valid[0] ? result.values[0] : null;
+}
+
+function renderDomainDynamicsTile(snapshot, tile) {
+    const renderer = createDomainDynamicsTileRenderer(snapshot);
+    try {
+        return renderer(tile);
+    } finally {
+        renderer.dispose();
+    }
+}
+
+function colorDomainDynamicsPoint(snapshot, re, im) {
+    const pointSnapshot = {
+        ...snapshot,
+        viewport: {
+            width: 1,
+            height: 1,
+            centerRe: String(re),
+            centerIm: String(im),
+            xSpan: '1',
+            ySpan: '1',
+            precisionBits: 256
+        }
+    };
+    const pixel = renderDomainDynamicsTile(pointSnapshot, {
+        x: 0, y: 0, width: 1, height: 1, scale: 1
+    });
+    return [pixel[0], pixel[1], pixel[2]];
+}
+
+function makeFakeCanvasEnvironment(targetCtx, { tileDelayMs = 0 } = {}) {
     const previousImageData = globalThis.ImageData;
     const previousWorker = globalThis.Worker;
 
@@ -139,45 +185,65 @@ function makeFakeCanvasEnvironment(targetCtx) {
         }
     }
 
-    function makeContext(canvas) {
-        return {
-            canvas,
-            puts: [],
-            imageSmoothingEnabled: false,
-            imageSmoothingQuality: 'low',
-            save() {},
-            restore() {},
-            setTransform() {},
-            clearRect() {},
-            putImageData(image, x, y) {
-                this.puts.push({ image, x, y });
-            },
-            drawImage(source) {
-                targetCtx.draws.push({ width: source.width, height: source.height });
+    class FakeWorker {
+        constructor() {
+            this.renderers = new Map();
+            this._onmessage = null;
+            this.onerror = null;
+        }
+
+        set onmessage(handler) {
+            this._onmessage = handler;
+            if (handler) {
+                setTimeout(() => {
+                    this._onmessage?.({ data: { type: 'ready' } });
+                }, 0);
             }
-        };
+        }
+
+        get onmessage() {
+            return this._onmessage;
+        }
+
+        postMessage(message) {
+            if (message.type === 'start') {
+                this.renderers.set(message.jobId, createDomainDynamicsTileRenderer(message.snapshot));
+                return;
+            }
+            if (message.type === 'cancel') {
+                const renderer = this.renderers.get(message.jobId);
+                renderer?.dispose?.();
+                this.renderers.delete(message.jobId);
+                return;
+            }
+            if (message.type !== 'tile') return;
+            const renderer = this.renderers.get(message.jobId);
+            setTimeout(() => {
+                try {
+                    if (!renderer) return;
+                    const pixels = renderer(message.tile);
+                    this.onmessage?.({ data: {
+                        type: 'tile', jobId: message.jobId,
+                        tile: message.tile, pixels, renderMilliseconds: 0
+                    } });
+                } catch (error) {
+                    this.onmessage?.({ data: {
+                        type: 'error', jobId: message.jobId,
+                        tile: message.tile, message: error.message
+                    } });
+                }
+            }, tileDelayMs);
+        }
+
+        terminate() {
+            this.renderers.clear();
+        }
     }
 
     globalThis.ImageData = FakeImageData;
-    globalThis.Worker = undefined;
-    globalThis.document = {
-        createElement(type) {
-            assert.equal(type, 'canvas');
-            const canvas = {
-                width: 0,
-                height: 0,
-                getContext(kind) {
-                    assert.equal(kind, '2d');
-                    if (!this.ctx) this.ctx = makeContext(this);
-                    return this.ctx;
-                }
-            };
-            return canvas;
-        }
-    };
+    globalThis.Worker = FakeWorker;
 
     return () => {
-        globalThis.document = previousDocument;
         globalThis.ImageData = previousImageData;
         globalThis.Worker = previousWorker;
     };
@@ -185,15 +251,13 @@ function makeFakeCanvasEnvironment(targetCtx) {
 
 function makeTargetCtx() {
     return {
-        draws: [],
-        imageSmoothingEnabled: false,
-        imageSmoothingQuality: 'low',
+        puts: [],
         save() {},
         restore() {},
         setTransform() {},
         clearRect() {},
-        drawImage(source) {
-            this.draws.push({ width: source.width, height: source.height });
+        putImageData(image, x, y) {
+            this.puts.push({ image, x, y });
         }
     };
 }
@@ -229,6 +293,7 @@ function iterateQuadraticZeroSeed(c, count, bailout = 1e8) {
 function makeAlgebraicDynamicsSnapshot(overrides = {}) {
     return {
         functionKey: 'algebraic_chaining',
+        derivativeOrder: 0,
         chainingEnabled: false,
         chainMode: 'recursion',
         chainCount: 1,
@@ -241,11 +306,15 @@ function makeAlgebraicDynamicsSnapshot(overrides = {}) {
             { re: 0, im: 0 },
             { re: 1, im: 0 }
         ],
+        expBase: { re: Math.E, im: 0 },
+        logBase: { re: Math.E, im: 0 },
+        besselOrder: { re: 0, im: 0 },
         mobiusA: { re: 1, im: 0 },
         mobiusB: { re: 0, im: 0 },
         mobiusC: { re: 0, im: 0 },
         mobiusD: { re: 1, im: 0 },
         fractionalPowerN: 0.5,
+        branchCutAngle: Math.PI,
         zetaContinuationEnabled: false,
         style: {
             brightness: 1,
@@ -257,8 +326,11 @@ function makeAlgebraicDynamicsSnapshot(overrides = {}) {
         viewport: {
             width: 4,
             height: 4,
-            xRange: [-2, 2],
-            yRange: [-2, 2]
+            centerRe: '0',
+            centerIm: '0',
+            xSpan: '4',
+            ySpan: '4',
+            precisionBits: 256
         },
         ...overrides
     };
@@ -278,7 +350,7 @@ test('dynamics snapshots represent Mandelbrot, Newton, and generic output chains
 
     try {
         applyFractalPreset(state, 'mandelbrot');
-        let snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        let snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         assert.equal(snapshot.functionKey, 'algebraic_chaining');
         assert.equal(snapshot.chainMode, 'zero_seed');
         assert.equal(snapshot.chainCount, 256);
@@ -286,14 +358,14 @@ test('dynamics snapshots represent Mandelbrot, Newton, and generic output chains
         assert.equal(snapshot.paletteStops.length >= 2, true);
 
         applyFractalPreset(state, 'newton_fractal');
-        snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         assert.equal(snapshot.functionKey, 'algebraic_chaining');
         assert.equal(snapshot.chainMode, 'recursion');
         assert.equal(snapshot.orbitColoringMode, 'attractor');
         assert.equal(snapshot.algebraicChainingTerms.length, 2);
 
         configureDynamics({ currentFunction: 'exp', chainingMode: 'recursion', chainCount: 7 });
-        snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         assert.equal(snapshot.functionKey, 'exp');
         assert.equal(snapshot.chainMode, 'recursion');
         assert.equal(snapshot.chainCount, 7);
@@ -308,29 +380,27 @@ test('domain dynamics accepts single functions and derivative presentation witho
 
     try {
         configureDynamics({
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             chainingEnabled: false,
             chainCount: 1
         });
 
         const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, {
-            isWPlaneColoring: false,
             mapPresentation: 'function'
         });
         assert.ok(snapshot);
         approxComplex(evaluateDomainDynamicsValue(snapshot, 0.5, 0.2), {
-            re: Math.sin(0.5) * Math.cosh(0.2),
-            im: Math.cos(0.5) * Math.sinh(0.2)
+            re: Math.cos(0.5) * Math.cosh(0.2),
+            im: -Math.sin(0.5) * Math.sinh(0.2)
         }, 1e-8);
 
         const derivativeSnapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, {
-            isWPlaneColoring: false,
             mapPresentation: 'derivative'
         });
         assert.ok(derivativeSnapshot);
         approxComplex(evaluateDomainDynamicsValue(derivativeSnapshot, 0.5, 0.2), {
-            re: Math.cos(0.5) * Math.cosh(0.2),
-            im: -Math.sin(0.5) * Math.sinh(0.2)
+            re: -Math.sin(0.5) * Math.cosh(0.2),
+            im: -Math.cos(0.5) * Math.sinh(0.2)
         }, 1e-6);
     } finally {
         restoreState(before);
@@ -346,7 +416,7 @@ test('built dynamics snapshots isolate and freeze nested algebraic data', () => 
     };
     const terms = [{
         coeff: { re: 1, im: 0 },
-        factors: [algebraicFactor('sin', { pipeline: [{ func: 'cos' }] })]
+        factors: [algebraicFactor('exp')]
     }];
 
     try {
@@ -357,17 +427,20 @@ test('built dynamics snapshots isolate and freeze nested algebraic data', () => 
             algebraicChainingTerms: terms
         });
 
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         assert.ok(Object.isFrozen(snapshot));
         assert.ok(Object.isFrozen(snapshot.algebraicChainingZExpr.right));
-        assert.ok(Object.isFrozen(snapshot.algebraicChainingTerms[0].factors[0].pipeline[0]));
+        assert.ok(Object.isFrozen(snapshot.algebraicChainingTerms[0].coeff));
+        assert.ok(Object.isFrozen(snapshot.algebraicChainingTerms[0].factors[0]));
         assert.notEqual(snapshot.algebraicChainingZExpr, zExpr);
         assert.notEqual(snapshot.algebraicChainingTerms[0].factors[0], terms[0].factors[0]);
 
         zExpr.right.value = 2;
-        terms[0].factors[0].pipeline[0].func = 'sin';
+        terms[0].coeff.re = 3;
+        terms[0].factors[0].func = 'tan';
         assert.equal(snapshot.algebraicChainingZExpr.right.value, 1);
-        assert.equal(snapshot.algebraicChainingTerms[0].factors[0].pipeline[0].func, 'cos');
+        assert.equal(snapshot.algebraicChainingTerms[0].coeff.re, 1);
+        assert.equal(snapshot.algebraicChainingTerms[0].factors[0].func, 'exp');
     } finally {
         restoreState(before);
     }
@@ -415,11 +488,14 @@ test('accelerated algebraic z expressions preserve parser unary-power precedence
 });
 
 test('domain dynamics enforce the explicit chain limit', () => {
-    assert.equal(normalizeDomainDynamicsChainCount(DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH + 100), DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH);
+    assert.throws(
+        () => normalizeDomainDynamicsChainCount(DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH + 100),
+        /chain count/i
+    );
 
     const snapshot = makeAlgebraicDynamicsSnapshot({
         chainingEnabled: true,
-        chainCount: DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH + 100,
+        chainCount: DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH,
         algebraicChainingTerms: [
             { coeff: { re: 1, im: 0 }, factors: [algebraicFactor('polynomial')] },
             { coeff: { re: 1, im: 0 }, factors: [] }
@@ -444,14 +520,35 @@ test('domain dynamics shared helpers cover boundary, overflow, and smoothing fix
         );
     }
 
-    assert.equal(isFiniteDomainDynamicsValue(1e30 * 0.999, 0), true);
-    assert.equal(isFiniteDomainDynamicsValue(1e30, 0), false);
+    assert.equal(isFiniteDomainDynamicsValue(DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE * 0.999, 0), true);
+    assert.equal(isFiniteDomainDynamicsValue(DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE, 0), false);
     assert.equal(isFiniteDomainDynamicsValue(NaN, 0), false);
 
     const smooth = domainDynamicsSmoothIteration(3, 17, 20000, 0);
     assert.ok(smooth >= 0 && smooth <= 17);
     assert.equal(domainDynamicsSmoothIteration(3, 17, NaN, 0), 4);
-    assert.equal(domainDynamicsSmoothIteration(3, 17, 1e30, 0), 4);
+    assert.equal(domainDynamicsSmoothIteration(3, 17, DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE, 0), 4);
+});
+
+test('native precise planar projection keeps neighboring source pixels distinct at 10^125', () => {
+    const viewport = {
+        centerRe: '-0.743643887037151000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
+        centerIm: '0.131825904205330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001',
+        zoomPower: 125,
+        precisionBits: 640,
+        width: 800,
+        height: 600
+    };
+    const output = projectNativePrecisePixels({
+        inputViewport: viewport,
+        outputViewport: viewport,
+        mapPoints: true,
+        mapOptions: completeNativeMapOptions({ functionKey: 'identity', chainingEnabled: false, chainCount: 1 })
+    }, new Float32Array([399, 299, 400, 299, 399, 300]));
+    assert.equal(output[0], 399.5);
+    assert.equal(output[2], 400.5);
+    assert.equal(output[1], 299.5);
+    assert.equal(output[5], 300.5);
 });
 
 test('orbit coloring modes distinguish escape and attractor observables', () => {
@@ -459,14 +556,14 @@ test('orbit coloring modes distinguish escape and attractor observables', () => 
 
     try {
         applyFractalPreset(state, 'mandelbrot');
-        let snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        let snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         const interior = colorDomainDynamicsPoint(snapshot, 0, 0);
         const exterior = colorDomainDynamicsPoint(snapshot, 2, 2);
         assert.deepEqual(interior, [0, 0, 0]);
         assert.ok(exterior[0] + exterior[1] + exterior[2] > 0);
 
         applyFractalPreset(state, 'newton_fractal');
-        snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         const convergedValue = evaluateDomainDynamicsValue(snapshot, 2, 0);
         const basinColor = colorDomainDynamicsPoint(snapshot, 2, 0);
         approxComplex(convergedValue, { re: 1, im: 0 }, 1e-9);
@@ -480,11 +577,11 @@ test('worker dynamics evaluator matches current mapped output-chain semantics', 
     const before = snapshotState();
 
     try {
-        configureDynamics({ currentFunction: 'sin', chainingMode: 'recursion', chainCount: 5 });
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
-        const base = getEffectiveBaseTransformFunction('sin');
-        const profile = getMappedTransformProfile('sin', base);
-        const expected = evaluateDomainColoringMappedTransform(profile, 0.2, -0.3, 'sin');
+        configureDynamics({ currentFunction: 'cos', chainingMode: 'recursion', chainCount: 5 });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
+        const base = getEffectiveBaseTransformFunction('cos');
+        const profile = getMappedTransformProfile('cos', base);
+        const expected = evaluateDomainColoringMappedTransform(profile, 0.2, -0.3, 'cos');
         const actual = evaluateDomainDynamicsValue(snapshot, 0.2, -0.3);
 
         approxComplex(actual, expected);
@@ -498,7 +595,7 @@ test('domain dynamics tile rendering produces opaque full tile data', () => {
 
     try {
         configureDynamics({ currentFunction: 'cos', chainCount: 3 });
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         const pixels = renderDomainDynamicsTile(snapshot, { x: 0, y: 0, width: 2, height: 2, scale: 1 });
 
         assert.equal(pixels.length, 16);
@@ -508,45 +605,283 @@ test('domain dynamics tile rendering produces opaque full tile data', () => {
     }
 });
 
-test('quality-only refinement preserves the tile contract for sparse edges', () => {
+test('native domain coloring normalizes fixed magnitude bounds', () => {
+    assert.equal(normalizeDomainColorLogMagnitude(DOMAIN_COLOR_LOG_MAGNITUDE_MIN), 0);
+    assert.equal(normalizeDomainColorLogMagnitude(0), 0.5);
+    assert.equal(normalizeDomainColorLogMagnitude(DOMAIN_COLOR_LOG_MAGNITUDE_MAX), 1);
+    assert.equal(normalizeDomainColorLogMagnitude(-Infinity), 0);
+    assert.equal(normalizeDomainColorLogMagnitude(Infinity), 1);
+    assert.throws(() => normalizeDomainColorLogMagnitude(NaN), /log magnitude/i);
+});
+
+test('large cos viewports stay colored and algebraic identity wrappers keep the direct kernel', () => {
+    const before = snapshotState();
+    const plane = {
+        width: 32,
+        height: 24,
+        currentVisXRange: [-500000, 500000],
+        currentVisYRange: [-350000, 350000]
+    };
+    const tile = { x: 0, y: 0, width: plane.width, height: plane.height, scale: 1 };
+
+    try {
+        configureDynamics({
+            currentFunction: 'cos',
+            chainingEnabled: false,
+            domainLightnessCycles: 1
+        });
+        const direct = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, plane), tile
+        );
+        let blackPixels = 0;
+        for (let index = 0; index < direct.length; index += 4) {
+            if (direct[index] === 0 && direct[index + 1] === 0 && direct[index + 2] === 0) blackPixels += 1;
+        }
+        assert.equal(blackPixels, 0);
+
+        Object.assign(state, {
+            currentFunction: 'algebraic_chaining',
+            algebraicChainingEnabled: true,
+            algebraicChainingZExpr: 'z',
+            algebraicChainingTerms: [
+                { coeff: { re: 1, im: 0 }, factors: [algebraicFactor('cos')] }
+            ]
+        });
+        const wrapped = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, plane), tile
+        );
+        assert.deepEqual(wrapped, direct);
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('meromorphic poles stay on the sphere instead of invalidating the tile', () => {
+    const before = snapshotState();
+    const tile = { x: 0, y: 0, width: 1, height: 1, scale: 1 };
+
+    try {
+        for (const fixture of [
+            { functionKey: 'gamma', centerRe: 0, continuation: false },
+            { functionKey: 'zeta', centerRe: 1, continuation: true }
+        ]) {
+            configureDynamics({
+                currentFunction: fixture.functionKey,
+                chainingEnabled: false,
+                chainCount: 1,
+                zetaContinuationEnabled: fixture.continuation,
+                domainLightnessCycles: 1
+            });
+            const plane = {
+                width: 1,
+                height: 1,
+                currentVisXRange: [fixture.centerRe - 0.5, fixture.centerRe + 0.5],
+                currentVisYRange: [-0.5, 0.5]
+            };
+            const pixels = renderDomainDynamicsTile(buildPlanarDomainDynamicsSnapshot(state, plane), tile);
+            assert.equal(pixels[3], 255);
+            assert.ok(pixels[0] + pixels[1] + pixels[2] > 0);
+        }
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('zeta without continuation is undefined at and left of Re(z) = 1', () => {
+    const before = snapshotState();
+    const plane = {
+        width: 1,
+        height: 1,
+        currentVisXRange: [-0.5, 0.5],
+        currentVisYRange: [-0.5, 0.5]
+    };
+
+    try {
+        configureDynamics({
+            currentFunction: 'zeta',
+            chainingEnabled: false,
+            chainCount: 1,
+            zetaContinuationEnabled: false,
+            domainLightnessCycles: 1
+        });
+        const directSnapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
+        assert.equal(evaluateDomainDynamicsValue(directSnapshot, 0, 0), null);
+        assert.ok(evaluateDomainDynamicsValue(directSnapshot, 2, 0));
+        assert.deepEqual(
+            Array.from(renderDomainDynamicsTile(
+                directSnapshot,
+                { x: 0, y: 0, width: 1, height: 1, scale: 1 }
+            )),
+            [0, 0, 0, 255]
+        );
+        const boundaryPixels = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, {
+                width: 3,
+                height: 1,
+                currentVisXRange: [-3, 3],
+                currentVisYRange: [-0.5, 0.5]
+            }),
+            { x: 0, y: 0, width: 3, height: 1, scale: 1 }
+        );
+        assert.deepEqual(Array.from(boundaryPixels.subarray(0, 8)), [0, 0, 0, 255, 0, 0, 0, 255]);
+        assert.ok(boundaryPixels[8] + boundaryPixels[9] + boundaryPixels[10] > 0);
+
+        state.zetaContinuationEnabled = true;
+        const continued = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, plane),
+            { x: 0, y: 0, width: 1, height: 1, scale: 1 }
+        );
+        assert.ok(continued[0] + continued[1] + continued[2] > 0);
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('sphere deltas preserve a deep viewport around a Möbius pole', () => {
+    const before = snapshotState();
+    const plane = {
+        width: 3,
+        height: 3,
+        currentVisXRange: [-1, 1],
+        currentVisYRange: [-1, 1],
+        preciseViewport: {
+            centerRe: '0',
+            centerIm: '0',
+            zoomPower: 125,
+            precisionBits: 512,
+            width: 3,
+            height: 3
+        }
+    };
+
+    try {
+        configureDynamics({
+            currentFunction: 'mobius',
+            chainingEnabled: false,
+            chainCount: 1,
+            mobiusA: { re: 0, im: 0 },
+            mobiusB: { re: 1, im: 0 },
+            mobiusC: { re: 1, im: 0 },
+            mobiusD: { re: 0, im: 0 },
+            domainLightnessCycles: 1
+        });
+        const pixels = renderDomainDynamicsTile(
+            buildPlanarDomainDynamicsSnapshot(state, plane),
+            { x: 0, y: 0, width: 3, height: 3, scale: 1 }
+        );
+        const colors = new Set();
+        for (let index = 0; index < pixels.length; index += 4) {
+            assert.equal(pixels[index + 3], 255);
+            colors.add(`${pixels[index]},${pixels[index + 1]},${pixels[index + 2]}`);
+        }
+        assert.ok(colors.size >= 4);
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('adaptive-quality rendering preserves the tile contract for sparse edges', () => {
     const snapshot = makeAlgebraicDynamicsSnapshot({
         viewport: {
             width: 64,
             height: 64,
-            xRange: [-2, 2],
-            yRange: [-2, 2]
+            centerRe: '0',
+            centerIm: '0',
+            xSpan: '4',
+            ySpan: '4',
+            precisionBits: 256
         }
     });
     const renderTile = createDomainDynamicsTileRenderer(snapshot);
-    const basePixels = new Uint8ClampedArray(64 * 64 * 4);
-
-    for (let y = 0; y < 64; y += 1) {
-        for (let x = 0; x < 64; x += 1) {
-            const index = (y * 64 + x) * 4;
-            const value = x < 32 ? 0 : 255;
-            basePixels[index] = value;
-            basePixels[index + 1] = value;
-            basePixels[index + 2] = value;
-            basePixels[index + 3] = 255;
-        }
-    }
+    const tile = { x: 0, y: 0, width: 64, height: 64, scale: 1 };
+    const basePixels = renderTile(tile);
     const originalPixels = new Uint8ClampedArray(basePixels);
-
-    const refined = renderTile({
-        x: 0,
-        y: 0,
-        width: 64,
-        height: 64,
-        scale: 1,
-        qualityOnly: true,
-        basePixels
-    });
+    const refined = renderTile({ ...tile, adaptiveQuality: true });
 
     assert.equal(refined.length, basePixels.length);
     for (let index = 3; index < refined.length; index += 4) {
         assert.equal(refined[index], 255);
     }
-    assert.notDeepEqual(Array.from(refined), Array.from(originalPixels));
+    assert.deepEqual(Array.from(basePixels), Array.from(originalPixels));
+});
+
+test('domain tiles are byte-identical across independent render contexts', () => {
+    const before = snapshotState();
+
+    try {
+        configureDynamics({
+            currentFunction: 'cos',
+            chainingEnabled: false,
+            chainCount: 1,
+            domainLightnessCycles: 1
+        });
+        const plane = {
+            width: 64,
+            height: 48,
+            currentVisXRange: [-1500, 1500],
+            currentVisYRange: [-1125, 1125]
+        };
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
+        const tile = { x: 0, y: 0, width: 64, height: 48, scale: 1, adaptiveQuality: true };
+
+        assert.deepEqual(
+            renderDomainDynamicsTile(snapshot, tile),
+            renderDomainDynamicsTile(snapshot, tile)
+        );
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('domain color at a world point is independent of the reference center', () => {
+    const before = snapshotState();
+
+    try {
+        configureDynamics({
+            currentFunction: 'algebraic_chaining',
+            algebraicChainingEnabled: true,
+            algebraicChainingZExpr: 'z',
+            algebraicChainingTerms: [{
+                coeff: { re: 1, im: 0 },
+                factors: [algebraicFactor('tan', { chainedFunc: 'sec' })]
+            }],
+            chainingEnabled: true,
+            chainCount: 79,
+            domainLightnessCycles: 1
+        });
+        const pixelStep = 0.07;
+        const colors = [0, 1, 2].map(offset => {
+            const centerRe = offset * pixelStep;
+            const plane = {
+                width: 100,
+                height: 100,
+                currentVisXRange: [centerRe - 3.5, centerRe + 3.5],
+                currentVisYRange: [-3.5, 3.5],
+                preciseViewport: {
+                    centerRe: String(centerRe),
+                    centerIm: '0',
+                    zoomPower: 0,
+                    precisionBits: 256,
+                    width: 100,
+                    height: 100
+                }
+            };
+            const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
+            return renderDomainDynamicsTile(snapshot, {
+                x: 50 - offset,
+                y: 50,
+                width: 1,
+                height: 1,
+                scale: 1,
+                adaptiveQuality: false
+            });
+        });
+
+        assert.deepEqual(colors[1], colors[0]);
+        assert.deepEqual(colors[2], colors[0]);
+    } finally {
+        restoreState(before);
+    }
 });
 
 test('Mandelbrot refinement is identical across worker tile boundaries', () => {
@@ -560,14 +895,14 @@ test('Mandelbrot refinement is identical across worker tile boundaries', () => {
             currentVisXRange: [-0.45, -0.25],
             currentVisYRange: [0.63, 0.655]
         };
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane, { isWPlaneColoring: false });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
         const renderTile = createDomainDynamicsTileRenderer(snapshot);
         const refine = tile => {
-            const basePixels = renderTile({ ...tile, deferQuality: true });
+            const basePixels = renderTile(tile);
             const originalPixels = new Uint8ClampedArray(basePixels);
             return {
                 originalPixels,
-                pixels: renderTile({ ...tile, qualityOnly: true, basePixels })
+                pixels: renderTile({ ...tile, adaptiveQuality: true })
             };
         };
 
@@ -593,7 +928,7 @@ test('Mandelbrot refinement is identical across worker tile boundaries', () => {
     }
 });
 
-test('unknown algebraic functions are invalid instead of implicit identity', () => {
+test('unknown algebraic functions fail instead of using an implicit identity', () => {
     const snapshot = makeAlgebraicDynamicsSnapshot({
         algebraicChainingTerms: [{
             coeff: { re: 1, im: 0 },
@@ -601,16 +936,19 @@ test('unknown algebraic functions are invalid instead of implicit identity', () 
         }]
     });
 
-    assert.equal(evaluateDomainDynamicsValue(snapshot, 0.25, -0.5), null);
+    assert.throws(
+        () => evaluateDomainDynamicsValue(snapshot, 0.25, -0.5),
+        /Unsupported native algebraic function/
+    );
 });
 
-test('invalid algebraic z expressions are invalid in domain dynamics', () => {
+test('invalid algebraic z expressions fail in domain dynamics', () => {
     const snapshot = makeAlgebraicDynamicsSnapshot({
         algebraicChainingZExpr: 'bad +',
         algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [algebraicFactor('c')] }]
     });
 
-    assert.equal(evaluateDomainDynamicsValue(snapshot, 0.25, -0.5), null);
+    assert.throws(() => evaluateDomainDynamicsValue(snapshot, 0.25, -0.5), /Expected a value/);
 });
 
 test('generic polynomial-parameter orbit rendering defines pixel indices', () => {
@@ -641,9 +979,9 @@ test('backend selection uses the worker dynamics backend', () => {
 
     try {
         configureDynamics();
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
 
-        assert.equal(selectDomainDynamicsBackend(snapshot).id, 'worker-cpu');
+        assert.equal(selectDomainDynamicsBackend(snapshot).id, 'worker-native');
     } finally {
         restoreState(before);
     }
@@ -656,16 +994,17 @@ test('async renderer reaches final scale one without another redraw trigger', as
 
     try {
         cancelPlanarDomainDynamics();
-        configureDynamics({ currentFunction: 'sin', chainCount: 2 });
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
 
         assert.equal(renderPlanarDomainDynamics(targetCtx, PLANE, snapshot), true);
-        await waitFor(() => targetCtx.draws.some(draw => draw.width === PLANE.width && draw.height === PLANE.height) &&
+        assert.equal(matchesPlanarDomainViewport(runtime.rendering.domainViewport, PLANE), true);
+        await waitFor(() => targetCtx.puts.some(put => put.image.width === PLANE.width && put.image.height === PLANE.height) &&
             selectDomainDynamicsBackend().queue.length === 0);
-        assert.ok(targetCtx.draws.length <= 4);
+        assert.equal(targetCtx.puts.length, 1);
         assert.equal(selectDomainDynamicsBackend().queue.length, 0);
         assert.equal(selectDomainDynamicsBackend().queueIndex, 0);
-        assert.equal(runtime.rendering.zDomainDynamicsHasFullResolution, true);
+        assert.equal(runtime.rendering.processingDomainDynamics, false);
     } finally {
         cancelPlanarDomainDynamics();
         restoreGlobals();
@@ -681,20 +1020,33 @@ test('domain-coloring redraws reuse an active CPU job while dirty state is being
 
     try {
         cancelPlanarDomainDynamics();
-        configureDynamics({ currentFunction: 'sin', chainCount: 2 });
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE, { isWPlaneColoring: false });
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, PLANE);
         assert.ok(snapshot);
 
         context.domainColoringDirty = true;
-        renderPlanarDomainColoring(targetCtx, PLANE, false, null);
+        renderPlanarDomainColoring(targetCtx, PLANE);
         const firstJobId = selectDomainDynamicsBackend().activeJob?.id;
 
-        renderPlanarDomainColoring(targetCtx, PLANE, false, null);
+        renderPlanarDomainColoring(targetCtx, PLANE);
         assert.equal(selectDomainDynamicsBackend().activeJob?.id, firstJobId);
     } finally {
         cancelPlanarDomainDynamics();
         restoreGlobals();
         context.domainColoringDirty = previousDirty;
+        restoreState(before);
+    }
+});
+
+test('function and algebraic-expression changes invalidate domain coloring', () => {
+    const before = snapshotState();
+
+    try {
+        context.domainColoringDirty = false;
+        state.currentFunction = state.currentFunction === 'cos' ? 'tan' : 'cos';
+        state.algebraicChainingZExpr = 'z + 1';
+        assert.equal(context.domainColoringDirty, true);
+    } finally {
         restoreState(before);
     }
 });
@@ -708,15 +1060,45 @@ test('async renderer ignores canceled old final tiles after viewport changes', a
 
     try {
         cancelPlanarDomainDynamics();
-        configureDynamics({ currentFunction: 'sin', chainCount: 2 });
-        const oldSnapshot = buildPlanarDomainDynamicsSnapshot(state, oldPlane, { isWPlaneColoring: false });
-        const nextSnapshot = buildPlanarDomainDynamicsSnapshot(state, nextPlane, { isWPlaneColoring: false });
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
+        const oldSnapshot = buildPlanarDomainDynamicsSnapshot(state, oldPlane);
+        const nextSnapshot = buildPlanarDomainDynamicsSnapshot(state, nextPlane);
 
         assert.equal(renderPlanarDomainDynamics(targetCtx, oldPlane, oldSnapshot), true);
         assert.equal(renderPlanarDomainDynamics(targetCtx, nextPlane, nextSnapshot), true);
 
-        await waitFor(() => targetCtx.draws.some(draw => draw.width === nextPlane.width && draw.height === nextPlane.height));
-        assert.equal(targetCtx.draws.some(draw => draw.width === oldPlane.width), false);
+        await waitFor(() => targetCtx.puts.some(put => put.image.width === nextPlane.width && put.image.height === nextPlane.height));
+        assert.equal(targetCtx.puts.some(put => put.image.width === oldPlane.width), false);
+    } finally {
+        cancelPlanarDomainDynamics();
+        restoreGlobals();
+        restoreState(before);
+    }
+});
+
+test('late canceled-worker messages cannot steal the active tile slot', async () => {
+    const before = snapshotState();
+    const targetCtx = makeTargetCtx();
+    const restoreGlobals = makeFakeCanvasEnvironment(targetCtx, { tileDelayMs: 10 });
+    const oldPlane = { ...PLANE, width: 7 };
+    const nextPlane = { ...PLANE, width: 11 };
+
+    try {
+        cancelPlanarDomainDynamics();
+        configureDynamics({ currentFunction: 'cos', chainCount: 2 });
+        const oldSnapshot = buildPlanarDomainDynamicsSnapshot(state, oldPlane);
+        const nextSnapshot = buildPlanarDomainDynamicsSnapshot(state, nextPlane);
+
+        renderPlanarDomainDynamics(targetCtx, oldPlane, oldSnapshot);
+        await waitFor(() => selectDomainDynamicsBackend().workers.some(worker => worker.busy));
+        renderPlanarDomainDynamics(targetCtx, nextPlane, nextSnapshot);
+
+        await waitFor(() => targetCtx.puts.some(put => put.image.width === nextPlane.width));
+        const backend = selectDomainDynamicsBackend();
+        assert.equal(runtime.rendering.domainDynamicsStats.state, 'complete');
+        assert.equal(runtime.rendering.processingDomainDynamics, false);
+        assert.equal(backend.remainingTiles, 0);
+        assert.equal(backend.workers.every(worker => !worker.busy && worker.jobId === 0), true);
     } finally {
         cancelPlanarDomainDynamics();
         restoreGlobals();
@@ -737,7 +1119,7 @@ test('deep Mandelbrot zero-seed dynamics match an independent orbit recurrence',
         applyFractalPreset(state, 'mandelbrot');
         state.chainCount = 1000;
 
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, deepPlane, { isWPlaneColoring: false });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, deepPlane);
 
         for (const c of [
             { re: 0, im: 0 },
@@ -765,9 +1147,9 @@ test('worker algebraic output chains match the main domain-coloring pipeline acr
     };
     const algebraicTerms = [
         { coeff: { re: 0.7, im: -0.2 }, factors: [algebraicFactor('polynomial')] },
-        { coeff: { re: 0.25, im: 0.1 }, factors: [algebraicFactor('sin')] },
+        { coeff: { re: 0.25, im: 0.1 }, factors: [algebraicFactor('cos')] },
         { coeff: { re: 0.08, im: -0.04 }, factors: [algebraicFactor('c')] },
-        { coeff: { re: 0.05, im: 0 }, factors: [algebraicFactor('cosh', { reciprocal: true })] }
+        { coeff: { re: 0.05, im: 0 }, factors: [algebraicFactor('sinh', { reciprocal: true })] }
     ];
     const points = [
         { re: -0.4, im: 0.2 },
@@ -793,18 +1175,23 @@ test('worker algebraic output chains match the main domain-coloring pipeline acr
                 chainCount: 4
             });
 
-            const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane, { isWPlaneColoring: false });
+            const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
             const profile = getMappedTransformProfile(
                 'algebraic_chaining',
                 getEffectiveBaseTransformFunction('algebraic_chaining')
             );
 
             for (const point of points) {
-                approxComplex(
-                    evaluateDomainDynamicsValue(snapshot, point.re, point.im),
-                    evaluateDomainColoringMappedTransform(profile, point.re, point.im, 'algebraic_chaining'),
-                    1e-10
+                const nativeValue = evaluateDomainDynamicsValue(snapshot, point.re, point.im);
+                const mappedValue = evaluateDomainColoringMappedTransform(
+                    profile, point.re, point.im, 'algebraic_chaining'
                 );
+                if (mode === 'zero_seed') {
+                    assert.equal(nativeValue, null);
+                    assert.equal(Number.isFinite(mappedValue.re) || Number.isFinite(mappedValue.im), false);
+                } else {
+                    approxComplex(nativeValue, mappedValue, 1e-10);
+                }
             }
         }
     } finally {
@@ -830,7 +1217,7 @@ test('worker zeta continuation chains match the main mapped transform in the cri
             chainCount: 2
         });
 
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane, { isWPlaneColoring: false });
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
         const profile = getMappedTransformProfile('zeta', getEffectiveBaseTransformFunction('zeta'));
 
         for (const point of [
@@ -850,35 +1237,39 @@ test('worker zeta continuation chains match the main mapped transform in the cri
     }
 });
 
-test('collapsed sub-ulp viewport ranges render deterministically uniform tiles', () => {
+test('deep domain snapshots render from exact centers and preserve digits', () => {
     const before = snapshotState();
-    const center = { re: 0.3, im: -0.2 };
-    const delta = 1e-50;
     const plane = {
-        width: 8,
-        height: 8,
-        currentVisXRange: [center.re, center.re + delta],
-        currentVisYRange: [center.im, center.im + delta]
+        width: 4,
+        height: 4,
+        currentVisXRange: [-1, 1],
+        currentVisYRange: [-1, 1],
+        preciseViewport: {
+            centerRe: '-0.7436438870371510000000000000000000000001',
+            centerIm: '0.1318259042053300000000000000000000000001',
+            zoomPower: 125,
+            precisionBits: 512,
+            width: 4,
+            height: 4
+        }
     };
 
     try {
-        configureDynamics({
-            currentFunction: 'exp',
-            chainingEnabled: true,
-            chainingMode: 'recursion',
-            chainCount: 2
-        });
-
-        assert.equal(plane.currentVisXRange[0], plane.currentVisXRange[1]);
-        assert.equal(plane.currentVisYRange[0], plane.currentVisYRange[1]);
-
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane, { isWPlaneColoring: false });
-        const pixels = renderDomainDynamicsTile(snapshot, { x: 0, y: 0, width: plane.width, height: plane.height, scale: 1 });
-        const firstPixel = Array.from(pixels.slice(0, 4));
-
-        for (let offset = 0; offset < pixels.length; offset += 4) {
-            assert.deepEqual(Array.from(pixels.slice(offset, offset + 4)), firstPixel);
+        applyFractalPreset(state, 'mandelbrot');
+        state.chainCount = 64;
+        const snapshot = buildPlanarDomainDynamicsSnapshot(state, plane);
+        assert.equal(snapshot.viewport.centerRe, plane.preciseViewport.centerRe);
+        assert.equal(Object.hasOwn(snapshot.viewport, 'xRange'), false);
+        assert.equal(snapshot.viewport.xSpan, '7e-125');
+        const renderTile = createDomainDynamicsTileRenderer(snapshot);
+        try {
+            const pixels = renderTile({ x: 0, y: 0, width: plane.width, height: plane.height, scale: 1 });
+            assert.equal(pixels.length, 64);
+            assert.equal(pixels.every((value, index) => index % 4 !== 3 || value === 255), true);
+        } finally {
+            renderTile.dispose();
         }
+
     } finally {
         restoreState(before);
     }

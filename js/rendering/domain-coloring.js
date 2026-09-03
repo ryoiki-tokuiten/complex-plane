@@ -1,18 +1,23 @@
 import { state, context, subscribeState } from '../store/state.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
+    cancelPlanarDomainDynamics,
     renderPlanarDomainDynamics
 } from './domain-dynamics.js';
-import { hslToRgb } from './canvas-primitives.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
+import {
+    DOMAIN_COLOR_LOG_MAGNITUDE_MIN,
+    normalizeDomainColorLogMagnitude
+} from '../constants/domain-dynamics.js';
+import { requireFiniteNumber } from '../utils/numeric-contracts.js';
+import { requestDomainRedraw } from './redraw-scheduler.js';
 
 const DOMAIN_LIGHTNESS_MIN = 0.34;
 const DOMAIN_LIGHTNESS_MAX = 0.72;
-const DOMAIN_LIGHTNESS_DETAIL_BASE = 0.72;
-const DOMAIN_LIGHTNESS_DETAIL_SCALE = 0.28;
 
 subscribeState(() => {
     context.domainColoringDirty = true;
+    requestDomainRedraw(true);
 }, [
     'currentFunction',
     'mapPresentation',
@@ -24,12 +29,12 @@ subscribeState(() => {
     'algebraicChainingTerms',
     'chainingEnabled',
     'chainingMode',
+    'chainSeed',
     'chainCount',
     'orbitColoringMode',
     'polynomialN',
     'polynomialCoeffs',
     'fractionalPowerN',
-    'branchCutType',
     'branchCutAngle',
     'zetaContinuationEnabled',
     'taylorSeriesEnabled',
@@ -44,38 +49,34 @@ subscribeState(() => {
     'domainPalette'
 ]);
 
-export function domainMagnitudeLightness(logMod, cycles) {
-    if (!Number.isFinite(logMod)) return DOMAIN_LIGHTNESS_MAX;
+subscribeState(({ value }) => {
+    context.domainColoringDirty = true;
+    requestDomainRedraw(true);
+    if (!value) cancelPlanarDomainDynamics();
+}, 'domainColoringEnabled');
 
-    if (cycles <= 0.0001) return 0.5;
-
-    const detail = Math.max(0.05, cycles);
-    const tone = (2 / Math.PI) * Math.atan(
-        logMod * (DOMAIN_LIGHTNESS_DETAIL_BASE + detail * DOMAIN_LIGHTNESS_DETAIL_SCALE)
-    );
+function domainMagnitudeLightness(logMod, cycles) {
+    if (Number.isNaN(logMod)) throw new Error('Domain-color log magnitude must be a number.');
+    const detail = requireFiniteNumber(cycles, 'Domain-color lightness detail');
+    if (detail <= 0.0001) return 0.5;
+    const normalized = normalizeDomainColorLogMagnitude(logMod);
+    const tone = Math.min(1, Math.max(0,
+        0.5 + (normalized - 0.5) * Math.max(0.05, detail)
+    ));
 
     return DOMAIN_LIGHTNESS_MIN + (DOMAIN_LIGHTNESS_MAX - DOMAIN_LIGHTNESS_MIN) * tone;
 }
 
-export function renderPlanarDomainColoring(tCtx, pP, isWPC, map) {
+export function renderPlanarDomainColoring(tCtx, pP) {
     const w = pP.width; const h = pP.height; if (w === 0 || h === 0) return;
 
-    const dynamicsSnapshot = buildPlanarDomainDynamicsSnapshot(state, pP, {
-        isWPlaneColoring: !!isWPC,
-        mapPresentation: map?.presentation
-    });
-    if (!dynamicsSnapshot || !renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot)) {
-        throw new Error('The CPU domain-coloring pipeline cannot render the current function state.');
-    }
+    // Domain coloring intentionally bypasses active-map evaluators. Its native
+    // worker pipeline renders viewport tiles directly into RGBA pixel buffers.
+    const dynamicsSnapshot = buildPlanarDomainDynamicsSnapshot(state, pP);
+    renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot);
 }
 
-
-export function getPaletteColor(paletteId, h) {
-    if (paletteId === 'classic') {
-        const rgb = hslToRgb(h, 1.0, 0.5);
-        return [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255];
-    }
-
+function getPaletteColor(paletteId, h) {
     const stops = getDomainPaletteStops(paletteId);
     const n = stops.length;
     const val = h * (n - 1);
@@ -92,7 +93,7 @@ export function getPaletteColor(paletteId, h) {
     ];
 }
 
-export function applyLightnessAndSaturation(rgb, L, S) {
+function applyLightnessAndSaturation(rgb, L, S) {
     let r = rgb[0];
     let g = rgb[1];
     let b = rgb[2];
@@ -124,17 +125,22 @@ export function applyLightnessAndSaturation(rgb, L, S) {
 }
 
 export function domainColorForValue(re, im, runtimeState) {
+    requireFiniteNumber(re, 'Domain-color real value');
+    requireFiniteNumber(im, 'Domain-color imaginary value');
+    if (!runtimeState || typeof runtimeState !== 'object') {
+        throw new Error('Domain coloring requires explicit style state.');
+    }
     const phase = Math.atan2(im, re);
-    const modValue = Math.hypot(re, im);
-    if (!Number.isFinite(modValue)) return [0, 0, 0];
-
-    const logMod = Math.log1p(modValue);
-    const cycles = (runtimeState && Number.isFinite(runtimeState.domainLightnessCycles)) ? runtimeState.domainLightnessCycles : 0;
+    const scale = Math.max(Math.abs(re), Math.abs(im));
+    const logMod = scale === 0
+        ? DOMAIN_COLOR_LOG_MAGNITUDE_MIN
+        : Math.log(scale) + 0.5 * Math.log((re / scale) ** 2 + (im / scale) ** 2);
+    const cycles = requireFiniteNumber(runtimeState.domainLightnessCycles, 'Domain lightness detail');
     const lBase = domainMagnitudeLightness(logMod, cycles);
 
-    const contrast = (runtimeState && Number.isFinite(runtimeState.domainContrast)) ? runtimeState.domainContrast : 1;
-    const brightness = (runtimeState && Number.isFinite(runtimeState.domainBrightness)) ? runtimeState.domainBrightness : 1;
-    const saturation = (runtimeState && Number.isFinite(runtimeState.domainSaturation)) ? runtimeState.domainSaturation : 1;
+    const contrast = requireFiniteNumber(runtimeState.domainContrast, 'Domain contrast');
+    const brightness = requireFiniteNumber(runtimeState.domainBrightness, 'Domain brightness');
+    const saturation = requireFiniteNumber(runtimeState.domainSaturation, 'Domain saturation');
 
     const lContrasted = 0.5 + (lBase - 0.5) * contrast;
     const lFinal = Math.min(0.95, Math.max(0.05, lContrasted * brightness));
@@ -142,7 +148,10 @@ export function domainColorForValue(re, im, runtimeState) {
     let h = (phase / (2.0 * Math.PI)) % 1.0;
     if (h < 0) h += 1.0;
 
-    const paletteId = (runtimeState && runtimeState.domainPalette) ? runtimeState.domainPalette : 'calming';
+    if (typeof runtimeState.domainPalette !== 'string' || !runtimeState.domainPalette) {
+        throw new Error('Domain coloring requires an explicit palette.');
+    }
+    const paletteId = runtimeState.domainPalette;
     const baseColor = getPaletteColor(paletteId, h);
     return applyLightnessAndSaturation(baseColor, lFinal, sFinal);
 }

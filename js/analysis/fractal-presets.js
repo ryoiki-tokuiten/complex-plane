@@ -1,3 +1,5 @@
+import { clonePlain } from '../utils/clone-utils.js';
+
 const NONE_FACTOR_FLAGS = Object.freeze({
     chainedFunc: 'none',
     power: 1.0,
@@ -18,21 +20,11 @@ function term(coeff, factors) {
     return { coeff, factors };
 }
 
-function cloneComplexList(values) {
-    return values.map(value => complex(value.re, value.im));
-}
-
-function cloneTerms(terms) {
-    return terms.map(item => ({
-        coeff: complex(item.coeff.re, item.coeff.im),
-        factors: item.factors.map(entry => ({ ...entry }))
-    }));
-}
-
-export const FRACTAL_PRESETS = Object.freeze({
+const FRACTAL_PRESETS = Object.freeze({
     mandelbrot: Object.freeze({
         label: 'Mandelbrot',
         chainMode: 'zero_seed',
+        chainSeed: complex(0),
         chainCount: 256,
         orbitColoringMode: 'escape',
         currentInputShape: 'empty_grid',
@@ -51,6 +43,7 @@ export const FRACTAL_PRESETS = Object.freeze({
     newton_fractal: Object.freeze({
         label: 'Newton Fractals',
         chainMode: 'recursion',
+        chainSeed: complex(0),
         chainCount: 64,
         orbitColoringMode: 'attractor',
         currentInputShape: 'empty_grid',
@@ -78,19 +71,19 @@ export function applyFractalPreset(runtimeState, key) {
     Object.assign(runtimeState, {
         currentFunction: 'algebraic_chaining',
         currentFunctionPreset: key,
-        fourierModeEnabled: false,
         laplaceModeEnabled: false,
         algebraicChainingEnabled: true,
         chainingEnabled: true,
         chainingMode: preset.chainMode,
+        chainSeed: clonePlain(preset.chainSeed || complex(0)),
         chainCount: preset.chainCount,
         orbitColoringMode: preset.orbitColoringMode || 'value',
         domainColoringEnabled: true,
         currentInputShape: preset.currentInputShape,
         domainPalette: preset.domainPalette,
         polynomialN: preset.polynomialN,
-        polynomialCoeffs: cloneComplexList(preset.polynomialCoeffs),
-        algebraicChainingTerms: cloneTerms(preset.algebraicChainingTerms)
+        polynomialCoeffs: clonePlain(preset.polynomialCoeffs),
+        algebraicChainingTerms: clonePlain(preset.algebraicChainingTerms)
     });
 
     return preset;

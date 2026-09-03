@@ -1,14 +1,16 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { getStateSignal, mutateState } from '../../store/state.js';
-import { TAYLOR_CENTER_PRESET_GROUPS } from '../../constants/numerical.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { state, mutateState } from '../../store/state.js';
+import { useAppState } from '../state-hooks.js';
+import { TAYLOR_CENTER_PRESETS } from '../../constants/numerical.js';
+import { requestDomainRedraw, requestUiRedraw } from '../../rendering/redraw-scheduler.js';
 import { formatTaylorNumericValue } from '../../utils/dom-utils.js';
 
 const samePoint = (a, b) => Math.abs(a.re - b.re) < 1e-9 && Math.abs(a.im - b.im) < 1e-9;
 
-export function ComplexParameterEditor({ stateKey, label }) {
-    const point = getStateSignal(stateKey).value;
+export function ComplexParameterEditor({ stateKey, label, pickLabel }) {
+    const point = useAppState(stateKey);
+    const isPicking = useAppState('canvasClickPickerTarget') === stateKey;
     const reInput = useRef(null);
     const imInput = useRef(null);
     const [reText, setReText] = useState(formatTaylorNumericValue(point.re));
@@ -21,7 +23,7 @@ export function ComplexParameterEditor({ stateKey, label }) {
 
     const setPoint = (re, im) => {
         mutateState(stateKey, value => Object.assign(value, { re, im }));
-        requestRedrawAll();
+        requestDomainRedraw();
     };
     const update = (part, text) => {
         part === 're' ? setReText(text) : setImText(text);
@@ -32,12 +34,11 @@ export function ComplexParameterEditor({ stateKey, label }) {
 
     return <>
         <div class="taylor-series-preset-groups">
-            {TAYLOR_CENTER_PRESET_GROUPS.map(group => <div class="taylor-series-preset-group" key={group.label}>
-                <div class="taylor-series-preset-group-title">{group.label}</div>
-                <div class="taylor-series-preset-buttons">{group.presets.map(preset =>
-                    <button type="button" class={`taylor-series-preset-btn${samePoint(point, preset) ? ' toggle-active' : ''}`}
-                        onClick={() => setPoint(preset.re, preset.im)}>{preset.label}</button>)}</div>
-            </div>)}
+            <div class="taylor-series-preset-buttons">
+                {TAYLOR_CENTER_PRESETS.map(preset =>
+                    <button type="button" key={preset.label} class={`taylor-series-preset-btn${samePoint(point, preset) ? ' toggle-active' : ''}`}
+                        onClick={() => setPoint(preset.re, preset.im)}>{preset.label}</button>)}
+            </div>
         </div>
         <div class="taylor-series-input-row">
             <label class="taylor-series-input-field"><span class="taylor-series-input-caption">Re({label})</span>
@@ -47,5 +48,9 @@ export function ComplexParameterEditor({ stateKey, label }) {
                 <input ref={imInput} type="text" class="small-number-input taylor-series-text-input" value={imText}
                     onInput={event => update('im', event.currentTarget.value)} /></label>
         </div>
+        {pickLabel && <button type="button" class={`taylor-pick-center-btn${isPicking ? ' is-picking' : ''}`} style={{ marginTop: '0.45rem' }}
+            onClick={() => { state.canvasClickPickerTarget = isPicking ? null : stateKey; requestUiRedraw(); }}>
+            {isPicking ? 'Click Canvas to Pin…' : pickLabel}
+        </button>}
     </>;
 }

@@ -3,10 +3,9 @@
 import { createObservableStore } from './observable-store.js';
 import {
     DEFAULT_CANVAS_WIDTH,
-    DEFAULT_CANVAS_HEIGHT,
-    SPHERE_INITIAL_ROT_X,
-    SPHERE_INITIAL_ROT_Y
+    DEFAULT_CANVAS_HEIGHT
 } from '../constants/rendering.js';
+import { GRID_SHAPE_DEFAULTS } from '../constants/grid-shapes.js';
 
 export const zPlaneInitialRanges = { x: [-3.5, 3.5], y: [-3.0, 3.0] };
 export const wPlaneInitialRanges = { x: [-6.5, 6.5], y: [-6.5, 6.5] };
@@ -17,7 +16,8 @@ export const zPlaneParams = {
     origin: { x: 0, y: 0 },
     scale: { x: 1, y: 1 },
     currentVisXRange: [...zPlaneInitialRanges.x],
-    currentVisYRange: [...zPlaneInitialRanges.y]
+    currentVisYRange: [...zPlaneInitialRanges.y],
+    preciseViewport: null
 };
 
 export const wPlaneParams = {
@@ -25,31 +25,50 @@ export const wPlaneParams = {
     height: DEFAULT_CANVAS_HEIGHT,
     origin: { x: 0, y: 0 },
     scale: { x: 1, y: 1 },
-    xRange: [...wPlaneInitialRanges.x],
-    yRange: [...wPlaneInitialRanges.y]
+    currentVisXRange: [...wPlaneInitialRanges.x],
+    currentVisYRange: [...wPlaneInitialRanges.y],
+    preciseViewport: null
 };
 
-export const sphereViewParams = {
-    z: { rotX: SPHERE_INITIAL_ROT_X, rotY: SPHERE_INITIAL_ROT_Y, dragging: false, lastMouseX: 0, lastMouseY: 0, radius: 0, centerX: 0, centerY: 0 },
-    w: { rotX: SPHERE_INITIAL_ROT_X, rotY: SPHERE_INITIAL_ROT_Y, dragging: false, lastMouseX: 0, lastMouseY: 0, radius: 0, centerX: 0, centerY: 0 }
+const laplaceComInitialRanges = { x: [0, 8], y: [-1.2, 1.2] };
+const laplaceSpectrumInitialRanges = { x: [-0.5, 16.5], y: [0, 1.5] };
+
+export const laplaceComPlaneParams = {
+    width: DEFAULT_CANVAS_WIDTH,
+    height: DEFAULT_CANVAS_HEIGHT,
+    origin: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    currentVisXRange: [...laplaceComInitialRanges.x],
+    currentVisYRange: [...laplaceComInitialRanges.y],
+    preciseViewport: null
 };
 
-export const sliderParamKeys = ['a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'fractionalPowerN'];
+export const laplaceSpectrumPlaneParams = {
+    width: DEFAULT_CANVAS_WIDTH,
+    height: DEFAULT_CANVAS_HEIGHT,
+    origin: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    currentVisXRange: [...laplaceSpectrumInitialRanges.x],
+    currentVisYRange: [...laplaceSpectrumInitialRanges.y],
+    preciseViewport: null
+};
+
+export const sliderParamKeys = ['a0', 'b0', 'circleR', 'fractionalPowerN'];
 
 const rawState = {
     a0: 0.0, b0: 0.0,
-    circleR: 1.0, ellipseA: 1.5, ellipseB: 0.7,
+    circleR: 1.0,
     mobiusA: { re: 1, im: 0 },
     mobiusB: { re: 0, im: 0 },
     mobiusC: { re: 0, im: 0 },
     mobiusD: { re: 1, im: 0 },
     polynomialN: 2,
-    polynomialCoeffs: [], 
+    polynomialCoeffs: [{ re: 1, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }],
     fractionalPowerN: 0.5,
     expBase: { re: Math.E, im: 0 },
     logBase: { re: Math.E, im: 0 },
     besselOrder: { re: 0, im: 0 },
-    currentFunction: 'cos', 
+    currentFunction: 'cos',
     mapPresentation: 'function',
     conformalGridEnabled: false,
     currentInputShape: 'grid_cartesian',
@@ -58,21 +77,27 @@ const rawState = {
     domainColoringEnabled: false,
     domainColoringKeyVisible: false,
     gridDensity: 15,
+    gridParameters: Object.fromEntries(
+        Object.entries(GRID_SHAPE_DEFAULTS).map(([shape, parameters]) => [shape, { ...parameters }])
+    ),
     riemannSurfaceResolution: 50,
     showZerosPoles: false,
     showCriticalPoints: false,
     probeActive: false,
     probeZ: { re: 0, im: 0 },
     probeNeighborhoodSize: 0.2,
-    riemannSphereViewEnabled: false,
-    riemannTransformationEnabled: false,
-    riemannTransformationProgressZ: 0.0,
-    riemannTransformationPlayingZ: true,
-    riemannTransformationProgressW: 0.0,
-    riemannTransformationPlayingW: true,
-    splitViewEnabled: false, 
+    manifold3dViewEnabled: false,
+    selectedManifold: 'sphere',
+    manifoldTransformationEnabled: false,
+    manifoldTransformationProgressZ: 0.0,
+    manifoldTransformationPlayingZ: true,
+    manifoldTransformationSpeedZ: 1.0,
+    manifoldTransformationProgressW: 0.0,
+    manifoldTransformationPlayingW: true,
+    manifoldTransformationSpeedW: 1.0,
     zPlaneZoom: 1.0,
     wPlaneZoom: 1.0,
+    canvasZoomControlsEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('complex_canvasZoomControlsEnabled') === 'true' : false,
     zeros: [],
     poles: [],
     criticalPoints: [],
@@ -80,24 +105,20 @@ const rawState = {
     zetaContinuationEnabled: false,
     vectorFieldEnabled: false,
     vectorFieldFunction: 'f(z)',
-    vectorFieldScale: 0.1,
+    vectorFieldScale: 1,
     vectorArrowThickness: 1.5,
-    vectorArrowHeadSize: 6,
+    vectorArrowHeadSize: 2,
     streamlineFlowEnabled: false,
     streamlineStepSize: 0.06,
     streamlineMaxLength: 400,
     streamlineThickness: 1.5,
     streamlineSeedDensityFactor: 0.8,
 
-    imageSize: 2.0,
-    imageOpacity: 1.0,
-    imageAspectRatio: 1.0,
-    imageContentVersion: 0,
+    mediaSize: 2.0,
+    mediaOpacity: 1.0,
+    mediaAspectRatio: 1.0,
+    mediaVersion: 0,
     videoProcessingFps: 60,
-    videoSize: 2.0,
-    videoOpacity: 1.0,
-    videoAspectRatio: 1.0,
-    videoFrameVersion: 0,
     videoIsPlaying: false,
     videoStatusMessage: 'No video loaded.',
 
@@ -105,7 +126,11 @@ const rawState = {
     isWFullScreen: false,
     fullscreenWIndex: 0,
     topControlsCollapsed: false,
-    verticalLayoutEnabled: undefined,
+    controlCategory: 'complex_functions',
+    domainPaletteGuideVisible: false,
+    surfacePaletteGuideVisible: false,
+    contextMenuPanel: '',
+    verticalLayoutEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('complex_verticalLayoutEnabled') === 'true' : false,
 
     cauchyIntegralModeEnabled: false,
     arbitraryShapeMode: 'draw',
@@ -115,13 +140,12 @@ const rawState = {
     arbitraryShapeClosed: true,
     arbitraryShapePoints: [],
 
-    branchCutType: 'ray',
     branchCutAngle: Math.PI,
-    branchCutPoints: [],
     continuationPath: [],
     continuationValues: [],
     continuationSheet: 0,
     continuationValue: null,
+    continuationAngle: null,
     branchDrawMode: null,
 
     preimageExplorerEnabled: false,
@@ -138,28 +162,27 @@ const rawState = {
     themeId: 'rose',
     gridColor1: '#FB923C',
     gridColor2: '#C084FC',
+    backgroundGridOpacity: 1.0,
     radialDiscreteStepsEnabled: false,
-    radialDiscreteStepsCount: 200, 
+    radialDiscreteStepsCount: 200,
 
     taylorSeriesEnabled: false,
     taylorSeriesOrder: 3,
-    taylorSeriesCenter: { re: 0, im: 0 }, 
+    taylorSeriesCenter: { re: 0, im: 0 },
     taylorSeriesConvergenceRadius: Infinity,
     taylorSeriesCustomCenterEnabled: false,
     taylorSeriesCustomCenter: { re: 0, im: 0 },
-    taylorSeriesColorAxisX: 'rgba(200, 150, 255, 0.7)',
-    taylorSeriesColorAxisY: 'rgba(255, 150, 100, 0.7)',
-    taylorSeriesColorConvergenceDiskFill: 'rgba(150, 150, 150, 0.2)',
-    taylorSeriesColorConvergenceDiskStroke: 'rgba(150, 150, 150, 0.5)',
+    taylorSeriesCanvasClickCenterEnabled: false,
+    canvasClickPickerTarget: null,
+    taylorSeriesHoverPoint: null,
 
     particleAnimationEnabled: false,
     particleDensity: 150,
     particleSpeed: 0.04,
     particleMaxLifetime: 300,
 
-    threeSphereEnabled: false,
-    threeSphereOpacity: 0.10,
-    sphereGridOpacity: 0.0,
+    manifoldSurfaceOpacity: 0.35,
+    manifoldGridOpacity: 0.25,
     riemannSurfaceEnabled: false,
     riemannSurfaceSheets: 5,
     riemannSurfaceBranchCenter: 0,
@@ -170,49 +193,59 @@ const rawState = {
     contoursEnabled: false,
     contourInterval: 0.5,
     contourThickness: 1.5,
-    fourierModeEnabled: false,
-    fourierFunction: 'sine',
-    fourierFrequency: 1.0,
-    fourierAmplitude: 1.0,
-    fourierTimeWindow: 4.0,
-    fourierSamples: 128,
-    fourierTimeDomainSignal: [],
-    fourierDFTResult: [],
-    fourierWindingFrequency: 1.0, 
-    fourierWindingTime: 1.0, 
-
     laplaceModeEnabled: false,
     laplaceFunction: 'exponential',
     laplaceFrequency: 2.0,
     laplaceDamping: 0.5,
+    laplaceAmplitude: 1.0,
+    laplaceTimeWindow: 4.0,
+    laplaceSamples: 1024,
     laplaceSigma: 0.0,
     laplaceOmega: 1.0,
-    laplaceAmplitude: 1.0,
-    laplaceShowROC: true,
+    laplaceShowROC: false,
     laplaceVizMode: 'magnitude',
     laplaceClipHeight: 10,
     laplaceShowPolesZeros: true,
     laplaceShowFourierLine: true,
+    laplaceHideIntegralEvaluation: true,
+    laplaceHide3DSurface: false,
+    laplaceShowSpectrum: true,
+    laplaceShowComGraph: true,
+    laplaceComComponent: 'both',
+    laplaceSyncWindingVector: true,
+    laplaceShowBarriers: true,
     laplaceAnimationTime: 1.0,
     laplaceAnimationPlaying: false,
     laplaceAnimationSpeed: 3.0,
     laplaceAnimationLoop: true,
     laplaceTimeDomainSignal: [],
-    laplaceSurface: [],
+    laplaceSpectrum: [],
+    laplaceComSweep: [],
+    laplaceSurface: null,
     laplacePoles: [],
     laplaceZeros: [],
     laplaceCurrentValue: null,
     laplaceROC: null,
     isLaplace3DFullScreen: false,
+    isLaplaceComFullScreen: false,
+    isLaplaceSpectrumFullScreen: false,
+    laplaceShowFourier3D: true,
+    fourier3DParallelGraphs: 4,
+    isFourier3DFullScreen: false,
     realPlotsEnabled: false,
     realPlotsInputExpr: 'x',
     realPlotsInputIsCustom: false,
+    realPlotsInputError: '',
     realPlotsImagExpr: '0',
     realPlotsImagIsCustom: false,
+    realPlotsImagError: '',
     realPlotsOutputComponent: 'real',
-    realPlotsPalette: 'viridis',
+    surfacePalette: 'viridis',
     realPlotsColorMode: 'height',
     realPlotsHeightScale: 1.0,
+    realPlotsBrightness: 0.5,
+    realPlotsContrast: 1.0,
+    realPlotsSaturation: 1.0,
     isRealPlotsFullScreen: false,
     graphViewEnabled: false,
     graphSelectedShape: '',
@@ -229,6 +262,7 @@ const rawState = {
     isContour2DFullScreen: false,
     chainingEnabled: false,
     chainingMode: 'recursion',
+    chainSeed: { re: 0, im: 0 },
     chainCount: 1,
     currentFunctionPreset: null,
     orbitColoringMode: 'value',
@@ -278,33 +312,18 @@ const rawState = {
             invalidPolicy: 'stop'
         },
         aggregateParameter: { re: 2, im: 0 },
-        parameters: [
-            { id: 'k', name: 'k', value: 1, min: -5, max: 5, step: 0.05 }
-        ],
         playback: {
             visibleCount: 50,
             playing: false,
             speed: 12,
-            loop: true,
-            followResult: false
+            loop: true
         },
-        display: {
-            showInputPoints: true,
-            showInputPath: false,
-            showTermPoints: true,
-            showPartialPath: true,
-            showVectors: true,
-            showLabels: false,
-            showInvalid: true,
-            colorMode: 'semantic',
-            productView: 'orbit',
-            pointRadius: 3
-        },
-        selectedSampleId: null,
+        productView: 'orbit',
         preset: 'custom'
     },
 
     navigationModeEnabled: false,
+    navigationPressedKeys: [],
     navigationSize: 0.55,
     navigationOpacity: 0.9,
     navigationSpeed: 1.1,
@@ -313,9 +332,10 @@ const rawState = {
 
 const store = createObservableStore(rawState, {
     normalize(key, value, values) {
-        return key === 'probeActive' && value === true && values.chainingEnabled
-            ? false
-            : value;
+        if (key === 'probeActive' && value === true && values.chainingEnabled) return false;
+        if (key === 'show2DContourPlot' && value === true &&
+            !values.realPlotsEnabled && !values.riemannSurfaceEnabled && !values.laplaceModeEnabled) return false;
+        return value;
     }
 });
 
@@ -329,28 +349,51 @@ subscribeState(({ value }) => {
     if (value && state.probeActive) state.probeActive = false;
 }, 'chainingEnabled');
 
+// Preserve mutual exclusivity between domain coloring and 3D manifold modes.
+subscribeState(({ value }) => {
+    if (value && state.manifold3dViewEnabled) {
+        state.manifold3dViewEnabled = false;
+        state.manifoldTransformationEnabled = false;
+    }
+}, 'domainColoringEnabled');
+
+subscribeState(({ value }) => {
+    if (value && state.domainColoringEnabled) {
+        state.domainColoringEnabled = false;
+    }
+}, 'manifold3dViewEnabled');
+
+subscribeState(() => {
+    if (!state.realPlotsEnabled && !state.riemannSurfaceEnabled &&
+        !state.laplaceModeEnabled && state.show2DContourPlot) {
+        state.show2DContourPlot = false;
+    }
+}, ['realPlotsEnabled', 'riemannSurfaceEnabled', 'laplaceModeEnabled']);
+
+subscribeState(() => {
+    if (state.canvasClickPickerTarget || state.taylorSeriesCanvasClickCenterEnabled) {
+        state.canvasClickPickerTarget = null;
+        state.taylorSeriesCanvasClickCenterEnabled = false;
+        state.taylorSeriesHoverPoint = null;
+    }
+}, 'currentFunction');
+
 export const context = {
     zCanvas: null,
     wCanvas: null,
     zCtx: null,
     wCtx: null,
     zDomainColorCanvas: null,
-    wDomainColorCanvas: null,
     zDomainColorCtx: null,
-    wDomainColorCtx: null,
 
     wCanvasList: [],
     wCtxList: [],
     wPlaneParamsList: [],
     wPlaneThreeContainersList: [],
-    sphereViewWParamsList: [],
     wPlanarTransformedLayerCacheList: [],
-
     redrawRequest: null,
     redrawQueued: false,
-    animationStates: {},
     domainColoringDirty: true,
-    domainColoringDirtyQueued: false,
 
     controls: {}
 };

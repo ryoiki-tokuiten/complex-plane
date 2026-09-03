@@ -1,4 +1,10 @@
 /** @jsxImportSource preact */
+import { useEffect, useRef } from 'preact/hooks';
+import { state } from '../../store/state.js';
+import { domainPalettes } from '../../constants/domain-palettes.js';
+import { SURFACE_PALETTES } from '../../constants/surface-palettes.js';
+import { drawDomainPalettePreview, drawSurfacePalettePreview } from '../../rendering/draw-palette-preview.js';
+import { useAppState } from '../state-hooks.js';
 
 const GUIDES = {
     domain: {
@@ -31,15 +37,31 @@ const GUIDES = {
 
 export function PaletteGuide({ type }) {
     const guide = GUIDES[type];
+    const circleRef = useRef(null);
+    const stripRef = useRef(null);
+    const paletteId = useAppState(type === 'domain' ? 'domainPalette' : 'surfacePalette');
+    const themeId = useAppState('themeId');
+    const brightness = useAppState(type === 'domain' ? 'domainBrightness' : 'realPlotsBrightness');
+    const contrast = useAppState(type === 'domain' ? 'domainContrast' : 'realPlotsContrast');
+    const saturation = useAppState(type === 'domain' ? 'domainSaturation' : 'realPlotsSaturation');
+    const palettes = type === 'domain' ? domainPalettes : SURFACE_PALETTES;
+    const title = palettes.find(palette => palette.id === paletteId)?.name || guide.title;
+
+    useEffect(() => {
+        if (type === 'domain') drawDomainPalettePreview(circleRef.current, stripRef.current);
+        else drawSurfacePalettePreview(circleRef.current, stripRef.current);
+    }, [type, paletteId, themeId, brightness, contrast, saturation]);
+
     return (
         <>
             <div class="dynamic-studio-header">
                 <div class="dynamic-studio-identity">
                     <span class="dynamic-section-eyebrow">{guide.eyebrow}</span>
-                    <strong id={guide.titleId}>{guide.title}</strong>
+                    <strong id={guide.titleId}>{title}</strong>
                 </div>
                 <div class="dynamic-studio-actions">
                     <button id={guide.closeId} type="button" class="dynamic-studio-action dynamic-studio-close"
+                        onClick={() => { state[type === 'domain' ? 'domainPaletteGuideVisible' : 'surfacePaletteGuideVisible'] = false; }}
                         aria-label={guide.closeLabel}>Close</button>
                 </div>
             </div>
@@ -50,13 +72,13 @@ export function PaletteGuide({ type }) {
                 </div>
             </div>
             <div class="palette-guide-wheel">
-                <canvas id={guide.canvasId} width="360" height="360" class="palette-guide-wheel-canvas" />
+                <canvas ref={circleRef} id={guide.canvasId} width="360" height="360" class="palette-guide-wheel-canvas" />
             </div>
             <div class="palette-guide-strip">
                 <div class="dynamic-intro-title palette-guide-strip-title">{guide.stripTitle}</div>
                 <div class="dynamic-intro-copy palette-guide-strip-copy">{guide.stripCopy}</div>
                 <div class="palette-guide-scale">
-                    <canvas id={guide.stripId} width="320" height="24" class="palette-guide-scale-canvas" />
+                    <canvas ref={stripRef} id={guide.stripId} width="320" height="24" class="palette-guide-scale-canvas" />
                     <div class="palette-guide-ticks">
                         {guide.ticks.map(([position, label]) => (
                             <span key={position} class={`palette-guide-tick is-${position}`}>{label}</span>

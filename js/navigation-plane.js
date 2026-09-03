@@ -1,16 +1,16 @@
-import { state, context, zPlaneParams, wPlaneParams } from './store/state.js';
+import { state, zPlaneParams, wPlaneParams } from './store/state.js';
 import { runtime } from './store/runtime.js';
-import { eventBus } from './store/events.js';
+import { requestDomainRedraw } from './rendering/redraw-scheduler.js';
 import { ROCKET_DATA_URIS } from './rocket-assets.js';
-import { getChainedTransformFunction } from './math-utils.js';
+import { getChainedTransformFunction } from './native/map-runtime.js';
 import { updatePlaneViewportRanges } from './utils/canvas-utils.js';
-import { drawImageWithWebGL } from './rendering/draw-image-webgl.js';
+import { drawRasterWithWebGL } from './rendering/draw-image-webgl.js';
 import { drawPlanarTransformedLine, drawComplexLineSetOnPlane } from './rendering/draw-planar.js';
-import { setupVisualParameters } from './utils/dom-utils.js';
-
-const { controls } = context;
+import { isFiniteComplex } from './utils/numeric-contracts.js';
+import { getMediaDisplayDimensions } from './utils/raster-media.js';
 
 const NAVIGATION_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const NAVIGATION_KEYS_LIST = [...NAVIGATION_KEYS];
 let navigationAnimationFrame = null;
 
 // ── Rocket image assets ────────────────────────────────────────────────────────
@@ -23,13 +23,14 @@ const NAVIGATION_ROCKET_IMAGES = {
     '-y': null,
 };
 
-(function preloadRocketImages() {
+(() => {
+    if (typeof Image === 'undefined') return;
     Object.entries(ROCKET_DATA_URIS).forEach(([key, dataUri]) => {
         const img = new Image();
         img.onload = () => { NAVIGATION_ROCKET_IMAGES[key] = img; };
         img.src = dataUri;
     });
-}());
+})();
 
 /**
  * Given a heading angle (radians, from Math.atan2), pick the best directional
@@ -53,56 +54,12 @@ function getRocketImageForHeading(heading) {
     }
 }
 
-function isFiniteComplexPoint(point) {
-    return point &&
-        Number.isFinite(point.re) &&
-        Number.isFinite(point.im);
-}
-
 function isNavigationFormTarget(target) {
     return !!(target && target.closest && target.closest('input, select, textarea, button, [contenteditable="true"]'));
 }
 
-function readNavigationControlValue(controlKey, fallback, parser = parseFloat) {
-    const control = controls[controlKey];
-    if (!control) return fallback;
-    const value = parser(control.value);
-    return Number.isNaN(value) ? fallback : value;
-}
-
-export function initializeNavigationStateFromControls() {
-    state.navigationSize = readNavigationControlValue('navigationSizeSlider', state.navigationSize);
-    state.navigationOpacity = readNavigationControlValue('navigationOpacitySlider', state.navigationOpacity);
-    state.navigationSpeed = readNavigationControlValue('navigationSpeedSlider', state.navigationSpeed);
-    state.navigationTrailLength = readNavigationControlValue('navigationTrailLengthSlider', state.navigationTrailLength, value => parseInt(value, 10));
-    state.navigationModeEnabled = controls.enableNavigationModeCb ? controls.enableNavigationModeCb.checked : state.navigationModeEnabled;
-    syncNavigationControls();
-}
-
-export function syncNavigationControls() {
-    const inSpecialMode = state.fourierModeEnabled || state.laplaceModeEnabled;
-    if (controls.navigationParams) {
-        controls.navigationParams.classList.toggle('hidden', inSpecialMode);
-    }
-    if (controls.enableNavigationModeCb) {
-        controls.enableNavigationModeCb.checked = state.navigationModeEnabled && !inSpecialMode;
-        controls.enableNavigationModeCb.disabled = inSpecialMode;
-    }
-    if (controls.navigationControlsContainer) {
-        controls.navigationControlsContainer.classList.toggle('hidden', !state.navigationModeEnabled || inSpecialMode);
-    }
-    const keyhintOverlay = document.getElementById('navigation_keyhint_overlay');
-    if (keyhintOverlay) {
-        keyhintOverlay.classList.toggle('hidden', !state.navigationModeEnabled || inSpecialMode);
-    }
-    if (controls.navigationSizeValueDisplay) controls.navigationSizeValueDisplay.textContent = state.navigationSize.toFixed(2);
-    if (controls.navigationOpacityValueDisplay) controls.navigationOpacityValueDisplay.textContent = state.navigationOpacity.toFixed(2);
-    if (controls.navigationSpeedValueDisplay) controls.navigationSpeedValueDisplay.textContent = state.navigationSpeed.toFixed(2);
-    if (controls.navigationTrailLengthValueDisplay) controls.navigationTrailLengthValueDisplay.textContent = state.navigationTrailLength;
-}
-
 export function setNavigationModeEnabled(enabled) {
-    if (enabled && (state.fourierModeEnabled || state.laplaceModeEnabled)) {
+    if (enabled && state.laplaceModeEnabled) {
         enabled = false;
     }
 
@@ -110,32 +67,21 @@ export function setNavigationModeEnabled(enabled) {
     state.probeActive = false;
 
     if (enabled) {
-        state.riemannSphereViewEnabled = false;
-        state.splitViewEnabled = false;
-        state.threeSphereEnabled = false;
-        if (controls.enableRiemannSphereCb) controls.enableRiemannSphereCb.checked = false;
-        if (controls.enableSplitViewCb) controls.enableSplitViewCb.checked = false;
-        if (controls.enableThreeSphereCb) controls.enableThreeSphereCb.checked = false;
+        state.manifold3dViewEnabled = false;
+        state.manifoldTransformationEnabled = false;
         followNavigationViewports();
     } else {
         runtime.navigation.keys = {};
+        state.navigationPressedKeys = [];
         stopNavigationLoop();
     }
-
-    syncNavigationControls();
-}
-
-export function resetNavigationVehicle() {
-    runtime.navigation.position = { re: 0, im: 0 };
-    runtime.navigation.heading = 0;
-    runtime.navigation.trail = [];
-    setupVisualParameters(true, true);
-    followNavigationViewports();
-    eventBus.emit('redraw:domain', true);
 }
 
 function getNavigationInputVector() {
-    const keys = runtime.navigation.keys || {};
+    const keys = runtime.navigation.keys;
+    if (!keys || typeof keys !== 'object' || Array.isArray(keys)) {
+        throw new Error('Navigation runtime requires a key-state object.');
+    }
     let x = 0;
     let y = 0;
     if (keys.ArrowLeft) x -= 1;
@@ -157,16 +103,7 @@ export function setNavigationKey(event, pressed) {
 
     event.preventDefault();
     runtime.navigation.keys[event.key] = pressed;
-
-    // Visual feedback on the keyhint widget
-    const keyToDirection = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
-    const dir = keyToDirection[event.key];
-    if (dir) {
-        const el = document.querySelector(`.keyhint-key [data-lucide="arrow-${dir}"]`);
-        if (el && el.parentElement) {
-            el.parentElement.classList.toggle('active', pressed);
-        }
-    }
+    state.navigationPressedKeys = NAVIGATION_KEYS_LIST.filter(key => runtime.navigation.keys[key]);
 
     if (pressed) startNavigationLoop();
     return true;
@@ -190,7 +127,7 @@ function updateNavigationLoop(now) {
     if (!state.navigationModeEnabled || !hasNavigationInput()) return;
 
     const viewportShifted = updateNavigationVehicle(now);
-    eventBus.emit('redraw:domain', Boolean(viewportShifted && state.domainColoringEnabled));
+    requestDomainRedraw(Boolean(viewportShifted && state.domainColoringEnabled));
 
     if (hasNavigationInput()) {
         navigationAnimationFrame = requestAnimationFrame(updateNavigationLoop);
@@ -222,7 +159,7 @@ function updateNavigationVehicle(now) {
 }
 
 function centerPlaneOnNavigationPoint(planeParams, point, panState) {
-    if (!isFiniteComplexPoint(point) || (panState && panState.isPanning)) return false;
+    if (!isFiniteComplex(point) || (panState && panState.isPanning)) return false;
 
     const nextOriginX = planeParams.width / 2 - point.re * planeParams.scale.x;
     const nextOriginY = planeParams.height / 2 + point.im * planeParams.scale.y;
@@ -235,7 +172,7 @@ function centerPlaneOnNavigationPoint(planeParams, point, panState) {
     return shifted;
 }
 
-export function followNavigationViewports() {
+function followNavigationViewports() {
     let shifted = centerPlaneOnNavigationPoint(zPlaneParams, runtime.navigation.position, runtime.interaction.panZ);
 
     const transformFunc = getChainedTransformFunction(state.currentFunction);
@@ -245,66 +182,6 @@ export function followNavigationViewports() {
     const mappedCenter = transformFunc(runtime.navigation.position.re, runtime.navigation.position.im);
     shifted = centerPlaneOnNavigationPoint(wPlaneParams, mappedCenter, runtime.interaction.panW) || shifted;
     return shifted;
-}
-
-// ── Image state injection for the existing pipeline ────────────────────────────
-//
-// Instead of custom drawing, we temporarily set the rocket PNG as the active
-// image (runtime.media.image, state.currentInputShape='image', etc.) so that the
-// existing drawPlanarInputShape / drawPlanarTransformedShape / drawImageWithWebGL
-// pipeline processes it exactly like a user-uploaded image.
-//
-// applyNavigationImageState()  → swaps state in
-// restoreNavigationImageState() → restores the previous state
-//
-// These are called by the renderer AROUND the normal shape-drawing calls.
-
-let _navImageStateSaved = null;
-
-function applyNavigationImageState(pos) {
-    const img = getRocketImageForHeading(runtime.navigation.heading);
-    if (!img || !(img instanceof HTMLImageElement) || !img.complete || img.naturalWidth === 0) {
-        return false;
-    }
-
-    // Save existing state
-    _navImageStateSaved = {
-        currentInputShape: state.currentInputShape,
-        uploadedImage: runtime.media.image,
-        imageAspectRatio: state.imageAspectRatio,
-        imageSize: state.imageSize,
-        imageOpacity: state.imageOpacity,
-        a0: state.a0,
-        b0: state.b0,
-        imageContentVersion: state.imageContentVersion,
-    };
-
-    // Inject the rocket image as the active raster source
-    state.currentInputShape = 'image';
-    runtime.media.image = img;
-    state.imageAspectRatio = img.naturalWidth / Math.max(1, img.naturalHeight);
-    state.imageSize = state.navigationSize * 2;
-    state.imageOpacity = state.navigationOpacity;
-    state.a0 = pos.re;
-    state.b0 = pos.im;
-    state.imageContentVersion = _navImageStateSaved.imageContentVersion + 1;
-
-    return true;
-}
-
-function restoreNavigationImageState() {
-    if (!_navImageStateSaved) return;
-
-    state.currentInputShape = _navImageStateSaved.currentInputShape;
-    runtime.media.image = _navImageStateSaved.uploadedImage;
-    state.imageAspectRatio = _navImageStateSaved.imageAspectRatio;
-    state.imageSize = _navImageStateSaved.imageSize;
-    state.imageOpacity = _navImageStateSaved.imageOpacity;
-    state.a0 = _navImageStateSaved.a0;
-    state.b0 = _navImageStateSaved.b0;
-    state.imageContentVersion = _navImageStateSaved.imageContentVersion;
-
-    _navImageStateSaved = null;
 }
 
 function drawNavigationTrail(ctx, planeParams, transformFunc) {
@@ -325,39 +202,26 @@ function drawNavigationTrail(ctx, planeParams, transformFunc) {
     ctx.restore();
 }
 
-/**
- * drawNavigationLayer — called by renderer.js for both z-plane and w-plane.
- *
- * This function injects the rocket image into the global state, then calls the
- * SAME pipeline that the regular image-upload feature uses:
- *   - Z-plane: drawImageWithWebGL(ctx, planeParams, false)
- *   - W-plane: drawImageWithWebGL(ctx, planeParams, false, 0)
- *
- * Since the position is pre-mapped via the global JS transform function,
- * WebGL is called with isWP = false (identity mapping) on both planes to render
- * the vehicle correctly without distortions or branch-cut issues.
- */
-export function drawNavigationLayer(ctx, planeParams, planeKey, transformFunc = null) {
+export function drawNavigationLayer(ctx, planeParams, transformFunc = null) {
     if (!state.navigationModeEnabled) return;
 
-    // Draw trail
     drawNavigationTrail(ctx, planeParams, transformFunc);
 
-    // Compute the correct position of the vehicle in this plane's coordinates
     const pos = transformFunc
         ? transformFunc(runtime.navigation.position.re, runtime.navigation.position.im)
         : runtime.navigation.position;
+    if (!isFiniteComplex(pos)) return;
 
-    if (!pos || isNaN(pos.re) || isNaN(pos.im) || !isFinite(pos.re) || !isFinite(pos.im)) {
-        return;
-    }
-
-    // Inject the rocket image into state, centering it at pos
-    if (!applyNavigationImageState(pos)) return;
-
-    try {
-        drawImageWithWebGL(ctx, planeParams, false, 0);
-    } finally {
-        restoreNavigationImageState();
-    }
+    const source = getRocketImageForHeading(runtime.navigation.heading);
+    if (!source?.complete || !source.naturalWidth) return;
+    drawRasterWithWebGL(ctx, planeParams, false, null, {
+        source,
+        token: 0,
+        center: pos,
+        size: getMediaDisplayDimensions(
+            state.navigationSize * 2,
+            source.naturalWidth / Math.max(1, source.naturalHeight)
+        ),
+        opacity: state.navigationOpacity
+    });
 }

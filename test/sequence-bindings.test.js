@@ -39,6 +39,18 @@ test('symbol bindings support geometric and harmonic progressions', () => {
     assert.deepEqual(generated.series.h.map(value => value.re), [1 / 2, 1 / 4, 1 / 6, 1 / 8]);
 });
 
+test('expression sequence bindings preserve their native filter program', () => {
+    const generated = generateSequenceBindingSeries([{
+        symbol: 'q',
+        kind: 'expression',
+        generatorExpression: 'j + 1',
+        filterExpression: 'mod(d, 2) == 0'
+    }], 4);
+
+    assert.deepEqual(generated.series.q.map(value => value.re), [2, 4, 6, 8]);
+    assert.deepEqual(generated.environments.map(environment => environment.q.re), [2, 4, 6, 8]);
+});
+
 test('geometric sequence bindings match the exact finite partial-sum formula', () => {
     const generated = generateSequenceBindingSeries([
         { symbol: 'z', kind: 'geometric', start: 3, ratio: -0.5 }

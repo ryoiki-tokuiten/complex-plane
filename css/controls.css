@@ -1,0 +1,506 @@
+
+/* Basic Button Styling */
+button {
+    background-color: var(--card-bg-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 0.6rem 1.1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+    font-family: var(--font-family);
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+/* More compact buttons specifically for canvas headers */
+.canvas-header-controls button {
+    padding: 0.4rem 0.8rem;
+    /* Reduced padding - Stays as is, not overridden by general button padding */
+    font-size: 0.85rem;
+    /* Slightly smaller font - Stays as is */
+}
+
+button:hover {
+    background-color: color-mix(in srgb, var(--card-bg-color) 90%, white 10%);
+    border-color: var(--accent-purple);
+    color: var(--text-color);
+
+    box-shadow: 0 3px 10px rgba(var(--bg-color-rgb), 0.3);
+}
+
+/* Generic style for button being actively pressed */
+button:active {
+    background-color: var(--accent-purple-dark);
+    border-color: var(--accent-purple-dark);
+    color: var(--text-color);
+    box-shadow: 0 1px 5px rgba(var(--bg-color-rgb), 0.2);
+
+}
+
+/* Navigation and category buttons in function-controls-panel */
+.panel-category-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    padding-bottom: 0.35rem;
+    padding-right: 140px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+    width: 100%;
+}
+
+.category-nav-btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.category-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.46rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--card-bg-color) 92%, white);
+    color: var(--text-secondary-color);
+    font-size: 0.82rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.category-nav-btn:hover {
+    border-color: color-mix(in srgb, var(--accent-purple) 60%, var(--border-color));
+    background: color-mix(in srgb, var(--accent-purple) 10%, var(--card-bg-color));
+    color: var(--text-color);
+}
+
+.category-nav-btn.active {
+    background: color-mix(in srgb, var(--accent-purple) 14%, var(--card-bg-color));
+    color: var(--accent-purple);
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 14px var(--glow-color);
+    font-weight: 600;
+}
+
+.function-subgrid-container {
+    padding: 0.15rem 0 0.35rem;
+    transition: all 0.25s ease;
+}
+
+.panel-content-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    min-width: 0;
+}
+
+/* Container for function selection buttons */
+.function-button-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Specific style for persistently active function selection buttons */
+.function-button-grid>button.active {
+    background-color: rgba(255, 255, 255, 0.04);
+    color: var(--accent-purple);
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 15px var(--glow-color);
+    /* Glassy glow using active theme glow */
+    filter: brightness(1);
+
+    transform: translateY(0px);
+
+}
+
+.icon-button {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.icon-button svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 1.8;
+    transition: transform 0.2s ease;
+}
+
+.canvas-icon-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+
+.canvas-icon-button:hover,
+.canvas-icon-button:active {
+    transform: none;
+}
+
+.canvas-icon-button:hover {
+    background-color: color-mix(in srgb, var(--card-bg-color) 70%, var(--bg-color));
+    border-color: color-mix(in srgb, var(--accent-purple) 68%, var(--border-color));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-purple) 12%, transparent), 0 6px 16px rgba(0, 0, 0, 0.14);
+}
+
+.canvas-icon-button:active {
+    background-color: color-mix(in srgb, var(--card-bg-color) 50%, var(--bg-color));
+    border-color: var(--accent-purple);
+    color: var(--text-color);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-purple) 16%, transparent);
+}
+
+.top-controls-toggle-btn {
+    width: 40px;
+    height: 40px;
+}
+
+.top-controls-toggle-btn * {
+    pointer-events: none;
+}
+
+.top-controls-maximize-icon {
+    display: none;
+}
+
+#controls_options_section.is-collapsed .top-controls-minimize-icon {
+    display: none;
+}
+
+#controls_options_section.is-collapsed .top-controls-maximize-icon {
+    display: inline-flex;
+}
+
+/* Generic active state for toggle buttons (e.g., for dependent settings) */
+button.toggle-active {
+    background-color: rgba(255, 255, 255, 0.04);
+    color: var(--accent-purple);
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 15px var(--glow-color);
+    transform: translateY(0px);
+    /* Override hover effects for persistent active state */
+}
+
+/* Basic Select Styling */
+select {
+    background-color: rgba(var(--bg-color-rgb), 0.3);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 2rem 0.5rem 0.75rem;
+    /* Adjusted padding for arrow */
+    border-radius: 6px;
+    font-family: var(--font-family);
+    font-size: 0.85rem;
+    /* Consistent with buttons */
+    min-width: 60px;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23B0B8E0%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.4-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E');
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 0.65em auto;
+    transition: border-color var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+/* Apply to .canvas-header-controls select specifically */
+.canvas-header-controls select {
+    font-size: 0.8rem;
+    /* This is more specific, so it will override the 0.85rem above */
+    padding-right: 1.8rem;
+
+}
+
+.canvas-shape-select,
+#input_shape_selector {
+    min-width: 220px;
+    min-height: 40px;
+    padding: 0.6rem 2.5rem 0.6rem 1rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--accent-purple) 34%, var(--border-color));
+    background: var(--panel-inset-bg);
+    color: var(--text-color);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.canvas-shape-select:hover,
+#input_shape_selector:hover {
+    transform: none;
+    border-color: color-mix(in srgb, var(--accent-purple) 62%, var(--border-color));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-purple) 12%, transparent);
+}
+
+.canvas-shape-select:focus,
+#input_shape_selector:focus {
+    outline: none;
+    transform: none;
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-purple) 22%, transparent), 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+#input_shape_selector option {
+    background: var(--bg-color);
+    color: var(--text-color);
+}
+
+select:focus {
+    outline: none;
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 0 3px var(--glow-color);
+}
+
+/* Styling for Slider Value Output */
+.slider-value-output {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background-color: color-mix(in srgb, var(--text-color) 8%, transparent);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: var(--text-color);
+
+    min-width: 40px;
+
+    text-align: center;
+
+    /* No margin-left here, as it's handled by the parent label or specific positioning rules */
+}
+
+/* Styling for Slider Container in Control Groups */
+.control-group .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.control-group .slider-container input[type="range"] {
+    flex-grow: 1;
+}
+
+.control-group .slider-container button {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.control-group .slider-container select {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.probe-info-overlay {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(var(--bg-color-rgb, 13, 15, 38), 0.85);
+    /* Use the new RGB variable */
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    /* Consistent with other elements */
+    padding: 0.75rem 1rem;
+    /* Decent padding */
+    font-size: 0.85rem;
+    line-height: 1.5;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    /* For Safari */
+    z-index: 100;
+
+    pointer-events: none;
+    /* So it doesn't interfere with mouse events on canvas */
+    max-width: calc(100% - 20px);
+
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    /* Subtle shadow */
+}
+
+.probe-info-overlay .probe-output-error {
+    color: #ffb4a5;
+    font-weight: 700;
+}
+
+.cauchy-info-overlay {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    /* Typically on the other side */
+    background: rgba(var(--bg-color-rgb, 13, 15, 38), 0.85);
+    color: var(--accent-yellow);
+    /* Use an accent for highlight */
+    border: 1px solid var(--accent-yellow);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 100;
+    pointer-events: none;
+    max-width: calc(100% - 70px);
+
+    text-align: left;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+
+/* Custom Checkbox Styling */
+.control-group label input[type="checkbox"] {
+    opacity: 0;
+
+    position: absolute;
+    width: 0;
+    height: 0;
+}
+
+/* The custom checkbox box */
+.control-group label .custom-checkbox-visual {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    background-color: rgba(var(--bg-color-rgb), 0.3);
+    border: 1px solid var(--border-color);
+    box-shadow: none;
+
+    border-radius: 4px;
+    margin-right: 0.5rem;
+
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    flex-shrink: 0;
+
+    position: relative;
+    /* For the checkmark */
+}
+
+/* Hover style on the custom box */
+.control-group label:hover .custom-checkbox-visual {
+    border-color: var(--accent-purple);
+    /* Highlight on hover */
+
+}
+
+/* Disabled style for checkboxes and labels */
+.control-group label:has(input[type="checkbox"]:disabled) {
+    opacity: 0.38;
+    cursor: not-allowed !important;
+}
+
+.control-group label:has(input[type="checkbox"]:disabled) .custom-checkbox-visual {
+    background: color-mix(in srgb, var(--card-bg-color) 70%, var(--bg-color)) !important;
+    border-color: var(--border-color) !important;
+    cursor: not-allowed !important;
+}
+
+#polynomial_coeffs_container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+
+    padding-top: 0.5rem;
+    /* Add some space above the first coefficient */
+}
+
+.polynomial-coeff-row,
+.mobius-coeff-row {
+    display: flex;
+    flex-direction: row;
+    gap: 1.5rem;
+    align-items: flex-start;
+}
+
+.polynomial-coeff-row > .control-group,
+.mobius-coeff-row > .control-group {
+    flex: 1;
+    min-width: 0;
+}
+
+.polynomial-coeff-row .control-group label,
+.mobius-coeff-row .control-group label {
+    font-size: 0.85rem;
+    justify-content: flex-start;
+    color: var(--text-secondary-color);
+}
+
+.mobius-coeff-row .control-group label>output,
+.polynomial-coeff-row .control-group label>output {
+    margin-left: 0.5rem;
+}
+
+.mobius-coeff-row .control-group input[type="range"],
+.polynomial-coeff-row .control-group input[type="range"] {
+    height: 6px;
+}
+
+.mobius-coeff-row .control-group input[type="range"]::-webkit-slider-thumb,
+.polynomial-coeff-row .control-group input[type="range"]::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+}
+
+.mobius-coeff-row .control-group .slider-container,
+.polynomial-coeff-row .control-group .slider-container {
+    gap: 0.5rem;
+}
+
+.mobius-coeff-row .control-group button,
+.mobius-coeff-row .control-group select,
+.polynomial-coeff-row .control-group button,
+.polynomial-coeff-row .control-group select {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+.small-number-input {
+    background-color: rgba(var(--bg-color-rgb), 0.3);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 0.5rem;
+    /* 8px */
+    border-radius: 6px;
+    width: 70px;
+    box-sizing: border-box;
+    font-family: var(--font-family);
+    font-size: 0.85rem;
+    text-align: center;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+@media (max-width: 960px) {
+    #controls_panels_row {
+        flex-direction: column;
+        max-height: none;
+    }
+
+    .controls-panel {
+        height: auto;
+        min-height: 220px;
+    }
+}
+
+
+.small-number-input:focus {
+    outline: none;
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 0 3px var(--glow-color);
+}
+
+

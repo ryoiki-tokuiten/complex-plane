@@ -1,86 +1,82 @@
 import { state } from '../store/state.js';
-import { getChainedStageTransformFunction } from '../math-utils.js';
+import { evaluateNativePoints } from '../native/complex-engine.js';
+import {
+    buildMappedTransformProfileKey,
+    resolveNativeMapOptions
+} from '../native/map-runtime.js';
 
-export const MAP_PRESENTATION = Object.freeze({
+const MAP_PRESENTATION = Object.freeze({
     function: 'function',
     derivative: 'derivative'
 });
 
-const DERIVATIVE_STEP = 1e-6;
-const NESTED_DERIVATIVE_STEP_MULTIPLIER = 100;
-const INVALID = Object.freeze({ re: NaN, im: NaN });
-
-function finiteComplex(value) {
-    return !!value && Number.isFinite(value.re) && Number.isFinite(value.im);
-}
-
 function normalizeStageIndex(stageIndex) {
-    return Math.max(0, Math.floor(Number.isFinite(stageIndex) ? stageIndex : 0));
-}
-
-function derivativeStep(re, im, multiplier = 1) {
-    return DERIVATIVE_STEP * multiplier * Math.max(1, Math.abs(re), Math.abs(im));
+    if (!Number.isInteger(stageIndex) || stageIndex < 0) {
+        throw new Error('Native map stage must be a non-negative integer.');
+    }
+    return stageIndex;
 }
 
 function sourceSignature() {
     return JSON.stringify({
-        function: state.currentFunction,
+        mappedProfile: buildMappedTransformProfileKey(state.currentFunction),
         chaining: state.chainingEnabled,
         chainCount: state.chainCount,
         chainMode: state.chainingMode,
-        algebraic: state.algebraicChainingTerms,
-        algebraicZExpr: state.algebraicChainingZExpr,
-        mobius: [state.mobiusA, state.mobiusB, state.mobiusC, state.mobiusD],
-        polynomial: [state.polynomialN, state.polynomialCoeffs],
-        fractionalPower: state.fractionalPowerN,
-        branchCut: [state.branchCutType, state.branchCutAngle],
-        zetaContinuationEnabled: state.zetaContinuationEnabled,
-        taylor: [state.taylorSeriesEnabled, state.taylorSeriesCenter, state.taylorSeriesOrder],
+        chainSeed: state.chainSeed,
+        taylor: [state.taylorSeriesEnabled, state.taylorSeriesCenter, state.taylorSeriesOrder,
+            String(state.taylorSeriesConvergenceRadius)],
         dynamic: state.dynamicPlotting
     });
 }
 
-export function getFinalMapStageIndex(runtimeState = state) {
-    if (!runtimeState?.chainingEnabled) return 0;
-    return normalizeStageIndex((runtimeState.chainCount || 1) - 1);
+function getFinalMapStageIndex(runtimeState = state) {
+    if (!runtimeState || typeof runtimeState.chainingEnabled !== 'boolean') {
+        throw new Error('Native map state requires an explicit chainingEnabled flag.');
+    }
+    if (!runtimeState.chainingEnabled) return 0;
+    return normalizeStageIndex(runtimeState.chainCount - 1);
 }
 
-export function createDerivativeTransform(transform, stepMultiplier = 1) {
-    return (re, im) => {
-        if (typeof transform !== 'function' || !Number.isFinite(re) || !Number.isFinite(im)) {
-            return INVALID;
+function createNativeEvaluator(stage, derivativeOrder) {
+    const options = resolveNativeMapOptions(state.currentFunction, stage, derivativeOrder);
+    const evaluator = (re, im) => {
+        if (!Number.isFinite(re) || !Number.isFinite(im)) {
+            return { re: NaN, im: NaN };
         }
-
-        const h = derivativeStep(re, im, stepMultiplier);
-        const right = transform(re + h, im);
-        const left = transform(re - h, im);
-
-        if (!finiteComplex(right) || !finiteComplex(left)) return INVALID;
-
-        return {
-            re: (right.re - left.re) / (2 * h),
-            im: (right.im - left.im) / (2 * h)
-        };
+        const result = evaluateNativePoints(options, [{ re, im }]);
+        return result.valid[0] ? result.values[0] : { re: NaN, im: NaN };
     };
+    evaluator.evaluateBatch = points => {
+        const result = evaluateNativePoints(options, points);
+        return result.values.map((value, index) => result.valid[index] ? value : { re: NaN, im: NaN });
+    };
+    Object.defineProperty(evaluator, 'nativeMapOptions', { value: options });
+    return evaluator;
 }
 
 export function resolveActiveMap(stageIndex = getFinalMapStageIndex()) {
+    // This dispatcher serves ordinary mapped geometry and analysis queries. The
+    // domain-coloring renderer has its own native tile pipeline.
     const stage = normalizeStageIndex(stageIndex);
-    const baseMap = getChainedStageTransformFunction(state.currentFunction, stage);
-    const baseDerivative = createDerivativeTransform(baseMap);
-    const presentation = state.mapPresentation === MAP_PRESENTATION.derivative
-        ? MAP_PRESENTATION.derivative
-        : MAP_PRESENTATION.function;
+    const presentation = state.mapPresentation;
+    if (presentation !== MAP_PRESENTATION.function && presentation !== MAP_PRESENTATION.derivative) {
+        throw new Error(`Unsupported native map presentation: ${presentation}.`);
+    }
+
+    const baseMap = createNativeEvaluator(stage, 0);
+    const baseDerivative = createNativeEvaluator(stage, 1);
+    const secondDerivative = createNativeEvaluator(stage, 2);
+
     const evaluate = presentation === MAP_PRESENTATION.derivative ? baseDerivative : baseMap;
-    const derivative = presentation === MAP_PRESENTATION.derivative
-        ? createDerivativeTransform(baseDerivative, NESTED_DERIVATIVE_STEP_MULTIPLIER)
-        : baseDerivative;
+    const derivative = presentation === MAP_PRESENTATION.derivative ? secondDerivative : baseDerivative;
 
     return Object.freeze({
         stage,
         presentation,
         derivative,
         evaluate,
+        evaluateBatch: evaluate.evaluateBatch,
         signature: `${presentation}:${stage}:${sourceSignature()}`
     });
 }

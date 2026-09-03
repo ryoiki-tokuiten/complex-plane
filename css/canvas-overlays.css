@@ -1,0 +1,201 @@
+/* Nested Chaining Panel */
+.nested-chaining-panel {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Canvas Vector Flow Overlay (Vector Field / Streamlines / Particle Motion) */
+.canvas-vector-flow-overlay {
+    position: absolute;
+    z-index: 85;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 12px;
+    max-width: calc(100% - 20px);
+    background: var(--overlay-glass-bg);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--overlay-glass-border);
+    border-radius: 12px;
+    padding: 8px 12px;
+    box-shadow: var(--shadow-soft, 0 14px 36px rgba(0, 0, 0, 0.45)), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    color: var(--text-color);
+    user-select: none;
+}
+
+.vector-flow-column {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 190px;
+}
+
+.vector-flow-column:not(.hidden) ~ .vector-flow-column:not(.hidden) {
+    padding-left: 12px;
+    border-left: 1px solid var(--border-color);
+}
+
+.vector-flow-column-header {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--accent-purple, #c084fc);
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 2px;
+}
+
+.vector-flow-row {
+    display: grid;
+    grid-template-columns: 66px 1fr 34px;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.71rem;
+}
+
+.vector-flow-row label {
+    font-size: 0.71rem;
+    font-weight: 500;
+    color: var(--text-secondary-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vector-flow-row input[type="range"] {
+    width: 100%;
+    height: 4px;
+    margin: 0;
+    accent-color: var(--accent-purple, #a78bfa);
+    cursor: pointer;
+}
+
+.vector-flow-row select {
+    width: 100%;
+    padding: 2px 4px;
+    font-size: 0.71rem;
+    background: var(--card-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-color);
+}
+
+.vector-flow-row output {
+    font-size: 0.68rem;
+    font-family: 'SF Mono', 'Roboto Mono', monospace;
+    color: var(--accent-purple);
+    text-align: right;
+}
+
+/* Theme Modal Grid & Probe Sliders */
+.theme-modal-sliders-row {
+    display: flex;
+    gap: 1rem;
+    width: 100%;
+}
+
+.theme-modal-slider-group {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.theme-slider-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+.theme-slider-output {
+    font-family: var(--font-mono, monospace);
+    font-weight: 600;
+    color: var(--accent-purple);
+    font-size: 0.82rem;
+}
+
+.theme-slider-container {
+    display: flex;
+    align-items: center;
+}
+
+.theme-slider-container input[type="range"] {
+    width: 100%;
+}
+
+/* On-Canvas Zoom Controls (+ / -) */
+.canvas-zoom-controls {
+    display: none;
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    z-index: 90;
+    flex-direction: column;
+    align-items: center;
+    background: var(--overlay-glass-bg);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--overlay-glass-border);
+    border-radius: 9px;
+    box-shadow: var(--shadow-soft, 0 10px 28px rgba(0, 0, 0, 0.35)), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    user-select: none;
+    pointer-events: auto;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.application-root.canvas-zoom-controls-enabled .canvas-zoom-controls:not(.hidden) {
+    display: flex;
+}
+
+.canvas-zoom-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-color, #e2e8f0);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.canvas-zoom-btn:hover {
+    background: color-mix(in srgb, var(--accent-purple) 15%, transparent);
+    color: var(--accent-purple, #a78bfa);
+}
+
+.canvas-zoom-btn:active {
+    background: color-mix(in srgb, var(--accent-purple) 25%, transparent);
+    transform: scale(0.92);
+}
+
+.canvas-zoom-btn i,
+.canvas-zoom-btn svg {
+    width: 16px;
+    height: 16px;
+    pointer-events: none;
+}
+
+.canvas-zoom-btn-divider {
+    width: 20px;
+    height: 1px;
+    background: var(--border-color);
+}
+
+/* Offset bottom-right overlays when zoom controls are enabled to prevent overlapping */
+.application-root.canvas-zoom-controls-enabled .canvas-shape-controls-overlay[data-position="bottom-right"],
+.application-root.canvas-zoom-controls-enabled .canvas-grid-controls-overlay[data-position="bottom-right"],
+.application-root.canvas-zoom-controls-enabled .canvas-vector-flow-overlay[data-position="bottom-right"],
+.application-root.canvas-zoom-controls-enabled .cauchy-info-overlay {
+    right: 56px;
+}

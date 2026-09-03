@@ -3,6 +3,9 @@
 .control-section {
     padding: 14px;
     border-radius: 10px;
+    background: var(--card-bg-color);
+    box-shadow: var(--shadow-soft, 0 4px 16px rgba(0, 0, 0, 0.08));
+    transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .section-header {
@@ -11,7 +14,7 @@
     text-transform: uppercase;
     letter-spacing: 0.8px;
     margin-bottom: 12px;
-    opacity: 0.9;
+    opacity: 0.95;
     display: flex;
     align-items: center;
 }
@@ -34,36 +37,9 @@
 }
 
 /* Specific Section Colors */
-.control-section.fourier-signal {
-    background: linear-gradient(135deg, rgba(100,150,255,0.08), rgba(150,100,255,0.08));
-    border: 1px solid rgba(120,140,255,0.25);
-}
-.control-section.fourier-signal .section-header { color: rgba(150,200,255,1); }
-.control-section.fourier-signal .section-header-icon { background: rgba(100,150,255,0.6); }
-.control-section.fourier-signal .slider-label { color: rgba(180,200,240,0.9); }
-.control-section.fourier-signal .slider-value { color: rgba(150,200,255,1); }
-
-.control-section.fourier-sampling {
-    background: linear-gradient(135deg, rgba(100,180,200,0.06), rgba(100,200,180,0.06));
-    border: 1px solid rgba(100,180,200,0.2);
-}
-.control-section.fourier-sampling .section-header { color: rgba(150,220,240,1); }
-.control-section.fourier-sampling .section-header-icon { background: rgba(100,180,200,0.6); }
-.control-section.fourier-sampling .slider-label { color: rgba(180,220,240,0.9); }
-.control-section.fourier-sampling .slider-value { color: rgba(150,220,240,1); }
-
-.control-section.fourier-winding {
-    background: linear-gradient(135deg, rgba(255,220,100,0.12), rgba(255,180,100,0.12));
-    border: 2px solid rgba(255,200,100,0.35);
-    box-shadow: 0 0 15px rgba(255,200,100,0.15);
-}
-.control-section.fourier-winding .section-header { color: rgba(255,230,180,1); }
-.control-section.fourier-winding .section-header-icon { background: linear-gradient(180deg, rgba(255,220,100,1), rgba(255,180,100,1)); }
-.control-section.fourier-winding .slider-label { color: rgba(255,220,180,0.9); }
-.control-section.fourier-winding .slider-value { color: rgba(255,230,180,1); }
 
 .control-section.laplace-signal {
-    background: linear-gradient(135deg, rgba(255,100,150,0.08), rgba(255,150,100,0.08));
+    background: linear-gradient(135deg, rgba(255,100,150,0.08), rgba(255,150,100,0.08)), var(--card-bg-color);
     border: 1px solid rgba(255,120,150,0.25);
 }
 .control-section.laplace-signal .section-header { color: rgba(255,180,200,1); }
@@ -71,8 +47,25 @@
 .control-section.laplace-signal .slider-label { color: rgba(255,180,200,0.9); }
 .control-section.laplace-signal .slider-value { color: rgba(255,150,180,1); }
 
+.section-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 4px 0 8px 0;
+}
+
+.control-section.laplace-sampling {
+    background: linear-gradient(135deg, rgba(100,180,200,0.06), rgba(100,200,180,0.06)), var(--card-bg-color);
+    border: 1px solid rgba(100,180,200,0.2);
+}
+.control-section.laplace-sampling .section-header { color: rgba(150,220,240,1); }
+.control-section.laplace-sampling .section-header-icon { background: rgba(100,180,200,0.6); }
+.control-section.laplace-sampling .slider-label { color: rgba(180,220,240,0.9); }
+.control-section.laplace-sampling .slider-value { color: rgba(150,220,240,1); }
+.control-section.laplace-sampling .section-header-winding { color: rgba(255,220,150,1); margin-top: 2px; }
+.control-section.laplace-sampling .section-header-icon-winding { background: linear-gradient(180deg, rgba(255,220,100,1), rgba(255,150,80,1)); }
+
 .control-section.laplace-splane {
-    background: linear-gradient(135deg, rgba(100,200,150,0.08), rgba(100,220,180,0.08));
+    background: linear-gradient(135deg, rgba(100,200,150,0.08), rgba(100,220,180,0.08)), var(--card-bg-color);
     border: 2px solid rgba(100,200,150,0.3);
     box-shadow: 0 0 15px rgba(100,220,150,0.1);
 }
@@ -81,8 +74,16 @@
 .control-section.laplace-splane .slider-label { color: rgba(180,240,200,0.9); }
 .control-section.laplace-splane .slider-value { color: rgba(150,255,200,1); }
 
+.control-section.laplace-toggles {
+    background: linear-gradient(135deg, rgba(120,150,255,0.06), rgba(100,180,220,0.06)), var(--card-bg-color);
+    border: 1px solid rgba(120,150,255,0.2);
+}
+.control-section.laplace-toggles .section-header { color: rgba(160,190,255,1); }
+.control-section.laplace-toggles .section-header-icon { background: rgba(120,150,255,0.6); }
+.control-section.laplace-toggles .slider-label { color: rgba(190,210,255,0.9); }
+
 .control-section.laplace-3d {
-    background: linear-gradient(135deg, rgba(150,100,255,0.08), rgba(200,100,255,0.08));
+    background: linear-gradient(135deg, rgba(150,100,255,0.08), rgba(200,100,255,0.08)), var(--card-bg-color);
     border: 1px solid rgba(180,100,255,0.25);
 }
 .control-section.laplace-3d .section-header { color: rgba(200,150,255,1); }
@@ -91,7 +92,7 @@
 .control-section.laplace-3d .slider-value { color: rgba(200,150,255,1); }
 
 .control-section.laplace-animation {
-    background: linear-gradient(135deg, rgba(255,200,100,0.12), rgba(255,150,80,0.12));
+    background: linear-gradient(135deg, rgba(255,200,100,0.12), rgba(255,150,80,0.12)), var(--card-bg-color);
     border: 2px solid rgba(255,180,100,0.35);
     box-shadow: 0 0 15px rgba(255,180,100,0.15);
 }
@@ -101,20 +102,15 @@
 .control-section.laplace-animation .slider-value { color: rgba(255,200,150,1); }
 
 /* Common internal styles */
-.control-select.fourier-select,
 .control-select.laplace-select,
 .control-select.laplace-3d-select {
     margin-top: 3px;
-    background: rgba(20,25,35,0.8);
+    background: var(--panel-inset-bg);
     padding: 5px 8px;
     border-radius: 5px;
     font-size: 11px;
 }
 
-.control-select.fourier-select {
-    border: 1px solid rgba(100,150,255,0.3);
-    color: rgba(200,220,255,1);
-}
 .control-select.laplace-select {
     border: 1px solid rgba(255,100,150,0.3);
     color: rgba(255,200,220,1);
@@ -122,4 +118,101 @@
 .control-select.laplace-3d-select {
     border: 1px solid rgba(180,100,255,0.3);
     color: rgba(220,200,255,1);
+}
+
+/* Light Mode Adaptations for Laplace Control Sections */
+[data-theme-mode="light"] .control-section {
+    background: var(--card-bg-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme-mode="light"] .section-divider {
+    background: var(--border-color);
+}
+
+[data-theme-mode="light"] .control-section .slider-label {
+    color: var(--text-color);
+}
+
+[data-theme-mode="light"] .control-section .slider-value {
+    color: var(--text-color);
+}
+
+[data-theme-mode="light"] .control-section.laplace-signal {
+    background: linear-gradient(135deg, rgba(244, 63, 94, 0.07), rgba(251, 146, 60, 0.07)), var(--card-bg-color);
+    border-color: rgba(225, 29, 72, 0.35);
+}
+[data-theme-mode="light"] .control-section.laplace-signal .section-header {
+    color: #be123c;
+}
+[data-theme-mode="light"] .control-section.laplace-signal .section-header-icon {
+    background: #e11d48;
+}
+
+[data-theme-mode="light"] .control-section.laplace-sampling {
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.06), rgba(20, 184, 166, 0.06)), var(--card-bg-color);
+    border-color: rgba(14, 116, 144, 0.35);
+}
+[data-theme-mode="light"] .control-section.laplace-sampling .section-header {
+    color: #0e7490;
+}
+[data-theme-mode="light"] .control-section.laplace-sampling .section-header-icon {
+    background: #0891b2;
+}
+[data-theme-mode="light"] .control-section.laplace-sampling .section-header-winding {
+    color: #b45309;
+}
+
+[data-theme-mode="light"] .control-section.laplace-splane {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.07), rgba(52, 211, 153, 0.07)), var(--card-bg-color);
+    border-color: rgba(5, 150, 105, 0.4);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.12);
+}
+[data-theme-mode="light"] .control-section.laplace-splane .section-header {
+    color: #047857;
+}
+[data-theme-mode="light"] .control-section.laplace-splane .section-header-icon {
+    background: #059669;
+}
+
+[data-theme-mode="light"] .control-section.laplace-toggles {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(99, 102, 241, 0.06)), var(--card-bg-color);
+    border-color: rgba(37, 99, 235, 0.35);
+}
+[data-theme-mode="light"] .control-section.laplace-toggles .section-header {
+    color: #1d4ed8;
+}
+[data-theme-mode="light"] .control-section.laplace-toggles .section-header-icon {
+    background: #2563eb;
+}
+
+[data-theme-mode="light"] .control-section.laplace-3d {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.07), rgba(168, 85, 247, 0.07)), var(--card-bg-color);
+    border-color: rgba(124, 58, 237, 0.35);
+}
+[data-theme-mode="light"] .control-section.laplace-3d .section-header {
+    color: #6d28d9;
+}
+[data-theme-mode="light"] .control-section.laplace-3d .section-header-icon {
+    background: #7c3aed;
+}
+
+[data-theme-mode="light"] .control-section.laplace-animation {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(249, 115, 22, 0.08)), var(--card-bg-color);
+    border-color: rgba(217, 119, 6, 0.4);
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.12);
+}
+[data-theme-mode="light"] .control-section.laplace-animation .section-header {
+    color: #b45309;
+}
+
+[data-theme-mode="light"] .control-select.laplace-select {
+    border-color: rgba(225, 29, 72, 0.4);
+    color: var(--text-color);
+    background: var(--panel-inset-bg);
+}
+[data-theme-mode="light"] .control-select.laplace-3d-select {
+    border-color: rgba(124, 58, 237, 0.4);
+    color: var(--text-color);
+    background: var(--panel-inset-bg);
 }

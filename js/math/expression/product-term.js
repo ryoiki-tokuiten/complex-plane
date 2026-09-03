@@ -2,7 +2,7 @@ import { parseExpression } from './parser.js';
 
 const WRAPPERS = new Set([
     'factorial', 'ln', 'log', 'exp', 'sqrt', 'sin', 'cos', 'tan',
-    'sinh', 'cosh', 'tanh', 'abs', 'conj', 'selected'
+    'sinh', 'tanh', 'abs', 'conj', 'selected'
 ]);
 
 function sliceNode(source, node) {
@@ -59,7 +59,8 @@ function flattenProduct(source, rawNode, denominator, factors) {
 }
 
 export function decomposeProductExpression(source) {
-    const expression = String(source || '').trim();
+    if (typeof source !== 'string') throw new Error('Product decomposition requires expression text.');
+    const expression = source.trim();
     if (!expression) return [];
     const factors = [];
     flattenProduct(expression, parseExpression(expression), false, factors);
@@ -67,7 +68,10 @@ export function decomposeProductExpression(source) {
 }
 
 function wrappedFactor(factor) {
-    const base = String(factor.base || '1').trim() || '1';
+    if (!factor || typeof factor.base !== 'string' || !factor.base.trim()) {
+        throw new Error('Product factors require a non-empty base expression.');
+    }
+    const base = factor.base.trim();
     let expression;
     switch (factor.wrapper) {
         case 'factorial':
@@ -84,15 +88,11 @@ function wrappedFactor(factor) {
             expression = `${factor.wrapper}(${base})`;
             break;
     }
-    const exponent = String(factor.exponent || '').trim();
+    const exponent = String(factor.exponent ?? '').trim();
     if (!exponent) return expression;
+    const ast = unwrapGroup(parseExpression(expression));
     let poweredBase = expression;
-    try {
-        const ast = unwrapGroup(parseExpression(expression));
-        if (!['literal', 'variable', 'call', 'postfix'].includes(ast.type)) {
-            poweredBase = `(${expression})`;
-        }
-    } catch {
+    if (!['literal', 'variable', 'call', 'postfix'].includes(ast.type)) {
         poweredBase = `(${expression})`;
     }
     return `${poweredBase}^(${exponent})`;
@@ -106,8 +106,9 @@ function product(factors) {
 }
 
 export function composeProductExpression(factors) {
-    const numerator = product((factors || []).filter(factor => !factor.denominator));
-    const denominator = (factors || []).filter(factor => factor.denominator);
+    if (!Array.isArray(factors)) throw new Error('Product composition requires a factor array.');
+    const numerator = product(factors.filter(factor => !factor.denominator));
+    const denominator = factors.filter(factor => factor.denominator);
     if (!denominator.length) return numerator;
     return `${numerator} / (${product(denominator)})`;
 }

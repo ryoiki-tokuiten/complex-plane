@@ -7,6 +7,7 @@ import {
     getTissotViewportBounds
 } from '../js/analysis/tissot.js';
 import { drawConformalIndicatrices } from '../js/rendering/draw-planar.js';
+import { completeNativeMapOptions } from './helpers/native-map.js';
 
 class CanvasStrokeCounter {
     constructor() { this.strokeCount = 0; }
@@ -19,11 +20,11 @@ class CanvasStrokeCounter {
     setLineDash() {}
 }
 
-test('Tissot indicatrices use the active map and its derivative once', () => {
-    const map = {
-        evaluate: (re, im) => ({ re, im }),
-        derivative: () => ({ re: 2, im: 0 })
-    };
+test('native Tissot geometry uses the active map and derivative', () => {
+    const map = completeNativeMapOptions({
+        functionKey: 'polynomial', chainingEnabled: false, polynomialN: 1,
+        polynomialCoeffs: [{ re: 0, im: 0 }, { re: 2, im: 0 }]
+    });
     const indicatrices = generateTissotIndicatrices(map, [-1, 1], [-1, 1], 8, 8);
 
     assert.ok(indicatrices.length > 0);
@@ -41,10 +42,10 @@ test('Tissot indicatrices use the active map and its derivative once', () => {
 });
 
 test('Tissot indicatrices preserve the source direction and flag critical collapse', () => {
-    const map = {
-        evaluate: (re, im) => ({ re: re + 2, im: im - 1 }),
-        derivative: () => ({ re: 0, im: 0 })
-    };
+    const map = completeNativeMapOptions({
+        functionKey: 'polynomial', chainingEnabled: false, polynomialN: 0,
+        polynomialCoeffs: [{ re: 2, im: -1 }]
+    });
     const [indicatrix] = generateTissotIndicatrices(map, [-1, 1], [-1, 1], 8, 8);
 
     assert.ok(indicatrix);
@@ -54,10 +55,9 @@ test('Tissot indicatrices preserve the source direction and flag critical collap
 });
 
 test('conformal indicatrix uses the unified Canvas stroke path', () => {
-    const [indicatrix] = generateTissotIndicatrices({
-        evaluate: (re, im) => ({ re, im }),
-        derivative: () => ({ re: 1, im: 0 })
-    }, [-1, 1], [-1, 1], 8, 8);
+    const [indicatrix] = generateTissotIndicatrices(completeNativeMapOptions({
+        functionKey: 'identity', chainingEnabled: false
+    }), [-1, 1], [-1, 1], 8, 8);
     const ctx = new CanvasStrokeCounter();
 
     drawConformalIndicatrices(ctx, {

@@ -3,21 +3,19 @@ import assert from 'node:assert/strict';
 
 import {
     generateDiscreteSource,
-    generateGeometricValues,
-    generateGaussianPrimeValues,
-    generateHarmonicValues,
-    generateIntegerValues,
-    isGaussianPrime,
     parseCustomPointText
 } from '../js/analysis/discrete-sources.js';
 
+const values = config => generateDiscreteSource(config).records.map(record => record.domainValue);
+const realValues = config => values(config).map(value => value.re);
+
 test('integer sources preserve explicit and symmetric ordering', () => {
     assert.deepEqual(
-        generateIntegerValues({ count: 5, start: -3, step: 2, ordering: 'ascending' }),
+        realValues({ kind: 'integers', count: 5, start: -3, step: 2, ordering: 'ascending' }),
         [-3, -1, 1, 3, 5]
     );
     assert.deepEqual(
-        generateIntegerValues({ count: 7, start: 1, step: 1, ordering: 'symmetric', includeZero: true }),
+        realValues({ kind: 'integers', count: 7, start: 1, step: 1, ordering: 'symmetric', includeZero: true }),
         [0, 1, -1, 2, -2, 3, -3]
     );
 });
@@ -29,11 +27,11 @@ test('arithmetic, geometric, and harmonic progressions follow their general term
         [3, 1, -1, -3, -5]
     );
     assert.deepEqual(
-        generateGeometricValues({ count: 5, start: 2, ratio: -3 }),
+        realValues({ kind: 'geometric', count: 5, start: 2, ratio: -3 }),
         [2, -6, 18, -54, 162]
     );
     assert.deepEqual(
-        generateHarmonicValues({ count: 4, start: 2, step: 2 }),
+        realValues({ kind: 'harmonic', count: 4, start: 2, step: 2 }),
         [1 / 2, 1 / 4, 1 / 6, 1 / 8]
     );
 });
@@ -77,19 +75,18 @@ test('prime generation matches known values and bounded ranges', () => {
     assert.match(inverted.diagnostics.join(' '), /contains 0 values/);
 });
 
-test('Gaussian-prime classification follows the exact axis and norm criteria', () => {
-    assert.equal(isGaussianPrime(1, 1), true);
-    assert.equal(isGaussianPrime(2, 1), true);
-    assert.equal(isGaussianPrime(3, 0), true);
-    assert.equal(isGaussianPrime(7, 0), true);
-    assert.equal(isGaussianPrime(5, 0), false);
-    assert.equal(isGaussianPrime(2, 2), false);
-    assert.equal(isGaussianPrime(0, 0), false);
+test('Gaussian-prime generation follows the exact axis and norm criteria', () => {
+    const generated = new Set(values({
+        kind: 'gaussian_primes', count: 80, bound: 12,
+        associatePolicy: 'all', includeConjugates: true
+    }).map(value => `${value.re},${value.im}`));
+    for (const prime of ['1,1', '2,1', '3,0', '7,0']) assert.equal(generated.has(prime), true);
+    for (const composite of ['5,0', '2,2', '0,0']) assert.equal(generated.has(composite), false);
 });
 
 test('Gaussian-prime ordering and associate policies are deterministic', () => {
-    const all = generateGaussianPrimeValues({
-        count: 12,
+    const all = values({
+        kind: 'gaussian_primes', count: 12,
         bound: 6,
         associatePolicy: 'all',
         includeConjugates: true
@@ -101,8 +98,8 @@ test('Gaussian-prime ordering and associate policies are deterministic', () => {
         { re: -1, im: 1 }
     ]);
 
-    const representatives = generateGaussianPrimeValues({
-        count: 20,
+    const representatives = values({
+        kind: 'gaussian_primes', count: 20,
         bound: 8,
         associatePolicy: 'representatives',
         includeConjugates: false

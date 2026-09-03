@@ -1,25 +1,26 @@
 /** @jsxImportSource preact */
-import { context, getStateSignal, state } from '../../store/state.js';
-import { domainPalettes, realPlotsPalettes, themes, applyTheme, persistThemePreferences } from '../../ui/theme-manager.js';
-import { requestRedrawAll } from '../../rendering/redraw-scheduler.js';
+import { state } from '../../store/state.js';
+import { useAppState } from '../state-hooks.js';
+import { domainPalettes } from '../../constants/domain-palettes.js';
+import { SURFACE_PALETTES } from '../../constants/surface-palettes.js';
+import { themes, applyTheme, persistThemePreferences } from '../theme.js';
+import { requestDomainRedraw } from '../../rendering/redraw-scheduler.js';
 
 function redraw() {
-    context.domainColoringDirty = true;
-    requestRedrawAll();
+    requestDomainRedraw();
 }
 
 export function ThemeOptions() {
-    const activeTheme = getStateSignal('themeId').value;
+    const activeTheme = useAppState('themeId');
 
     return themes.map(theme => (
         <button class={`theme-card${activeTheme === theme.id ? ' active' : ''}`}
             data-theme-id={theme.id} type="button" onClick={() => {
-                state.themeId = theme.id;
-                applyTheme(theme.id, { preserveGridColors: true });
+                applyTheme(theme.id);
                 persistThemePreferences();
                 redraw();
             }}>
-            <div class="theme-preview-pill">
+            <div class="theme-preview-pill" style={{ background: theme.colors.bg, borderColor: theme.colors.border }}>
                 {[theme.colors.accent, theme.colors.gridPri, theme.colors.gridSec].map(color => (
                     <div key={color} class="theme-preview-dot" style={{ backgroundColor: color }} />
                 ))}
@@ -33,7 +34,7 @@ export function ThemeOptions() {
 }
 
 function PaletteOptions({ palettes, stateKey, gradient }) {
-    const activeId = getStateSignal(stateKey).value;
+    const activeId = useAppState(stateKey);
 
     return palettes.map(palette => (
         <button key={palette.id} class={`domain-palette-circle-btn${activeId === palette.id ? ' active' : ''}`}
@@ -50,16 +51,16 @@ export const DomainPaletteOptions = () => (
     <PaletteOptions palettes={domainPalettes} stateKey="domainPalette" />
 );
 
-export const RealPlotsPaletteOptions = () => (
-    <PaletteOptions palettes={realPlotsPalettes} stateKey="realPlotsPalette" gradient />
+export const SurfacePaletteOptions = () => (
+    <PaletteOptions palettes={SURFACE_PALETTES} stateKey="surfacePalette" gradient />
 );
 
 export function ActiveDomainPaletteName() {
-    const id = getStateSignal('domainPalette').value;
+    const id = useAppState('domainPalette');
     return domainPalettes.find(palette => palette.id === id)?.name || domainPalettes[0].name;
 }
 
-export function ActiveRealPlotsPaletteName() {
-    const id = getStateSignal('realPlotsPalette').value;
-    return realPlotsPalettes.find(palette => palette.id === id)?.name || realPlotsPalettes[0].name;
+export function ActiveSurfacePaletteName() {
+    const id = useAppState('surfacePalette');
+    return SURFACE_PALETTES.find(palette => palette.id === id)?.name || SURFACE_PALETTES[0].name;
 }

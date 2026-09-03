@@ -1,13 +1,16 @@
-import { state, context, zPlaneParams as defaultZPlaneParams, wPlaneParams as defaultWPlaneParams, sphereViewParams } from '../store/state.js';
+import { state, context, zPlaneParams as defaultZPlaneParams, wPlaneParams as defaultWPlaneParams } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import {
-    COLOR_CANVAS_BACKGROUND,
-    COLOR_TEXT_ON_CANVAS,
     COLOR_CRITICAL_POINT_Z,
     COLOR_CRITICAL_VALUE_W,
     COLOR_FTA_C_MARKER,
     COLOR_W_ORIGIN_GLOW
 } from '../constants/colors.js';
+import {
+    getCanvasBackgroundColor,
+    getCanvasTextColor,
+    getCanvasGridColors
+} from '../frontend/theme.js';
 import { MAX_POLY_DEGREE, ZETA_REFLECTION_POINT_RE } from '../constants/numerical.js';
 import {
     ORIGIN_GLOW_DURATION_MS,
@@ -16,17 +19,16 @@ import {
 } from '../constants/rendering.js';
 import { mapToCanvasCoords } from '../utils/canvas-utils.js';
 import { resolveActiveMap } from '../math/active-map.js';
-import { buildRasterSurfaceMesh, getImageRenderChainIndex } from './draw-image-webgl.js';
+import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
+import { buildRasterSurfaceMesh, getImageRenderStage } from './draw-image-webgl.js';
 import {
-    getRasterSourceForShape,
-    getRasterSizeForShape,
-    getRasterAspectRatioForShape,
-    getRasterOpacityForShape,
-    isRasterInputShape
+    getActiveMediaRaster,
+    isMediaInputShape
 } from '../utils/raster-media.js';
-import { drawWindingVisualization, drawTimeDomainSignal } from './draw-fourier-winding.js';
 import { drawLaplaceWindingVisualization, drawLaplaceTimeDomain } from './draw-laplace-panels.js';
-import { ThreeRiemannRenderer, buildGridFoldLineData } from './three-riemann-renderer.js';
+import { getLaplaceFrameData } from '../analysis/laplace-transform.js';
+import { ThreeManifoldsRenderer } from './3d-manifolds-renderer.js';
+import { buildNativeGridFold, findNativePreimages } from '../native/complex-engine.js';
 import {
     generateCurrentInputShapePointSets,
     buildInputShapeGeometryConfig,
@@ -34,6 +36,8 @@ import {
 } from './shape-generators.js';
 import { drawGraphSelectionOverlay, filterGraphFullGridPointSets } from './transformation-graph.js';
 import { hideRiemannSurface, renderRiemannSurface } from './webgl-riemann-surface.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
+import { requireFiniteNumber, requireInteger, isFiniteComplex } from '../utils/numeric-contracts.js';
 import { drawAxes, drawGrid } from './canvas-primitives.js';
 import {
     drawZerosAndPolesMarkers,
@@ -51,24 +55,21 @@ import {
     drawPlanarInputOverlays,
     drawZPlaneVectorField
 } from './draw-planar.js';
-import { requestRedrawAll } from './redraw-scheduler.js';
+import { requestRedrawAll, requestUiRedraw } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
 import { renderPlanarDomainColoring } from './domain-coloring.js';
-import { drawRiemannSphereBase, drawSphereGridAndShape, drawSphereProbeAndNeighborhood } from './draw-sphere.js';
+import { matchesPlanarDomainViewport } from './domain-dynamics.js';
 import { updateWindingNumberDisplay } from '../analysis/cauchy.js';
 import {
     getDynamicPlottingCacheKey
 } from '../analysis/dynamic-plotting.js';
 import {
-    drawDynamicSphere,
     drawDynamicWPlane,
-    drawDynamicZPlane,
-    getDynamicSphereSceneData
+    drawDynamicZPlane
 } from './draw-dynamic-plotting.js';
 import { generateTissotIndicatrices, selectStableTissotIndicatrices } from '../analysis/tissot.js';
-import { findPreimages } from '../analysis/preimage.js';
-import { surfaceStageHasBranches } from '../analysis/riemann-surface.js';
+import { baseExpressionHasBranches } from '../analysis/riemann-surface.js';
 
 function drawPreimageMarkers(ctx, planeParams, points, target = false) {
     if (!Array.isArray(points) || points.length === 0) return;
@@ -114,7 +115,6 @@ let wCanvasList;
 let wCtxList;
 let wPlaneParamsList;
 let wPlaneThreeContainersList;
-let sphereViewWParamsList;
 const wStaticThreeRenderers = new WeakMap();
 
 const { controls } = context;
@@ -139,11 +139,12 @@ const planarKeyTrackers = new WeakMap();
 const zFlowKeyTracker = { values: [], cursor: 0, changed: true, key: null };
 const PLANAR_STATE_DEPENDENCIES = Object.freeze([
     'currentFunction', 'mapPresentation', 'currentInputShape', 'gridDensity',
-    'a0', 'b0', 'circleR', 'ellipseA', 'ellipseB', 'themeId',
+    'gridParameters',
+    'a0', 'b0', 'circleR', 'themeId',
     'arbitraryShapeMode', 'arbitraryShapeExpression', 'arbitraryShapeTMin', 'arbitraryShapeTMax',
     'arbitraryShapeClosed', 'arbitraryShapePoints',
-    'branchCutType', 'branchCutAngle', 'branchCutPoints',
-    'imageSize', 'imageOpacity', 'videoSize', 'videoOpacity',
+    'branchCutAngle',
+    'mediaSize', 'mediaOpacity', 'mediaAspectRatio', 'mediaVersion',
     'cauchyIntegralModeEnabled', 'graphViewEnabled', 'graphFullGridEnabled', 'graphGridFamily',
     'graphLayerLockEnabled',
     'graphSelectedShape', 'graphSelectedLineIndex'
@@ -153,8 +154,7 @@ const DOMAIN_STATE_DEPENDENCIES = Object.freeze([
     'domainSaturation', 'domainLightnessCycles'
 ]);
 const TAYLOR_LAYER_DEPENDENCIES = Object.freeze([
-    'taylorSeriesOrder', 'taylorSeriesConvergenceRadius',
-    'taylorSeriesColorAxisX', 'taylorSeriesColorAxisY'
+    'taylorSeriesOrder', 'taylorSeriesConvergenceRadius'
 ]);
 
 function beginDependencyScan(tracker) {
@@ -214,10 +214,6 @@ function createLayerCache() {
     };
 }
 
-function isFiniteComplex(value) {
-    return Number.isFinite(value?.re) && Number.isFinite(value?.im);
-}
-
 function isPanning(panState) {
     return Boolean(panState?.isPanning);
 }
@@ -244,7 +240,6 @@ function syncWRenderContext() {
     wCtxList = context.wCtxList;
     wPlaneParamsList = context.wPlaneParamsList;
     wPlaneThreeContainersList = context.wPlaneThreeContainersList;
-    sphereViewWParamsList = context.sphereViewWParamsList;
 
     const externalCaches = context.wPlanarTransformedLayerCacheList;
     if (Array.isArray(externalCaches)) wPlanarTransformedLayerCacheList = externalCaches;
@@ -308,7 +303,7 @@ function preparePlanarLayer(cache, planeParams, renderScale, clear) {
 // Every cached and uncached planar vector layer uses this same supersampled Canvas path.
 function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, render, renderUncached = render) {
     if (!targetCtx || !planeParams || typeof render !== 'function') return true;
-    const renderScale = isRasterInputShape(state.currentInputShape) ? 1 : PLANAR_CANVAS_SUPERSAMPLE;
+    const renderScale = isMediaInputShape(state.currentInputShape) ? 1 : PLANAR_CANVAS_SUPERSAMPLE;
 
     if (enabled && cache?.canvas && cache.key === cacheKey) {
         compositePlanarLayer(cache, targetCtx, planeParams);
@@ -353,8 +348,11 @@ function renderThroughCache(cache, targetCtx, planeParams, cacheKey, enabled, re
 }
 
 function normalizedPolynomialDegree() {
-    const degree = Number.isFinite(state.polynomialN) ? state.polynomialN : 0;
-    return Math.max(0, Math.min(MAX_POLY_DEGREE, degree));
+    const degree = requireInteger(state.polynomialN, 'Renderer polynomial degree');
+    if (degree < 0 || degree > MAX_POLY_DEGREE) {
+        throw new Error(`Renderer polynomial degree must be from zero through ${MAX_POLY_DEGREE}.`);
+    }
+    return degree;
 }
 
 function captureNamedTransformDependencies(tracker, name) {
@@ -370,12 +368,15 @@ function captureNamedTransformDependencies(tracker, name) {
             const coeffs = state.polynomialCoeffs;
             captureDependency(tracker, degree);
             for (let index = 0; index <= degree; index += 1) {
-                captureComplexDependency(tracker, Array.isArray(coeffs) ? coeffs[index] || null : null);
+                if (!Array.isArray(coeffs) || !coeffs[index]) {
+                    throw new Error(`Renderer polynomial coefficient ${index} is missing.`);
+                }
+                captureComplexDependency(tracker, coeffs[index]);
             }
             return;
         }
         case 'power':
-            captureDependency(tracker, state.fractionalPowerN ?? 0.5);
+            captureDependency(tracker, state.fractionalPowerN);
             return;
         case 'exp':
             captureComplexDependency(tracker, state.expBase);
@@ -442,11 +443,9 @@ function scanPlanarLayerDependencies(isWPlane, tracker) {
     captureStateDependencies(tracker, PLANAR_STATE_DEPENDENCIES);
     captureDependency(tracker, Boolean(state.conformalGridEnabled));
     captureDependency(tracker, Boolean(state.zetaContinuationEnabled));
-    captureDependency(tracker, state.gridColor1 || '');
-    captureDependency(tracker, state.gridColor2 || '');
-    captureDependency(tracker, state.imageContentVersion || 0);
-    captureDependency(tracker, state.videoProcessingFps || 0);
-    captureDependency(tracker, state.videoFrameVersion || 0);
+    captureDependency(tracker, state.gridColor1);
+    captureDependency(tracker, state.gridColor2);
+    captureDependency(tracker, state.videoProcessingFps);
     captureDependency(tracker, getDynamicPlottingCacheKey());
 
     const domainEnabled = Boolean(state.domainColoringEnabled);
@@ -456,12 +455,13 @@ function scanPlanarLayerDependencies(isWPlane, tracker) {
         captureDependency(tracker, normalizeOrbitColoringMode(state.orbitColoringMode));
     }
 
-    const sourceX = zPlaneParams?.currentVisXRange;
-    const sourceY = zPlaneParams?.currentVisYRange;
-    captureDependency(tracker, sourceX?.[0]);
-    captureDependency(tracker, sourceX?.[1]);
-    captureDependency(tracker, sourceY?.[0]);
-    captureDependency(tracker, sourceY?.[1]);
+    requireVisibleViewport(zPlaneParams, 'Planar cache viewport');
+    const sourceX = zPlaneParams.currentVisXRange;
+    const sourceY = zPlaneParams.currentVisYRange;
+    captureDependency(tracker, sourceX[0]);
+    captureDependency(tracker, sourceX[1]);
+    captureDependency(tracker, sourceY[0]);
+    captureDependency(tracker, sourceY[1]);
     captureDependency(tracker, params?.origin?.x);
     captureDependency(tracker, params?.origin?.y);
     captureDependency(tracker, params?.scale?.x);
@@ -479,6 +479,7 @@ function scanPlanarLayerDependencies(isWPlane, tracker) {
     captureDependency(tracker, chainingEnabled);
     if (chainingEnabled) {
         captureDependency(tracker, state.chainingMode);
+        captureComplexDependency(tracker, state.chainSeed);
         captureDependency(tracker, state.chainCount);
         captureDependency(tracker, normalizeOrbitColoringMode(state.orbitColoringMode));
     }
@@ -528,10 +529,9 @@ function buildZFlowLayerCacheKey() {
 }
 
 function shouldUseWPlanarTransformedLayerCache() {
-    return !state.riemannSphereViewEnabled
-        && !state.splitViewEnabled
+    return !state.manifold3dViewEnabled
         && !state.navigationModeEnabled
-        && state.currentInputShape !== 'video'
+        && !(isMediaInputShape() && runtime.media.video)
         && !isPanning(runtime.interaction.panZ)
         && !isPanning(runtime.interaction.panW);
 }
@@ -539,14 +539,14 @@ function shouldUseWPlanarTransformedLayerCache() {
 function shouldUseZPlanarInputLayerCache() {
     return !state.navigationModeEnabled
         && !state.vectorFieldEnabled
-        && !(state.riemannSphereViewEnabled && !state.splitViewEnabled)
-        && state.currentInputShape !== 'video'
+        && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)
+        && !(isMediaInputShape() && runtime.media.video)
         && !isPanning(runtime.interaction.panZ);
 }
 
 function shouldUseZFlowLayerCache() {
     return (state.vectorFieldEnabled || state.streamlineFlowEnabled)
-        && !(state.riemannSphereViewEnabled && !state.splitViewEnabled)
+        && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)
         && !isPanning(runtime.interaction.panZ);
 }
 
@@ -555,24 +555,17 @@ function fillCanvasBackground(ctx, planeParams) {
         return;
     }
 
-    ctx.fillStyle = COLOR_CANVAS_BACKGROUND;
+    ctx.fillStyle = getCanvasBackgroundColor();
     ctx.fillRect(0, 0, planeParams.width, planeParams.height);
 }
 
 function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
     if (state.domainColoringEnabled && domainCanvas) {
         withCanvasState(ctx, () => {
-            const isProcessing = !planeParams.currentVisXRange
-                ? runtime.rendering.processingWDomainDynamics
-                : runtime.rendering.processingZDomainDynamics;
-            const hasFullResolution = !planeParams.currentVisXRange
-                ? runtime.rendering.wDomainDynamicsHasFullResolution
-                : runtime.rendering.zDomainDynamicsHasFullResolution;
-            if (isProcessing && !hasFullResolution) {
-                ctx.filter = 'blur(3px)';
-            }
             fillCanvasBackground(ctx, planeParams);
-            ctx.drawImage(domainCanvas, 0, 0);
+            if (matchesPlanarDomainViewport(runtime.rendering.domainViewport, planeParams)) {
+                ctx.drawImage(domainCanvas, 0, 0);
+            }
         });
         return;
     }
@@ -581,8 +574,9 @@ function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
 }
 
 function getPlaneRanges(planeParams) {
-    const [xMin, xMax] = planeParams?.currentVisXRange || planeParams?.xRange || [];
-    const [yMin, yMax] = planeParams?.currentVisYRange || planeParams?.yRange || [];
+    requireVisibleViewport(planeParams);
+    const [xMin, xMax] = planeParams.currentVisXRange;
+    const [yMin, yMax] = planeParams.currentVisYRange;
 
     return { xMin, xMax, yMin, yMax };
 }
@@ -645,12 +639,14 @@ function drawTaylorConvergenceOverlay(ctx, planeParams) {
         }
 
         withCanvasState(ctx, () => {
-            ctx.fillStyle = state.taylorSeriesColorConvergenceDiskFill;
-            ctx.strokeStyle = state.taylorSeriesColorConvergenceDiskStroke;
+            ctx.fillStyle = state.gridColor2;
+            ctx.strokeStyle = state.gridColor2;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.arc(centerCanvas.x, centerCanvas.y, radiusCanvas, 0, 2 * Math.PI);
+            ctx.globalAlpha = 0.2;
             ctx.fill();
+            ctx.globalAlpha = 0.5;
             ctx.stroke();
         });
 
@@ -659,12 +655,86 @@ function drawTaylorConvergenceOverlay(ctx, planeParams) {
 
     if (radius === 0) {
         withCanvasState(ctx, () => {
-            ctx.fillStyle = state.taylorSeriesColorConvergenceDiskStroke;
+            ctx.fillStyle = state.gridColor2;
+            ctx.globalAlpha = 0.5;
             ctx.beginPath();
             ctx.arc(centerCanvas.x, centerCanvas.y, 2, 0, 2 * Math.PI);
             ctx.fill();
         });
     }
+}
+
+function drawTaylorPickerReticle(ctx, planeParams, isZ) {
+    if ((!state.taylorSeriesCanvasClickCenterEnabled && !state.canvasClickPickerTarget) || !state.taylorSeriesHoverPoint) return;
+    if (state.taylorSeriesHoverPoint.isZ !== isZ) return;
+
+    const { world } = state.taylorSeriesHoverPoint;
+    const pt = mapToCanvasCoords(world.x, world.y, planeParams);
+    if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return;
+
+    withCanvasState(ctx, () => {
+        // Glowing circle around mouse
+        const radius = 24;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = state.gridColor2;
+        ctx.globalAlpha = 0.2;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = state.gridColor2;
+        ctx.globalAlpha = 0.95;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Inner center dot
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = state.gridColor2;
+        ctx.stroke();
+
+        // Subtle crosshairs
+        ctx.beginPath();
+        ctx.moveTo(pt.x - 32, pt.y);
+        ctx.lineTo(pt.x - 10, pt.y);
+        ctx.moveTo(pt.x + 10, pt.y);
+        ctx.lineTo(pt.x + 32, pt.y);
+        ctx.moveTo(pt.x, pt.y - 32);
+        ctx.lineTo(pt.x, pt.y - 10);
+        ctx.moveTo(pt.x, pt.y + 10);
+        ctx.lineTo(pt.x, pt.y + 32);
+        ctx.strokeStyle = state.gridColor2;
+        ctx.globalAlpha = 0.7;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Coordinate text badge
+        const reVal = Number(world.x);
+        const imVal = Number(world.y);
+        const reStr = reVal.toFixed(2);
+        const imSign = imVal < 0 ? '−' : '+';
+        const imStr = Math.abs(imVal).toFixed(2);
+        const text = `z₀ = ${reStr} ${imSign} ${imStr}i`;
+
+        ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+        const textWidth = ctx.measureText(text).width;
+        const badgeX = pt.x + 18;
+        const badgeY = pt.y - 18;
+
+        ctx.fillStyle = getCanvasBackgroundColor();
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(badgeX - 5, badgeY - 13, textWidth + 10, 18, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = getCanvasTextColor();
+        ctx.fillText(text, badgeX, badgeY);
+    });
 }
 
 function drawPolynomialOriginMarkerOverlay(ctx, planeParams) {
@@ -690,7 +760,7 @@ function drawPolynomialOriginMarkerOverlay(ctx, planeParams) {
         ctx.arc(canvasPoint.x, canvasPoint.y, 5, 0, 2 * Math.PI);
         ctx.fill();
 
-        ctx.fillStyle = COLOR_TEXT_ON_CANVAS;
+        ctx.fillStyle = getCanvasTextColor();
         ctx.font = "10px 'SF Pro Text', sans-serif";
         ctx.textAlign = 'center';
         ctx.fillText('P(0)', canvasPoint.x, canvasPoint.y - 10);
@@ -698,7 +768,7 @@ function drawPolynomialOriginMarkerOverlay(ctx, planeParams) {
 }
 
 function drawWOriginGlowOverlay(ctx, planeParams) {
-    const startedAt = Number(runtime.rendering.wOriginGlowTime) || 0;
+    const startedAt = requireFiniteNumber(runtime.rendering.wOriginGlowTime, 'W-origin glow timestamp');
 
     if (startedAt <= 0) {
         return;
@@ -722,14 +792,10 @@ function drawWOriginGlowOverlay(ctx, planeParams) {
     });
 }
 
-function visiblePlaneRange(planeParams, currentKey, fallbackKey) {
-    const range = planeParams?.[currentKey] || planeParams?.[fallbackKey];
-    return Array.isArray(range) && range.length >= 2 ? range : [-1, 1];
-}
-
 function getConformalIndicatrixData(map) {
-    const xRange = visiblePlaneRange(zPlaneParams, 'currentVisXRange', 'xRange');
-    const yRange = visiblePlaneRange(zPlaneParams, 'currentVisYRange', 'yRange');
+    requireVisibleViewport(zPlaneParams, 'Conformal-grid viewport');
+    const xRange = zPlaneParams.currentVisXRange;
+    const yRange = zPlaneParams.currentVisYRange;
     const key = [
         map.signature,
         state.gridDensity,
@@ -740,7 +806,7 @@ function getConformalIndicatrixData(map) {
     if (conformalIndicatrixCache.key !== key) {
         conformalIndicatrixCache.key = key;
         conformalIndicatrixCache.value = selectStableTissotIndicatrices(
-            generateTissotIndicatrices(map, xRange, yRange, state.gridDensity, 72)
+            generateTissotIndicatrices(nativeOptionsForActiveMap(map), xRange, yRange, state.gridDensity, 72)
         );
     }
     return conformalIndicatrixCache.value;
@@ -774,45 +840,31 @@ function drawCriticalMarkers(ctx, planeParams, points, color) {
 export function drawZPlaneContent(timestamp) {
     syncZRenderContext();
 
-    if (state.fourierModeEnabled) {
-        if (zCtx && zPlaneParams) drawTimeDomainSignal(zCtx, state.fourierTimeDomainSignal, zPlaneParams);
-        return;
-    }
     if (state.laplaceModeEnabled) {
-        if (zCtx && zPlaneParams) drawLaplaceTimeDomain(zCtx, state.laplaceTimeDomainSignal, zPlaneParams);
+        if (zCtx && zPlaneParams) {
+            const signal = state.laplaceTimeDomainSignal;
+            drawLaplaceTimeDomain(zCtx, signal, zPlaneParams, getLaplaceFrameData(signal));
+        }
         return;
     }
 
+    // The ordinary planar path below uses the active-map evaluator for shapes,
+    // overlays, and transformed geometry. Domain coloring is a separate pixel
+    // pipeline: it snapshots state and dispatches native RGBA tile work to
+    // workers rather than evaluating through this map object.
     const map = resolveActiveMap();
-    if (state.riemannSphereViewEnabled && !state.splitViewEnabled) {
-        if (!zCtx || !zPlaneParams) return;
-        const sphereParams = sphereViewParams.z;
-        fillCanvasBackground(zCtx, zPlaneParams);
-        drawCanvasLayer(zCtx, layerCtx => {
-            drawRiemannSphereBase(layerCtx, sphereParams);
-            drawSphereGridAndShape(layerCtx, sphereParams, false);
-            drawDynamicSphere(layerCtx, sphereParams, { isWPlane: false });
-            if (state.probeActive) {
-                drawSphereProbeAndNeighborhood(
-                    layerCtx,
-                    sphereParams,
-                    state.probeZ,
-                    state.probeNeighborhoodSize,
-                    null
-                );
-            }
-        });
+    if (state.manifoldTransformationEnabled) {
         return;
     }
 
     if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCtx) {
-        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams, false, map);
+        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams);
     }
     if (!zCtx || !zPlaneParams) {
         if (state.navigationModeEnabled) {
             invalidateCache(zFlowLayerCache);
             invalidateCache(zPlanarInputLayerCache);
-            drawNavigationLayer(zCtx, zPlaneParams, 'z');
+            drawNavigationLayer(zCtx, zPlaneParams);
         } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
             invalidateCache(zPlanarInputLayerCache);
             buildZFlowLayerCacheKey();
@@ -835,17 +887,18 @@ export function drawZPlaneContent(timestamp) {
         && !state.vectorFieldEnabled
         && !state.streamlineFlowEnabled
         && state.currentInputShape !== 'empty_grid') {
+        const gridColors = getCanvasGridColors();
         drawGrid(zCtx, zPlaneParams, {
             targetCount: state.gridDensity,
-            minorColor: 'rgba(128, 137, 255, 0.04)',
-            majorColor: 'rgba(128, 137, 255, 0.12)'
+            minorColor: gridColors.minorColor,
+            majorColor: gridColors.majorColor
         });
     }
 
     if (state.navigationModeEnabled) {
         invalidateCache(zFlowLayerCache);
         invalidateCache(zPlanarInputLayerCache);
-        drawNavigationLayer(zCtx, zPlaneParams, 'z');
+        drawNavigationLayer(zCtx, zPlaneParams);
     } else if (state.vectorFieldEnabled || state.streamlineFlowEnabled) {
         invalidateCache(zPlanarInputLayerCache);
         const cacheKey = buildZFlowLayerCacheKey();
@@ -872,7 +925,7 @@ export function drawZPlaneContent(timestamp) {
             shouldUseZPlanarInputLayerCache(),
             cacheCtx => drawPlanarInputShape(cacheCtx, zPlaneParams)
         );
-        if ((state.radialDiscreteStepsEnabled && state.currentFunction !== 'poincare') || surfaceStageHasBranches(state)) {
+        if (state.radialDiscreteStepsEnabled || baseExpressionHasBranches(state)) {
             drawPlanarInputOverlays(zCtx, zPlaneParams);
         }
     }
@@ -908,6 +961,9 @@ export function drawZPlaneContent(timestamp) {
     if (state.preimageExplorerEnabled && state.preimageRoots.length) {
         drawCanvasLayer(zCtx, layerCtx => drawPreimageMarkers(layerCtx, zPlaneParams, state.preimageRoots));
     }
+    if (state.taylorSeriesCanvasClickCenterEnabled || state.canvasClickPickerTarget) {
+        drawCanvasLayer(zCtx, layerCtx => drawTaylorPickerReticle(layerCtx, zPlaneParams, true));
+    }
 
     if (!state.particleAnimationEnabled || state.navigationModeEnabled) {
         runtime.particlesLastUpdateTime = null;
@@ -926,12 +982,10 @@ function ensureWPlaneCache(index) {
 
 function setWThreeHidden(hidden) {
     const container = controls.wPlaneThreeContainer;
-    container?.classList?.toggle('hidden', hidden);
     if (hidden) wStaticThreeRenderers.get(container)?.stopAnimationLoop();
 }
 
 function setWPresentation(mode) {
-    wCanvas?.classList?.toggle('hidden', mode !== 'canvas');
     setWThreeHidden(mode !== 'three');
     if (mode === 'three') {
         const container = controls.wPlaneThreeContainer;
@@ -948,14 +1002,12 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
     const previousCtx = wCtx;
     const previousParams = wPlaneParams;
     const previousThreeContainer = controls.wPlaneThreeContainer;
-    const previousSphereParams = sphereViewParams.w;
     const previousCache = wPlanarTransformedLayerCache;
 
     wCanvas = wCanvasList?.[index];
     wCtx = wCtxList?.[index];
     wPlaneParams = wPlaneParamsList?.[index];
     controls.wPlaneThreeContainer = wPlaneThreeContainersList?.[index];
-    sphereViewParams.w = sphereViewWParamsList?.[index];
     wPlanarTransformedLayerCache = ensureWPlaneCache(index);
 
     try {
@@ -963,21 +1015,28 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
         if (isSpecialMode) {
             hideRiemannSurface(wCanvas);
             setWPresentation('canvas');
-            if (state.fourierModeEnabled) {
-                drawWindingVisualization(wCtx, state.fourierTimeDomainSignal, wPlaneParams);
-            } else if (state.laplaceModeEnabled) {
-                drawLaplaceWindingVisualization(wCtx, state.laplaceTimeDomainSignal, wPlaneParams);
+            if (state.laplaceModeEnabled) {
+                const signal = state.laplaceTimeDomainSignal;
+                drawLaplaceWindingVisualization(
+                    wCtx,
+                    signal,
+                    wPlaneParams,
+                    getLaplaceFrameData(signal),
+                    { showIntegralEvaluation: !state.laplaceHideIntegralEvaluation }
+                );
             }
             return;
         }
-        if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) return;
-        if (state.riemannTransformationEnabled) {
+        if (renderRiemannSurfaceIfEnabled(index, map, options.renderRiemannSurface !== false)) {
+            return;
+        }
+        if (state.manifoldTransformationEnabled || state.manifold3dViewEnabled) {
             setWPresentation('hidden');
             return;
         }
         if (state.foldSurface3dEnabled) {
-            if (isRasterInputShape(state.currentInputShape)) {
-                renderThreeWRasterSurface(map, index);
+            if (isMediaInputShape(state.currentInputShape)) {
+                renderThreeWRasterSurface(map);
                 return;
             }
             if (isFoldableInputShape(state.currentInputShape)) {
@@ -986,30 +1045,22 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
             }
         }
 
-        const isRiemannW = state.riemannSphereViewEnabled || state.splitViewEnabled;
-        if (state.threeSphereEnabled && isRiemannW) {
-            renderThreeWPlane(map, index);
-            return;
-        }
-
         setWPresentation('canvas');
-        if (!isRiemannW) {
-            fillCanvasBackground(wCtx, wPlaneParams);
-            drawAxes(wCtx, wPlaneParams, 'Re(w)', 'Im(w)');
-            drawPolynomialOriginMarkerOverlay(wCtx, wPlaneParams);
-            drawWOriginGlowOverlay(wCtx, wPlaneParams);
-            if (!state.navigationModeEnabled && state.currentInputShape !== 'empty_grid') {
-                drawGrid(wCtx, wPlaneParams, {
-                    targetCount: state.gridDensity,
-                    minorColor: 'rgba(128, 137, 255, 0.04)',
-                    majorColor: 'rgba(128, 137, 255, 0.12)'
-                });
-            }
+        fillCanvasBackground(wCtx, wPlaneParams);
+        drawAxes(wCtx, wPlaneParams, 'Re(w)', 'Im(w)');
+        drawPolynomialOriginMarkerOverlay(wCtx, wPlaneParams);
+        drawWOriginGlowOverlay(wCtx, wPlaneParams);
+        if (!state.navigationModeEnabled && state.currentInputShape !== 'empty_grid') {
+            const gridColors = getCanvasGridColors();
+            drawGrid(wCtx, wPlaneParams, {
+                targetCount: state.gridDensity,
+                minorColor: gridColors.minorColor,
+                majorColor: gridColors.majorColor
+            });
         }
 
         if (state.taylorSeriesEnabled
             && map.presentation !== 'derivative'
-            && !isRiemannW
             && !state.navigationModeEnabled) {
             const cacheKey = buildPlanarLayerCacheKey(true);
             renderThroughCache(
@@ -1021,26 +1072,14 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 drawTaylorApproximationLayer,
                 targetCtx => drawCanvasLayer(targetCtx, drawTaylorApproximationLayer)
             );
-        } else if (isRiemannW) {
-            const sphereParams = sphereViewParams.w;
-            fillCanvasBackground(wCtx, wPlaneParams);
-            drawCanvasLayer(wCtx, layerCtx => {
-                drawRiemannSphereBase(layerCtx, sphereParams);
-                drawSphereGridAndShape(layerCtx, sphereParams, true, map.evaluate);
-                drawDynamicSphere(layerCtx, sphereParams, {
-                    isWPlane: true,
-                    transform: map.evaluate,
-                    stageIndex: index
-                });
-            });
         } else {
             renderWPlanarTransformedShape(index, map);
         }
 
-        if (!isRiemannW && state.dynamicPlotting?.enabled) {
+        if (state.dynamicPlotting?.enabled) {
             drawDynamicWPlane(wCtx, wPlaneParams, map.evaluate, index);
         }
-        if (!isRiemannW && state.preimageExplorerEnabled && state.preimageTarget) {
+        if (state.preimageExplorerEnabled && state.preimageTarget) {
             drawCanvasLayer(wCtx, layerCtx => {
                 drawPreimageMarkers(layerCtx, wPlaneParams, [state.preimageTarget], true);
                 if (state.preimageStatus) {
@@ -1050,12 +1089,11 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
                 }
             });
         }
-        if (!isRiemannW && state.continuationValues.length > 1) {
+        if (state.continuationValues.length > 1) {
             drawCanvasLayer(wCtx, layerCtx => drawContinuationValues(layerCtx, wPlaneParams));
         }
         if (state.showCriticalPoints
             && !state.navigationModeEnabled
-            && !isRiemannW
             && Array.isArray(state.criticalValues)
             && state.criticalValues.length > 0) {
             drawCanvasLayer(wCtx, layerCtx => {
@@ -1064,32 +1102,24 @@ function renderSingleWPlane(index, map, isSpecialMode, options) {
         }
         if (state.probeActive && !state.navigationModeEnabled) {
             drawCanvasLayer(wCtx, layerCtx => {
-                if (isRiemannW) {
-                    drawSphereProbeAndNeighborhood(
-                        layerCtx,
-                        sphereViewParams.w,
-                        state.probeZ,
-                        state.probeNeighborhoodSize,
-                        map.evaluate
-                    );
-                } else {
-                    drawPlanarTransformedProbe(layerCtx, wPlaneParams, map);
-                }
+                drawPlanarTransformedProbe(layerCtx, wPlaneParams, map);
             });
         }
-        if (state.conformalGridEnabled && !isRiemannW) {
+        if (state.conformalGridEnabled) {
             const indicatrices = getConformalIndicatrixData(map);
             drawCanvasLayer(wCtx, layerCtx => {
                 drawConformalIndicatrices(layerCtx, wPlaneParams, indicatrices, 'mapped');
             });
         }
-        if (!isRiemannW && index === 0) updateWindingNumberDisplay(map.evaluate);
+        if (state.taylorSeriesCanvasClickCenterEnabled || state.canvasClickPickerTarget) {
+            drawCanvasLayer(wCtx, layerCtx => drawTaylorPickerReticle(layerCtx, wPlaneParams, false));
+        }
+        if (index === 0) updateWindingNumberDisplay();
     } finally {
         wCanvas = previousCanvas;
         wCtx = previousCtx;
         wPlaneParams = previousParams;
         controls.wPlaneThreeContainer = previousThreeContainer;
-        sphereViewParams.w = previousSphereParams;
         wPlanarTransformedLayerCache = previousCache;
     }
 }
@@ -1100,128 +1130,84 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
         return false;
     }
 
-    setWThreeHidden(true);
-    if (!enabled) return true;
-
-    const stage = state.chainingEnabled && state.chainCount > 25
-        ? state.chainCount
-        : index + 1;
-    context.riemannSurfaceContourPipeline = { index, stage, map };
-    if (wCanvas && renderRiemannSurface(wCanvas, { stage, map })) {
-        wCanvas?.classList?.toggle('hidden', true);
+    if (wPlaneParams?.preciseViewport) {
+        hideRiemannSurface(wCanvas);
+        setWThreeHidden(true);
+        setWPresentation('canvas');
+        fillCanvasBackground(wCtx, wPlaneParams);
+        wCtx.save();
+        wCtx.fillStyle = getCanvasTextColor();
+        wCtx.font = '13px sans-serif';
+        wCtx.textAlign = 'center';
+        wCtx.fillText('Riemann surface is unavailable beyond GPU precision.', wPlaneParams.width * 0.5, 28);
+        wCtx.restore();
         return true;
     }
 
-    wCanvas?.classList?.toggle('hidden', false);
-    return false;
+    setWThreeHidden(true);
+    if (!enabled) return true;
+
+    const stage = state.chainingEnabled
+        ? state.chainCount
+        : index + 1;
+    context.riemannSurfaceContourPipeline = { index, stage, map };
+    if (!wCanvas) throw new Error('Riemann surface rendering requires a W-plane canvas.');
+    renderRiemannSurface(wCanvas, { stage, map, planeIndex: index });
+    wCanvas.classList?.toggle('hidden', true);
+    return true;
 }
 
 function prepareThreeWRenderer() {
     const container = controls.wPlaneThreeContainer;
     if (!container) {
-        wCanvas?.classList?.toggle('hidden', false);
-        return null;
+        throw new Error('Three-dimensional W-plane rendering requires its container.');
     }
 
     setWPresentation('three');
     let renderer = wStaticThreeRenderers.get(container);
     if (!renderer) {
-        renderer = new ThreeRiemannRenderer(container, 'w');
+        renderer = new ThreeManifoldsRenderer(container, 'w');
         wStaticThreeRenderers.set(container, renderer);
     }
     renderer.onFoldTargetSelected = target => {
         const map = resolveActiveMap();
-        const xRange = zPlaneParams.currentVisXRange || zPlaneParams.xRange;
-        const yRange = zPlaneParams.currentVisYRange || zPlaneParams.yRange;
+        const xRange = zPlaneParams.currentVisXRange;
+        const yRange = zPlaneParams.currentVisYRange;
         state.preimageTarget = target;
-        state.preimageRoots = findPreimages(target, map.evaluate, { xRange, yRange });
+        state.preimageRoots = findNativePreimages({
+            density: 18,
+            maxIterations: 28,
+            map: nativeOptionsForActiveMap(map),
+            target,
+            xRange,
+            yRange
+        });
         state.preimageStatus = `${state.preimageRoots.length} preimage${state.preimageRoots.length === 1 ? '' : 's'}`;
-        requestRedrawAll();
+        requestUiRedraw();
     };
     return renderer;
 }
 
-function renderThreeWPlane(map, stageIndex) {
-    const threeRenderer = prepareThreeWRenderer();
-    if (!threeRenderer) return;
-
-    threeRenderer.setSphereMode();
-
-    const stage = state.chainingEnabled && state.chainCount > 25
-        ? Math.max(0, state.chainCount - 1)
-        : stageIndex;
-    const transformChanged = threeRenderer.setTransform(map.evaluate, stage + 1, map.signature);
-
-    const gridConfigObj = buildInputShapeGeometryConfig(zPlaneParams, {
-        currentFunction: state.currentFunction,
-        zetaContinuationEnabled: state.zetaContinuationEnabled,
-        gridDensity: state.gridDensity
-    });
-    const gridConfigKey = `${map.signature}:${JSON.stringify(gridConfigObj)}`;
-
-    // Skip rebuilding heavy 3D geometries continuously during 2D canvas drag-panning.
-    // The pointerup redraw will rebuild any stale geometry.
-    if (threeRenderer.lastGridConfigKey !== gridConfigKey
-        && !runtime.interaction.panZ.isPanning
-        && !runtime.interaction.panW.isPanning) {
-        threeRenderer.lastGridConfigKey = gridConfigKey;
-
-        const wPointSets = generateCurrentInputShapePointSets(zPlaneParams, {
-            currentFunction: state.currentFunction,
-            zetaContinuationEnabled: state.zetaContinuationEnabled,
-            curvePoints: 1000,
-            gridDensity: state.gridDensity
-        });
-
-        threeRenderer.buildGridFromPointSets(wPointSets, 1.0);
-    }
-
-    const geometryChanged = threeRenderer.updateGeometry(1.0);
-    const overlayChanged = threeRenderer.setDynamicOverlay(
-        getDynamicSphereSceneData({ transform: map.evaluate, stageIndex }),
-        `${stageIndex}:${getDynamicPlottingCacheKey()}`
-    );
-
-    let probeChanged = false;
-    if (state.probeActive && state.probeZ) {
-        const wProbe = map.evaluate(state.probeZ.re, state.probeZ.im);
-        probeChanged = threeRenderer.updateProbe(wProbe);
-    } else {
-        probeChanged = threeRenderer.updateProbe(null);
-    }
-
-    if (transformChanged || geometryChanged || overlayChanged || probeChanged) {
-        threeRenderer.render();
-    }
-}
-
-function renderThreeWRasterSurface(map, stageIndex) {
-    const rasterShape = state.currentInputShape;
-    const source = getRasterSourceForShape(rasterShape);
-
-    if (!source) {
-        setWPresentation('canvas');
-        return;
+function renderThreeWRasterSurface(map) {
+    const raster = getActiveMediaRaster();
+    if (!raster) {
+        throw new Error('Raster fold rendering requires a decoded raster source.');
     }
 
     const threeRenderer = prepareThreeWRenderer();
-    if (!threeRenderer) return;
 
-    const xRange = wPlaneParams.currentVisXRange || wPlaneParams.xRange;
-    const yRange = wPlaneParams.currentVisYRange || wPlaneParams.yRange;
-    const rasterStage = getImageRenderChainIndex(stageIndex, map);
-    const rasterSize = getRasterSizeForShape(rasterShape);
-    const rasterAspectRatio = getRasterAspectRatioForShape(rasterShape);
-    const rasterContentVersion = rasterShape === 'image' ? state.imageContentVersion : 0;
+    const xRange = wPlaneParams.currentVisXRange;
+    const yRange = wPlaneParams.currentVisYRange;
+    const rasterStage = getImageRenderStage(map);
     const surfaceKey = [
         rasterStage,
-        map?.signature || '',
-        rasterShape,
-        rasterContentVersion,
-        state.a0,
-        state.b0,
-        rasterSize,
-        rasterAspectRatio,
+        map.signature,
+        raster.token,
+        raster.center.re,
+        raster.center.im,
+        raster.size.width,
+        raster.size.height,
+        state.foldSurfaceHeightScale,
         xRange[0], xRange[1], yRange[0], yRange[1]
     ].join('|');
 
@@ -1229,29 +1215,24 @@ function renderThreeWRasterSurface(map, stageIndex) {
         ? threeRenderer.rasterSurfaceData
         : null;
     if (!surface) {
-        surface = buildRasterSurfaceMesh(wPlaneParams, map);
-        if (surface) threeRenderer.rasterSurfaceKey = surfaceKey;
+        surface = buildRasterSurfaceMesh(wPlaneParams, map, raster);
+        threeRenderer.rasterSurfaceKey = surfaceKey;
     }
 
-    if (!threeRenderer.setRasterSurface(
+    threeRenderer.setRasterSurface(
         surface,
-        source,
-        getRasterOpacityForShape(rasterShape),
+        raster.source,
+        raster.opacity,
         state.foldSurfaceHeightScale
-    )) {
-        threeRenderer.rasterSurfaceKey = null;
-        setWPresentation('canvas');
-        return;
-    }
+    );
 
-    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map.evaluate);
+    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map);
 
     threeRenderer.render();
 }
 
 function renderThreeWGridFold(map) {
     const threeRenderer = prepareThreeWRenderer();
-    if (!threeRenderer) return;
 
     const geometryConfig = buildInputShapeGeometryConfig(zPlaneParams, {
         currentFunction: state.currentFunction,
@@ -1259,8 +1240,8 @@ function renderThreeWGridFold(map) {
         gridDensity: state.gridDensity,
         curvePoints: 250
     });
-    const outputXRange = wPlaneParams.currentVisXRange || wPlaneParams.xRange;
-    const outputYRange = wPlaneParams.currentVisYRange || wPlaneParams.yRange;
+    const outputXRange = wPlaneParams.currentVisXRange;
+    const outputYRange = wPlaneParams.currentVisYRange;
     const surfaceKey = [
         map.signature,
         JSON.stringify(geometryConfig),
@@ -1272,6 +1253,7 @@ function renderThreeWGridFold(map) {
         state.graphLayerLockEnabled,
         state.graphSelectedShape,
         state.graphSelectedLineIndex,
+        state.foldSurfaceHeightScale,
         outputXRange[0], outputXRange[1],
         outputYRange[0], outputYRange[1]
     ].join('|');
@@ -1284,21 +1266,19 @@ function renderThreeWGridFold(map) {
         const pointSets = state.graphViewEnabled && state.graphFullGridEnabled
             ? filterGraphFullGridPointSets(generatedPointSets)
             : generatedPointSets;
-        surface = buildGridFoldLineData(pointSets, map.evaluate, {
+        surface = buildNativeGridFold({
+            mapOptions: nativeOptionsForActiveMap(map),
             sourceXRange: geometryConfig.xRange,
             outputXRange,
-            outputYRange
-        });
-        if (surface) threeRenderer.gridFoldSurfaceKey = surfaceKey;
+            outputYRange,
+            heightScale: state.foldSurfaceHeightScale
+        }, pointSets);
+        threeRenderer.gridFoldSurfaceKey = surfaceKey;
     }
 
-    if (!threeRenderer.setGridFoldSurface(surface, state.foldSurfaceHeightScale)) {
-        threeRenderer.gridFoldSurfaceKey = null;
-        setWPresentation('canvas');
-        return;
-    }
+    threeRenderer.setGridFoldSurface(surface, state.foldSurfaceHeightScale);
 
-    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map.evaluate);
+    threeRenderer.setFoldPreimageMarkers(state.preimageRoots, state.preimageTarget, map);
 
     threeRenderer.render();
 }
@@ -1310,23 +1290,25 @@ function drawTaylorApproximationLayer(ctx) {
         state.currentFunction,
         state.taylorSeriesCenter,
         state.taylorSeriesOrder,
-        state.taylorSeriesColorAxisX,
-        state.taylorSeriesColorAxisY,
+        state.gridColor2,
+        state.gridColor1,
         { includeAxes: false }
     );
 }
 
-function drawWTransformedShape(index, map, targetCtx, options = null) {
-    const stageIndex = Number.isFinite(map?.stage) ? map.stage : index;
-    const drawOptions = { ...options, index: stageIndex, map };
-    return drawPlanarTransformedShape(targetCtx, wPlaneParams, map.evaluate, drawOptions);
+function drawWTransformedShape(_index, map, targetCtx, options = null) {
+    if (!map || !Number.isInteger(map.stage)) {
+        throw new Error('W-plane transformed rendering requires a resolved native map stage.');
+    }
+    const drawOptions = { ...options, index: map.stage };
+    return drawPlanarTransformedShape(targetCtx, wPlaneParams, map, drawOptions);
 }
 
 function drawWTransformedShapeChunk(index, map, targetCtx, fresh) {
     const cache = wPlanarTransformedLayerCache;
 
     if (fresh || !cache.renderJob) {
-        cache.renderJob = createPlanarTransformedShapeRenderJob(map.evaluate, map);
+        cache.renderJob = createPlanarTransformedShapeRenderJob(map);
         cache.nextPointSet = 0;
     }
 
@@ -1370,7 +1352,7 @@ function drawWTransformedShapeChunk(index, map, targetCtx, fresh) {
 function renderWPlanarTransformedShape(index, map) {
     if (state.navigationModeEnabled) {
         invalidateCache(wPlanarTransformedLayerCache);
-        drawNavigationLayer(wCtx, wPlaneParams, 'w', map.evaluate);
+        drawNavigationLayer(wCtx, wPlaneParams, map.evaluate);
         return;
     }
 
@@ -1398,22 +1380,19 @@ export function drawWPlaneContent(options = {}) {
         if (!Array.isArray(wCanvasList)
             || !Array.isArray(wCtxList)
             || !Array.isArray(wPlaneParamsList)
-            || wCanvasList.length === 0) return;
-        if (state.fourierModeEnabled || state.laplaceModeEnabled) {
+            || wCanvasList.length === 0) {
+            throw new Error('W-plane rendering requires initialized canvas, context, and viewport lists.');
+        }
+        if (state.laplaceModeEnabled) {
             renderSingleWPlane(0, null, true, options);
             return;
         }
-        if (state.chainingEnabled && state.chainCount > 25) {
-            renderSingleWPlane(0, resolveActiveMap(Math.max(0, state.chainCount - 1)), false, options);
-            return;
+        const requested = requireInteger(state.chainCount, 'W-plane chain count');
+        if (requested < 1 || requested > 1024) {
+            throw new Error('W-plane chain count must be from one through 1024.');
         }
-
-        const available = wCanvasList.length;
-        const requested = Number.isFinite(state.chainCount) ? state.chainCount : 0;
-        const count = state.chainingEnabled ? Math.max(0, Math.min(requested, available)) : 1;
-        for (let index = 0; index < count; index += 1) {
-            renderSingleWPlane(index, resolveActiveMap(index), false, options);
-        }
+        const mapIndex = state.chainingEnabled ? requested - 1 : 0;
+        renderSingleWPlane(0, resolveActiveMap(mapIndex), false, options);
     } finally {
         wPlanarRenderDeadline = Infinity;
         wPlanarWorkPerformed = false;

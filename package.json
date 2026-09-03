@@ -2,16 +2,18 @@
   "name": "complex-function-analysis",
   "version": "1.0.0",
   "description": "![Example](./Example1.png)",
-  "main": "index.js",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/ensure-wasm.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/ensure-wasm.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test test/*.test.js",
+    "test": "node --import ./test/setup.js --test test/*.test.js",
     "test:e2e": "playwright test",
-    "benchmark": "node --expose-gc test/benchmarks/index.js",
-    "benchmark:smoke": "BENCH_PROFILE=smoke node --expose-gc test/benchmarks/index.js"
+    "benchmark": "node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
+    "benchmark:smoke": "BENCH_PROFILE=smoke node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
+    "build:wasm": "node scripts/ensure-wasm.mjs --force"
   },
   "repository": {
     "type": "git",
@@ -30,6 +32,7 @@
   },
   "dependencies": {
     "@preact/signals": "^2.9.4",
+    "lucide-preact": "^1.40.0",
     "preact": "^10.29.7",
     "three": "^0.184.0"
   }

@@ -1,21 +1,21 @@
 import { context, state, mutateState } from '../store/state.js';
-import { setActiveTransformProvider, transformFunctions } from '../math-utils.js';
+import { setActiveTransformProvider, transformFunctions } from '../native/map-runtime.js';
+import { asComplex } from '../math/expression/index.js';
 import {
-    asComplex,
-    compileExpression,
-    finiteComplex
-} from '../math/expression/index.js';
+    compileNativeDynamicAggregate,
+    evaluateNativeDynamic,
+    evaluateNativePoints,
+    nativeMapOptions
+} from '../native/complex-engine.js';
 import { generateDiscreteSource } from './discrete-sources.js';
-import { reduceComplexTerms } from './reducers.js';
 import {
     freeParameterSymbols,
     generateSequenceBindingSeries,
     synchronizeSequenceBindings
 } from './sequence-bindings.js';
+import { isFiniteComplex, requireFiniteComplex, requireInteger } from '../utils/numeric-contracts.js';
+import { clonePlain } from '../utils/clone-utils.js';
 
-const DEFAULT_POINT_EXPRESSION = 'd';
-const DEFAULT_CUSTOM_TERM_EXPRESSION = 'z';
-const SELECTED_TERM_EXPRESSION = 'selected(z)';
 const RESULT_CACHE_LIMIT = 24;
 const transformIds = new WeakMap();
 let nextTransformId = 1;
@@ -220,20 +220,12 @@ const PRESETS = Object.freeze({
 function cache() {
     if (!context.dynamicPlotting) {
         context.dynamicPlotting = {
-            compilationSignature: null,
-            compiled: null,
             sourceSignature: null,
             source: null,
             results: new Map()
         };
     }
     return context.dynamicPlotting;
-}
-
-function clonePlain(value) {
-    if (Array.isArray(value)) return value.map(clonePlain);
-    if (!value || typeof value !== 'object') return value;
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clonePlain(item)]));
 }
 
 function stableStringify(value) {
@@ -255,80 +247,30 @@ function getTransformId(transform) {
 }
 
 function dynamicConfig() {
-    return state.dynamicPlotting || {};
-}
-
-function parameterEnvironment() {
-    const environment = {};
-    for (const parameter of dynamicConfig().parameters || []) {
-        const name = String(parameter?.name || '').trim();
-        if (!name) continue;
-        environment[name] = { re: Number(parameter.value) || 0, im: 0 };
+    if (!state.dynamicPlotting || typeof state.dynamicPlotting !== 'object') {
+        throw new Error('Dynamic plotting requires explicit configuration.');
     }
-    return environment;
-}
-
-function parameterNames() {
-    return Object.keys(parameterEnvironment());
+    return state.dynamicPlotting;
 }
 
 function termBindings() {
-    const term = dynamicConfig().term || {};
+    const term = dynamicConfig().term;
+    if (!term || typeof term !== 'object') throw new Error('Dynamic plotting requires a term.');
     if (term.kind !== 'expression') return [];
+    if (typeof term.expression !== 'string' ||
+        (term.bindings !== undefined && !Array.isArray(term.bindings))) {
+        throw new Error('Dynamic expression terms require source text and bindings.');
+    }
     return synchronizeSequenceBindings(
-        String(term.expression ?? DEFAULT_CUSTOM_TERM_EXPRESSION),
-        term.bindings || []
+        term.expression,
+        term.bindings ?? []
     );
 }
 
-function allowedVariables(baseVariables) {
-    return [
-        ...baseVariables,
-        ...parameterNames(),
-        ...termBindings().map(binding => binding.symbol)
-    ];
-}
-
-function compilationSignature() {
-    const config = dynamicConfig();
-    return stableStringify({
-        pointExpression: config.pointExpression,
-        term: config.term,
-        parameterNames: (config.parameters || []).map(parameter => parameter?.name),
-        bindingSymbols: termBindings().map(binding => binding.symbol)
-    });
-}
-
-function compilePipelineExpressions() {
-    const runtime = cache();
-    const signature = compilationSignature();
-    if (runtime.compilationSignature === signature && runtime.compiled) {
-        return runtime.compiled;
-    }
-
-    const pointSource = String(dynamicConfig().pointExpression ?? DEFAULT_POINT_EXPRESSION);
-    const termSource = dynamicConfig().term?.kind === 'selected-function'
-        ? SELECTED_TERM_EXPRESSION
-        : String(dynamicConfig().term?.expression ?? DEFAULT_CUSTOM_TERM_EXPRESSION);
-    const point = compileExpression(pointSource, {
-        allowedVariables: allowedVariables(['c', 'd', 'j', 's'])
-    });
-    const term = compileExpression(termSource, {
-        allowedVariables: allowedVariables(['c', 'd', 'j', 'z', 's'])
-    });
-
-    runtime.compilationSignature = signature;
-    runtime.compiled = { point, term };
-    runtime.results.clear();
-    return runtime.compiled;
-}
-
 function sourceSignature() {
-    const source = dynamicConfig().source || {};
-    return stableStringify({
-        source,
-        parameters: parameterEnvironment()
-    });
+    const source = dynamicConfig().source;
+    if (!source || typeof source !== 'object') throw new Error('Dynamic plotting requires a source.');
+    return stableStringify(source);
 }
 
 function getSource() {
@@ -336,14 +278,12 @@ function getSource() {
     const signature = sourceSignature();
     if (runtime.sourceSignature === signature && runtime.source) return runtime.source;
 
-    const sourceConfig = clonePlain(dynamicConfig().source || {});
+    const sourceConfig = clonePlain(dynamicConfig().source);
     if (sourceConfig.kind === 'custom_points') {
-        sourceConfig.points = Array.isArray(sourceConfig.points) ? sourceConfig.points : [];
+        if (!Array.isArray(sourceConfig.points)) throw new Error('Custom dynamic sources require a points array.');
     }
 
-    const source = generateDiscreteSource(sourceConfig, {
-        parameters: parameterEnvironment()
-    });
+    const source = generateDiscreteSource(sourceConfig);
     runtime.sourceSignature = signature;
     runtime.source = source;
     runtime.results.clear();
@@ -352,7 +292,7 @@ function getSource() {
 
 function visibleCount(recordCount) {
     const requested = Number(dynamicConfig().playback?.visibleCount);
-    if (!Number.isFinite(requested)) return recordCount;
+    if (!Number.isFinite(requested)) throw new Error('Dynamic playback requires a finite visible count.');
     return Math.max(0, Math.min(recordCount, Math.floor(requested)));
 }
 
@@ -363,67 +303,73 @@ function classifyInvalid(value, error) {
     return 'not-finite';
 }
 
-function evaluatePoint(
-    record,
-    compiled,
-    environment,
-    symbolEnvironment,
-    selectedFunction,
-    aggregateParameter
-) {
-    return asComplex(compiled.point({
-        ...environment,
-        ...symbolEnvironment,
-        d: record.domainValue,
-        j: { re: record.ordinal, im: 0 },
-        s: aggregateParameter,
-        c: aggregateParameter,
-        selectedFunction
-    }));
+const REDUCTION_STATUS = Object.freeze(['included', 'skipped', 'stopped', 'not-evaluated']);
+
+function selectedNativeMap(selectedFunction) {
+    const metadata = selectedFunction?.nativeMapOptions;
+    if (!metadata) throw new Error('Dynamic selected functions must expose native map options.');
+    const functionKey = metadata.functionKey;
+    if (!transformFunctions[functionKey]) {
+        throw new Error('Dynamic selected functions must be owned by the native engine.');
+    }
+    return nativeMapOptions(state, {
+        ...metadata,
+        functionKey,
+        chainingEnabled: metadata.chainingEnabled,
+        chainCount: metadata.chainCount,
+        derivativeOrder: metadata.derivativeOrder
+    });
 }
 
-function evaluateTerm(
-    record,
-    inputPoint,
-    compiled,
-    environment,
-    symbolEnvironment,
-    selectedFunction,
-    aggregateParameter
-) {
-    const termConfig = dynamicConfig().term || {};
-    if (termConfig.kind === 'selected-function') {
-        return asComplex(selectedFunction(inputPoint.re, inputPoint.im));
+function nativeAggregateDefinition(source, bindings, bindingResult, count) {
+    const config = dynamicConfig();
+    if (typeof config.pointExpression !== 'string' || !config.term || !config.reduction) {
+        throw new Error('Dynamic aggregate configuration is incomplete.');
     }
-
-    return asComplex(compiled.term({
-        ...environment,
-        ...symbolEnvironment,
-        d: record.domainValue,
-        j: { re: record.ordinal, im: 0 },
-        z: inputPoint,
-        s: aggregateParameter,
-        c: aggregateParameter,
-        selectedFunction
-    }));
+    return compileNativeDynamicAggregate({
+        pointExpression: config.pointExpression,
+        term: clonePlain(config.term),
+        bindings: clonePlain(bindings),
+        reductionKind: config.reduction.kind,
+        invalidPolicy: config.reduction.invalidPolicy,
+        sourceRecords: source.records.slice(0, count).map(record => ({
+            ordinal: record.ordinal,
+            domainValue: record.domainValue
+        })),
+        bindingSeries: bindingResult.series
+    });
 }
 
 function evaluateSamples(selectedFunction, aggregateParameter, limit = null) {
     const source = getSource();
-    const compiled = compilePipelineExpressions();
-    const environment = parameterEnvironment();
     const count = limit === null
         ? source.records.length
         : Math.max(0, Math.min(source.records.length, limit));
-    const samples = [];
-    const bindingResult = generateSequenceBindingSeries(termBindings(), count, {
-        aggregateParameter,
-        parameters: environment
+    const bindings = termBindings();
+    const bindingResult = generateSequenceBindingSeries(bindings, count, {
+        aggregateParameter
     });
-
-    for (let index = 0; index < count; index += 1) {
+    const aggregate = nativeAggregateDefinition(source, bindings, bindingResult, count);
+    const evaluated = evaluateNativeDynamic(
+        selectedNativeMap(selectedFunction), aggregate, aggregateParameter
+    );
+    const reductionKind = dynamicConfig().reduction.kind;
+    const samples = Array.from({ length: count }, (_, index) => {
         const sourceRecord = source.records[index];
-        const symbolEnvironment = bindingResult.environments[index] || {};
+        const symbolEnvironment = bindingResult.environments[index];
+        if (!symbolEnvironment) throw new Error(`Dynamic binding environment ${index} is missing.`);
+        const errorCode = evaluated.errors[index];
+        const reductionStatus = REDUCTION_STATUS[evaluated.reductionStatus[index]];
+        if (!reductionStatus) throw new Error(`Unknown native reduction status at index ${index}.`);
+        const point = evaluated.pointValues[index];
+        const term = evaluated.termValues[index];
+        const valid = !errorCode && isFiniteComplex(point) && isFiniteComplex(term);
+        const partialValue = evaluated.partialValues[index];
+        let partial = null;
+        if (reductionKind === 'sum') partial = { value: partialValue };
+        else if (reductionKind === 'product') {
+            partial = { value: partialValue, ...evaluated.partialProducts[index] };
+        }
         const sample = {
             id: `${source.kind}:${sourceRecord.ordinal}:${sourceRecord.label}`,
             ordinal: sourceRecord.ordinal,
@@ -431,58 +377,29 @@ function evaluateSamples(selectedFunction, aggregateParameter, limit = null) {
             label: sourceRecord.label,
             metadata: sourceRecord.metadata,
             symbolValues: symbolEnvironment,
-            inputPoint: null,
-            termValue: null,
-            status: 'valid',
-            error: null,
-            partial: null
+            inputPoint: point,
+            termValue: term,
+            status: valid ? 'valid' : classifyInvalid(term, errorCode),
+            error: errorCode ? `Native expression error ${errorCode}` : null,
+            reductionStatus,
+            partial
         };
-
-        try {
-            sample.inputPoint = evaluatePoint(
-                sourceRecord,
-                compiled,
-                environment,
-                symbolEnvironment,
-                selectedFunction,
-                aggregateParameter
-            );
-            if (!finiteComplex(sample.inputPoint)) {
-                sample.status = classifyInvalid(sample.inputPoint);
-                samples.push(sample);
-                continue;
-            }
-
-            sample.termValue = evaluateTerm(
-                sourceRecord,
-                sample.inputPoint,
-                compiled,
-                environment,
-                symbolEnvironment,
-                selectedFunction,
-                aggregateParameter
-            );
-            if (!finiteComplex(sample.termValue)) {
-                sample.status = classifyInvalid(sample.termValue);
-            }
-        } catch (error) {
-            sample.status = classifyInvalid(null, error);
-            sample.error = error?.message || String(error);
-        }
-
-        samples.push(sample);
-    }
-
-    const reduction = reduceComplexTerms(samples, {
-        kind: dynamicConfig().reduction?.kind || 'none',
-        invalidPolicy: dynamicConfig().reduction?.invalidPolicy || 'stop'
+        return sample;
     });
+
+    const reduction = {
+        kind: reductionKind,
+        stopped: samples.some(sample => sample.reductionStatus === 'stopped'),
+        finalValue: evaluated.finalValue,
+        product: evaluated.product
+    };
 
     return {
         source,
         samples,
         reduction,
-        bindingDiagnostics: bindingResult.diagnostics
+        bindingDiagnostics: bindingResult.diagnostics,
+        nativeAggregate: aggregate
     };
 }
 
@@ -503,6 +420,7 @@ function transformEnvironmentSignature() {
         chaining: {
             enabled: state.chainingEnabled,
             mode: state.chainingMode,
+            seed: state.chainSeed,
             count: state.chainCount
         },
         algebraicTerms: state.algebraicChainingTerms
@@ -516,7 +434,6 @@ function resultSignature(selectedFunction, aggregateParameter, stageIndex) {
         pointExpression: config.pointExpression,
         term: config.term,
         reduction: config.reduction,
-        parameters: parameterEnvironment(),
         aggregateParameter,
         stageIndex,
         transformId: getTransformId(selectedFunction),
@@ -538,13 +455,13 @@ function reductionForVisibleSamples(samples, kind) {
         return {
             kind,
             stopped,
-            finalValue: included?.partial?.value || { re: 0, im: 0 },
+            finalValue: included?.partial?.value ?? { re: 0, im: 0 },
             product: null
         };
     }
 
     if (kind === 'product') {
-        const partial = included?.partial || {
+        const partial = included?.partial ?? {
             value: { re: 1, im: 0 },
             normalized: { re: 1, im: 0 },
             logAbs: 0,
@@ -580,11 +497,18 @@ export function getDynamicPlotResult(options = {}) {
 
     const selectedFunction = typeof options.transform === 'function'
         ? options.transform
-        : transformFunctions[state.currentFunction] || ((re, im) => ({ re, im }));
+        : transformFunctions[state.currentFunction];
+    if (!selectedFunction) throw new Error(`Unknown native transform: ${state.currentFunction}.`);
     const aggregateParameter = asComplex(
-        options.aggregateParameter || dynamicConfig().aggregateParameter || { re: 0, im: 0 }
+        options.aggregateParameter === undefined
+            ? dynamicConfig().aggregateParameter
+            : options.aggregateParameter
     );
-    const stageIndex = Number(options.stageIndex) || 0;
+    requireFiniteComplex(aggregateParameter, 'Dynamic aggregate parameter');
+    const stageIndex = options.stageIndex === undefined
+        ? 0
+        : requireInteger(options.stageIndex, 'Dynamic stage index');
+    if (stageIndex < 0) throw new Error('Dynamic stage index must be non-negative.');
     const signature = resultSignature(selectedFunction, aggregateParameter, stageIndex);
     const runtime = cache();
 
@@ -603,19 +527,20 @@ export function getDynamicPlotResult(options = {}) {
 
     const count = visibleCount(result.samples.length);
     const visibleSamples = result.samples.slice(0, count);
+    const reductionKind = dynamicConfig().reduction?.kind;
+    if (reductionKind !== 'none' && reductionKind !== 'sum' && reductionKind !== 'product') {
+        throw new Error(`Unsupported dynamic reduction: ${reductionKind}.`);
+    }
     return {
         ...result,
         visibleCount: count,
         visibleSamples,
-        reduction: reductionForVisibleSamples(
-            visibleSamples,
-            dynamicConfig().reduction?.kind || 'none'
-        ),
+        reduction: reductionForVisibleSamples(visibleSamples, reductionKind),
         validCount: visibleSamples.filter(sample => sample.status === 'valid').length,
         invalidCount: visibleSamples.filter(sample => sample.status !== 'valid').length,
         diagnostics: [
             ...result.sourceDiagnostics,
-            ...(result.bindingDiagnostics || []),
+            ...result.bindingDiagnostics,
             ...visibleSamples
                 .filter(sample => sample.error)
                 .slice(0, 5)
@@ -624,17 +549,27 @@ export function getDynamicPlotResult(options = {}) {
     };
 }
 
-export function evaluateDynamicAggregateAt(value, selectedFunction) {
-    const s = asComplex(value);
-    const count = visibleCount(getSource().records.length);
-    const evaluated = evaluateSamples(selectedFunction, s, count);
-    return evaluated.reduction.finalValue || { re: NaN, im: NaN };
-}
-
-export function createDynamicAggregateTransform(selectedFunction) {
-    const transform = (re, im) => evaluateDynamicAggregateAt({ re, im }, selectedFunction);
+function createDynamicAggregateTransform(selectedFunction) {
+    const source = getSource();
+    const count = visibleCount(source.records.length);
+    const bindings = termBindings();
+    const bindingResult = generateSequenceBindingSeries(bindings, count, {
+        aggregateParameter: { re: 0, im: 0 }
+    });
+    const aggregate = nativeAggregateDefinition(source, bindings, bindingResult, count);
+    const metadata = {
+        ...selectedNativeMap(selectedFunction),
+        chainingEnabled: false,
+        chainCount: 1,
+        dynamicAggregate: aggregate
+    };
+    const transform = (re, im) => {
+        const result = evaluateNativePoints(metadata, [{ re, im }]);
+        return result.valid[0] ? result.values[0] : { re: NaN, im: NaN };
+    };
     transform.dynamicPlottingTransform = true;
     transform.dynamicPlottingBaseTransform = selectedFunction;
+    Object.defineProperty(transform, 'nativeMapOptions', { value: metadata });
     return transform;
 }
 
@@ -661,7 +596,6 @@ export function initializeDynamicPlottingEngine() {
                 pointExpression: dynamicConfig().pointExpression,
                 term: dynamicConfig().term,
                 reduction: dynamicConfig().reduction,
-                parameters: dynamicConfig().parameters,
                 visibleCount: dynamicConfig().playback?.visibleCount
             }
         });
@@ -678,8 +612,6 @@ export function initializeDynamicPlottingEngine() {
 
 export function invalidateDynamicPlotting() {
     const runtime = cache();
-    runtime.compilationSignature = null;
-    runtime.compiled = null;
     runtime.sourceSignature = null;
     runtime.source = null;
     runtime.activeTransformSignature = null;
@@ -701,9 +633,11 @@ export function getDynamicTermBindings() {
 }
 
 export function getDynamicFreeParameterSymbols() {
-    const term = dynamicConfig().term || {};
+    const term = dynamicConfig().term;
+    if (!term || typeof term !== 'object') throw new Error('Dynamic plotting requires a term.');
     if (term.kind !== 'expression') return [];
-    return freeParameterSymbols(String(term.expression || ''), termBindings());
+    if (typeof term.expression !== 'string') throw new Error('Dynamic expression terms require source text.');
+    return freeParameterSymbols(term.expression, termBindings());
 }
 
 function mergeConfig(target, source) {
@@ -726,19 +660,22 @@ export function applyDynamicPlottingPreset(presetId) {
     mutateState('dynamicPlotting', dynamic => {
         mergeConfig(dynamic, clonePlain(preset.config));
         dynamic.preset = presetId;
+        const sourceCount = requireInteger(dynamic.source?.count, 'Dynamic source count');
+        const visibleCount = requireInteger(dynamic.playback?.visibleCount, 'Dynamic visible count');
+        if (sourceCount < 0 || visibleCount < 0) throw new Error('Dynamic counts must be non-negative.');
         dynamic.playback.visibleCount = Math.min(
-            Number(dynamic.source.count) || 0,
-            Number(dynamic.playback.visibleCount) || Number(dynamic.source.count) || 0
+            sourceCount,
+            visibleCount
         );
         if (presetId !== 'custom') {
-            dynamic.playback.visibleCount = Number(dynamic.source.count) || 0;
+            dynamic.playback.visibleCount = sourceCount;
         }
     });
     invalidateDynamicPlotting();
 }
 
 export function formatDynamicValue(value, digits = 6) {
-    if (!finiteComplex(value)) return 'undefined';
+    if (!isFiniteComplex(value)) return 'undefined';
     const normalize = number => Number((Math.abs(number) < 1e-12 ? 0 : number).toFixed(digits));
     const re = normalize(value.re);
     const im = normalize(value.im);
@@ -756,10 +693,9 @@ export function getDynamicPlottingCacheKey() {
         pointExpression: config.pointExpression,
         term: config.term,
         reduction: config.reduction,
-        parameters: config.parameters,
         aggregateParameter: config.aggregateParameter,
         visibleCount: config.playback?.visibleCount,
-        display: config.display,
+        productView: config.productView,
         transformEnvironment: transformEnvironmentSignature()
     });
 }
@@ -773,7 +709,8 @@ export function getDynamicFunctionFormulaHtml() {
 
     const aggregate = reduction === 'sum' ? 'S' : 'P';
     const parameterSymbols = getDynamicFreeParameterSymbols();
-    const count = Math.max(0, Number(config.playback?.visibleCount) || 0);
+    const count = requireInteger(config.playback?.visibleCount, 'Dynamic visible count');
+    if (count < 0) throw new Error('Dynamic visible count must be non-negative.');
     const parameter = parameterSymbols.length ? `(${parameterSymbols.join(',')})` : '';
     return `${aggregate}<sub>${count}</sub>${parameter}`;
 }

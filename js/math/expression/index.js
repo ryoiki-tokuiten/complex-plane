@@ -2,18 +2,13 @@ export {
     EXPRESSION_LIMITS,
     ExpressionSyntaxError,
     collectExpressionDependencies,
-    parseExpression,
-    tokenizeExpression,
-    walkExpression
+    parseExpression
 } from './parser.js';
 
 export {
     ExpressionEvaluationError,
-    asBoolean,
     asComplex,
-    compileExpression,
-    finiteComplex,
-    isPrimeInteger
+    compileExpression
 } from './evaluator.js';
 
 export {

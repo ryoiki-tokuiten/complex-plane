@@ -3,15 +3,22 @@ import assert from 'node:assert/strict';
 
 import { state, context, zPlaneParams } from '../js/store/state.js';
 
+class TestPath2D {
+    moveTo() {}
+    lineTo() {}
+}
+
+if (typeof globalThis.Path2D !== 'function') globalThis.Path2D = TestPath2D;
+
 const STATE_KEYS = [
     'currentFunction', 'currentInputShape', 'gridDensity', 'domainColoringEnabled',
     'navigationModeEnabled', 'vectorFieldEnabled', 'streamlineFlowEnabled',
-    'riemannSphereViewEnabled', 'splitViewEnabled', 'riemannSurfaceEnabled',
-    'riemannTransformationEnabled', 'foldSurface3dEnabled', 'threeSphereEnabled',
+    'manifold3dViewEnabled', 'selectedManifold', 'manifoldTransformationEnabled',
+    'riemannSurfaceEnabled', 'foldSurface3dEnabled',
     'taylorSeriesEnabled', 'taylorSeriesCenter', 'taylorSeriesOrder',
-    'taylorSeriesConvergenceRadius', 'taylorSeriesColorAxisX', 'taylorSeriesColorAxisY',
+    'taylorSeriesConvergenceRadius', 'gridColor1', 'gridColor2',
     'chainingEnabled', 'algebraicChainingEnabled', 'algebraicChainingZExpr',
-    'algebraicChainingTerms', 'cauchyIntegralModeEnabled', 'fourierModeEnabled',
+    'algebraicChainingTerms', 'cauchyIntegralModeEnabled',
     'laplaceModeEnabled', 'conformalGridEnabled', 'dynamicPlotting',
     'a0', 'b0', 'circleR'
 ];
@@ -22,7 +29,7 @@ function makeCanvasContext(kind, counters) {
         setTransform() {},
         clearRect() { if (kind === 'offscreen') counters.clear += 1; },
         drawImage() { if (kind === 'target') counters.targetDraw += 1; },
-        save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+        save() {}, restore() {}, translate() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
         fill() {}, fillRect() {}, fillText() {}, arc() {}, closePath() {}, rect() {},
         measureText(text) { return { width: String(text).length * 7 }; },
         setLineDash() {}, getLineDash() { return []; }
@@ -50,7 +57,7 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
     };
     const contextKeys = [
         'wCanvasList', 'wCtxList', 'wPlaneParamsList', 'wPlaneThreeContainersList',
-        'sphereViewWParamsList', 'wPlanarTransformedLayerCacheList'
+        'wPlanarTransformedLayerCacheList'
     ];
     const previousContext = Object.fromEntries(contextKeys.map(key => [key, context[key]]));
     const previousAnalysisInfo = context.controls.wPlaneAnalysisInfo;
@@ -77,8 +84,8 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             height: 240,
             origin: { x: 160, y: 120 },
             scale: { x: 20, y: 20 },
-            xRange: [-8, 8],
-            yRange: [-6, 6]
+            currentVisXRange: [-8, 8],
+            currentVisYRange: [-6, 6]
         };
         Object.assign(zPlaneParams, {
             width: 320,
@@ -93,27 +100,24 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             wCtxList: [targetContext],
             wPlaneParamsList: [wParams],
             wPlaneThreeContainersList: [null],
-            sphereViewWParamsList: [{}],
             wPlanarTransformedLayerCacheList: []
         });
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             currentInputShape: 'circle',
             gridDensity: 2,
             domainColoringEnabled: false,
             navigationModeEnabled: false,
             vectorFieldEnabled: false,
             streamlineFlowEnabled: false,
-            riemannSphereViewEnabled: false,
-            splitViewEnabled: false,
+            manifold3dViewEnabled: false,
+            selectedManifold: 'sphere',
+            manifoldTransformationEnabled: false,
             riemannSurfaceEnabled: false,
-            riemannTransformationEnabled: false,
             foldSurface3dEnabled: false,
-            threeSphereEnabled: false,
             taylorSeriesEnabled: false,
             chainingEnabled: false,
             cauchyIntegralModeEnabled: false,
-            fourierModeEnabled: false,
             laplaceModeEnabled: false,
             conformalGridEnabled: false,
             dynamicPlotting: { enabled: false },
@@ -141,7 +145,7 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
             algebraicChainingTerms: [{
                 coeff: { re: 1, im: 0 },
                 factors: [{
-                    func: 'sin', chainedFunc: 'none', power: 1,
+                    func: 'cos', chainedFunc: 'none', power: 1,
                     reciprocal: false, log: false, exp: false
                 }]
             }]
@@ -153,18 +157,18 @@ test('W planar cache invalidates for Cauchy, algebraic, and Taylor dependencies'
         assert.equal(counters.clear, 4);
 
         Object.assign(state, {
-            currentFunction: 'sin',
+            currentFunction: 'cos',
             taylorSeriesEnabled: true,
             taylorSeriesCenter: { re: 0, im: 0 },
             taylorSeriesOrder: 2,
             taylorSeriesConvergenceRadius: 1,
-            taylorSeriesColorAxisX: '#111',
-            taylorSeriesColorAxisY: '#222'
+            gridColor1: '#111111',
+            gridColor2: '#222222'
         });
         drawWPlaneContent();
         assert.equal(counters.clear, 5);
 
-        state.taylorSeriesColorAxisX = '#333';
+        state.gridColor2 = '#333333';
         drawWPlaneContent();
         assert.equal(counters.clear, 6);
 

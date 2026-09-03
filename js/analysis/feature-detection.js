@@ -1,458 +1,316 @@
 import { state, zPlaneParams } from '../store/state.js';
-import {
-    getChainedTransformFunction,
-    complexDivide,
-    estimateResidue,
-    numericDerivativeNthOrder,
-    factorial,
-    Complex
-} from '../math-utils.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import {
-    findPolynomialRoots_DurandKerner,
-    findGeneralRoots_Subdivision
-} from './root-finding.js';
-import { getAlgebraicStructureSignatureShared } from '../rendering/webgl-shared.js';
+    estimateNativeResidue,
+    evaluateNativePoints,
+    findNativePolynomialRoots,
+    findNativePreimages
+} from '../native/complex-engine.js';
+import { nativeOptionsForActiveMap, resolveNativeMapOptions } from '../native/map-runtime.js';
 import {
     CRITICAL_POINT_FIND_GRID_SIZE,
-    ZP_CP_CHECK_DISTANCE_FACTOR,
-    CRITICAL_POINT_EPSILON,
+    TWO_PI,
     ZERO_POLE_GRID_SIZE,
-    ZETA_REFLECTION_POINT_RE,
-    ZETA_POLE,
-    ZERO_POLE_EPSILON,
-    POLE_MAGNITUDE_THRESHOLD
+    ZETA_POLE
 } from '../constants/numerical.js';
+import { requireVisibleViewport } from '../utils/viewport.js';
 
-function buildFeatureDetectionCacheKey() {
+function cacheKey(active) {
+    requireVisibleViewport(zPlaneParams, 'Feature-detection viewport');
     return [
-        state.currentFunction,
-        state.mapPresentation,
-        state.chainingEnabled,
-        state.chainCount,
-        state.algebraicChainingEnabled,
-        getAlgebraicStructureSignatureShared(state.algebraicChainingTerms),
-        state.algebraicChainingZExpr || 'z',
-        JSON.stringify(state.polynomialCoeffs),
-        state.mobiusA?.re, state.mobiusA?.im,
-        state.mobiusB?.re, state.mobiusB?.im,
-        state.mobiusC?.re, state.mobiusC?.im,
-        state.mobiusD?.re, state.mobiusD?.im,
-        state.fractionalPowerN,
-        zPlaneParams.currentVisXRange?.[0], zPlaneParams.currentVisXRange?.[1],
-        zPlaneParams.currentVisYRange?.[0], zPlaneParams.currentVisYRange?.[1]
+        active.signature,
+        zPlaneParams.currentVisXRange.join(','), zPlaneParams.currentVisYRange.join(',')
     ].join('|');
 }
 
-let lastCriticalPointsKey = null;
+function inRange(point, xRange, yRange, padding) {
+    return point.re >= xRange[0] - padding && point.re <= xRange[1] + padding &&
+        point.im >= yRange[0] - padding && point.im <= yRange[1] + padding;
+}
+
+function unique(points, distance) {
+    const result = [];
+    for (const point of points) {
+        if (!result.some(other => Math.hypot(other.re - point.re, other.im - point.im) <= distance)) {
+            result.push(point);
+        }
+    }
+    return result;
+}
+
+function activeNativeMap(active, derivativeOrder = null) {
+    return derivativeOrder === null
+        ? nativeOptionsForActiveMap(active)
+        : resolveNativeMapOptions(state.currentFunction, active.stage, derivativeOrder);
+}
+
+let criticalKey = null;
+
 export function findCriticalPoints() {
-    const isZPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled; 
-    if (!state.showCriticalPoints || !isZPlanar) {
+    if (!state.showCriticalPoints || (state.manifold3dViewEnabled && state.manifoldTransformationEnabled) ||
+        zPlaneParams.preciseViewport) {
         state.criticalPoints = [];
         state.criticalValues = [];
-        lastCriticalPointsKey = null;
+        criticalKey = null;
         return;
     }
-
-    const key = buildFeatureDetectionCacheKey();
-    if (key === lastCriticalPointsKey) {
-        return;
-    }
-    lastCriticalPointsKey = key;
-
-    state.criticalPoints = [];
-    state.criticalValues = [];
-
-    const activeMap = resolveActiveMap();
-    const func = activeMap.evaluate;
-    const derivative = activeMap.derivative;
-    const { currentVisXRange: xR, currentVisYRange: yR } = zPlaneParams;
-    
-    const cpCheckDist = (xR[1] - xR[0]) / CRITICAL_POINT_FIND_GRID_SIZE * ZP_CP_CHECK_DISTANCE_FACTOR;
-
-    const addCritPoint = (re, im) => {
-        const z_crit = { re, im };
-        
-        if (z_crit.re >= xR[0] - cpCheckDist && z_crit.re <= xR[1] + cpCheckDist &&
-            z_crit.im >= yR[0] - cpCheckDist && z_crit.im <= yR[1] + cpCheckDist) {
-
-            let tooClose = state.criticalPoints.some(cp =>
-                Math.abs(cp.re - z_crit.re) < cpCheckDist && Math.abs(cp.im - z_crit.im) < cpCheckDist
-            );
-            if (!tooClose) {
-                state.criticalPoints.push(z_crit);
-                const val_at_crit = func(z_crit.re, z_crit.im);
-                if (!isNaN(val_at_crit.re) && !isNaN(val_at_crit.im) && isFinite(val_at_crit.re) && isFinite(val_at_crit.im)){
-                    state.criticalValues.push(val_at_crit);
-                } else {
-                    state.criticalValues.push({re: NaN, im: NaN}); 
-                }
-            }
+    const active = resolveActiveMap();
+    const key = cacheKey(active);
+    if (key === criticalKey) return;
+    const xRange = zPlaneParams.currentVisXRange;
+    const yRange = zPlaneParams.currentVisYRange;
+    const map = activeNativeMap(active);
+    const simple = active.presentation === 'function' && !map.chainingEnabled && !map.taylor && !map.dynamicAggregate;
+    const span = Math.max(xRange[1] - xRange[0], yRange[1] - yRange[0]);
+    const merge = Math.max(1e-8, span * 1e-7);
+    let points = [];
+    if (simple && ['exp', 'tan', 'ln'].includes(state.currentFunction)) {
+        points = [];
+    } else if (simple && ['sin', 'cos', 'sec'].includes(state.currentFunction)) {
+        const offset = state.currentFunction === 'sin' ? 0.5 : 0;
+        for (let n = Math.ceil(xRange[0] / Math.PI - offset) - 1;
+            n <= Math.floor(xRange[1] / Math.PI - offset) + 1; n += 1) {
+            points.push({ re: (n + offset) * Math.PI, im: 0 });
         }
+    } else {
+        const derivativeMap = activeNativeMap(active, active.presentation === 'derivative' ? 2 : 1);
+        points = findNativePreimages({
+            map: derivativeMap,
+            target: { re: 0, im: 0 }, xRange, yRange,
+            density: Math.min(32, CRITICAL_POINT_FIND_GRID_SIZE), maxIterations: 30
+        });
+        points = certifyCandidates(derivativeMap, points, points, 1, span);
+    }
+    state.criticalPoints = unique(points.filter(point => inRange(point, xRange, yRange, merge)), merge)
+        .map(({ analysisRadius: _, ...point }) => point);
+    const values = evaluateNativePoints(map, state.criticalPoints);
+    state.criticalValues = values.values.map((value, index) => values.valid[index] ? value : { re: NaN, im: NaN });
+    criticalKey = key;
+}
+
+let zerosPolesKey = null;
+
+function decoratePole(map, point) {
+    const residue = point.residue ?? estimateNativeResidue(map, point, point.analysisRadius, 160);
+    const { analysisRadius: _, ...pole } = point;
+    return { ...pole, type: 'pole', order: point.order ?? 1, residue };
+}
+
+function lattice(range, offset, period, imaginary = false) {
+    const points = [];
+    for (let n = Math.ceil((range[0] - offset) / period); n <= Math.floor((range[1] - offset) / period); n++) {
+        points.push(imaginary ? { re: 0, im: offset + n * period, order: 1 }
+            : { re: offset + n * period, im: 0, order: 1 });
+    }
+    return points;
+}
+
+const magnitudeSquared = value => value.re * value.re + value.im * value.im;
+const multiply = (a, b) => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re });
+const subtract = (a, b) => ({ re: a.re - b.re, im: a.im - b.im });
+
+function divide(a, b) {
+    const denominator = magnitudeSquared(b);
+    if (denominator === 0) throw new Error('Cannot divide by a zero complex coefficient.');
+    return {
+        re: (a.re * b.re + a.im * b.im) / denominator,
+        im: (a.im * b.re - a.re * b.im) / denominator
     };
+}
 
-    
-    
-    if (activeMap.presentation !== 'derivative') {
-        if (['exp', 'tan', 'reciprocal', 'ln', 'poincare'].includes(state.currentFunction)) {
-            state.criticalPoints = []; state.criticalValues = []; return;
-        }
-
-        if (state.currentFunction === 'sin') {
-            for (let n = Math.ceil(xR[0] / Math.PI - 0.5) - 1; n <= Math.floor(xR[1] / Math.PI - 0.5) + 1; n++) {
-                addCritPoint((n + 0.5) * Math.PI, 0);
-            } return;
-        }
-        if (state.currentFunction === 'cos') {
-            for (let n = Math.ceil(xR[0] / Math.PI) - 1; n <= Math.floor(xR[1] / Math.PI) + 1; n++) {
-                addCritPoint(n * Math.PI, 0);
-            } return;
-        }
-        if (state.currentFunction === 'sec') {
-            for (let n = Math.ceil(xR[0] / Math.PI) - 1; n <= Math.floor(xR[1] / Math.PI) + 1; n++) {
-                addCritPoint(n * Math.PI, 0);
-            } return;
-        }
+function mobiusFeatures() {
+    const { mobiusA: a, mobiusB: b, mobiusC: c, mobiusD: d } = state;
+    const determinant = subtract(multiply(a, d), multiply(b, c));
+    if (magnitudeSquared(c) === 0 && magnitudeSquared(d) === 0) {
+        throw new Error('Zero/pole analysis is undefined for a Möbius map with zero denominator.');
     }
-    
-
-    
-    const dx_grid = (xR[1] - xR[0]) / CRITICAL_POINT_FIND_GRID_SIZE;
-    const dy_grid = (yR[1] - yR[0]) / CRITICAL_POINT_FIND_GRID_SIZE;
-
-    for (let i = 0; i <= CRITICAL_POINT_FIND_GRID_SIZE; i++) {
-        const z_re_eval = xR[0] + i * dx_grid;
-        for (let j = 0; j <= CRITICAL_POINT_FIND_GRID_SIZE; j++) {
-            const z_im_eval = yR[0] + j * dy_grid;
-            const z_test = { re: z_re_eval, im: z_im_eval };
-
-            
-            if (state.currentFunction === 'zeta' && !state.zetaContinuationEnabled && z_test.re <= ZETA_REFLECTION_POINT_RE) {
-                continue;
-            }
-            const deriv = derivative(z_test.re, z_test.im);
-            if (isNaN(deriv.re) || isNaN(deriv.im) || !isFinite(deriv.re) || !isFinite(deriv.im)) continue;
-
-            const modDerivSq = deriv.re * deriv.re + deriv.im * deriv.im;
-            if (modDerivSq < CRITICAL_POINT_EPSILON * CRITICAL_POINT_EPSILON) {
-                addCritPoint(z_test.re, z_test.im);
-            }
+    if (magnitudeSquared(determinant) === 0) {
+        if (magnitudeSquared(a) === 0 && magnitudeSquared(b) === 0) {
+            throw new Error('The zero Möbius map has no isolated zeros.');
         }
+        return { zeros: [], poles: [] };
+    }
+    return {
+        zeros: magnitudeSquared(a) === 0 ? [] : [{ ...divide({ re: -b.re, im: -b.im }, a), order: 1 }],
+        poles: magnitudeSquared(c) === 0 ? [] : [{
+            ...divide({ re: -d.re, im: -d.im }, c), order: 1,
+            residue: divide({ re: -determinant.re, im: -determinant.im }, multiply(c, c))
+        }]
+    };
+}
+
+function simpleFeaturePlan(xRange, yRange) {
+    const real = (offset = 0) => lattice(xRange, offset, Math.PI);
+    const imaginary = (offset = 0) => lattice(yRange, offset, Math.PI, true);
+    switch (state.currentFunction) {
+        case 'identity': return { zeros: [{ re: 0, im: 0, order: 1 }], poles: [] };
+        case 'exp': return { zeros: [], poles: [] };
+        case 'sin': return { zeros: real(), poles: [] };
+        case 'cos': return { zeros: real(Math.PI / 2), poles: [] };
+        case 'tan': return {
+            zeros: real(),
+            poles: real(Math.PI / 2).map(point => ({ ...point, residue: { re: -1, im: 0 } }))
+        };
+        case 'sec': return {
+            zeros: [],
+            poles: real(Math.PI / 2).map(point => ({
+                ...point, residue: { re: -1 / Math.sin(point.re), im: 0 }
+            }))
+        };
+        case 'sinh': return { zeros: imaginary(), poles: [] };
+        case 'tanh': return {
+            zeros: imaginary(),
+            poles: imaginary(Math.PI / 2).map(point => ({ ...point, residue: { re: 1, im: 0 } }))
+        };
+        case 'ln': return { zeros: [{ re: 1, im: 0, order: 1 }], poles: [] };
+        case 'asin':
+        case 'atan': return { zeros: [{ re: 0, im: 0, order: 1 }], poles: [] };
+        case 'gamma': {
+            const poles = [];
+            let factorial = 1;
+            for (let n = 0; -n >= xRange[0]; n++) {
+                poles.push({ re: -n, im: 0, order: 1, residue: { re: (n % 2 ? -1 : 1) / factorial, im: 0 } });
+                factorial *= n + 1;
+            }
+            return { zeros: [], poles };
+        }
+        case 'loggamma':
+        case 'bessel': return { zeros: null, poles: [] };
+        case 'power': {
+            const exponent = state.fractionalPowerN;
+            if (!Number.isInteger(exponent)) return { zeros: [], poles: [] };
+            if (exponent > 0) return { zeros: [{ re: 0, im: 0, order: exponent }], poles: [] };
+            if (exponent < 0) return {
+                zeros: [],
+                poles: [{ re: 0, im: 0, order: -exponent, residue: { re: exponent === -1 ? 1 : 0, im: 0 } }]
+            };
+            return { zeros: [], poles: [] };
+        }
+        case 'mobius': return mobiusFeatures();
+        case 'polynomial': {
+            if (state.polynomialCoeffs.every(coefficient => magnitudeSquared(coefficient) === 0)) {
+                throw new Error('The zero polynomial has no isolated zeros.');
+            }
+            return {
+                zeros: findNativePolynomialRoots([...state.polynomialCoeffs].reverse(), {
+                    maxIterations: 1000, tolerance: 1e-7
+                }),
+                poles: []
+            };
+        }
+        case 'zeta': return {
+            zeros: state.zetaContinuationEnabled ? null : [],
+            poles: [{ ...ZETA_POLE, order: 1, residue: { re: 1, im: 0 } }]
+        };
+        default: return null;
     }
 }
 
-let lastZerosPolesKey = null;
+function winding(values, valid, start, count) {
+    if (valid.slice(start, start + count).some(value => !value)) return null;
+    let previous = Math.atan2(values[start + count - 1].im, values[start + count - 1].re);
+    let total = 0;
+    for (let index = 0; index < count; index++) {
+        const value = values[start + index];
+        if (value.re === 0 && value.im === 0) return null;
+        const angle = Math.atan2(value.im, value.re);
+        let delta = angle - previous;
+        if (delta > Math.PI) delta -= TWO_PI;
+        else if (delta < -Math.PI) delta += TWO_PI;
+        total += delta;
+        previous = angle;
+    }
+    const result = total / TWO_PI;
+    const integer = Math.round(result);
+    return Math.abs(result - integer) <= 0.08 ? integer : null;
+}
+
+function certifyCandidates(map, candidates, allCandidates, sign, span) {
+    if (!candidates.length) return [];
+    const samples = 48;
+    const points = [];
+    const radii = candidates.map(candidate => {
+        let radius = span / 300;
+        for (const other of allCandidates) {
+            const distance = Math.hypot(candidate.re - other.re, candidate.im - other.im);
+            if (distance > 0) radius = Math.min(radius, distance / 3);
+        }
+        return Math.max(span * 1e-7, radius);
+    });
+    for (let index = 0; index < candidates.length; index++) {
+        for (const scale of [1, 0.5]) {
+            for (let sample = 0; sample < samples; sample++) {
+                const angle = sample / samples * TWO_PI;
+                points.push({
+                    re: candidates[index].re + radii[index] * scale * Math.cos(angle),
+                    im: candidates[index].im + radii[index] * scale * Math.sin(angle)
+                });
+            }
+        }
+    }
+    const evaluated = evaluateNativePoints(map, points);
+    return candidates.flatMap((candidate, index) => {
+        const offset = index * samples * 2;
+        const outer = winding(evaluated.values, evaluated.valid, offset, samples);
+        const inner = winding(evaluated.values, evaluated.valid, offset + samples, samples);
+        return outer !== null && outer === inner && Math.sign(outer) === sign
+            ? [{ ...candidate, order: Math.abs(outer), analysisRadius: radii[index] * 0.5 }]
+            : [];
+    });
+}
+
 export function findZerosAndPoles() {
-    const isZPlanar = !state.riemannSphereViewEnabled || state.splitViewEnabled;
-    if (!state.showZerosPoles || !isZPlanar) {
+    if (!state.showZerosPoles || (state.manifold3dViewEnabled && state.manifoldTransformationEnabled) ||
+        zPlaneParams.preciseViewport) {
         state.zeros = [];
         state.poles = [];
-        lastZerosPolesKey = null;
+        zerosPolesKey = null;
         return;
     }
-
-    const key = buildFeatureDetectionCacheKey();
-    if (key === lastZerosPolesKey) {
-        return;
+    const active = resolveActiveMap();
+    const key = cacheKey(active);
+    if (key === zerosPolesKey) return;
+    const xRange = zPlaneParams.currentVisXRange;
+    const yRange = zPlaneParams.currentVisYRange;
+    const span = Math.max(xRange[1] - xRange[0], yRange[1] - yRange[0]);
+    const merge = Math.max(1e-8, span * 1e-7);
+    const map = activeNativeMap(active);
+    const simple = active.presentation === 'function' && !map.chainingEnabled && !map.taylor && !map.dynamicAggregate;
+    const plan = simple ? simpleFeaturePlan(xRange, yRange) : null;
+    const density = Math.min(32, ZERO_POLE_GRID_SIZE);
+    const candidateDistance = span / (density * 120);
+    const search = (inverseOutput, candidateMap = map) => findNativePreimages({
+        map: candidateMap, target: { re: 0, im: 0 }, xRange, yRange,
+        density, maxIterations: 30, inverseOutput
+    });
+    let zeroCandidates = plan?.zeros ?? search(false);
+    if (simple && state.currentFunction === 'polynomial') {
+        zeroCandidates = unique(zeroCandidates, candidateDistance);
     }
-    lastZerosPolesKey = key;
-
-    state.zeros = [];
-    state.poles = [];
-
-    const funcOriginal = getChainedTransformFunction(state.currentFunction); 
-    const { currentVisXRange: xR, currentVisYRange: yR } = zPlaneParams;
-    const zpCheckDist = (xR[1] - xR[0]) / ZERO_POLE_GRID_SIZE * ZP_CP_CHECK_DISTANCE_FACTOR; 
-
-    
-    const addZero = (re, im, type = 'zero', order = null, residue = null) => {
-        const z_zero = { re, im, type, order, residue };
-        if (z_zero.re >= xR[0] - zpCheckDist && z_zero.re <= xR[1] + zpCheckDist &&
-            z_zero.im >= yR[0] - zpCheckDist && z_zero.im <= yR[1] + zpCheckDist) {
-            let tooClose = state.zeros.some(z => Math.abs(z.re - z_zero.re) < zpCheckDist && Math.abs(z.im - z_zero.im) < zpCheckDist);
-            if (!tooClose) state.zeros.push(z_zero);
-        }
-    };
-
-    
-    const addPole = (re, im) => {
-        const poleObject = {re, im}; 
-
-        
-        const funcForAnalysis = (zComplex) => {
-            const result_re_im = funcOriginal(zComplex.real, zComplex.imag);
-            return new Complex(result_re_im.re, result_re_im.im);
-        };
-
-        const analysisResult = analyzeSingularity(poleObject, funcForAnalysis, state.currentFunction);
-
-        
-        if (analysisResult.re >= xR[0] - zpCheckDist && analysisResult.re <= xR[1] + zpCheckDist &&
-            analysisResult.im >= yR[0] - zpCheckDist && analysisResult.im <= yR[1] + zpCheckDist) {
-            let tooClose = state.poles.some(p => Math.abs(p.re - analysisResult.re) < zpCheckDist && Math.abs(p.im - analysisResult.im) < zpCheckDist);
-            if (!tooClose) {
-                state.poles.push(analysisResult);
-            }
-        }
-    };
-
-    
-    const searchBounds = { xMin: xR[0], xMax: xR[1], yMin: yR[0], yMax: yR[1] };
-    const N_subdivision_points = 30; 
-
-    
-    const isChained = state.chainingEnabled && state.chainCount > 1;
-
-    if (!isChained) {
-        if (['exp', 'poincare'].includes(state.currentFunction)) {
-            state.zeros = []; state.poles = []; return;
-        }
-        if (state.currentFunction === 'sin') {
-            for (let n = Math.ceil(xR[0] / Math.PI) - 1; n <= Math.floor(xR[1] / Math.PI) + 1; n++) addZero(n * Math.PI, 0);
-            state.poles = []; return;
-        }
-        if (state.currentFunction === 'cos') {
-            for (let n = Math.ceil(xR[0] / Math.PI - 0.5) - 1; n <= Math.floor(xR[1] / Math.PI - 0.5) + 1; n++) addZero((n + 0.5) * Math.PI, 0);
-            state.poles = []; return;
-        }
-        if (state.currentFunction === 'tan') {
-            for (let n = Math.ceil(xR[0] / Math.PI) - 1; n <= Math.floor(xR[1] / Math.PI) + 1; n++) addZero(n * Math.PI, 0);
-            for (let n = Math.ceil(xR[0] / Math.PI - 0.5) - 1; n <= Math.floor(xR[1] / Math.PI - 0.5) + 1; n++) addPole((n + 0.5) * Math.PI, 0, 'pole', 1); 
-            return;
-        }
-        if (state.currentFunction === 'sec') { 
-            state.zeros = [];
-            for (let n = Math.ceil(xR[0] / Math.PI - 0.5) - 1; n <= Math.floor(xR[1] / Math.PI - 0.5) + 1; n++) addPole((n + 0.5) * Math.PI, 0, 'pole', 1); 
-            return;
-        }
-        if (state.currentFunction === 'reciprocal') { 
-            addPole(0,0, 'pole', 1); state.zeros = []; return;
-        }
-         if (state.currentFunction === 'ln') { 
-            addZero(1,0); addPole(0,0, 'branch_point'); return;
-        }
-
-        
-        if (state.currentFunction === 'polynomial') {
-            
-            
-            const coeffsForDK = state.polynomialCoeffs.map(c => c.re).reverse();
-            const roots = findPolynomialRoots_DurandKerner(coeffsForDK); 
-            roots.forEach(root => addZero(root.real, root.imag));
-            state.poles = []; 
-            return;
-        }
-
-        if (state.currentFunction === 'mobius') {
-            
-            
-            
-            
-            if (state.mobiusA.re !== 0 || state.mobiusA.im !== 0) {
-                const negB = {re: -state.mobiusB.re, im: -state.mobiusB.im};
-                const zero_mobius = complexDivide(negB, state.mobiusA); 
-                addZero(zero_mobius.re, zero_mobius.im);
-            } else if (state.mobiusB.re !== 0 || state.mobiusB.im !== 0) {
-                
-            }
-
-            if (state.mobiusC.re !== 0 || state.mobiusC.im !== 0) {
-                const negD = {re: -state.mobiusD.re, im: -state.mobiusD.im};
-                const pole_mobius = complexDivide(negD, state.mobiusC); 
-                addPole(pole_mobius.re, pole_mobius.im, 'pole', 1); 
-            }
-            
-            
-            return;
-        }
+    let poleCandidates = plan?.poles ?? search(true);
+    if (!plan && active.presentation === 'derivative') {
+        poleCandidates = unique([...search(true, activeNativeMap(active, 0)), ...poleCandidates], candidateDistance);
     }
+    const allCandidates = [...zeroCandidates, ...poleCandidates];
+    const numericalZeros = plan?.zeros === null || !plan || (simple && state.currentFunction === 'polynomial');
+    let zeros = numericalZeros
+        ? certifyCandidates(map, zeroCandidates, allCandidates, 1, span)
+        : zeroCandidates;
+    const poles = plan?.poles === null || !plan
+        ? certifyCandidates(map, poleCandidates, allCandidates, -1, span)
+        : poleCandidates;
 
-    
-    
-    const generalAnalyticFunctions = ['zeta', 'sin', 'cos', 'tan', 'sec', 'exp', 'ln', 'reciprocal']; 
-
-    
-    if (isChained || generalAnalyticFunctions.includes(state.currentFunction)) {
-
-        
-        const funcForSubdivision = (zComplex) => {
-            const result_re_im = funcOriginal(zComplex.real, zComplex.imag); 
-            return new Complex(result_re_im.re, result_re_im.im);
-        };
-
-        
-        const zerosFound = findGeneralRoots_Subdivision(funcForSubdivision, searchBounds, N_subdivision_points);
-        zerosFound.forEach(z => addZero(z.real, z.imag));
-
-        
-        const oneOverFunc = (zComplex) => {
-            const f_val_complex = funcForSubdivision(zComplex); 
-            if (!f_val_complex.isFinite() || (f_val_complex.real === 0 && f_val_complex.imag === 0) ) {
-                 
-                 
-                 
-                 
-                 
-                 
-                 
-                 
-            }
-            return (new Complex(1,0)).divide(f_val_complex);
-        };
-
-        const polesFound = findGeneralRoots_Subdivision(oneOverFunc, searchBounds, N_subdivision_points);
-        polesFound.forEach(p => addPole(p.real, p.imag)); 
-
-        
-        if (state.currentFunction === 'zeta') {
-            let zetaPoleFound = state.poles.some(p => Math.abs(p.re - ZETA_POLE.re) < zpCheckDist && Math.abs(p.im - ZETA_POLE.im) < zpCheckDist);
-            if (!zetaPoleFound && (ZETA_POLE.re >= xR[0] && ZETA_POLE.re <= xR[1] && ZETA_POLE.im >= yR[0] && ZETA_POLE.im <= yR[1])) {
-                addPole(ZETA_POLE.re, ZETA_POLE.im, 'pole', 1); 
-            }
-            if (state.zetaContinuationEnabled) {
-                for (let n = -2; n >= Math.floor(xR[0]); n -= 2) { 
-                    if (n <= xR[1] && n >= xR[0]) { 
-                         let zeroExists = state.zeros.some(z => Math.abs(z.re - n) < zpCheckDist && Math.abs(z.im - 0) < zpCheckDist);
-                         if(!zeroExists) addZero(n, 0);
-                    }
-                }
-            }
-        }
-        
-        
-        
-        
-        
-        
-        
-        
-
-        return;
-    }
-
-
-    
-    console.warn("Using fallback grid search for:", state.currentFunction); 
-    const dx_grid = (xR[1] - xR[0]) / ZERO_POLE_GRID_SIZE;
-    const dy_grid = (yR[1] - yR[0]) / ZERO_POLE_GRID_SIZE;
-
-    for (let i = 0; i <= ZERO_POLE_GRID_SIZE; i++) {
-        const z_re_eval = xR[0] + i * dx_grid;
-        for (let j = 0; j <= ZERO_POLE_GRID_SIZE; j++) {
-            const z_im_eval = yR[0] + j * dy_grid;
-
-            const w = funcOriginal(z_re_eval, z_im_eval); 
-            if (isNaN(w.re) || isNaN(w.im) || !isFinite(w.re) || !isFinite(w.im)) continue;
-            const modW = Math.sqrt(w.re * w.re + w.im * w.im);
-
-            if (modW < ZERO_POLE_EPSILON) addZero(z_re_eval, z_im_eval);
-            else if (modW > POLE_MAGNITUDE_THRESHOLD) addPole(z_re_eval, z_im_eval);
-        }
-    }
-} 
-
-
-
-
-
-export function analyzeSingularity(pole_obj, funcWrapper, funcString) {
-    const z0 = new Complex(pole_obj.re, pole_obj.im);
-    const MAX_POLE_ORDER_CHECK = 5; 
-    const LIMIT_DELTA = 1e-6; 
-    const DERIV_H = 1e-4; 
-    const FINITE_NON_ZERO_TOLERANCE = 1e-5; 
-
-    let poleOrder = 'unknown';
-    let residue = new Complex(NaN, NaN);
-
-    
-    for (let k = 1; k <= MAX_POLE_ORDER_CHECK; k++) {
-        const h_z = (z) => { 
-            const term_z_minus_z0_pow_k = Complex.power(z.subtract(z0), k);
-            return term_z_minus_z0_pow_k.multiply(funcWrapper(z));
-        };
-
-        
-        const p1 = h_z(z0.add(new Complex(LIMIT_DELTA, 0)));
-        const p2 = h_z(z0.add(new Complex(-LIMIT_DELTA, 0)));
-        const p3 = h_z(z0.add(new Complex(0, LIMIT_DELTA)));
-        const p4 = h_z(z0.add(new Complex(0, -LIMIT_DELTA)));
-
-        
-        if (p1.isFinite() && p1.equals(p2, FINITE_NON_ZERO_TOLERANCE) &&
-            p1.equals(p3, FINITE_NON_ZERO_TOLERANCE) && p1.equals(p4, FINITE_NON_ZERO_TOLERANCE)) {
-
-            if (p1.abs() > FINITE_NON_ZERO_TOLERANCE) { 
-                poleOrder = k;
-                
-                
-                
-                
-                
-                
-                
-                
-                break;
+    if (simple && state.currentFunction === 'zeta' && state.zetaContinuationEnabled) {
+        for (let real = -2; real >= Math.floor(xRange[0]); real -= 2) {
+            if (real <= xRange[1]) {
+                zeros = zeros.filter(point => Math.hypot(point.re - real, point.im) > candidateDistance);
+                zeros.push({ re: real, im: 0, order: 1 });
             }
         }
     }
-
-    if (poleOrder !== 'unknown' && poleOrder > 0) {
-        const m = poleOrder;
-        if (m === 1) { 
-            
-            const h_z_simple = (z) => z.subtract(z0).multiply(funcWrapper(z));
-            const r1 = h_z_simple(z0.add(new Complex(LIMIT_DELTA, 0)));
-            
-            residue = r1;
-        } else {
-            
-            const term_to_differentiate = (z_complex) => {
-                const z_minus_z0_pow_m = Complex.power(z_complex.subtract(z0), m);
-                return z_minus_z0_pow_m.multiply(funcWrapper(z_complex));
-            };
-
-            const derivative_val = numericDerivativeNthOrder(term_to_differentiate, z0, m - 1, DERIV_H);
-            if (derivative_val.isFinite()) {
-                const fact_m_minus_1 = factorial(m - 1);
-                if (fact_m_minus_1 !== 0 && !isNaN(fact_m_minus_1)) {
-                    residue = derivative_val.divide(new Complex(fact_m_minus_1, 0));
-                }
-            }
-        }
-    } else {
-        
-        
-        
-        const f_at_z0 = funcWrapper(z0);
-        if (f_at_z0.isFinite()) {
-            
-            
-            poleOrder = 0; 
-        } else {
-            poleOrder = 'essential';
-        }
-    }
-
-    
-    if (!residue.isFinite() && poleOrder !== 'essential' && poleOrder !== 0) {
-        console.warn(`Residue calculation failed for ${funcString} at {${z0.real}, ${z0.imag}}, order ${poleOrder}. Trying contour integral.`);
-        
-        
-        const original_func_re_im = (re, im) => {
-            const res_complex = funcWrapper(new Complex(re,im));
-            return {re: res_complex.real, im: res_complex.imag};
-        };
-        const residue_contour_obj = estimateResidue(original_func_re_im, pole_obj, LIMIT_DELTA*10, 360); 
-        residue = new Complex(residue_contour_obj.re, residue_contour_obj.im);
-    }
-
-
-    return {
-        re: pole_obj.re,
-        im: pole_obj.im,
-        type: poleOrder === 'essential' ? 'essential' : (poleOrder === 0 ? 'removable' : 'pole'),
-        order: poleOrder,
-        residue: { re: residue.real, im: residue.imag } 
-    };
+    state.zeros = unique(zeros.filter(point => inRange(point, xRange, yRange, merge)), merge)
+        .map(({ analysisRadius: _, ...point }) => ({ ...point, type: 'zero', order: point.order ?? 1, residue: null }));
+    state.poles = unique(poles.filter(point => inRange(point, xRange, yRange, merge)), merge)
+        .map(point => decoratePole(map, point));
+    zerosPolesKey = key;
 }

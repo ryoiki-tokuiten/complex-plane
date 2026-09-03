@@ -181,7 +181,7 @@ function freezePalette(palette) {
     });
 }
 
-export const DOMAIN_PALETTES = Object.freeze(RAW_DOMAIN_PALETTES.map(freezePalette));
+const DOMAIN_PALETTES = Object.freeze(RAW_DOMAIN_PALETTES.map(freezePalette));
 
 export const domainPalettes = Object.freeze(DOMAIN_PALETTES.map(palette => Object.freeze({
     id: palette.id,
@@ -194,13 +194,10 @@ export const DOMAIN_PALETTE_IDS = Object.freeze(Object.fromEntries(
     DOMAIN_PALETTES.map(palette => [palette.id, palette.shaderId])
 ));
 
-export const DEFAULT_DOMAIN_PALETTE_ID = 'arctic-frost';
-export const FALLBACK_DOMAIN_PALETTE_SHADER_ID = DOMAIN_PALETTE_IDS[DEFAULT_DOMAIN_PALETTE_ID];
-
-export function getDomainPalette(id) {
-    return DOMAIN_PALETTES.find(palette => palette.id === id) ||
-        DOMAIN_PALETTES.find(palette => palette.id === DEFAULT_DOMAIN_PALETTE_ID) ||
-        DOMAIN_PALETTES[0];
+function getDomainPalette(id) {
+    const palette = DOMAIN_PALETTES.find(candidate => candidate.id === id);
+    if (!palette) throw new Error(`Unknown domain palette: ${id}`);
+    return palette;
 }
 
 export function getDomainPaletteStops(id) {
@@ -208,7 +205,9 @@ export function getDomainPaletteStops(id) {
 }
 
 export function getDomainPaletteShaderId(id) {
-    return DOMAIN_PALETTE_IDS[id] ?? FALLBACK_DOMAIN_PALETTE_SHADER_ID;
+    const shaderId = DOMAIN_PALETTE_IDS[id];
+    if (shaderId === undefined) throw new Error(`Unknown domain palette: ${id}`);
+    return shaderId;
 }
 
 function glslFloat(value) {
@@ -244,15 +243,12 @@ export function createDomainPaletteGlslSource(functionName = 'getPaletteColor') 
         const prefix = index === 0 ? 'if' : 'else if';
         return `  ${prefix} (paletteId == ${palette.shaderId}) return ${glslPaletteCall(palette)};`;
     });
-    const fallback = DOMAIN_PALETTES.find(palette => palette.shaderId === FALLBACK_DOMAIN_PALETTE_SHADER_ID) ||
-        DOMAIN_PALETTES[0];
-
     return [
         ...stopCounts.map(glslInterpolator),
         `vec3 ${functionName}(int paletteId, float h) {`,
         '  float hue = fract(h);',
         ...branches,
-        `  return ${glslPaletteCall(fallback)};`,
+        '  return vec3(1.0, 0.0, 1.0);',
         '}'
     ].join('\n\n');
 }

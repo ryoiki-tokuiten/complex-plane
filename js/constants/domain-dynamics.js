@@ -1,10 +1,12 @@
-export const DYNAMICS_ESCAPE_RADIUS = 1e4;
-export const DYNAMICS_ESCAPE_RADIUS_SQ = DYNAMICS_ESCAPE_RADIUS * DYNAMICS_ESCAPE_RADIUS;
+const DYNAMICS_ESCAPE_RADIUS = 1e4;
+const DYNAMICS_ESCAPE_RADIUS_SQ = DYNAMICS_ESCAPE_RADIUS * DYNAMICS_ESCAPE_RADIUS;
 export const DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE = 1e8;
+const DOMAIN_COLOR_MAGNITUDE_MIN = 1e-30;
+const DOMAIN_COLOR_MAGNITUDE_MAX = 1e30;
+export const DOMAIN_COLOR_LOG_MAGNITUDE_MIN = Math.log(DOMAIN_COLOR_MAGNITUDE_MIN);
+export const DOMAIN_COLOR_LOG_MAGNITUDE_MAX = Math.log(DOMAIN_COLOR_MAGNITUDE_MAX);
 export const DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE = 1e30;
-export const DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH = 512;
-export const DOMAIN_DYNAMICS_EXPONENT_MIN = -745;
-export const DOMAIN_DYNAMICS_EXPONENT_MAX = Math.log(DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE);
+export const DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH = 1024;
 
 function glslFloat(value) {
     const source = String(value);
@@ -12,9 +14,11 @@ function glslFloat(value) {
 }
 
 export function normalizeDomainDynamicsChainCount(value) {
-    const count = Math.floor(Number(value));
-    if (!Number.isFinite(count)) return 1;
-    return Math.max(1, Math.min(DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH, count));
+    const count = Number(value);
+    if (!Number.isInteger(count) || count < 1 || count > DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH) {
+        throw new Error(`Domain-dynamics chain count must be an integer from 1 through ${DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH}.`);
+    }
+    return count;
 }
 
 export function isFiniteDomainDynamicsValue(re, im) {
@@ -22,13 +26,18 @@ export function isFiniteDomainDynamicsValue(re, im) {
         Math.abs(im) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE;
 }
 
-export function domainDynamicsChainBailsOut(re, im) {
-    return !(Math.abs(re) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE) ||
-        !(Math.abs(im) < DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE);
-}
-
 export function domainDynamicsLogMagnitude(re, im) {
     return Math.log1p(Math.hypot(re, im));
+}
+
+export function normalizeDomainColorLogMagnitude(logMagnitude) {
+    if (Number.isNaN(logMagnitude)) {
+        throw new Error('Domain-color log magnitude must be a number.');
+    }
+    return Math.min(1, Math.max(0,
+        (logMagnitude - DOMAIN_COLOR_LOG_MAGNITUDE_MIN) /
+        (DOMAIN_COLOR_LOG_MAGNITUDE_MAX - DOMAIN_COLOR_LOG_MAGNITUDE_MIN)
+    ));
 }
 
 export function domainDynamicsSmoothIteration(iteration, chainCount, re, im) {
@@ -46,7 +55,7 @@ export const DOMAIN_DYNAMICS_GLSL = `
 const float DYNAMICS_ESCAPE_RADIUS = ${glslFloat(DYNAMICS_ESCAPE_RADIUS)};
 const float DYNAMICS_ESCAPE_RADIUS_SQ = ${glslFloat(DYNAMICS_ESCAPE_RADIUS_SQ)};
 const float DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE = ${glslFloat(DOMAIN_COLOR_CHAIN_BAILOUT_MAGNITUDE)};
-const float DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE = ${glslFloat(DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE)};
+const float DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE = 1.0e30;
 const int DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH = ${DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH};
 
 bool isFiniteDomainDynamicsValue(vec2 value) {
