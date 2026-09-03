@@ -1,5 +1,6 @@
 /** @jsxImportSource preact */
 import { useAppState } from '../state-hooks.js';
+import { Icon } from './icon.jsx';
 
 const KEYS = [
     [null, null],
@@ -19,7 +20,7 @@ export function NavigationKeyHints() {
             {KEYS.map(([key, icon], index) => key
                 ? <div key={key} class={`keyhint-key${pressed.has(key) ? ' active' : ''}`}
                     data-tooltip={`Move ${key.replace('Arrow', '').toLowerCase()}`}>
-                    <i data-lucide={icon} aria-hidden="true" />
+                    <Icon name={icon} />
                 </div>
                 : <div key={`spacer-${index}`} class="keyhint-spacer" />)}
         </div>

@@ -130,7 +130,6 @@ const rawState = {
     domainPaletteGuideVisible: false,
     surfacePaletteGuideVisible: false,
     contextMenuPanel: '',
-    animationRevision: 0,
     verticalLayoutEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('complex_verticalLayoutEnabled') === 'true' : false,
 
     cauchyIntegralModeEnabled: false,
@@ -394,7 +393,6 @@ export const context = {
     wPlanarTransformedLayerCacheList: [],
     redrawRequest: null,
     redrawQueued: false,
-    animationStates: {},
     domainColoringDirty: true,
 
     controls: {}

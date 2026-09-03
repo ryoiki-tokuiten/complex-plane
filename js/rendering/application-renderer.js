@@ -27,7 +27,6 @@ import {
 import { draw2DContourPlot } from './contour-2d.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
-import { refreshPanelEdgeHandles } from '../ui/panel-layout-manager.js';
 
 const { controls } = context;
 let surfaceRedrawFrame = null;
@@ -54,7 +53,7 @@ function drawLaplaceSurface() {
         showFourierLine: state.laplaceShowFourierLine === true,
         showROC: state.laplaceShowROC === true
     };
-    drawScalarSurface('laplace_3d_container', {
+    drawScalarSurface(controls.laplace3DContainer, {
         geometryKey: laplaceSurfaceGeometryKey(surface, options),
         buildGeometry: () => buildLaplaceSurfaceGeometry(surface, options),
         frameKey: [surface.revision, mode, ...surface.sigmaRange, ...surface.omegaRange].join('|'),
@@ -89,8 +88,6 @@ function syncOptionalRenderer(key, visible, onHide) {
     if (optionalRendererVisibility.get(key) === visible) return;
     optionalRendererVisibility.set(key, visible);
     if (!visible) onHide?.();
-
-    refreshPanelEdgeHandles(true);
 
     const refreshPlanes = () => {
         setupVisualParameters(false, false);
@@ -130,7 +127,7 @@ export function renderApplicationFrame(timestamp) {
     syncOptionalRenderer(
         'laplace-3d',
         state.laplaceModeEnabled && !state.laplaceHide3DSurface,
-        () => disposeScalarSurface('laplace_3d_container')
+        () => disposeScalarSurface(controls.laplace3DContainer)
     );
     syncOptionalRenderer('laplace-spectrum', state.laplaceModeEnabled && state.laplaceShowSpectrum);
     syncOptionalRenderer('laplace-com', state.laplaceModeEnabled && state.laplaceShowComGraph);

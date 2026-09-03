@@ -96,19 +96,6 @@ export function applyTheme(themeId, { preserveGridColors = false } = {}) {
         state.gridColor1 = theme.colors.gridPri;
         state.gridColor2 = theme.colors.gridSec;
     }
-    if (typeof document !== 'undefined') {
-        const root = document.documentElement;
-        root.setAttribute('data-theme', themeId);
-        root.setAttribute('data-theme-mode', theme.isLight ? 'light' : 'dark');
-        const vars = themeVariables(themeId);
-        for (const [key, value] of Object.entries(vars)) {
-            root.style.setProperty(key, value);
-        }
-    }
-}
-
-export function getActiveTheme() {
-    return themes.find(t => t.id === state.themeId) || themes[0];
 }
 
 export function getCanvasBackgroundColor(themeId = state.themeId) {

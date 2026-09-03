@@ -1,4 +1,4 @@
-import { state, context, subscribeState, mutateState, zPlaneParams, wPlaneParams, laplaceComPlaneParams, laplaceSpectrumPlaneParams, sliderParamKeys } from '../store/state.js';
+import { state, context, mutateState, zPlaneParams, wPlaneParams, laplaceComPlaneParams, laplaceSpectrumPlaneParams, sliderParamKeys } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { loadUploadedMediaFile, pauseUploadedVideoPlayback, startVideoProcessingLoop, publishVideoPlaybackStatus, isMediaInputShape } from '../utils/raster-media.js';
@@ -20,7 +20,6 @@ import {
     ORBIT_COLORING_MODES,
     normalizeOrbitColoringMode
 } from '../constants/rendering.js';
-import { syncComplexParameterControls } from './view-model.js';
 import { syncGridDensityControls } from './grid-density.js';
 import { stopLaplaceAnimation, toggleLaplaceAnimation, resetLaplaceAnimation, showFullLaplaceSpiral } from '../rendering/laplace-animation.js';
 import { setNavigationModeEnabled, setNavigationKey, stopNavigationLoop } from '../navigation-plane.js';
@@ -29,7 +28,11 @@ import { initializePolynomialCoeffs } from '../store/polynomial-state.js';
 import { resizeScalarSurface } from '../rendering/real-plots-renderer.js';
 import { applyTheme, loadThemePreferences } from './theme.js';
 import { applyFractalPreset, isFractalPresetKey } from '../analysis/fractal-presets.js';
-import { initPanelLayoutManager, refreshPanelEdgeHandles, refreshPanelLayout, positionContour2DPanel } from '../ui/panel-layout-manager.js';
+import {
+    initPanelLayoutManager,
+    refreshPanelLayout,
+    resetAllPanelLayouts
+} from '../ui/panel-layout-manager.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { compileExpression } from '../math/expression/index.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
@@ -43,10 +46,8 @@ import {
 import { disposeRealPlotsRenderer, disposeScalarSurface, validateRealPlotExpression } from '../rendering/real-plots-renderer.js';
 import { appendAlgebraicTerm } from '../math/algebraic-term-utils.js';
 import { openThemeModal } from '../frontend/theme-state.js';
-import { resetAllPanelLayouts } from '../ui/panel-layout-manager.js';
 import { isFoldableInputShape } from '../rendering/shape-generators.js';
 import {
-    continuationNativeSheet,
     evaluateNativeSheets,
     findNativePreimages,
     nativeMapOptions
@@ -56,13 +57,12 @@ import { resetRiemannSurfaceViews } from '../rendering/webgl-riemann-surface.js'
 import { findNearestDynamicSample, formatDynamicSampleTooltip } from '../rendering/draw-dynamic-plotting.js';
 import { drawFourier3DPipeline } from '../rendering/fourier-3d-pipeline.js';
 import { showDynamicTooltip, hideDynamicTooltip } from './tooltip-state.js';
-import { controlKeyFromId } from '../ui/control-registry.js';
+import { controlKeyFromId } from './control-key.js';
 
 const { controls = {} } = context;
 
 let zCanvas;
 let wCanvas;
-let uiEventListenersBound = false;
 let transformViewportSnapshot = null;
 let algebraicChainingSourceFunction = null;
 let nonFractalSavedState = null;
@@ -81,16 +81,19 @@ const FRACTAL_RESTORE_KEYS = [
 
 const PASSIVE_LISTENER_OPTIONS = Object.freeze({ passive: true });
 const PASSIVE_CAPTURE_LISTENER_OPTIONS = Object.freeze({ passive: true, capture: true });
-const ACTIVE_LISTENER_OPTIONS = Object.freeze({ passive: false });
-const DEFAULT_FRAME_DELAY = 0;
 
 const uiActions = new Map();
+const FUNCTION_KEYS = [
+    'cos', 'sin', 'tan', 'sec', 'exp', 'ln', 'sinh', 'tanh', 'asin', 'atan',
+    'power', 'mobius', 'zeta', 'gamma', 'loggamma', 'bessel', 'polynomial',
+    'mandelbrot', 'newton_fractal', 'laplace'
+];
 
 const EVENT_PROP_NAMES = {
     blur: 'onBlur', change: 'onChange', click: 'onClick', contextmenu: 'onContextMenu',
     input: 'onInput', keydown: 'onKeyDown', keyup: 'onKeyUp', mousedown: 'onMouseDown',
     mouseleave: 'onMouseLeave', mousemove: 'onMouseMove', mouseup: 'onMouseUp',
-    pointerdown: 'onPointerDown', pointermove: 'onPointerMove', pointerup: 'onPointerUp',
+    pointercancel: 'onPointerCancel', pointerdown: 'onPointerDown', pointermove: 'onPointerMove', pointerup: 'onPointerUp',
     wheel: 'onWheel'
 };
 
@@ -105,6 +108,10 @@ function registerUiAction(controlKey, eventName, handler) {
             ? event => { previous(event); handler(event, event.currentTarget); }
             : event => handler(event, event.currentTarget)
     });
+}
+
+function registerUiProps(controlKey, props) {
+    uiActions.set(controlKey, { ...uiActions.get(controlKey), ...props });
 }
 
 const canvasInteractionContexts = { z: null, w: null };
@@ -256,12 +263,8 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
-function frame(callback) {
-    return requestAnimationFrame(callback);
-}
-
-function laterFrame(callback, delay = DEFAULT_FRAME_DELAY) {
-    frame(() => setTimeout(callback, delay));
+function laterFrame(callback, delay = 0) {
+    requestAnimationFrame(() => setTimeout(callback, delay));
 }
 
 function setOrbitColoringMode(mode) {
@@ -277,16 +280,7 @@ function parseControlValue(control, parser = parseFloat) {
     return requireFiniteNumber(parser(control.value), `Control ${control.id || '(unnamed)'}`);
 }
 
-function bindElementListener(element, eventName, handler, options) {
-    if (!element) return;
-    if (element.id) {
-        registerUiAction(controlKeyFromId(element.id), eventName, handler);
-        return;
-    }
-    element.addEventListener(eventName, event => handler(event, element), options);
-}
-
-function bindControlListener(controlKey, eventName, handler, options) {
+function bindControlListener(controlKey, eventName, handler) {
     registerUiAction(controlKey, eventName, handler);
 }
 
@@ -341,17 +335,13 @@ function bindSimpleControlRemainder() {
     SIMPLE_SELECTOR_BINDINGS.forEach(({ controlKey, stateKey }) => bindSelector(controlKey, stateKey));
 }
 
-function scheduleRedraw(markDomainDirty = false) {
-    if (markDomainDirty) requestScheduledDomainRedraw();
-    else requestScheduledUiRedraw();
-}
-
 function requestUiRedraw() {
-    scheduleRedraw();
+    requestScheduledUiRedraw();
 }
 
 function requestDomainRedraw(markDomainDirty = false) {
-    scheduleRedraw(markDomainDirty);
+    if (markDomainDirty) requestScheduledDomainRedraw();
+    else requestScheduledUiRedraw();
 }
 
 function requestAlgebraicRedraw() {
@@ -376,10 +366,6 @@ function setActiveFunctionButton(activeKey) {
     }
 }
 
-function updateModePanels() {
-    refreshPanelEdgeHandles(true);
-}
-
 function disableAlgebraicChaining() {
     if (!state.algebraicChainingEnabled) {
         algebraicChainingSourceFunction = null;
@@ -397,7 +383,7 @@ function disableOutputChaining() {
 }
 
 function refreshPlanesAfterLayoutChange() {
-    frame(() => {
+    requestAnimationFrame(() => {
         setupVisualParameters(false, false);
         requestUiRedraw();
     });
@@ -416,7 +402,7 @@ function disableRealPlots() {
 function disableLaplaceMode() {
     if (!state.laplaceModeEnabled) return;
     stopLaplaceAnimation();
-    disposeScalarSurface('laplace_3d_container');
+    disposeScalarSurface(controls.laplace3DContainer);
     state.laplaceModeEnabled = false;
     restoreNormalViewports();
 }
@@ -428,13 +414,10 @@ function disableGraphView() {
     state.graphFourierEnabled = false;
     state.graphTraceEnabled = false;
     state.graphSelectedShape = '';
-    if (state.isGraphFullScreen && controls.toggleFullscreenGraphBtn) {
-        controls.toggleFullscreenGraphBtn.click();
-    }
+    state.isGraphFullScreen = false;
 
     disposeTransformationGraphRenderer();
     refreshPlanesAfterLayoutChange();
-    updateModePanels();
 }
 
 function syncChainingControlsFromState() {
@@ -515,7 +498,6 @@ function activateFractalPreset(key) {
     if (leavingTransform) restoreNormalViewports();
     syncChainingControlsFromState();
     syncAlgebraicControlsFromState();
-    updateModePanels();
     setActiveFunctionButton(key);
     requestDomainRedraw(true);
     return true;
@@ -612,7 +594,7 @@ function activateFunctionMode(key) {
 
     if (state.laplaceModeEnabled && !enteringLaplace) {
         stopLaplaceAnimation();
-        disposeScalarSurface('laplace_3d_container');
+        disposeScalarSurface(controls.laplace3DContainer);
     }
     if (enteringTransform && isMediaInputShape() && runtime.media.video) pauseUploadedVideoPlayback();
 
@@ -644,7 +626,6 @@ function activateFunctionMode(key) {
     if (enteringTransform) fitTransformViewports();
     else if (leavingTransform) restoreNormalViewports();
 
-    updateModePanels();
     setActiveFunctionButton(key);
     requestDomainRedraw(true);
 }
@@ -653,21 +634,33 @@ function complexState(key) {
     return requireFiniteComplex(state[key], `State ${key}`);
 }
 
-function bindAnimatedSlider(slider, updateState, playButton, speedSelector) {
-    if (!slider || !playButton || !speedSelector) return;
-    bindElementListener(playButton, 'click', () => toggleAnimation(slider, updateState, playButton, speedSelector));
+const ANIMATION_RANGES = {
+    a0: [-5, 5, .05],
+    b0: [-5, 5, .05],
+    circleR: [.1, 10, .05],
+    fractionalPowerN: [-5, 5, .05]
+};
+
+function bindAnimatedSlider(key, getValue, update, range = ANIMATION_RANGES[key]) {
+    const sliderId = `${key}_slider`;
+    bindControlListener(controlKeyFromId(`play_${key}_btn`), 'click', () => toggleAnimation({
+        id: sliderId,
+        value: getValue(),
+        min: range[0],
+        max: range[1],
+        step: range[2],
+        speedId: `speed_${key}_selector`,
+        update
+    }));
 }
 
 function bindBaseParameterControls() {
     sliderParamKeys.forEach(key => {
         bindSlider(`${key}Slider`, key);
         bindAnimatedSlider(
-            controls[`${key}Slider`],
-            value => {
-                state[key] = value;
-            },
-            controls[`play${key[0].toUpperCase()}${key.slice(1)}Btn`],
-            controls[`speed${key[0].toUpperCase()}${key.slice(1)}Selector`]
+            key,
+            () => state[key],
+            value => { state[key] = value; }
         );
     });
 }
@@ -687,12 +680,12 @@ function bindMobiusControls() {
         });
 
         bindAnimatedSlider(
-            controls[sliderKey],
+            `mobius${param}_${part}`,
+            () => complexState(stateKey)[part],
             value => {
                 state[stateKey] = { ...complexState(stateKey), [part]: value };
             },
-            controls[`playMobius${param}${partKey}Btn`],
-            controls[`speedMobius${param}${partKey}Selector`]
+            [-5, 5, .1]
         );
     }));
 }
@@ -746,8 +739,6 @@ function bindFunctionButtons() {
         state.currentFunction = 'algebraic_chaining';
         state.currentFunctionPreset = null;
         setActiveFunctionButton('custom_complex');
-        updateModePanels();
-        syncComplexParameterControls();
         requestAlgebraicRedraw();
     });
 
@@ -790,10 +781,9 @@ function bindFunctionButtons() {
     });
 
     // Standard function & fractal & laplace buttons
-    Object.entries(controls.funcButtons || {}).forEach(([key, button]) => {
-        if (key === 'custom_complex' || key === 'real_plots') return;
-        bindElementListener(button, 'click', () => activateFunctionMode(key));
-    });
+    FUNCTION_KEYS.forEach(key => bindControlListener(
+        controlKeyFromId(`select_${key}_btn`), 'click', () => activateFunctionMode(key)
+    ));
 }
 
 function firstFile(event) {
@@ -820,7 +810,7 @@ function bindVideoControls() {
 
 function bindDomainColoringControls() {
     bindCheckbox('showDomainColoringKeyCb', 'domainColoringKeyVisible');
-    bindElementListener(controls.orbitColoringModeSelect, 'change', event => {
+    bindControlListener('orbitColoringModeSelect', 'change', event => {
         setOrbitColoringMode(event.target.value);
         state.currentFunctionPreset = null;
         requestDomainRedraw(true);
@@ -922,9 +912,9 @@ function bindViewControls() {
 }
 
 function bindNavigationControls() {
-    bindElementListener(document, 'keydown', event => setNavigationKey(event, true));
-    bindElementListener(document, 'keyup', event => setNavigationKey(event, false));
-    bindElementListener(window, 'blur', () => {
+    document.addEventListener('keydown', event => setNavigationKey(event, true));
+    document.addEventListener('keyup', event => setNavigationKey(event, false));
+    window.addEventListener('blur', () => {
         runtime.navigation.keys = {};
         stopNavigationLoop();
     });
@@ -1033,7 +1023,6 @@ function bindLaplaceControls() {
     ].forEach(([controlKey, stateKey]) => bindCheckbox(controlKey, stateKey));
 
     bindSlider('laplaceAnimationSpeedSlider', 'laplaceAnimationSpeed', parseFloat, () => {
-        syncLaplacePlayPauseButton();
     });
     bindSlider('laplaceAnimationTimeSlider', 'laplaceAnimationTime', parseFloat, () => {
         stopLaplaceAnimation();
@@ -1046,7 +1035,6 @@ function bindLaplaceControls() {
         ['laplaceShowFullBtn', showFullLaplaceSpiral]
     ].forEach(([controlKey, fn]) => bindControlListener(controlKey, 'click', () => {
         fn();
-        frame(syncLaplacePlayPauseButton);
     }));
 
 }
@@ -1446,19 +1434,25 @@ function handleCanvasWheel(ctx, event) {
     flushCanvasWheel(ctx);
 }
 
-function bindViewportInteractions(canvas, { getViewport, setViewport, scaleZoom, onRedraw }) {
-    if (!canvas) return;
+export function createViewportInteractionProps({ getViewport, setViewport, scaleZoom, onRedraw }) {
     let drag = null;
 
-    canvas.addEventListener('mousedown', event => {
+    const end = event => {
+        drag = null;
+        if (event?.currentTarget?.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+    };
+    return {
+    onPointerDown(event) {
         if (event.button !== 0) return;
         const { xRange, yRange } = getViewport();
         drag = { x: event.clientX, y: event.clientY, xRange: [...xRange], yRange: [...yRange] };
-    }, PASSIVE_LISTENER_OPTIONS);
-
-    bindElementListener(window, 'mousemove', event => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    onPointerMove(event) {
         if (!drag) return;
-        const rect = canvas.getBoundingClientRect();
+        const rect = event.currentTarget.getBoundingClientRect();
         const xSpan = drag.xRange[1] - drag.xRange[0];
         const ySpan = drag.yRange[1] - drag.yRange[0];
         const shiftX = -(event.clientX - drag.x) * xSpan / Math.max(1, rect.width);
@@ -1469,14 +1463,13 @@ function bindViewportInteractions(canvas, { getViewport, setViewport, scaleZoom,
             getViewport().zoom
         );
         onRedraw();
-    }, PASSIVE_LISTENER_OPTIONS);
-
-    bindElementListener(window, 'mouseup', () => { drag = null; }, PASSIVE_LISTENER_OPTIONS);
-
-    canvas.addEventListener('wheel', event => {
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+    onWheel(event) {
         event.preventDefault();
         const current = getViewport();
-        const rect = canvas.getBoundingClientRect();
+        const rect = event.currentTarget.getBoundingClientRect();
         const width = Math.max(1, rect.width);
         const height = Math.max(1, rect.height);
         const px = clamp(event.clientX - rect.left, 0, width);
@@ -1492,12 +1485,13 @@ function bindViewportInteractions(canvas, { getViewport, setViewport, scaleZoom,
         const yMax = anchorY + py / height * nextYSpan;
         setViewport([xMin, xMin + nextXSpan], [yMax - nextYSpan, yMax], zoom);
         onRedraw();
-    }, ACTIVE_LISTENER_OPTIONS);
+    }
+    };
 }
 
-export function bindGenericPlaneInteractions(canvas, planeParams, onRedraw) {
+export function createPlaneViewportProps(planeParams, onRedraw) {
     if (!planeParams) return;
-    bindViewportInteractions(canvas, {
+    return createViewportInteractionProps({
         getViewport: () => ({
             xRange: planeParams.currentVisXRange,
             yRange: planeParams.currentVisYRange
@@ -1522,26 +1516,26 @@ function bindCanvasInteractions() {
         if (!ctx.canvas) return;
 
         const key = planeType === 'z' ? 'zPlaneCanvas' : 'wPlaneCanvas';
-        registerUiAction(key, 'mousemove', onCanvasMouseMove);
-        registerUiAction(key, 'mousedown', onCanvasMouseDown);
-        registerUiAction(key, 'mouseup', onCanvasMouseUp);
-        registerUiAction(key, 'mouseleave', onCanvasMouseLeave);
-        registerUiAction(key, 'wheel', onCanvasWheel);
-        registerUiAction(key, 'click', onCanvasClick);
+        bindControlListener(key, 'mousemove', onCanvasMouseMove);
+        bindControlListener(key, 'mousedown', onCanvasMouseDown);
+        bindControlListener(key, 'mouseup', onCanvasMouseUp);
+        bindControlListener(key, 'mouseleave', onCanvasMouseLeave);
+        bindControlListener(key, 'wheel', onCanvasWheel);
+        bindControlListener(key, 'click', onCanvasClick);
         const wrapperKey = planeType === 'z' ? 'zPlaneCanvasWrapper' : 'wPlaneCanvasWrapper';
-        registerUiAction(wrapperKey, 'contextmenu', event => {
+        bindControlListener(wrapperKey, 'contextmenu', event => {
             if (event.target.closest?.('canvas')) openPlaneContextMenu(event, planeType);
         });
     });
 
-    bindElementListener(window, 'mouseup', event => {
+    window.addEventListener('mouseup', event => {
         for (const ctx of Object.values(canvasInteractionContexts)) {
             if (ctx) handleCanvasUp(ctx, event);
         }
     }, PASSIVE_LISTENER_OPTIONS);
 
-    bindGenericPlaneInteractions(controls.laplaceComCanvas, laplaceComPlaneParams, requestUiRedraw);
-    bindGenericPlaneInteractions(controls.laplaceSpectrumCanvas, laplaceSpectrumPlaneParams, requestUiRedraw);
+    registerUiProps('laplaceComCanvas', createPlaneViewportProps(laplaceComPlaneParams, requestUiRedraw));
+    registerUiProps('laplaceSpectrumCanvas', createPlaneViewportProps(laplaceSpectrumPlaneParams, requestUiRedraw));
 
     ['z_plane_shape_controls_overlay', 'grid_shape_controls_overlay', 'radial_discrete_steps_options_div'].forEach(id => {
         ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'pointerdown']
@@ -1552,11 +1546,10 @@ function bindCanvasInteractions() {
 }
 
 function bindContourCanvasInteractions() {
-    const contourCanvas = controls.contour2DCanvas;
     const getViewport = () => state.laplaceModeEnabled
         ? { xRange: state.laplaceSurface.sigmaRange, yRange: state.laplaceSurface.omegaRange, zoom: state.laplaceSurface.viewportZoom ?? 1 }
         : { xRange: zPlaneParams.currentVisXRange, yRange: zPlaneParams.currentVisYRange, zoom: state.zPlaneZoom };
-    bindViewportInteractions(contourCanvas, {
+    registerUiProps('contour2DCanvas', createViewportInteractionProps({
         getViewport,
         setViewport(xRange, yRange, zoom) {
             if (state.laplaceModeEnabled) return setLaplaceSurfaceViewport(xRange, yRange, zoom);
@@ -1575,7 +1568,7 @@ function bindContourCanvasInteractions() {
             return { factor: oldZoom / zoom, zoom };
         },
         onRedraw: () => requestDomainRedraw(true)
-    });
+    }));
 }
 
 function refreshCanvasLayout() {
@@ -1588,14 +1581,9 @@ function refreshCanvasLayout() {
 }
 
 function bindCanvasRectInvalidation() {
-    bindElementListener(window, 'resize', refreshCanvasLayout, PASSIVE_LISTENER_OPTIONS);
-    bindElementListener(window, 'scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
-    bindElementListener(document, 'scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
-    bindElementListener(document, 'transitionend', (e) => {
-        if (e.target && (e.target.id === 'canvases_section' || e.target.classList?.contains('plane-column') || e.target.classList?.contains('two-column-layout') || e.target.classList?.contains('controls-panel') || e.target.id === 'controls_options_section')) {
-            refreshCanvasLayout();
-        }
-    }, PASSIVE_LISTENER_OPTIONS);
+    window.addEventListener('resize', refreshCanvasLayout, PASSIVE_LISTENER_OPTIONS);
+    window.addEventListener('scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
+    document.addEventListener('scroll', invalidateAllCanvasRects, PASSIVE_CAPTURE_LISTENER_OPTIONS);
 }
 
 function contextForCanvasEvent(event) {
@@ -1699,8 +1687,6 @@ function bindFullscreenControls() {
     bindControlListener('toggleFullscreenZBtn', 'click', () => handleFullScreenToggle('z'));
     bindControlListener('toggleFullscreenWBtn', 'click', () => handleFullScreenToggle('w', 0));
     bindFullscreenPanelToggle('toggleFullscreenLaplace3DBtn', {
-        container: controls.laplace3DContainer,
-        column: controls.laplace3DColumn,
         stateKey: 'isLaplace3DFullScreen',
         onResize: () => resizeScalarSurface(controls.laplace3DContainer)
     });
@@ -1709,66 +1695,35 @@ function bindFullscreenControls() {
         requestUiRedraw();
     };
     bindFullscreenPanelToggle('toggleFullscreenLaplaceComBtn', {
-        container: controls.laplaceComCanvas?.parentElement,
-        column: controls.laplaceComColumn,
         stateKey: 'isLaplaceComFullScreen',
         onResize: resizeLaplaceCanvas
     });
     bindFullscreenPanelToggle('toggleFullscreenLaplaceSpectrumBtn', {
-        container: controls.laplaceSpectrumCanvas?.parentElement,
-        column: controls.laplaceSpectrumColumn,
         stateKey: 'isLaplaceSpectrumFullScreen',
         onResize: resizeLaplaceCanvas
     });
     bindFullscreenPanelToggle('toggleFullscreenFourier3DBtn', {
-        container: controls.fourier3DContainer,
-        column: controls.fourier3DColumn,
         stateKey: 'isFourier3DFullScreen',
         onResize: drawFourier3DPipeline
     });
 
-    // Event delegation for dynamic chained w-plane fullscreen buttons
-    bindElementListener(document, 'click', event => {
-        const btn = event.target.closest('[id^="toggle_fullscreen_w_btn_"]');
-        if (btn) {
-            const index = parseInt(btn.id.replace('toggle_fullscreen_w_btn_', ''), 10);
-            if (!isNaN(index)) {
-                handleFullScreenToggle('w', index);
-            }
-        }
-    });
-
-    bindElementListener(document, 'keydown', event => {
+    document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
         if (state.isZFullScreen) handleFullScreenToggle('z');
         if (state.isWFullScreen) handleFullScreenToggle('w', state.fullscreenWIndex || 0);
-        if (state.isLaplace3DFullScreen && controls.toggleFullscreenLaplace3DBtn) {
-            controls.toggleFullscreenLaplace3DBtn.click();
-        }
-        if (state.isLaplaceComFullScreen && controls.toggleFullscreenLaplaceComBtn) {
-            controls.toggleFullscreenLaplaceComBtn.click();
-        }
-        if (state.isLaplaceSpectrumFullScreen && controls.toggleFullscreenLaplaceSpectrumBtn) {
-            controls.toggleFullscreenLaplaceSpectrumBtn.click();
-        }
-        if (state.isFourier3DFullScreen && controls.toggleFullscreenFourier3DBtn) {
-            controls.toggleFullscreenFourier3DBtn.click();
-        }
-        if (state.isGraphFullScreen && controls.toggleFullscreenGraphBtn) {
-            controls.toggleFullscreenGraphBtn.click();
-        }
+        state.isLaplace3DFullScreen = false;
+        state.isLaplaceComFullScreen = false;
+        state.isLaplaceSpectrumFullScreen = false;
+        state.isFourier3DFullScreen = false;
+        state.isGraphFullScreen = false;
+        requestAnimationFrame(refreshCanvasLayout);
     });
-}
-
-function syncTopControlsCollapseState() {
-    return state.topControlsCollapsed;
 }
 
 function bindTopControlsToggle() {
     const toggle = () => {
         state.topControlsCollapsed = !state.topControlsCollapsed;
-        syncTopControlsCollapseState();
-        frame(refreshCanvasLayout);
+        requestAnimationFrame(refreshCanvasLayout);
     };
 
     bindControlListener('toggleTopControlsBtn', 'click', toggle);
@@ -1781,30 +1736,23 @@ export function createFrontendActions() {
     zCanvas = context.zCanvas;
     wCanvas = context.wCanvas;
 
-    if (uiEventListenersBound) return uiActions;
-    uiEventListenersBound = true;
-
     BINDERS.forEach(fn => fn());
 
-    syncTopControlsCollapseState();
-    updateModePanels();
     return uiActions;
 }
 
 function bindChainingControls() {
-    bindControlListener('inputShapeSelector', 'change', (_event, selector) => selectInputShape(selector.value));
-
     bindSlider('chainCountSlider', 'chainCount', parseInteger, () => {
         requestUiRedraw();
     });
 
-    bindElementListener(controls.enableChainingCb, 'change', event => {
+    bindControlListener('enableChainingCb', 'change', event => {
         state.chainingEnabled = event.target.checked;
         state.currentFunctionPreset = null;
         requestUiRedraw();
     });
 
-    bindElementListener(controls.chainModeSelector, 'change', event => {
+    bindControlListener('chainModeSelector', 'change', event => {
         state.chainingMode = event.target.value === 'zero_seed' ? 'zero_seed' : 'recursion';
         state.currentFunctionPreset = null;
         requestUiRedraw();
@@ -1836,10 +1784,6 @@ function bindThemeControls() {
     applyTheme(state.themeId, { preserveGridColors: true });
     bindControlListener('themeSelectorBtn', 'click', openThemeModal);
     bindControlListener('resetWorkspaceLayoutBtn', 'click', resetAllPanelLayouts);
-    if (typeof document !== 'undefined') {
-        const btn = document.getElementById('reset_workspace_layout_btn');
-        if (btn) btn.addEventListener('click', resetAllPanelLayouts);
-    }
 }
 
 function setPlaneFullscreen(isZ, value, index = 0) {
@@ -1855,7 +1799,7 @@ function isPlaneFullscreen(isZ) {
     return isZ ? state.isZFullScreen : state.isWFullScreen;
 }
 
-function handleFullScreenToggle(planeType, index = 0) {
+export function handleFullScreenToggle(planeType, index = 0) {
     const isZ = planeType === 'z';
     setPlaneFullscreen(isZ, !isPlaneFullscreen(isZ), index);
     setupVisualParameters(false, false);
@@ -1864,8 +1808,7 @@ function handleFullScreenToggle(planeType, index = 0) {
 }
 
 function bindAlgebraicChainingControls() {
-    if (controls.enableAlgebraicChainingCb) {
-        bindElementListener(controls.enableAlgebraicChainingCb, 'change', event => {
+    bindControlListener('enableAlgebraicChainingCb', 'change', event => {
             const enabled = event.target.checked;
             const currentFunction = state.currentFunction === 'algebraic_chaining'
                 ? algebraicChainingSourceFunction || state.algebraicChainingTerms?.[0]?.factors?.[0]?.func || 'cos'
@@ -1893,10 +1836,9 @@ function bindAlgebraicChainingControls() {
             if (!enabled) algebraicChainingSourceFunction = null;
 
             requestAlgebraicRedraw();
-        });
-    }
+    });
 
-    bindElementListener(controls.addAlgebraicTermBtn, 'click', () => {
+    bindControlListener('addAlgebraicTermBtn', 'click', () => {
         appendAlgebraicTerm();
     });
 
@@ -1943,14 +1885,11 @@ function bindGraphControls() {
         } else {
             state.graphFourierEnabled = enabled;
         }
-        updateModePanels();
         requestUiRedraw();
     });
 
     bindCheckbox('enableGraphTraceCb', 'graphTraceEnabled', () => requestUiRedraw());
     bindFullscreenPanelToggle('toggleFullscreenGraphBtn', {
-        container: controls.graphContainer,
-        column: controls.graphColumn,
         stateKey: 'isGraphFullScreen',
         onResize: () => {
             resizeTransformationGraphRenderer();
@@ -1965,9 +1904,7 @@ function bindRealPlotsExpressionControls({ preset, input, expressionKey, customK
     const commit = (source, custom) => {
         const value = String(source ?? '').trim();
         const error = validateRealPlotExpression(value);
-        const field = controls[input];
         state[errorKey] = error || '';
-        field?.setCustomValidity?.(error || '');
         if (error) {
             return false;
         }
@@ -1979,7 +1916,7 @@ function bindRealPlotsExpressionControls({ preset, input, expressionKey, customK
 
     bindControlListener(preset, 'change', (_event, selector) => {
         const custom = selector.value === 'custom';
-        commit(custom ? controls[input]?.value : selector.value, custom);
+        commit(custom ? state[expressionKey] : selector.value, custom);
     });
 
     bindControlListener(input, 'input', (_event, field) => {
@@ -2008,8 +1945,6 @@ function bindRealPlotsControls() {
         bindSlider(`realPlots${name}Slider`, `realPlots${name}`)
     );
     bindFullscreenPanelToggle('toggleFullscreenRealPlotsBtn', {
-        container: controls.realPlotsContainer,
-        column: controls.realPlotsColumn,
         stateKey: 'isRealPlotsFullScreen',
         onResize: () => {
             setupVisualParameters(false, false);
@@ -2026,16 +1961,9 @@ function bindContourControls() {
         bindControlListener(`${prefix}Show2DContourBtn`, 'click', () => {
             state.show2DContourPlot = !state.show2DContourPlot;
             requestUiRedraw();
-            if (state.show2DContourPlot) {
-                positionContour2DPanel();
-            } else if (state.realPlotsEnabled) {
-                refreshPanelLayout();
-            }
         });
     });
     bindFullscreenPanelToggle('toggleFullscreenContour2DBtn', {
-        container: controls.contour2DCanvas,
-        column: controls.contour2DColumn,
         stateKey: 'isContour2DFullScreen',
         onResize: () => {
             setupVisualParameters(false, false);

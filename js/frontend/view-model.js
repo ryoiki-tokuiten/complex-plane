@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { state, context, sliderParamKeys, zPlaneParams, wPlaneParams, wPlaneInitialRanges } from '../store/state.js';
+import { state, sliderParamKeys, zPlaneParams, wPlaneParams, wPlaneInitialRanges } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { DEFAULT_TAYLOR_SERIES_CENTER, CRITICAL_POINT_EPSILON, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL } from '../constants/numerical.js';
@@ -19,11 +19,11 @@ import { requireFiniteComplex, requireFiniteNumber, isFiniteComplex } from '../u
 import { generateTissotIndicatrices, selectStableTissotIndicatrices, getTissotViewportBounds } from '../analysis/tissot.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { setPlaneViewport } from '../utils/canvas-utils.js';
-import { controlKeyFromId } from '../ui/control-registry.js';
+import { controlKeyFromId } from './control-key.js';
+import { animations } from './animation-controller.js';
 import { getCauchyDisplay, getWindingDisplay } from '../analysis/cauchy.js';
 import { isGraphViewSupported } from '../rendering/transformation-graph.js';
 
-const { controls = {} } = context;
 const modelProps = new Map();
 
 function patchProps(key, patch) {
@@ -63,7 +63,7 @@ const HIDDEN_CLASS = 'hidden';
 const VISUALLY_HIDDEN_CLASS = 'hidden-visually';
 const EPS = 1e-9;
 
-export function syncLaplacePlayPauseButton() {
+function syncLaplacePlayPauseButton() {
     setText('laplacePlayPauseBtn', state.laplaceAnimationPlaying ? 'Pause' : 'Play');
 }
 
@@ -204,15 +204,6 @@ const LAPLACE_VALUE_BINDINGS = Object.freeze([
     { display: 'laplaceFourier3DCountValueDisplay', key: 'fourier3DParallelGraphs', companion: 'laplaceFourier3DCountSlider' }
 ]);
 
-function control(key) {
-    return controls[key] ?? null;
-}
-
-function resolveControl(target) {
-    if (!target) return null;
-    return typeof target === 'string' ? control(target) : target;
-}
-
 function setHidden(target, hidden = true) {
     const key = typeof target === 'string' ? target : target?.id;
     if (key) patchClass(key, HIDDEN_CLASS, hidden);
@@ -288,11 +279,7 @@ function fractionalPowerExponent() {
     return Number((n || 0.5).toFixed(2));
 }
 
-function syncDelegates() {
-    syncLaplacePlayPauseButton();
-}
-
-export function syncParameterControlsPanelVisibility() {
+function syncParameterControlsPanelVisibility() {
     setHidden('parameterControlsPanel', false);
 }
 
@@ -333,17 +320,6 @@ function syncCenterLabels(currentShape) {
     const labels = CENTER_LABELS[currentShape] ?? CENTER_LABELS.default;
     setHtml('a0LabelDesc', labels[0]);
     setHtml('b0LabelDesc', labels[1]);
-}
-
-function decimalPlacesFromStep(step) {
-    const text = String(step ?? '');
-    const decimalIndex = text.indexOf('.');
-
-    if (decimalIndex < 0) {
-        return 0;
-    }
-
-    return text.slice(decimalIndex + 1).length;
 }
 
 function syncSliderParamValueDisplays() {
@@ -389,7 +365,7 @@ function syncFractionalPowerDisplays() {
     setText('fractionalPowerNValueDisplay', rendered ?? '0.50');
 }
 
-export function syncComplexParameterControls() {
+function syncComplexParameterControls() {
     if (state.laplaceModeEnabled) {
         return;
     }
@@ -400,7 +376,6 @@ export function syncComplexParameterControls() {
     setChecked('enableAlgebraicChainingCb', state.algebraicChainingEnabled);
     setHidden('algebraicChainingControlsContainer', !state.algebraicChainingEnabled);
     setHidden('chainSeedControl', !state.chainingEnabled || state.chainingMode !== 'zero_seed');
-    setValue('inputShapeSelector', state.currentInputShape);
 
     const shape = state.currentInputShape;
     const activeFunctions = collectActiveFunctionKeys();
@@ -443,6 +418,7 @@ export function syncComplexParameterControls() {
     const continuationDone = Array.isArray(state.continuationPath) && state.continuationPath.length > 1;
     setHidden('resetContinuationBtn', !continuationDone);
     setHidden('mediaUploadControls', !isMedia);
+    void state.mediaVersion;
     setHidden('mediaVideoControls', !isMedia || !runtime.media.video);
     setHidden('arbitraryShapeControls', !isArbitrary);
     setValue('arbitraryShapeExpressionInput', state.arbitraryShapeExpression);
@@ -522,7 +498,6 @@ function syncModeControlPanels() {
         'algebraicChainingParams',
         state.laplaceModeEnabled || !(state.realPlotsEnabled || state.algebraicChainingEnabled)
     );
-    setHidden('inputShapeSelector', state.laplaceModeEnabled);
 }
 
 function syncRiemannAndTransformDisplays() {
@@ -595,8 +570,8 @@ function updateSliderLabelsAndDisplay() {
     syncRiemannAndTransformDisplays();
     syncGraphControls();
     syncParameterControlsPanelVisibility();
-    syncDelegates();
-    Object.entries(context.animationStates).forEach(([sliderId, animation]) => {
+    syncLaplacePlayPauseButton();
+    Object.entries(animations.value).forEach(([sliderId, animation]) => {
         if (sliderId.startsWith('poly_coeff_')) return;
         const buttonKey = controlKeyFromId(`play_${sliderId.replace(/_slider$/, '')}_btn`);
         setText(buttonKey, animation.animating ? 'Pause' : 'Play');
@@ -973,13 +948,12 @@ function outputFormulaModel() {
     }
 
     const hasOutputChain = state.chainingEnabled && state.chainCount > 1;
-    const isSinglePanelChain = state.chainingEnabled && state.chainCount > 25;
     const wOutputFormula = hasOutputChain
-        ? getChainingTitleHTML(isSinglePanelChain ? state.chainCount - 1 : 0, state.chainingMode)
+        ? getChainingTitleHTML(state.chainCount - 1, state.chainingMode)
         : `w = ${fND}`;
 
-    const chainLabel = isSinglePanelChain ? `Iteration ${state.chainCount}` : 'Chain 0';
-    const mappedChainLabel = isSinglePanelChain ? `mapped iteration ${state.chainCount}` : 'mapped chain 0';
+    const chainLabel = `Iteration ${state.chainCount}`;
+    const mappedChainLabel = `mapped iteration ${state.chainCount}`;
     const derivativePrefix = state.mapPresentation === 'derivative' ? 'Derivative of ' : '';
 
     return {
@@ -1078,7 +1052,6 @@ function syncTransformModeTitles() {
 
     setHtml('zPlaneTitle', 'Time Domain (Signal)');
     setHtml('wPlaneTitle', 'Complex Frequency Domain (Laplace winding; Fourier at σ = 0)');
-    setDisabled('inputShapeSelector', true);
 
     const laplace3DTitles = {
         magnitude: '3D Surface: |F(s)| Magnitude',
@@ -1121,7 +1094,6 @@ function syncDomainColoringControls() {
     setHidden('orbitColoringModeGroup', !(state.domainColoringEnabled && state.chainingEnabled));
 
     const normalized = normalizeOrbitColoringMode(state.orbitColoringMode);
-    state.orbitColoringMode = normalized;
     setValue('orbitColoringModeSelect', normalized);
 
     setChecked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
@@ -1343,7 +1315,6 @@ function syncCanvasZoomControlsUI() {
 }
 
 function syncVisualizationOptionControls() {
-    setDisabled('inputShapeSelector', state.laplaceModeEnabled);
     syncRiemannSurfaceControls();
     syncDomainColoringControls();
     setHidden('radialDiscreteStepsOptionsDiv', !state.radialDiscreteStepsEnabled);

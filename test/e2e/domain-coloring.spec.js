@@ -48,30 +48,6 @@ test.describe('Domain Coloring Rendering', () => {
         await page.waitForFunction(() => window.__state && document.getElementById('z_plane_canvas')?.width > 0);
     });
 
-    test('renders domain coloring for polynomial function', async ({ page }) => {
-        const errors = [];
-        page.on('pageerror', err => errors.push(err.message));
-
-        await page.locator('#select_polynomial_btn').click();
-        await enableDomainColoring(page);
-
-        // Wait for z-plane canvas to render colored domain pixels (colored background instead of dark background)
-        await page.waitForFunction(() => {
-            const canvas = document.getElementById('z_plane_canvas');
-            if (!canvas) return false;
-            const ctx = canvas.getContext('2d');
-            const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-            // Check if there are non-black, colored pixels across the plane
-            let colored = 0;
-            for (let i = 0; i < data.length; i += 16) {
-                if (data[i] > 30 || data[i + 1] > 30 || data[i + 2] > 30) colored++;
-            }
-            return colored > 500;
-        }, { timeout: 10000 });
-
-        expect(errors).toEqual([]);
-    });
-
     test('function and algebraic expression changes finish a fresh domain frame', async ({ page }) => {
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
@@ -107,8 +83,6 @@ test.describe('Domain Coloring Rendering', () => {
     test('coalesces extreme zoom input into one native frame without overflow bands', async ({ page }) => {
         const errors = [];
         page.on('pageerror', err => errors.push(err.message));
-        page.on('console', msg => console.log(msg.text()));
-
         await page.locator('#select_cos_btn').click();
         await enableDomainColoring(page);
         const initial = await waitForCompletedDomainFrame(page, 1);

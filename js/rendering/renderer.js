@@ -1147,7 +1147,7 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
     setWThreeHidden(true);
     if (!enabled) return true;
 
-    const stage = state.chainingEnabled && state.chainCount > 25
+    const stage = state.chainingEnabled
         ? state.chainCount
         : index + 1;
     context.riemannSurfaceContourPipeline = { index, stage, map };
@@ -1391,19 +1391,8 @@ export function drawWPlaneContent(options = {}) {
         if (requested < 1 || requested > 1024) {
             throw new Error('W-plane chain count must be from one through 1024.');
         }
-        if (state.chainingEnabled && state.chainCount > 25) {
-            renderSingleWPlane(0, resolveActiveMap(requested - 1), false, options);
-            return;
-        }
-
-        const available = wCanvasList.length;
-        const count = state.chainingEnabled ? requested : 1;
-        if (available < count || wCtxList.length < count || wPlaneParamsList.length < count) {
-            throw new Error(`W-plane rendering requires ${count} initialized output planes; found ${available}.`);
-        }
-        for (let index = 0; index < count; index += 1) {
-            renderSingleWPlane(index, resolveActiveMap(index), false, options);
-        }
+        const mapIndex = state.chainingEnabled ? requested - 1 : 0;
+        renderSingleWPlane(0, resolveActiveMap(mapIndex), false, options);
     } finally {
         wPlanarRenderDeadline = Infinity;
         wPlanarWorkPerformed = false;

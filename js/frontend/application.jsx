@@ -8,11 +8,7 @@ import { Tooltip } from './components/tooltip.jsx';
 import { useAppState } from './state-hooks.js';
 import { themeVariables, themes } from './theme.js';
 
-const EMPTY_UI_MODEL = Object.freeze({ props: new Map(), actions: new Map() });
-let root = null;
-let currentModel = EMPTY_UI_MODEL;
-
-function Application({ model }) {
+function Application() {
     const vertical = useAppState('verticalLayoutEnabled');
     const zoomControls = useAppState('canvasZoomControlsEnabled');
     const themeId = useAppState('themeId');
@@ -26,23 +22,16 @@ function Application({ model }) {
             style={theme}>
             <div class="background-container"><div class="background-noise" /></div>
             <main>
-                <ControlPanel model={model} />
-                <Workspace model={model} />
+                <ControlPanel />
+                <Workspace />
             </main>
             <Tooltip />
-            <Overlays model={model} />
-            <PlaneContextMenu model={model} theme={theme} />
+            <Overlays />
+            <PlaneContextMenu theme={theme} />
         </div>
     );
 }
 
-export function mountApplication(container, model = EMPTY_UI_MODEL) {
-    root = container;
-    currentModel = model;
-    render(<Application model={currentModel} />, root);
-}
-
-export function refreshApplication(model = currentModel) {
-    currentModel = model;
-    if (root) render(<Application model={currentModel} />, root);
+export function mountApplication(container) {
+    render(<Application />, container);
 }

@@ -5,7 +5,6 @@ import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
 import { downloadCanvasImage } from '../utils/dom-utils.js';
 import { isGraphViewSupported, isFullGridPerspectiveSupported, disposeTransformationGraphRenderer } from '../rendering/transformation-graph.js';
 import { syncGridDensityControls } from './grid-density.js';
-import { refreshPanelEdgeHandles } from '../ui/panel-layout-manager.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
 import { updateDynamicPlotting } from './dynamic-plotting-state.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
@@ -42,7 +41,6 @@ function toggleGraphView() {
         state.graphTraceEnabled = false;
         state.graphSelectedShape = '';
     }
-    refreshPanelEdgeHandles(true);
     window.dispatchEvent(new Event('resize'));
 }
 

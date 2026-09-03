@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { state, zPlaneParams } from '../store/state.js';
+import { state, context, zPlaneParams } from '../store/state.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import { NUM_POINTS_CURVE } from '../constants/numerical.js';
 import { mapCanvasToWorldCoords, mapToCanvasCoords } from '../utils/canvas-utils.js';
@@ -2027,15 +2027,12 @@ class TransformationGraphRenderer {
     }
 }
 
-export function drawTransformationGraph(containerId = 'graph_3d_container') {
-    if (typeof document === 'undefined') return;
+export function drawTransformationGraph() {
+    const container = context.controls.graph3DContainer;
+    const active = graphModeActive() && isGraphViewSupported();
 
-    const column = document.getElementById('graph_column');
-    const container = document.getElementById(containerId);
-    const columnHidden = column?.classList.contains('hidden');
-
-    if (!graphModeActive() || columnHidden || !container) {
-        if (!graphModeActive() || columnHidden) disposeTransformationGraphRenderer();
+    if (!active || !container) {
+        if (!active) disposeTransformationGraphRenderer();
         return;
     }
 

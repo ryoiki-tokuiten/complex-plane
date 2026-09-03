@@ -1,7 +1,9 @@
 /** @jsxImportSource preact */
 import { h } from 'preact';
+import { computed, signal } from '@preact/signals';
 import { context } from '../store/state.js';
-import { controlKeyFromId } from '../ui/control-registry.js';
+import { controlKeyFromId } from './control-key.js';
+import { buildViewModel } from './view-model.js';
 import { PolynomialCoefficients } from './components/polynomial-coefficients.jsx';
 import { ComplexParameterEditor } from './components/complex-parameter-editor.jsx';
 import { AlgebraicTermEditor } from './components/algebraic-term-editor.jsx';
@@ -17,6 +19,7 @@ import {
 import { GridShapeControls } from './components/grid-shape-controls.jsx';
 import { InputShapePicker } from './components/input-shape-picker.jsx';
 import { PanelEdgeControls } from './components/panel-edge-controls.jsx';
+import { getPanelProps } from '../ui/panel-layout-manager.js';
 import { ManifoldTransformationControls } from './components/manifold-transformation-controls.jsx';
 import { NavigationKeyHints } from './components/navigation-key-hints.jsx';
 import { VideoPlaybackButton, VideoPlaybackStatus } from './components/video-playback-status.jsx';
@@ -60,32 +63,40 @@ const WORKSPACE_PANELS = new Set([
     'contour_2d_column'
 ]);
 
+const viewProps = computed(buildViewModel);
+const actionProps = signal(new Map());
+
+export function installUiActions(actions) {
+    actionProps.value = actions;
+}
+
 function saveControl(id, element) {
     const key = controlKeyFromId(id);
     if (element) context.controls[key] = element;
     else delete context.controls[key];
 }
 
-export function Ui({ as, id, children, model, ...staticProps }) {
+export function Ui({ as, id, children, ...staticProps }) {
     const key = controlKeyFromId(id);
-    const dynamicProps = model.props.get(key) || {};
-    const actionProps = model.actions.get(key) || {};
+    const panel = WORKSPACE_PANELS.has(id) ? getPanelProps(id) : null;
+    const dynamicProps = viewProps.value.get(key) || {};
+    const actions = actionProps.value.get(key) || {};
     const Slot = SLOTS[id];
     if (Slot && ROOT_SLOTS.has(id)) {
-        return <Slot model={model} revision={model.revision} />;
+        return <Slot />;
     }
     const slotChildren = Object.hasOwn(dynamicProps, 'children')
         ? dynamicProps.children
         : Slot
-            ? <Slot model={model} revision={model.revision} />
+            ? <Slot />
             : children;
     const renderedChildren = WORKSPACE_PANELS.has(id)
-        ? <>{slotChildren}<PanelEdgeControls /></>
+        ? <>{slotChildren}<PanelEdgeControls panelId={id} /></>
         : slotChildren;
     const props = {
         ...staticProps,
         ...dynamicProps,
-        ...actionProps,
+        ...actions,
         id,
         ref: element => saveControl(id, element)
     };
@@ -97,6 +108,13 @@ export function Ui({ as, id, children, model, ...staticProps }) {
         });
         props.class = [...classes].join(' ');
         delete props.$classes;
+    }
+    if (panel) {
+        props.style = panel.style;
+        props.class = `${props.class || ''}${panel.dragging ? ' is-dragging' : ''}${panel.resizing ? ' is-resizing' : ''}${panel.edgeVisible ? ' show-edge-handle' : ''}`;
+        props.onPointerDown = panel.onPointerDown;
+        props.onPointerMove = panel.onPointerMove;
+        props.onPointerLeave = panel.onPointerLeave;
     }
     return h(as, props, renderedChildren);
 }

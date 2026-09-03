@@ -1,11 +1,11 @@
 import { state, context } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
-import { buildMappedTransformProfileKey } from '../native/map-runtime.js';
+import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
+import { resolveActiveMap } from '../math/active-map.js';
 import {
     analyzeNativeContour,
     classifyNativeContourSingularities,
     generateNativeContourPoints,
-    nativeMapOptions
 } from '../native/complex-engine.js';
 import {
     NUM_INTEGRAL_STEPS,
@@ -19,6 +19,10 @@ const { controls } = context;
 let cauchyDisplay = { key: null, text: '', html: null, hidden: true };
 let windingDisplay = '';
 let cauchyAnalysisCache = null;
+
+function formatted(value, digits) {
+    return (Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value).toFixed(digits);
+}
 
 export function isPointInsideContour(point, contourType, params) {
     if (!point || !params) throw new Error('Contour classification requires a point and parameters.');
@@ -41,19 +45,31 @@ function complexListKey(values) {
         : '';
 }
 
+function refineContour(points) {
+    return points.flatMap((point, index) => index === points.length - 1 ? [point] : [
+        point,
+        { re: (point.re + points[index + 1].re) / 2, im: (point.im + points[index + 1].im) / 2 }
+    ]);
+}
+
+function convergedIntegral(map, initialPoints) {
+    let points = initialPoints;
+    let previous = null;
+    while (points.length <= NUM_INTEGRAL_STEPS * 128 + 1) {
+        const analysis = analyzeNativeContour(map, points);
+        if (analysis.status & 1) return null;
+        if (previous && Math.abs(analysis.integral.re - previous.re) <= 5e-4 &&
+            Math.abs(analysis.integral.im - previous.im) <= 5e-4) return analysis.integral;
+        previous = analysis.integral;
+        points = refineContour(points);
+    }
+    return null;
+}
+
 function cauchyAnalysisKey(isZPlanar) {
     return [
         isZPlanar ? 1 : 0,
-        buildMappedTransformProfileKey(state.currentFunction),
-        state.chainingEnabled ? 1 : 0,
-        state.chainingMode,
-        state.chainSeed?.re,
-        state.chainSeed?.im,
-        state.chainCount,
-        state.taylorSeriesEnabled ? 1 : 0,
-        state.taylorSeriesOrder,
-        state.taylorSeriesCenter?.re,
-        state.taylorSeriesCenter?.im,
+        resolveActiveMap().signature,
         state.currentInputShape,
         state.a0,
         state.b0,
@@ -115,8 +131,8 @@ export function resolveCauchyContour(state, { planeParams = null, curvePoints = 
 
 export function performCauchyAnalysis() {
     const isZPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);
-    const analysisKey = cauchyAnalysisKey(isZPlanar);
     const active = state.cauchyIntegralModeEnabled && isZPlanar;
+    const analysisKey = active ? cauchyAnalysisKey(isZPlanar) : `inactive:${isZPlanar ? 1 : 0}`;
     const cacheInputKey = `${analysisKey}|active:${active ? 1 : 0}`;
     if (cauchyAnalysisCache?.inputKey === cacheInputKey) {
         publishCauchyResult(cauchyAnalysisCache.outputKey, cauchyAnalysisCache.result);
@@ -139,7 +155,7 @@ export function performCauchyAnalysis() {
         return;
     }
 
-    const map = nativeMapOptions(state);
+    const map = nativeOptionsForActiveMap(resolveActiveMap());
     const contourCPointSets = resolved.pointSets;
     const contourC_points = contourCPointSets[0] || [];
     const contourParams = resolved.type === 'contours'
@@ -151,15 +167,20 @@ export function performCauchyAnalysis() {
         return;
     }
 
-    const integralValue = (contourCPointSets || [contourC_points]).reduce((sum, points) => {
-        const value = analyzeNativeContour(map, points).integral;
-        return { re: sum.re + value.re, im: sum.im + value.im };
-    }, { re: 0, im: 0 });
+    let integralValue = { re: 0, im: 0 };
+    for (const points of contourCPointSets || [contourC_points]) {
+        const value = convergedIntegral(map, points);
+        if (!value) {
+            integralValue = null;
+            break;
+        }
+        integralValue = { re: integralValue.re + value.re, im: integralValue.im + value.im };
+    }
     let resultsHTML = `∮<sub>C</sub> f(z)dz ≈ `;
-    if (isNaN(integralValue.re) || isNaN(integralValue.im)) {
-        resultsHTML += `N/A (Pole likely on contour)`;
+    if (!integralValue) {
+        resultsHTML += `N/A (integral did not converge on C)`;
     } else {
-        resultsHTML += `${integralValue.re.toFixed(3)} + ${integralValue.im.toFixed(3)}i`;
+        resultsHTML += `${formatted(integralValue.re, 3)} + ${formatted(integralValue.im, 3)}i`;
     }
 
 
@@ -197,11 +218,11 @@ export function performCauchyAnalysis() {
 
                 if (pole.type === 'essential') {
                     hasEssentialSingularityInside = true;
-                    resultsHTML += `<br/>&nbsp;&nbsp;Essential singularity at z = ${pole.re.toFixed(2)} + ${pole.im.toFixed(2)}i`;
+                    resultsHTML += `<br/>&nbsp;&nbsp;Essential singularity at z = ${formatted(pole.re, 2)} + ${formatted(pole.im, 2)}i`;
                     
                 } else if (pole.type === 'pole') {
                     let poleOrderDisplay = pole.order !== 'unknown' && pole.order !== null ? `(order: ${pole.order})` : '';
-                    resultsHTML += `<br/>&nbsp;&nbsp;Pole at z = ${pole.re.toFixed(2)} + ${pole.im.toFixed(2)}i ${poleOrderDisplay}`;
+                    resultsHTML += `<br/>&nbsp;&nbsp;Pole at z = ${formatted(pole.re, 2)} + ${formatted(pole.im, 2)}i ${poleOrderDisplay}`;
 
                     if (!pole.residue || !Number.isFinite(pole.residue.re) ||
                         !Number.isFinite(pole.residue.im)) {
@@ -211,22 +232,22 @@ export function performCauchyAnalysis() {
 
                     if (!isNaN(displayResidue.re) && !isNaN(displayResidue.im)) {
                         sumResidues = { re: sumResidues.re + displayResidue.re, im: sumResidues.im + displayResidue.im };
-                        resultsHTML += ` &nbsp;&nbsp;Res ≈ ${displayResidue.re.toFixed(2)} + ${displayResidue.im.toFixed(2)}i`;
+                        resultsHTML += ` &nbsp;&nbsp;Res ≈ ${formatted(displayResidue.re, 2)} + ${formatted(displayResidue.im, 2)}i`;
                     } else {
                         resultsHTML += ` &nbsp;&nbsp;Res ≈ N/A (calc failed)`;
                     }
                 } else if (pole.type === 'branch_point') { 
-                     resultsHTML += `<br/>&nbsp;&nbsp;Branch point at z = ${pole.re.toFixed(2)} + ${pole.im.toFixed(2)}i (Residue theorem may not directly apply or needs careful branch cut handling).`;
+                     resultsHTML += `<br/>&nbsp;&nbsp;Branch point at z = ${formatted(pole.re, 2)} + ${formatted(pole.im, 2)}i (Residue theorem may not directly apply or needs careful branch cut handling).`;
                      hasEssentialSingularityInside = true; 
                 } else {
                     
-                     resultsHTML += `<br/>&nbsp;&nbsp;Singularity at z = ${pole.re.toFixed(2)} + ${pole.im.toFixed(2)}i (type: ${pole.type || 'unknown'})`;
+                     resultsHTML += `<br/>&nbsp;&nbsp;Singularity at z = ${formatted(pole.re, 2)} + ${formatted(pole.im, 2)}i (type: ${pole.type || 'unknown'})`;
                 }
             });
 
             if (!hasEssentialSingularityInside) {
                 const residueTheoremSum = { re: -2 * Math.PI * sumResidues.im, im: 2 * Math.PI * sumResidues.re };
-                resultsHTML += `<br/>2πi ΣRes ≈ ${residueTheoremSum.re.toFixed(3)} + ${residueTheoremSum.im.toFixed(3)}i`;
+                resultsHTML += `<br/>2πi ΣRes ≈ ${formatted(residueTheoremSum.re, 3)} + ${formatted(residueTheoremSum.im, 3)}i`;
             } else {
                 resultsHTML += `<br/>2πi ΣRes: N/A (Presence of essential singularity or branch point; theorem requires careful application).`;
             }
@@ -251,6 +272,7 @@ export function performCauchyAnalysis() {
 export function updateWindingNumberDisplay() {
     windingDisplay = '';
     let contourC_points = null;
+    let contourParams = null;
     const N_winding_num_pts = 150;
     const wIsPlanar = !state.manifold3dViewEnabled;
 
@@ -260,11 +282,14 @@ export function updateWindingNumberDisplay() {
             contourC_points = resolved.type === 'contours'
                 ? resolved.pointSets.flatMap((points, index) => index ? [null, ...points] : points)
                 : resolved.pointSets[0];
+            contourParams = resolved.type === 'contours'
+                ? { type: 'contours', contours: resolved.pointSets }
+                : { type: resolved.type, ...resolved.params };
         }
     }
 
     if (contourC_points && contourC_points.length > 1) {
-        const analysis = analyzeNativeContour(nativeMapOptions(state), contourC_points);
+        const analysis = analyzeNativeContour(nativeOptionsForActiveMap(resolveActiveMap()), contourC_points);
         const pathHasNaN = !!(analysis.status & 1);
         const pathCrossesOrigin = !!(analysis.status & 2);
         let windingNumber;
@@ -274,8 +299,8 @@ export function updateWindingNumberDisplay() {
         
         let Z_in_C = 0, P_in_C = 0;let argumentPrincipleText = "";
         if (state.cauchyIntegralModeEnabled && state.showZerosPoles && state.zeros && state.poles && !pathCrossesOrigin && !pathHasNaN && typeof windingNumber === 'number') {
-            state.zeros.forEach(zero => {if (isPointInsideContour(zero, contourParams.type, contourParams)) Z_in_C++;});
-            state.poles.forEach(pole => {if (isPointInsideContour(pole, contourParams.type, contourParams)) P_in_C++;});
+            state.zeros.forEach(zero => {if (isPointInsideContour(zero, contourParams.type, contourParams)) Z_in_C += zero.order ?? 1;});
+            state.poles.forEach(pole => {if (isPointInsideContour(pole, contourParams.type, contourParams)) P_in_C += pole.order ?? 1;});
             argumentPrincipleText = ` (Z-P in C = ${Z_in_C}-${P_in_C} = ${Z_in_C - P_in_C})`;
         }
         windingDisplay = `W(f(C),0): ${windingNumber}${argumentPrincipleText}`;

@@ -334,6 +334,12 @@
     padding: 0;
 }
 
+.workspace-bounds-extender {
+    position: absolute;
+    inset: 0 auto auto 0;
+    pointer-events: none;
+}
+
 #canvases_section .plane-column,
 #laplace_3d_column,
 #laplace_spectrum_column,
@@ -969,7 +975,7 @@ input[type="range"]:focus::-moz-range-thumb {
     left: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
-    background-color: var(--bg-color);
+    background: var(--bg-color) !important;
     z-index: 2000 !important;
     display: flex !important;
     border-radius: 0 !important;

@@ -1,5 +1,6 @@
 #include "complex_engine.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 
@@ -36,7 +37,26 @@ int32_t ce_find_preimages(const ce_map_config *config, double target_re, double 
                 if (!ce_analysis_target_value(config, (ce_complex){re, im}, inverse_output, &value)) break;
                 const double error_re = value.re - target_re;
                 const double error_im = value.im - target_im;
-                if (hypot(error_re, error_im) <= tolerance) {
+                int converged = error_re == 0.0 && error_im == 0.0;
+                double step_re = 0.0, step_im = 0.0;
+                if (!converged) {
+                    ce_complex x_value, y_value;
+                    if (!ce_analysis_target_value(config, (ce_complex){re + derivative_step, im}, inverse_output, &x_value) ||
+                        !ce_analysis_target_value(config, (ce_complex){re, im + derivative_step}, inverse_output, &y_value)) break;
+                    const double j00 = (x_value.re - value.re) / derivative_step;
+                    const double j10 = (x_value.im - value.im) / derivative_step;
+                    const double j01 = (y_value.re - value.re) / derivative_step;
+                    const double j11 = (y_value.im - value.im) / derivative_step;
+                    const double determinant = j00 * j11 - j01 * j10;
+                    const double jacobian_scale = fmax(fmax(fabs(j00), fabs(j01)), fmax(fabs(j10), fabs(j11)));
+                    if (!isfinite(determinant) || !isfinite(jacobian_scale) || jacobian_scale == 0.0 ||
+                        fabs(determinant) <= 16.0 * DBL_EPSILON * jacobian_scale * jacobian_scale) break;
+                    step_re = (error_re * j11 - error_im * j01) / determinant;
+                    step_im = (j00 * error_im - j10 * error_re) / determinant;
+                    converged = hypot(error_re, error_im) <= tolerance &&
+                        hypot(step_re, step_im) <= derivative_step;
+                }
+                if (converged) {
                     int duplicate = 0;
                     for (uint32_t index = 0; index < root_count; ++index) {
                         if (hypot(roots[index].re - re, roots[index].im - im) <= merge_distance) {
@@ -51,17 +71,8 @@ int32_t ce_find_preimages(const ce_map_config *config, double target_re, double 
                     }
                     break;
                 }
-                ce_complex x_value, y_value;
-                if (!ce_analysis_target_value(config, (ce_complex){re + derivative_step, im}, inverse_output, &x_value) ||
-                    !ce_analysis_target_value(config, (ce_complex){re, im + derivative_step}, inverse_output, &y_value)) break;
-                const double j00 = (x_value.re - value.re) / derivative_step;
-                const double j10 = (x_value.im - value.im) / derivative_step;
-                const double j01 = (y_value.re - value.re) / derivative_step;
-                const double j11 = (y_value.im - value.im) / derivative_step;
-                const double determinant = j00 * j11 - j01 * j10;
-                if (!isfinite(determinant) || fabs(determinant) < 1e-14) break;
-                re -= (error_re * j11 - error_im * j01) / determinant;
-                im -= (j00 * error_im - j10 * error_re) / determinant;
+                re -= step_re;
+                im -= step_im;
                 if (!isfinite(re) || !isfinite(im) || fabs(re) > span * 100.0 || fabs(im) > span * 100.0) break;
             }
         }
@@ -142,7 +153,7 @@ int32_t ce_analyze_contour(const ce_map_config *config, const ce_complex *points
         if (!isfinite(point.re) || !isfinite(point.im)) { has_previous = 0; continue; }
         ce_complex value;
         if (!ce_analysis_value(config, point, &value)) { *status |= 1u; return 0; }
-        if (hypot(value.re, value.im) < 1e-9) { *status |= 2u; return 0; }
+        if (hypot(value.re, value.im) < 1e-9) *status |= 2u;
         if (has_previous) {
             const ce_complex average = {(previous_value.re + value.re) * 0.5,
                                         (previous_value.im + value.im) * 0.5};
@@ -180,8 +191,10 @@ int32_t ce_estimate_residue(const ce_map_config *config, double pole_re, double 
         previous_point = point;
         previous_value = value;
     }
-    residue->re = integral.im / 6.28318530717958647693;
-    residue->im = -integral.re / 6.28318530717958647693;
+    const double step = 6.28318530717958647693 / samples;
+    const double polygon_correction = step / sin(step);
+    residue->re = integral.im / 6.28318530717958647693 * polygon_correction;
+    residue->im = -integral.re / 6.28318530717958647693 * polygon_correction;
     return 0;
 }
 
@@ -307,4 +320,3 @@ int32_t ce_classify_contour_singularities(uint32_t contour_type, double cx, doub
     }
     return 0;
 }
-

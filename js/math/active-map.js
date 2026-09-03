@@ -24,7 +24,8 @@ function sourceSignature() {
         chainCount: state.chainCount,
         chainMode: state.chainingMode,
         chainSeed: state.chainSeed,
-        taylor: [state.taylorSeriesEnabled, state.taylorSeriesCenter, state.taylorSeriesOrder],
+        taylor: [state.taylorSeriesEnabled, state.taylorSeriesCenter, state.taylorSeriesOrder,
+            String(state.taylorSeriesConvergenceRadius)],
         dynamic: state.dynamicPlotting
     });
 }

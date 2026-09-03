@@ -382,7 +382,7 @@ export function getChainedTransformFunction(functionKey = state.currentFunction)
     return transform;
 }
 
-const ENTIRE_FUNCTIONS = new Set(['exp', 'sin', 'cos', 'polynomial']);
+const ENTIRE_FUNCTIONS = new Set(['identity', 'exp', 'sin', 'cos', 'sinh', 'polynomial']);
 
 export function updateTaylorSeriesCenterAndRadius() {
     const center = state.taylorSeriesCustomCenter

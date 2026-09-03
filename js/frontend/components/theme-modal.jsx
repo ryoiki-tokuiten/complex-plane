@@ -4,9 +4,9 @@ import { state } from '../../store/state.js';
 import { useAppState } from '../state-hooks.js';
 import { requestDomainRedraw, requestUiRedraw } from '../../rendering/redraw-scheduler.js';
 import { persistThemePreferences } from '../theme.js';
-import { refreshPanelEdgeHandles } from '../../ui/panel-layout-manager.js';
 import { ThemeOptions } from './theme-and-palette-options.jsx';
 import { gridDensityMax } from '../grid-density.js';
+import { Icon } from './icon.jsx';
 
 import { isThemeModalOpen, closeThemeModal } from '../theme-state.js';
 
@@ -30,7 +30,7 @@ function GridColor({ index, stateKey }) {
     );
 }
 
-function GridDensityControl({ model, revision }) {
+function GridDensityControl() {
     const density = state.gridDensity ?? 15;
     return (
         <div class="control-group theme-modal-slider-group">
@@ -95,7 +95,7 @@ function GridOpacityControl() {
     );
 }
 
-export function ThemeModal({ model, revision }) {
+export function ThemeModal() {
     const vertical = useAppState('verticalLayoutEnabled');
     const canvasZoomControls = useAppState('canvasZoomControlsEnabled');
     const layoutApplied = useRef(false);
@@ -106,11 +106,6 @@ export function ThemeModal({ model, revision }) {
             return;
         }
         localStorage.setItem('complex_verticalLayoutEnabled', String(vertical));
-        if (typeof document !== 'undefined') {
-            document.body?.classList?.toggle('vertical-layout', Boolean(vertical));
-            document.querySelector?.('.application-root')?.classList?.toggle('vertical-layout', Boolean(vertical));
-        }
-        refreshPanelEdgeHandles(true);
         const needsRefresh = vertical || layoutApplied.current;
         layoutApplied.current = true;
         if (needsRefresh) refreshLayout();
@@ -128,7 +123,7 @@ export function ThemeModal({ model, revision }) {
             <div class="theme-modal-backdrop" id="theme_modal_backdrop" onClick={close} />
             <div class="theme-modal-content">
                 <button id="close_theme_modal_btn" class="theme-modal-close-btn" aria-label="Close theme modal"
-                    onClick={close}><i data-lucide="x" /></button>
+                    onClick={close}><Icon name="x" /></button>
                 <div class="theme-modal-header">
                     <h2>Themes & Display</h2>
                     <p>Select application theme, accent colors, layout, and visualization controls.</p>
@@ -137,7 +132,7 @@ export function ThemeModal({ model, revision }) {
 
                 <div class="theme-modal-section">
                     <div class="theme-modal-sliders-row">
-                        <GridDensityControl model={model} revision={revision} />
+                        <GridDensityControl />
                         <GridOpacityControl />
                         <ProbeNeighborhoodControl />
                     </div>

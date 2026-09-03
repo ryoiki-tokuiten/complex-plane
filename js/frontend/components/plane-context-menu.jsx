@@ -82,7 +82,7 @@ function MenuItems(props) {
             : <MenuButton key={item.id || index} item={item} {...props} />);
 }
 
-export function PlaneContextMenu({ model, theme }) {
+export function PlaneContextMenu({ theme }) {
     const menuRef = useRef(null);
     const submenuRef = useRef(null);
     const closeTimer = useRef(null);
@@ -235,7 +235,7 @@ export function PlaneContextMenu({ model, theme }) {
                 role="menu" style={{ ...theme, left: submenu.left, top: submenu.top }}
                 onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
                 {submenu.custom
-                    ? <Overlays model={model} contextPanel={submenu.custom} />
+                    ? <Overlays contextPanel={submenu.custom} />
                     : <MenuItems items={submenu.items} {...shared} />}
             </div>
         </>}

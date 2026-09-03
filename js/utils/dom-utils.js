@@ -1,14 +1,11 @@
 import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, zPlaneInitialRanges, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
-import { bindGenericPlaneInteractions, invalidateAllCanvasRects } from '../frontend/actions.js';
+import { invalidateAllCanvasRects } from '../frontend/actions.js';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
 import { synchronizePreciseViewport } from '../native/precise-viewport.js';
 import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
-import { registerControls } from '../ui/control-registry.js';
 import { requireInteger } from './numeric-contracts.js';
-import { refreshPanelEdgeHandles } from '../ui/panel-layout-manager.js';
-import { requestDomainRedraw } from '../rendering/redraw-scheduler.js';
 
 const { controls } = context;
 
@@ -31,8 +28,11 @@ export function findTaylorCenterPreset(re, im) {
     ) || null;
 }
 
-export function setupDOMReferences() {
-    zCanvas = document.getElementById('z_plane_canvas'); wCanvas = document.getElementById('w_plane_canvas');
+export function setupCanvasReferences() {
+    zCanvas = controls.zPlaneCanvas;
+    wCanvas = controls.wPlaneCanvas;
+    if (!zCanvas || !wCanvas) throw new Error('Plane canvases must be mounted before renderer initialization.');
+
     zCtx = zCanvas.getContext('2d');
     zCtx.imageSmoothingEnabled = true;
     zCtx.imageSmoothingQuality = 'high';
@@ -40,11 +40,7 @@ export function setupDOMReferences() {
     wCtx.imageSmoothingEnabled = true;
     wCtx.imageSmoothingQuality = 'high';
 
-    registerControls(document, controls);
-    controls.zPlaneCanvas = zCanvas;
-    controls.wPlaneCanvas = wCanvas;
-
-    zDomainColorCanvas = document.createElement('canvas');
+    zDomainColorCanvas = new OffscreenCanvas(DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT);
     zDomainColorCtx = zDomainColorCanvas.getContext('2d');
 
     wCanvasList = [wCanvas];
@@ -52,23 +48,6 @@ export function setupDOMReferences() {
     wPlaneParamsList = [wPlaneParams];
     wPlaneThreeContainersList = [controls.wPlaneThreeContainer];
 
-    controls.funcButtons = Object.fromEntries(
-        [...document.querySelectorAll('[id^="select_"][id$="_btn"]')]
-            .map(button => [button.id.slice(7, -4), button])
-    );
-    
-    const requiredControls = [
-        'zPlaneCanvas', 'wPlaneCanvas',
-        'inputShapeSelector',
-        'functionControlsPanel',
-        'commonParamsSliders',
-        'shapeParamsSliders', 'mobiusParamsSliders', 'polynomialParamsSliders'
-    ];
-
-    const missingControls = requiredControls.filter(key => !controls[key]);
-    if (missingControls.length > 0) {
-        throw new Error(`Essential controls not found: ${missingControls.join(', ')}`);
-    }
     context.zCanvas = zCanvas;
     context.wCanvas = wCanvas;
     context.zCtx = zCtx;
@@ -125,14 +104,7 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
 
     setupCanvasBaseParams(zPlaneParams, zCanvas, zIsFullscreen);
 
-    if (wCanvasList && wCanvasList.length > 0) {
-        for (let i = 0; i < wCanvasList.length; i++) {
-            const isThisWFullscreen = wIsFullscreen && (state.fullscreenWIndex === i);
-            setupCanvasBaseParams(wPlaneParamsList[i], wCanvasList[i], isThisWFullscreen);
-        }
-    } else {
-        setupCanvasBaseParams(wPlaneParams, wCanvas, wIsFullscreen);
-    }
+    setupCanvasBaseParams(wPlaneParams, wCanvas, wIsFullscreen);
 
     let zIsPrecise = !!zPlaneParams.preciseViewport;
     if (updateZFromSlider) { 
@@ -170,20 +142,7 @@ export function setupVisualParameters(updateZFromSlider = true, updateWFromSlide
         }
     }
 
-    // Propagate zoom/pan to all recursive planes
-    if (!wIsPrecise && wPlaneParamsList && wPlaneParamsList.length > 1) {
-        const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
-        const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
-        for (let i = 1; i < wPlaneParamsList.length; i++) {
-            const p = wPlaneParamsList[i];
-            const baseScaleP = Math.min(p.width / initialXSpanW, p.height / initialYSpanW);
-            const scaleP = baseScaleP * (state.wPlaneZoom || 1);
-            p.scale.x = p.scale.y = scaleP;
-            p.origin.x = (p.width * 0.5) - wWorldCenterX * scaleP;
-            p.origin.y = (p.height * 0.5) + wWorldCenterY * scaleP;
-            updatePlaneViewportRanges(p);
-        }
-    }
+
 
     if (controls.laplaceComCanvas) {
         setupCanvasBaseParams(laplaceComPlaneParams, controls.laplaceComCanvas, state.isLaplaceComFullScreen);
@@ -245,65 +204,6 @@ function formatChainingSeed(seed) {
     return `${re} ${imValue < 0 ? '-' : '+'} ${im}i`;
 }
 
-function ensureChainedPlaneLists() {
-    if (wCanvasList?.length) return;
-    wCanvasList = [wCanvas];
-    wCtxList = [wCtx];
-    wPlaneParamsList = [wPlaneParams];
-    wPlaneThreeContainersList = [controls.wPlaneThreeContainer];
-}
-
-function publishChainedPlaneLists() {
-    context.wCanvasList = wCanvasList;
-    context.wCtxList = wCtxList;
-    context.wPlaneParamsList = wPlaneParamsList;
-    context.wPlaneThreeContainersList = wPlaneThreeContainersList;
-}
-
-export function registerChainedPlane(index, canvas, threeContainer) {
-    requireInteger(index, 'Chaining column index');
-    if (!canvas || index < 1 || index > 24) throw new Error('Invalid chained plane registration.');
-    ensureChainedPlaneLists();
-
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    const params = wPlaneParamsList[index] || {
-        width: DEFAULT_CANVAS_WIDTH,
-        height: DEFAULT_CANVAS_HEIGHT,
-        origin: { x: 0, y: 0 },
-        scale: { x: 1, y: 1 },
-        currentVisXRange: [...wPlaneInitialRanges.x],
-        currentVisYRange: [...wPlaneInitialRanges.y]
-    };
-
-    wCanvasList[index] = canvas;
-    wCtxList[index] = ctx;
-    wPlaneParamsList[index] = params;
-    wPlaneThreeContainersList[index] = threeContainer;
-    if (!canvas.dataset.interactionsBound) {
-        canvas.dataset.interactionsBound = 'true';
-        bindGenericPlaneInteractions(canvas, params, requestDomainRedraw);
-    }
-    publishChainedPlaneLists();
-    setupVisualParameters(false, false);
-    refreshPanelEdgeHandles(true);
-}
-
-export function unregisterChainedPlane(index) {
-    ensureChainedPlaneLists();
-    const canvas = wCanvasList[index];
-    if (canvas) disposeRiemannSurface(canvas);
-    wPlaneThreeContainersList[index]?.__threeManifoldsRenderer?.dispose();
-    [wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList].forEach(list => {
-        list[index] = null;
-        while (list.length > 1 && list.at(-1) == null) list.pop();
-    });
-    if (context.wPlanarTransformedLayerCacheList?.length > wCanvasList.length) {
-        context.wPlanarTransformedLayerCacheList.length = wCanvasList.length;
-    }
-    publishChainedPlaneLists();
-}
 
 export function downloadCanvasImage(canvas, filename = 'complex-plane.png') {
     if (!canvas) return;

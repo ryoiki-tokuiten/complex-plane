@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { state, zPlaneParams } from '../store/state.js';
+import { state, context, zPlaneParams } from '../store/state.js';
 import { buildMappedTransformProfileKey, getMappedTransformProfile } from '../native/map-runtime.js';
 import { parseExpression } from '../math/expression/parser.js';
 import {
@@ -533,7 +533,7 @@ function requireContainer(container) {
 }
 
 export function drawScalarSurface(container, view, rendererOptions = {}) {
-    const target = requireContainer(typeof container === 'string' ? document.getElementById(container) : container);
+    const target = requireContainer(container);
     let renderer = rendererByContainer.get(target);
     if (!renderer) {
         renderer = new ScalarSurfaceRenderer(target, rendererOptions);
@@ -543,17 +543,15 @@ export function drawScalarSurface(container, view, rendererOptions = {}) {
 }
 
 export function resizeScalarSurface(container) {
-    const target = typeof container === 'string' ? document.getElementById(container) : container;
-    if (target) rendererByContainer.get(target)?.resize();
+    if (container) rendererByContainer.get(container)?.resize();
 }
 
 export function disposeScalarSurface(container) {
-    const target = typeof container === 'string' ? document.getElementById(container) : container;
-    if (!target) return;
-    const renderer = rendererByContainer.get(target);
+    if (!container) return;
+    const renderer = rendererByContainer.get(container);
     if (!renderer) return;
     renderer.dispose();
-    rendererByContainer.delete(target);
+    rendererByContainer.delete(container);
 }
 
 const DEFAULT_SAMPLE_SEGMENTS = 96;
@@ -747,7 +745,7 @@ function zoomRealPlotCoordinates(event) {
 }
 
 export function drawRealPlot() {
-    const container = document.getElementById('real_plots_3d_container');
+    const container = context.controls.realPlots3DContainer;
     if (!container) return;
     const xRange = [...zPlaneParams.currentVisXRange];
     const yRange = [...zPlaneParams.currentVisYRange];
@@ -781,5 +779,5 @@ export function drawRealPlot() {
 }
 
 export function disposeRealPlotsRenderer() {
-    disposeScalarSurface(document.getElementById('real_plots_3d_container'));
+    disposeScalarSurface(context.controls.realPlots3DContainer);
 }

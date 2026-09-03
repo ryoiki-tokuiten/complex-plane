@@ -1,4 +1,4 @@
-import { state, zPlaneParams } from '../store/state.js';
+import { state, context, zPlaneParams } from '../store/state.js';
 import { ThreeManifoldsRenderer } from './3d-manifolds-renderer.js';
 import { generateCurrentInputShapePointSets } from './shape-generators.js';
 import { resolveActiveMap } from '../math/active-map.js';
@@ -9,14 +9,14 @@ const BOUNCE_PAUSE_TIME = 1.0;
 
 const PLANE_CONFIGS = {
     z: {
-        containerId: 'z_plane_threejs_container',
+        containerKey: 'zPlaneThreejsContainer',
         progressKey: 'manifoldTransformationProgressZ',
         playingKey: 'manifoldTransformationPlayingZ',
         speedKey: 'manifoldTransformationSpeedZ',
         generator: generateCurrentInputShapePointSets
     },
     w: {
-        containerId: 'w_plane_threejs_container',
+        containerKey: 'wPlaneThreejsContainer',
         progressKey: 'manifoldTransformationProgressW',
         playingKey: 'manifoldTransformationPlayingW',
         speedKey: 'manifoldTransformationSpeedW',
@@ -41,7 +41,7 @@ class PlaneController {
 
     init() {
         if (this.renderer) return;
-        const container = document.getElementById(this.config.containerId);
+        const container = context.controls[this.config.containerKey];
         if (!container) return;
         this.renderer = new ThreeManifoldsRenderer(container, this.id);
     }
