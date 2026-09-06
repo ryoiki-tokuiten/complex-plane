@@ -8,21 +8,24 @@ function key(sample, width) {
     return `${pixel % width + x},${Math.floor(pixel / width) + y}`;
 }
 
-test('refinement covers remaining sample centers without an eight-round cutoff or repeated centers', () => {
+test('refinement clusters pending samples by pixel without repeated centers or premature precision escalation', () => {
     const plan = new DomainRefinement(16, 6, 256);
     let pending = Array.from({ length: 384 }, (_, i) => i);
     const visited = new Set();
+    const coveredSamples = new Set();
     let rounds = 0;
     while (pending.length) {
         const sites = plan.next(pending);
         const chosen = new Set(sites.map(({ x, y }) => `${x},${y}`));
         assert.equal(sites.length, 32);
         for (const point of chosen) { assert.ok(!visited.has(point)); visited.add(point); }
-        pending = pending.filter(sample => !chosen.has(key(sample, 16)));
+        for (const sample of sites.activeSamples) { coveredSamples.add(sample); }
+        pending = pending.filter(sample => !coveredSamples.has(sample));
         rounds++;
     }
-    assert.equal(rounds, 12);
-    assert.equal(visited.size, 384);
+    assert.equal(rounds, 3);
+    assert.equal(visited.size, 96);
+    assert.equal(coveredSamples.size, 384);
     assert.equal(plan.precision, 256, 'coverage progress does not unnecessarily raise precision');
     assert.deepEqual(plan.next(pending), []);
 });

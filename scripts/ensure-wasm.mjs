@@ -166,7 +166,7 @@ const exported = [
     '_ce_compute_taylor_coefficients',
     '_ce_generate_input_shape', '_ce_generate_radial_steps',
     '_ce_generate_viewport_grid_pixels',
-    '_ce_build_planar_line', '_ce_build_planar_lines', '_ce_build_planar_polyline',
+    '_ce_build_planar_polyline',
     '_ce_generate_transform_signal', '_ce_compute_spectrum', '_ce_build_laplace_winding',
     '_ce_generate_laplace_analysis',
     '_ce_build_laplace_surface', '_ce_build_real_surface', '_ce_build_image_mesh',

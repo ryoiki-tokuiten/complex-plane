@@ -13,7 +13,7 @@ async function loadBytes() {
         const { readFile } = await import(/* @vite-ignore */ nodeFileSystemModule);
         return readFile(wasmUrl);
     }
-    const response = await fetch(wasmUrl, { cache: 'no-cache' });
+    const response = await fetch(wasmUrl);
     if (!response.ok) throw new Error(`Native complex engine failed to load: HTTP ${response.status}`);
     return response.arrayBuffer();
 }
@@ -1402,71 +1402,7 @@ export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePo
     });
 }
 
-export function buildNativePlanarLine(options) {
-    const sampleCount = requireInteger(options.sampleCount, 'Native planar-line sample count');
-    if (sampleCount < 1 || sampleCount > 1_000_000) {
-        throw new Error('Native planar-line sample count must be from one through 1,000,000.');
-    }
-    requireFiniteComplex(options.start, 'Native planar-line start');
-    requireFiniteComplex(options.end, 'Native planar-line end');
-    requirePlanarRenderOptions(options);
-    const outputCapacity = (sampleCount + 1) * 2 + 2;
-    return withAllocations((allocations, allocate) => {
-        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
-        writeMapConfig(configPointer, options.map, allocations);
-        const outputPointer = trackAlloc(allocations, outputCapacity * 16);
-        const count = wasm.ce_build_planar_line(
-            configPointer,
-            options.start.re, options.start.im, options.end.re, options.end.im, sampleCount,
-            options.scaleX, options.scaleY, options.renderLimit,
-            options.jumpThresholdSq, options.toleranceSq,
-            options.hasBranchCuts ? 1 : 0, options.branchCutAngle,
-            outputPointer, outputCapacity
-        );
-        if (count < 0) throw new Error(`Native planar line job failed with status ${count}.`);
-        return readComplexBuffer(outputPointer, count);
-    });
-}
 
-export function buildNativePlanarLines(options) {
-    if (!Array.isArray(options.lines) || !options.lines.length) return [];
-    requirePlanarRenderOptions(options);
-    return withAllocations((allocations, allocate) => {
-        const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
-        writeMapConfig(configPointer, options.map, allocations);
-        const lineCount = options.lines.length;
-        const startsPointer = trackAlloc(allocations, lineCount * 16);
-        const endsPointer = trackAlloc(allocations, lineCount * 16);
-        const countsPointer = trackAlloc(allocations, lineCount * 4);
-        const offsetsPointer = trackAlloc(allocations, (lineCount + 1) * 4);
-        const lineView = memoryView();
-        let outputCapacity = 0;
-        options.lines.forEach((line, index) => {
-            const sampleCount = requireInteger(line.sampleCount, `Native planar line ${index} sample count`);
-            if (sampleCount < 1 || sampleCount > 1_000_000) {
-                throw new Error(`Native planar line ${index} sample count is outside one through 1,000,000.`);
-            }
-            requireFiniteComplex(line.start, `Native planar line ${index} start`);
-            requireFiniteComplex(line.end, `Native planar line ${index} end`);
-            writeComplex(lineView, startsPointer + index * 16, line.start);
-            writeComplex(lineView, endsPointer + index * 16, line.end);
-            lineView.setUint32(countsPointer + index * 4, sampleCount, true);
-            outputCapacity += (sampleCount + 1) * 2 + 2;
-        });
-        const outputPointer = trackAlloc(allocations, outputCapacity * 16);
-        const total = wasm.ce_build_planar_lines(
-            configPointer, startsPointer, endsPointer, countsPointer, lineCount,
-            options.scaleX, options.scaleY, options.renderLimit,
-            options.jumpThresholdSq, options.toleranceSq,
-            options.hasBranchCuts ? 1 : 0, options.branchCutAngle,
-            outputPointer, outputCapacity, offsetsPointer
-        );
-        if (total < 0) throw new Error(`Native planar lines job failed with status ${total}.`);
-        const offsets = copyWasmArray(Uint32Array, offsetsPointer, lineCount + 1);
-        const packed = readComplexBuffer(outputPointer, total);
-        return options.lines.map((_line, index) => packed.slice(offsets[index] * 2, offsets[index + 1] * 2));
-    });
-}
 
 export function buildNativePlanarPolyline(options) {
     if (!Array.isArray(options.points) || !options.points.length) return new Float64Array();
@@ -1484,10 +1420,7 @@ export function buildNativePlanarPolyline(options) {
     if (inputCount * 2 - 1 > outputLimit) {
         throw new Error('Native planar polyline input exceeds the one-million-point output budget.');
     }
-    const safeSubdivisions = Math.max(1, Math.floor((outputLimit - inputCount * 2) / Math.max(1, inputCount - 1)));
-    const safeDepth = Math.max(0, Math.floor(Math.log2(safeSubdivisions)));
-    const effectiveMaxDepth = Math.min(maxDepth, safeDepth);
-    const theoretical = inputCount * 2 + Math.max(0, inputCount - 1) * 2 ** effectiveMaxDepth;
+    const theoretical = inputCount * 2 + Math.max(0, inputCount - 1) * (2 ** maxDepth);
     const outputCapacity = Math.min(outputLimit, Math.max(4096, theoretical));
     return withAllocations((allocations, allocate) => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
@@ -1504,7 +1437,7 @@ export function buildNativePlanarPolyline(options) {
             configPointer, inputPointer, options.points.length,
             options.originX, options.originY, options.scaleX, options.scaleY,
             options.renderLimit, options.jumpThresholdSq, options.toleranceSq,
-            options.maxSegmentSq, effectiveMaxDepth,
+            options.maxSegmentSq, maxDepth,
             options.hasBranchCuts ? 1 : 0, options.branchCutAngle,
             outputPointer, outputCapacity
         );
@@ -2689,13 +2622,8 @@ export function compileDomainProgram(snapshot) {
             chainCount: snapshot.chainingEnabled ? snapshot.chainCount : 1,
             reference({ x, y, precision, terms }) {
                 if (disposed) throw new Error('Domain program has been disposed.');
-                const strings = [];
-                let pointer;
-                try {
-                    const v = snapshot.viewport;
-                    const addresses = [v.centerRe, v.centerIm, v.xSpan, v.ySpan].map(s => writeCString(s, strings));
-                    pointer = wasm.ce_domain_reference_create(program, ...addresses, v.width, v.height, x, y, precision, terms);
-                } finally { for (const address of strings) wasm.ce_free(address); }
+                const v = snapshot.viewport;
+                let pointer = wasm.ce_domain_reference_create(program, ...coordinateStrings, v.width, v.height, x, y, precision, terms);
                 if (!pointer) throw new Error('Unable to construct a bounded domain reference.');
                 const ballSize = 8;
                 const header = new Float32Array(6 * ballSize);

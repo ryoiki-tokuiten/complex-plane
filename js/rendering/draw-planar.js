@@ -33,10 +33,7 @@ import { hslToRgb } from './canvas-primitives.js';
 import { filterGraphFullGridPointSets } from './transformation-graph.js';
 import { baseExpressionHasBranches } from '../analysis/riemann-surface.js';
 import {
-    buildNativePlanarLine,
-    buildNativePlanarLines,
     buildNativePlanarPolyline,
-    buildNativeVectorField,
     evaluateNativePoints,
     nativeMapOptions,
     projectNativePrecisePixels,
@@ -72,21 +69,12 @@ const LINEAR_SOURCE_POINT_SET_ROLES = new Set([
 ]);
 
 const PATH2D_MIN_POINTS = 64;
-const STATIC_CURVE_TOLERANCE_PX_SQ = 0.001;
-const INTERACTION_CURVE_TOLERANCE_PX_SQ = 1;
-const STATIC_MAX_SEGMENT_PX_SQ = 4 * 4;
-const INTERACTION_MAX_SEGMENT_PX_SQ = 36 * 36;
-const MAX_TRANSFORM_SUBDIVISION_DEPTH = 16;
-
-// One transformed-grid geometry pipeline is shared by every W-plane stage.
-// Bulk evaluators accelerate sampling where available; all lines then use the
-// same clipping, discontinuity detection, simplification, and cache semantics.
-const TRANSFORM_GRID_RENDER_LIMIT_HEADROOM = 1.25;
-const TRANSFORM_GRID_STATIC_TOLERANCE_SQ = 0.01;
-const TRANSFORM_GRID_INTERACTION_TOLERANCE_SQ = 0.36;
-const TRANSFORM_GRID_OUTPUT_SAMPLES = Math.max(DEFAULT_POINTS_PER_LINE, 512);
-const TRANSFORM_GRID_INTERACTION_OUTPUT_SAMPLES = Math.max(DEFAULT_POINTS_PER_LINE, 256);
-const transformGridGeometryCaches = new WeakMap();
+const STATIC_CURVE_TOLERANCE_PX_SQ = 0.25;
+const INTERACTION_CURVE_TOLERANCE_PX_SQ = 2.25;
+const STATIC_MAX_SEGMENT_PX_SQ = 48 * 48;
+const INTERACTION_MAX_SEGMENT_PX_SQ = 96 * 96;
+const MAX_TRANSFORM_SUBDIVISION_DEPTH = 10;
+const INTERACTION_TRANSFORM_SUBDIVISION_DEPTH = 7;
 
 function getPathConstructorForContext(ctx) {
     if (typeof Path2D !== 'function') throw new Error('Planar rendering requires Path2D.');
@@ -304,7 +292,7 @@ function getAdaptiveTransformRenderTuning() {
         maxSegmentSq: interacting ? INTERACTION_MAX_SEGMENT_PX_SQ : STATIC_MAX_SEGMENT_PX_SQ,
         maxDepth: appState.chainingEnabled && appState.chainCount > 25
             ? 0
-            : MAX_TRANSFORM_SUBDIVISION_DEPTH
+            : (interacting ? INTERACTION_TRANSFORM_SUBDIVISION_DEPTH : MAX_TRANSFORM_SUBDIVISION_DEPTH)
     };
 }
 
@@ -470,23 +458,6 @@ function isCanvasPointNearViewport(point, planeParams) {
         point.y < height + margin;
 }
 
-function getTransformGridTuning() {
-    const interacting = isViewportManipulationActive();
-    return {
-        toleranceSq: interacting ? TRANSFORM_GRID_INTERACTION_TOLERANCE_SQ : TRANSFORM_GRID_STATIC_TOLERANCE_SQ,
-        outputSamples: interacting ? TRANSFORM_GRID_INTERACTION_OUTPUT_SAMPLES : TRANSFORM_GRID_OUTPUT_SAMPLES
-    };
-}
-
-// The public render limit is an off-screen numerical safety guard, not a visual
-// clip rectangle. Bucket it with modest headroom so translating the output
-// viewport does not invalidate otherwise identical transformed geometry.
-function getTransformGridRenderSafetyLimit(renderLimit) {
-    if (!(renderLimit > 0) || !Number.isFinite(renderLimit)) return renderLimit;
-    const requested = renderLimit * TRANSFORM_GRID_RENDER_LIMIT_HEADROOM;
-    return 2 ** Math.ceil(Math.log2(requested));
-}
-
 function buildOriginRelativePath(PathCtor, points, scaleX, scaleY) {
     const path = new PathCtor();
     let open = false;
@@ -505,147 +476,13 @@ function buildOriginRelativePath(PathCtor, points, scaleX, scaleY) {
     return path;
 }
 
-function createTransformGridGeometry(points) {
-    return { points, path: null, pathConstructor: null };
-}
-
-function drawTransformGridGeometry(ctx, planeParams, geometry, color) {
-    const points = geometry?.points || geometry;
-    if (!points) return;
-    ctx.strokeStyle = color;
-    configureRoundStroke(ctx);
-
-    const PathCtor = getPathConstructorForContext(ctx);
-    if (!geometry || typeof ctx.translate !== 'function') {
-        throw new Error('Transformed-grid rendering requires cached geometry and canvas transforms.');
-    }
-    if (!geometry.path || geometry.pathConstructor !== PathCtor) {
-        geometry.path = buildOriginRelativePath(PathCtor, points, planeParams.scale.x, planeParams.scale.y);
-        geometry.pathConstructor = PathCtor;
-    }
-    ctx.save();
-    try {
-        ctx.translate(planeParams.origin.x, planeParams.origin.y);
-        ctx.stroke(geometry.path);
-    } finally {
-        ctx.restore();
-    }
-}
-
-function getTransformGridGeometryCache(mappedTransform) {
-    const cacheOwner = mappedTransform?.renderCacheOwner || mappedTransform;
-    let cache = transformGridGeometryCaches.get(cacheOwner);
-    if (!cache) {
-        cache = new Map();
-        transformGridGeometryCaches.set(cacheOwner, cache);
-    }
-    return cache;
-}
-
-function transformGridGeometryKey(start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, toleranceSq) {
-    return `${sampleCount}|${start.re}|${start.im}|${end.re}|${end.im}|${planeParams.scale.x}|${planeParams.scale.y}|${renderLimit}|${jumpThresholdSq}|${toleranceSq}`;
-}
-
-function buildTransformGridGeometry(mappedTransform, start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, toleranceSq, map = null) {
-    return buildNativePlanarLine({
-        map: nativeMapOptions(appState, {
-            functionKey: mappedTransform.functionKey,
-            ...mappedTransform.nativeMapOptions,
-            stage: map?.stage,
-            derivativeOrder: map?.presentation === 'derivative' ? 1 : 0
-        }),
-        start,
-        end,
-        sampleCount,
-        scaleX: planeParams.scale.x,
-        scaleY: planeParams.scale.y,
-        renderLimit,
-        jumpThresholdSq,
-        toleranceSq,
-        hasBranchCuts: baseExpressionHasBranches(appState) || appState.currentFunction === 'power',
-        branchCutAngle: appState.branchCutAngle
-    });
-}
-
-function drawTransformedLinearPointSet(ctx, planeParams, mappedTransform, pointSet, color, map = null) {
-    const endpoints = getPointSetEndpoints(pointSet);
-    if (!endpoints) return false;
-
-    const start = endpoints.start;
-    const end = endpoints.end;
-    const renderLimit = getTransformGridRenderSafetyLimit(getPlanarTransformRenderLimit(planeParams));
-    const jumpThresholdSq = getViewportJumpThresholdSq(planeParams);
-    const tuning = getTransformGridTuning();
-    const sampleCount = tuning.outputSamples;
-    const cache = getTransformGridGeometryCache(mappedTransform);
-    const cacheKey = transformGridGeometryKey(
-        start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, tuning.toleranceSq
-    );
-    const cached = cache.get(cacheKey);
-    if (cached) {
-        drawTransformGridGeometry(ctx, planeParams, cached, color);
-        return true;
-    }
-
-    const points = buildTransformGridGeometry(
-        mappedTransform, start, end, sampleCount, planeParams, renderLimit, jumpThresholdSq, tuning.toleranceSq, map
-    );
-    if (cache.size >= 2048) cache.clear();
-    const entry = createTransformGridGeometry(points);
-    cache.set(cacheKey, entry);
-    drawTransformGridGeometry(ctx, planeParams, entry, color);
-    return true;
-}
-
-function prepareNativeLinearGeometries(planeParams, mappedTransform, pointSets, startIndex, endIndex, map) {
-    const renderLimit = getTransformGridRenderSafetyLimit(getPlanarTransformRenderLimit(planeParams));
-    const jumpThresholdSq = getViewportJumpThresholdSq(planeParams);
-    const tuning = getTransformGridTuning();
-    const sampleCount = tuning.outputSamples;
-    const cache = getTransformGridGeometryCache(mappedTransform);
-    const missing = [];
-    for (let index = startIndex; index < endIndex; index += 1) {
-        const pointSet = pointSets[index];
-        if (!pointSet || !LINEAR_SOURCE_POINT_SET_ROLES.has(pointSet.role) || !Array.isArray(pointSet.points)) continue;
-        const endpoints = getPointSetEndpoints(pointSet);
-        if (!endpoints) continue;
-        const cacheKey = transformGridGeometryKey(
-            endpoints.start, endpoints.end, sampleCount, planeParams,
-            renderLimit, jumpThresholdSq, tuning.toleranceSq
-        );
-        if (!cache.has(cacheKey)) missing.push({ ...endpoints, sampleCount, cacheKey });
-    }
-    if (!missing.length) return;
-    const geometries = buildNativePlanarLines({
-        map: nativeMapOptions(appState, {
-            functionKey: mappedTransform.functionKey,
-            ...mappedTransform.nativeMapOptions,
-            stage: map?.stage,
-            derivativeOrder: map?.presentation === 'derivative' ? 1 : 0
-        }),
-        lines: missing,
-        scaleX: planeParams.scale.x,
-        scaleY: planeParams.scale.y,
-        renderLimit,
-        jumpThresholdSq,
-        toleranceSq: tuning.toleranceSq,
-        hasBranchCuts: baseExpressionHasBranches(appState) || appState.currentFunction === 'power',
-        branchCutAngle: appState.branchCutAngle
-    });
-    if (cache.size + geometries.length >= 2048) cache.clear();
-    for (let index = 0; index < geometries.length; index += 1) {
-        cache.set(missing[index].cacheKey, createTransformGridGeometry(geometries[index]));
-    }
-}
-
-
 function getViewportJumpThresholdSq(planeParams) {
     const xRange = getPlaneXRanges(planeParams);
     const yRange = getPlaneYRanges(planeParams);
     const spanX = xRange[1] - xRange[0];
     const spanY = yRange[1] - yRange[0];
 
-    return (spanX * spanX + spanY * spanY) * 4;
+    return Math.max(256.0, (spanX * spanX + spanY * spanY) * 4);
 }
 
 function getFirstVisibleColor(pointSets, colorResolver) {
@@ -838,7 +675,9 @@ function isInteractionActive() {
 function isViewportManipulationActive() {
     return !!(
         runtime.interaction.panZ.isPanning ||
-        runtime.interaction.panW.isPanning
+        runtime.interaction.panW.isPanning ||
+        (runtime.interaction.lastInteractionTime &&
+         nowMs() - runtime.interaction.lastInteractionTime < 250)
     );
 }
 
@@ -918,10 +757,6 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
         ? pointSets.length
         : requireFiniteNumber(options.endIndex, 'Point-set end index')), startIndex, pointSets.length);
 
-    if (mappedTransform && !mappedTransform.isConstant) {
-        prepareNativeLinearGeometries(planeParams, mappedTransform, pointSets, startIndex, endIndex, options.map);
-    }
-
     withSavedContext(ctx, () => {
         configureRoundStroke(ctx);
         setOptionalCanvasState(ctx, options);
@@ -954,17 +789,6 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
                 }
                 continue;
             }
-            if (mappedTransform && sourcePointSet &&
-                LINEAR_SOURCE_POINT_SET_ROLES.has(sourcePointSet.role) && Array.isArray(sourcePointSet.points)) {
-                const color = colorResolver(sourcePointSet);
-                const lineWidth = lineWidthResolver(sourcePointSet);
-                if (color && lineWidth) {
-                    ctx.lineWidth = lineWidth;
-                    drawTransformedLinearPointSet(ctx, planeParams, mappedTransform, sourcePointSet, color, options.map);
-                }
-                continue;
-            }
-
             const preparedPointSet = preparePointSet(sourcePointSet, transformFunc, planeParams);
 
             if (!preparedPointSet || !Array.isArray(preparedPointSet.points)) {
@@ -1268,7 +1092,7 @@ function getPlanarTransformRenderLimit(planeParams) {
     const yRange = getPlaneYRanges(planeParams);
 
     return Math.max(
-        1,
+        1e5,
         Math.abs(xRange[0]),
         Math.abs(xRange[1]),
         Math.abs(yRange[0]),

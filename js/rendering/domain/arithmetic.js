@@ -28,6 +28,7 @@ B bz(){return ball(vec2(0.0),0.0,0.0);}
 B bi(){return ball(vec2(0.0),2000000.0,uintBitsToFloat(0x7f800000u));}
 bool finiteB(B a){return !any(isnan(a.lo))&&!any(isinf(a.lo))&&abs(a.e)<=1000000.0&&a.r>=0.0&&!any(isnan(vec4(a.v,a.e,a.r)))&&!any(isinf(vec4(a.v,a.e,a.r)));}
 bool zeroB(B a){return all(equal(a.v,vec2(0.0)))&&a.r==0.0&&all(equal(a.lo,vec2(0.0)));}
+bool centerZero(B a){return all(equal(a.v,vec2(0.0)))&&all(equal(a.lo,vec2(0.0)));}
 float norm1(vec2 v){return abs(v.x)+abs(v.y);}
 B bn(B a){
  if(!finiteB(a))return bi();
@@ -53,8 +54,11 @@ B alignB(B a,float e){
  a.v*=scale;a.lo*=scale;a.r*=scale;a.e=e;return a;
 }
 B badd(B a,B b){
+ if(!finiteB(a)||!finiteB(b))return bi();
  if(zeroB(a))return b;if(zeroB(b))return a;
  float e=max(a.e,b.e);B x=alignB(a,e),y=alignB(b,e);
+ if(centerZero(x)){y.r=(x.r+y.r)*(1.0+8.0*U);return bn(y);}
+ if(centerZero(y)){x.r=(x.r+y.r)*(1.0+8.0*U);return bn(x);}
  vec2 re=dsadd(vec2(x.v.x,x.lo.x),vec2(y.v.x,y.lo.x));
  vec2 im=dsadd(vec2(x.v.y,x.lo.y),vec2(y.v.y,y.lo.y));
  float error=DU*(sizeB(x)+sizeB(y));
@@ -62,12 +66,25 @@ B badd(B a,B b){
 }
 B bsub(B a,B b){return badd(a,bneg(b));}
 B bmul(B a,B b){
+ if(!finiteB(a)||!finiteB(b))return bi();
+ // Reference defects and remainder enclosures have an exact zero center.
+ // Their products only propagate radii; no compensated ALU work is needed.
+ if(centerZero(a))return bn(ball(vec2(0.0),a.e+b.e,a.r*(sizeB(b)+b.r)*(1.0+16.0*U)));
+ if(centerZero(b))return bn(ball(vec2(0.0),a.e+b.e,b.r*(sizeB(a)+a.r)*(1.0+16.0*U)));
  vec2 ar=vec2(a.v.x,a.lo.x),ai=vec2(a.v.y,a.lo.y),br=vec2(b.v.x,b.lo.x),bb=vec2(b.v.y,b.lo.y);
  vec2 re=dsadd(dsmul(ar,br),-dsmul(ai,bb)),im=dsadd(dsmul(ar,bb),dsmul(ai,br));
  float x=sizeB(a),y=sizeB(b),error=DU*x*y;
  return bn(B(vec2(re.x,im.x),vec2(re.y,im.y),a.e+b.e,(x*b.r+y*a.r+a.r*b.r+error)*(1.0+16.0*U)));
 }
-B bscale(B a,float s){return bmul(a,bf(s));}
+// A real scalar needs two compensated products, not a complex multiply.
+B bscale(B a,float s){
+ B scalar=bf(s);float t=scalar.v.x;
+ if(!finiteB(a)||!finiteB(scalar))return bi();
+ vec2 re=dsmul(vec2(a.v.x,a.lo.x),vec2(t,0.0));
+ vec2 im=dsmul(vec2(a.v.y,a.lo.y),vec2(t,0.0));
+ float error=DU*sizeB(a)*abs(t);
+ return bn(B(vec2(re.x,im.x),vec2(re.y,im.y),a.e+scalar.e,(abs(t)*a.r+error)*(1.0+16.0*U)));
+}
 B binv(B a){
  if(!finiteB(a))return bi();
  // One Newton correction of the FP32 inverse, performed with high/low pairs.
@@ -85,8 +102,28 @@ B binv(B a){
  return bshift(bn(result),-a.e);
 }
 B bdiv(B a,B b){return bmul(a,binv(b));}
+// Horner mantissas share an exponent supplied by C. |q| < 1 and at most
+// 64 coefficients bound the intermediate centers; there is no range rescaling
+// or alignment between multiply and add. The tiny floor encloses underflow.
+B hornerStep(B q,B s,B c){
+ vec2 qr=vec2(q.v.x,q.lo.x),qi=vec2(q.v.y,q.lo.y);
+ vec2 sr=vec2(s.v.x,s.lo.x),si=vec2(s.v.y,s.lo.y);
+ vec2 re=dsadd(dsmul(qr,sr),-dsmul(qi,si));
+ vec2 im=dsadd(dsmul(qr,si),dsmul(qi,sr));
+ float x=sizeB(q),y=sizeB(s);
+ float productError=(x*s.r+y*q.r+q.r*s.r+DU*x*y)*(1.0+16.0*U)+exp2(-120.0);
+ float productSize=(norm1(vec2(re.x,im.x))+norm1(vec2(re.y,im.y)))*(1.0+4.0*U);
+ re=dsadd(re,vec2(c.v.x,c.lo.x));im=dsadd(im,vec2(c.v.y,c.lo.y));
+ float error=(productError+c.r+DU*(productSize+sizeB(c)))*(1.0+8.0*U)+exp2(-120.0);
+ return B(vec2(re.x,im.x),vec2(re.y,im.y),0.0,error);
+}
 B magnitudeUpper(B a){return bn(ball(vec2((length(a.v)+norm1(a.lo)+a.r)*(1.0+8.0*U),0.0),a.e,0.0));}
 B upperB(B a){return bn(ball(vec2((sizeB(a)+a.r)*(1.0+8.0*U),0.0),a.e,0.0));}
+// Positive upper bounds are already rounded outwards; they do not need a
+// compensated complex center. Inputs come from upperB/magnitudeUpper or here.
+B upperProduct(B a,B b){
+ return bn(ball(vec2(a.v.x*b.v.x*(1.0+4.0*U),0.0),a.e+b.e,0.0));
+}
 bool upperLess(B a,B b){a=upperB(a);b=upperB(b);if(zeroB(a))return !zeroB(b);if(zeroB(b))return false;return a.e<b.e||(a.e==b.e&&a.v.x<b.v.x);}
 B withError(B a,B error){error=upperB(error);return badd(a,ball(vec2(0.0),error.e,error.v.x));}
 int truthB(B a){if(!finiteB(a))return -1;if(max(abs(a.v.x),abs(a.v.y))>a.r+norm1(a.lo))return 1;return zeroB(a)?0:-1;}

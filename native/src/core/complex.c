@@ -378,6 +378,16 @@ static ce_complex ce_zeta_eta(double re, double im, uint32_t levels) {
     return ce_div(sum, denominator);
 }
 
+static ce_complex ce_zeta_reflect(ce_complex z) {
+    const ce_complex one_minus_z = ce_make(1.0 - z.re, -z.im);
+    const ce_complex two_pow = ce_pow(ce_make(2.0, 0.0), z);
+    const ce_complex pi_pow = ce_pow(ce_make(CE_PI, 0.0), ce_make(z.re - 1.0, z.im));
+    const ce_complex sin_term = ce_sin(ce_make(CE_PI * 0.5 * z.re, CE_PI * 0.5 * z.im));
+    const ce_complex gamma_val = ce_gamma(one_minus_z);
+    const ce_complex zeta_pos = ce_zeta_eta(one_minus_z.re, one_minus_z.im, 64);
+    return ce_mul(ce_mul(two_pow, pi_pow), ce_mul(sin_term, ce_mul(gamma_val, zeta_pos)));
+}
+
 static ce_complex ce_zeta_direct(double re, double im, uint32_t terms) {
     if (re <= 1.0) return ce_make(NAN, NAN);
     ce_ensure_zeta_log_table();
@@ -699,8 +709,11 @@ ce_complex ce_eval_function(uint32_t function_id, ce_complex z, ce_complex c,
                 return ce_zeta_direct(z.re, z.im, 100);
             }
             if (z.re == 0.0 && z.im == 0.0) return ce_make(-0.5, 0.0);
-            if (z.im == 0.0 && z.re < 0.0 && fmod(z.re, 2.0) == 0.0) return ce_make(0.0, 0.0);
-            return ce_zeta_eta(z.re, z.im, 32);
+            if (z.re < 0.0) {
+                if (z.im == 0.0 && fmod(z.re, 2.0) == 0.0) return ce_make(0.0, 0.0);
+                return ce_zeta_reflect(z);
+            }
+            return ce_zeta_eta(z.re, z.im, 64);
         case CE_FN_POLYNOMIAL: return ce_polynomial(z, config);
         case CE_FN_ALGEBRAIC: return ce_eval_algebraic(z, c, config);
         case CE_FN_IDENTITY: return z;

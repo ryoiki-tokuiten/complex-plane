@@ -192,20 +192,7 @@ int32_t ce_generate_viewport_grid_pixels(uint32_t shape, uint32_t density,
                                          float *output, uint32_t output_capacity,
                                          uint32_t *line_offsets, uint32_t *line_roles,
                                          uint32_t line_capacity, uint32_t stats[2]);
-int32_t ce_build_planar_line(const ce_map_config *config,
-                             double start_re, double start_im, double end_re, double end_im,
-                             uint32_t sample_count,
-                             double scale_x, double scale_y, double render_limit,
-                             double jump_threshold_sq, double tolerance_sq,
-                             uint32_t has_branch_cuts, double branch_cut_angle,
-                             ce_complex *output, uint32_t output_capacity);
-int32_t ce_build_planar_lines(const ce_map_config *config,
-                              const ce_complex *starts, const ce_complex *ends,
-                              const uint32_t *sample_counts, uint32_t line_count,
-                              double scale_x, double scale_y, double render_limit,
-                              double jump_threshold_sq, double tolerance_sq,
-                              uint32_t has_branch_cuts, double branch_cut_angle,
-                              ce_complex *output, uint32_t output_capacity, uint32_t *line_offsets);
+
 int32_t ce_build_planar_polyline(const ce_map_config *config,
                                  const ce_complex *input, uint32_t input_count,
                                  double origin_x, double origin_y,

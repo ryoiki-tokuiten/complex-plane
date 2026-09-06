@@ -8,7 +8,7 @@ precision highp float;
 uniform sampler2D u_color,u_done;
 uniform int u_width,u_height;
 out vec4 color;
-void main(){ivec2 p=ivec2(gl_FragCoord.xy);p.y=u_height-1-p.y;int id=(p.y*u_width+p.x)*4;int w=textureSize(u_color,0).x;vec3 sum=vec3(0.0);for(int s=0;s<4;s++){ivec2 q=ivec2((id+s)%w,(id+s)/w);if(texelFetch(u_done,q,0).r<0.5){color=vec4(0.0);return;}sum+=texelFetch(u_color,q,0).rgb;}color=vec4(sum*0.25,1.0);}`;
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);p.y=u_height-1-p.y;int id=(p.y*u_width+p.x)*4;int w=textureSize(u_color,0).x;vec3 sum=vec3(0.0);float valid=0.0;for(int s=0;s<4;s++){ivec2 q=ivec2((id+s)%w,(id+s)/w);if(texelFetch(u_done,q,0).r>=0.5){sum+=texelFetch(u_color,q,0).rgb;valid+=1.0;}}if(valid<0.5){color=vec4(0.0);}else{color=vec4(sum/valid,1.0);}}`;
 export function domainColorVertex(layout, paletteCount, derivative) {
     const { state } = layout;
     const inputs = stateInputs(state, derivative ? 2 : 1);
@@ -19,7 +19,7 @@ uniform sampler2D u_header;
 uniform ivec2 u_sampleSize;
 uniform float u_tolerance;
 ${inputs.declarations}
-layout(location=${state*(derivative ? 2 : 1)/4}) in highp uint inputSampleId;
+layout(location=${state*(derivative ? 2 : 1)/4}) in highp uvec2 inputSampleInfo;
 ${domainArithmetic}
 uniform int u_mode,u_depth;
 uniform vec3 u_palette[${paletteCount}];
@@ -30,7 +30,7 @@ B headerB(int at){int w=textureSize(u_header,0).x;vec4 v=texelFetch(u_header,ive
 void main(){
  ${inputs.assign}
  gl_Position=vec4(2.0,2.0,0.0,1.0);gl_PointSize=1.0;color=vec4(0.0);
- int id=int(inputSampleId)/${derivative ? 2 : 1};if(inputState[2].y!=1.0)return;
+ int id=int(inputSampleInfo.x)/${derivative ? 2 : 1};if(inputState[2].y!=1.0)return;
  B value=stateB(0);
  ${derivative ? `
  if(inputState[${state/4+2}].y!=1.0)return;
@@ -48,7 +48,7 @@ void main(){
  float position=hue*float(${paletteCount - 1});int index=min(${paletteCount - 2},int(floor(position)));
  vec3 rgb=mix(u_palette[index],u_palette[index+1],position-float(index));
  float lightness=u_style.w<=0.0001?0.5:0.34+0.38*clamp(0.5+(clamp((lm+69.07755278982137)/138.15510557964274,0.0,1.0)-0.5)*max(0.05,u_style.w),0.0,1.0);
- if(event!=0.0&&u_mode!=0)lightness=0.25+0.5*(1.0-inputState[2].x/float(u_depth));
+ if(event!=0.0&&u_mode!=0)lightness=0.22+0.58*pow(clamp(abs(event)/float(u_depth),0.0,1.0),0.65);
  lightness=clamp((0.5+(lightness-0.5)*u_style.y)*u_style.x,0.05,0.95);
  rgb=mix(vec3(dot(rgb,vec3(0.299,0.587,0.114))),rgb,clamp(u_style.z,0.0,1.0));
  rgb=lightness<0.5?rgb*(2.0*lightness):mix(rgb,vec3(1.0),(lightness-0.5)*2.0);
@@ -71,6 +71,7 @@ export class DomainGpu {
         this.gl = gl;
         this.resources = [];
         this.textureSizes = new WeakMap();
+        this.uniformLocations = new WeakMap();
         this.maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
         this.maxAttributes = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
         this.inputVaos = [this.own('VertexArray'), this.own('VertexArray')];
@@ -105,6 +106,7 @@ export class DomainGpu {
             this.done = this.texture(width, height, gl.RGBA8);
             this.sampleWidth = width; this.sampleHeight = height;
             this.statusBytes = new Uint8Array(width * height * 4);
+            this.statusWords = new Uint32Array(this.statusBytes.buffer);
             this.pendingStorage = new Uint32Array(width * height);
         }
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
@@ -156,7 +158,13 @@ export class DomainGpu {
     bind(program, name, texture, unit) {
         const gl = this.gl;
         gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.uniform1i(gl.getUniformLocation(program, name), unit);
+        gl.uniform1i(this.uniform(program, name), unit);
+    }
+    uniform(program, name) {
+        let locations = this.uniformLocations.get(program);
+        if (!locations) { locations = new Map(); this.uniformLocations.set(program, locations); }
+        if (!locations.has(name)) locations.set(name, this.gl.getUniformLocation(program, name));
+        return locations.get(name);
     }
     floats(data, previous = null) {
         const gl = this.gl, width = Math.min(this.maxTexture, Math.max(1, Math.ceil(data.length / 4)));
@@ -175,7 +183,7 @@ export class DomainGpu {
         }
         return texture;
     }
-    prepare(program, terms, header, coefficients) {
+    prepare(program, terms, header, coefficients, activeSamples = null, activeRefIndices = null) {
         const gl = this.gl;
         const mode = this.lanes === 2 ? 0 : ['value','escape','attractor','hybrid'].indexOf(this.snapshot.orbitColoringMode);
         const graphKey = JSON.stringify([Array.from(program.nodes), program.output, mode, this.snapshot.paletteStops.length, this.lanes]);
@@ -207,12 +215,16 @@ export class DomainGpu {
             variant.nodes = this.floats(metadata, variant.nodes);
             variant.nodesCount = program.nodes.length / 4;
         }
-        this.activeLogicalSamples = this.pendingSamples?.length ?? this.logicalSamples;
+        this.activeLogicalSamples = activeSamples ? activeSamples.length : (this.pendingSamples?.length ?? this.logicalSamples);
         this.activeSamples = this.activeLogicalSamples * this.lanes;
-        const ids = new Uint32Array(this.activeSamples);
+        const ids = new Uint32Array(this.activeSamples * 2);
         for (let i = 0; i < this.activeLogicalSamples; i++) {
-            const logical = this.pendingSamples ? this.pendingSamples[i] : i;
-            for (let lane = 0; lane < this.lanes; lane++) ids[i * this.lanes + lane] = logical * this.lanes + lane;
+            const logical = activeSamples ? activeSamples[i] : (this.pendingSamples ? this.pendingSamples[i] : i);
+            const ref = activeRefIndices ? activeRefIndices[i] : 0;
+            for (let lane = 0; lane < this.lanes; lane++) {
+                ids[(i * this.lanes + lane) * 2] = logical * this.lanes + lane;
+                ids[(i * this.lanes + lane) * 2 + 1] = ref;
+            }
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, this.sampleIdBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, ids, gl.STATIC_DRAW);
@@ -242,7 +254,7 @@ export class DomainGpu {
         const idLocation = components / 4;
         gl.bindBuffer(gl.ARRAY_BUFFER, this.sampleIdBuffer);
         gl.enableVertexAttribArray(idLocation);
-        gl.vertexAttribIPointer(idLocation, 1, gl.UNSIGNED_INT, lanes * 4, 0);
+        gl.vertexAttribIPointer(idLocation, 2, gl.UNSIGNED_INT, lanes * 8, 0);
         for (let i = idLocation + 1; i < this.attributeCounts[index]; i++) gl.disableVertexAttribArray(i);
         this.attributeCounts[index] = idLocation + 1;
     }
@@ -252,11 +264,11 @@ export class DomainGpu {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, this.width, this.height);
         gl.useProgram(p);
-        gl.uniform1ui(gl.getUniformLocation(p, 'u_roundingBarrier'), 0);
+        gl.uniform1ui(this.uniform(p, 'u_roundingBarrier'), 0);
         this.bind(p, 'u_reference', this.reference, 0); this.bind(p, 'u_header', this.header, 1);
         this.bind(p, 'u_nodes', v.nodes, 4); this.bind(p, 'u_coefficients', this.coefficients, 3);
-        for (const [key, value] of Object.entries({ u_batch: count, u_nodesCount: v.nodesCount, u_references: this.referenceCount, TERMS: v.terms, u_stride: v.stride, u_iteration: iteration, u_depth: depth, u_width: this.width, u_initial: initial ? 1 : 0, u_zeroSeed: this.snapshot.chainingEnabled && this.snapshot.chainMode === 'zero_seed' ? 1 : 0 })) gl.uniform1i(gl.getUniformLocation(p, key), value);
-        gl.uniform1f(gl.getUniformLocation(p, 'u_tolerance'), this.tolerance);
+        for (const [key, value] of Object.entries({ u_batch: count, u_nodesCount: v.nodesCount, u_references: this.referenceCount, u_activeCount: this.activeLogicalSamples, TERMS: v.terms, u_stride: v.stride, u_iteration: iteration, u_depth: depth, u_width: this.width, u_initial: initial ? 1 : 0, u_zeroSeed: this.snapshot.chainingEnabled && this.snapshot.chainMode === 'zero_seed' ? 1 : 0 })) gl.uniform1i(this.uniform(p, key), value);
+        gl.uniform1f(this.uniform(p, 'u_tolerance'), this.tolerance);
         this.inputs(this.stateBuffers[this.readIndex], v.state);
         const outputIndex = 1 - this.readIndex;
         this.check('prepare evaluation');
@@ -269,27 +281,19 @@ export class DomainGpu {
         this.readIndex = outputIndex;
         if (publish) {
             const cp = v.colorProgram; gl.useProgram(cp);
-            gl.uniform1ui(gl.getUniformLocation(cp, 'u_roundingBarrier'), 0);
+            gl.uniform1ui(this.uniform(cp, 'u_roundingBarrier'), 0);
             this.inputs(this.stateBuffers[this.readIndex], v.state * this.lanes, this.lanes);
             this.bind(cp, 'u_header', this.header, 1);
-            gl.uniform1f(gl.getUniformLocation(cp, 'u_tolerance'), this.tolerance);
-            gl.uniform2i(gl.getUniformLocation(cp, 'u_sampleSize'), this.sampleWidth, this.sampleHeight);
-            gl.uniform1i(gl.getUniformLocation(cp, 'u_mode'), v.mode); gl.uniform1i(gl.getUniformLocation(cp, 'u_depth'), depth);
-            gl.uniform3fv(gl.getUniformLocation(cp, 'u_palette[0]'), this.snapshot.paletteStops.flat());
-            const s = this.snapshot.style; gl.uniform4f(gl.getUniformLocation(cp, 'u_style'), s.brightness, s.contrast, s.saturation, s.lightnessCycles);
+            gl.uniform1f(this.uniform(cp, 'u_tolerance'), this.tolerance);
+            gl.uniform2i(this.uniform(cp, 'u_sampleSize'), this.sampleWidth, this.sampleHeight);
+            gl.uniform1i(this.uniform(cp, 'u_mode'), v.mode); gl.uniform1i(this.uniform(cp, 'u_depth'), depth);
+            gl.uniform3fv(this.uniform(cp, 'u_palette[0]'), this.snapshot.paletteStops.flat());
+            const s = this.snapshot.style; gl.uniform4f(this.uniform(cp, 'u_style'), s.brightness, s.contrast, s.saturation, s.lightnessCycles);
             gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer); gl.viewport(0, 0, this.sampleWidth, this.sampleHeight); gl.drawArrays(gl.POINTS, 0, this.activeLogicalSamples);
         }
         this.check('color samples');
         if (!publish) return;
-        const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
-        try {
-            while (true) {
-                const result = gl.clientWaitSync(fence, gl.SYNC_FLUSH_COMMANDS_BIT, 0);
-                if (result === gl.WAIT_FAILED) throw new Error('Domain GPU synchronization failed.');
-                if (result !== gl.TIMEOUT_EXPIRED) break;
-                await new Promise(resolve => setTimeout(resolve, 16));
-            }
-        } finally { gl.deleteSync(fence); }
+        gl.flush();
         if (gl.isContextLost()) throw new Error('Domain GPU context was lost.');
     }
     check(operation) {
@@ -302,11 +306,15 @@ export class DomainGpu {
         gl.readPixels(0, 0, this.sampleWidth, this.sampleHeight, gl.RGBA, gl.UNSIGNED_BYTE, this.statusBytes);
         let completed = 0;
         let pendingCount = 0;
-        for (let i = 0; i < this.logicalSamples; i++) {
-            if (this.statusBytes[4 * i]) completed += this.lanes;
-            else this.pendingStorage[pendingCount++] = i;
+        const words = this.statusWords;
+        const storage = this.pendingStorage;
+        const total = this.logicalSamples;
+        const lanes = this.lanes;
+        for (let i = 0; i < total; i++) {
+            if (words[i] !== 0) completed += lanes;
+            else storage[pendingCount++] = i;
         }
-        this.pendingSamples = this.pendingStorage.subarray(0, pendingCount);
+        this.pendingSamples = storage.subarray(0, pendingCount);
         return { completedSamples: completed, totalSamples: this.samples };
     }
 
@@ -314,9 +322,9 @@ export class DomainGpu {
         const gl = this.gl, p = this.resolve;
         gl.bindVertexArray(this.emptyVao);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, this.width, this.height); gl.useProgram(p);
-        gl.uniform1ui(gl.getUniformLocation(p, 'u_roundingBarrier'), 0);
+        gl.uniform1ui(this.uniform(p, 'u_roundingBarrier'), 0);
         this.bind(p, 'u_color', this.color, 0); this.bind(p, 'u_done', this.done, 1);
-        gl.uniform1i(gl.getUniformLocation(p, 'u_width'), this.width); gl.uniform1i(gl.getUniformLocation(p, 'u_height'), this.height); gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.uniform1i(this.uniform(p, 'u_width'), this.width); gl.uniform1i(this.uniform(p, 'u_height'), this.height); gl.drawArrays(gl.TRIANGLES, 0, 3);
         return this.canvas.transferToImageBitmap();
     }
     dispose() {
