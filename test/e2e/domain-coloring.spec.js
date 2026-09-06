@@ -80,7 +80,7 @@ test.describe('Domain Coloring Rendering', () => {
         expect(errors).toEqual([]);
     });
 
-    test('coalesces extreme zoom input into one native frame without overflow bands', async ({ page }) => {
+    test('completes the latest zoom at every backing sample without overflow bands', async ({ page }) => {
         const errors = [];
         page.on('pageerror', err => errors.push(err.message));
         await page.locator('#select_cos_btn').click();
@@ -89,11 +89,11 @@ test.describe('Domain Coloring Rendering', () => {
 
         await page.evaluate(() => {
             const target = window.__context.zDomainColorCtx;
-            const originalPutImageData = target.putImageData.bind(target);
-            window.__domainTileCommits = 0;
-            target.putImageData = (...args) => {
-                window.__domainTileCommits += 1;
-                return originalPutImageData(...args);
+            const originalDrawImage = target.drawImage.bind(target);
+            window.__domainFrameCommits = 0;
+            target.drawImage = (...args) => {
+                window.__domainFrameCommits += 1;
+                return originalDrawImage(...args);
             };
         });
 
@@ -127,7 +127,7 @@ test.describe('Domain Coloring Rendering', () => {
 
             return {
                 blackRatio: blackPixels / (canvas.width * canvas.height),
-                commits: window.__domainTileCommits,
+                commits: window.__domainFrameCommits,
                 zoom: state.zPlaneZoom,
                 stats: runtime.rendering.domainDynamicsStats
             };
@@ -135,11 +135,11 @@ test.describe('Domain Coloring Rendering', () => {
 
         expect(result.zoom).toBe(1e-3);
         expect(result.blackRatio, JSON.stringify(result)).toBeLessThan(0.001);
-        expect(result.commits).toBe(completed.totalTiles);
+        expect(result.commits).toBeGreaterThan(0);
         expect(completed.completedJobs).toBe(initial.completedJobs + 1);
-        expect(completed.totalTiles).toBe(completed.completedTiles);
+        expect(completed.totalSamples).toBe(completed.completedSamples);
+        expect(completed.totalSamples).toBe(completed.width * completed.height * 4);
         expect(completed.wallMilliseconds).toBeGreaterThan(0);
-        expect(completed.workerMilliseconds).toBeGreaterThan(0);
         expect(errors).toEqual([]);
     });
 });

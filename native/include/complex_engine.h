@@ -13,7 +13,6 @@ typedef struct {
     double im;
 } ce_complex;
 
-typedef struct ce_domain_render_context ce_domain_render_context;
 
 typedef struct {
     uint32_t function_id;
@@ -215,23 +214,6 @@ int32_t ce_build_planar_polyline(const ce_map_config *config,
                                  double max_segment_sq, uint32_t max_depth,
                                  uint32_t has_branch_cuts, double branch_cut_angle,
                                  ce_complex *output, uint32_t output_capacity);
-ce_domain_render_context *ce_create_domain_render_context(
-                              const ce_map_config *config,
-                              const char *center_re, const char *center_im,
-                              const char *x_span, const char *y_span,
-                              uint32_t precision_bits,
-                              uint32_t frame_width, uint32_t frame_height,
-                              uint32_t orbit_mode,
-                              const ce_complex *palette_rg, const double *palette_b,
-                              uint32_t palette_count, double brightness, double contrast,
-                              double saturation, double lightness_cycles);
-void ce_destroy_domain_render_context(ce_domain_render_context *context);
-int32_t ce_render_domain_tile(ce_domain_render_context *context,
-                              uint32_t tile_x, uint32_t tile_y,
-                              uint32_t tile_width, uint32_t tile_height, uint32_t scale,
-                              uint32_t adaptive_quality,
-                              uint8_t *rgba);
-
 int32_t ce_project_precise_pixels(const ce_map_config *config,
                                   const char *input_center_re, const char *input_center_im,
                                   double input_zoom_power, uint32_t precision_bits,

@@ -1,7 +1,3 @@
-import {
-    createCompiledDomainTileRenderer
-} from './complex-engine.js';
-
 function deepFreeze(value, seen = new WeakSet()) {
     if (!value || typeof value !== 'object' || seen.has(value)) return value;
     seen.add(value);
@@ -11,10 +7,6 @@ function deepFreeze(value, seen = new WeakSet()) {
 
 export function freezeDomainDynamicsSnapshot(snapshot) {
     return deepFreeze(snapshot);
-}
-
-export function createDomainDynamicsTileRenderer(snapshot) {
-    return createCompiledDomainTileRenderer(snapshot);
 }
 
 export function domainDynamicsSignature(snapshot) {

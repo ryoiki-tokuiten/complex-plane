@@ -23,8 +23,6 @@ import {
 import { clonePlain } from '../utils/clone-utils.js';
 import { signal } from '@preact/signals';
 
-const TILE_SIZE = 64;
-const MAX_WORKERS = 16;
 const SUPPORTED_FUNCTIONS = new Set([
     'sin',
     'cos',
@@ -48,7 +46,6 @@ const SUPPORTED_FUNCTIONS = new Set([
 
 let nextJobId = 1;
 let activeSignature = null;
-let activeBackend = null;
 let activeJobId = 0;
 
 function paletteStops(paletteId) {
@@ -258,315 +255,113 @@ export function buildPlanarDomainDynamicsSnapshot(runtimeState, planeParams, opt
     return freezeDomainDynamicsSnapshot(snapshot);
 }
 
-function canUseWorker() {
-    return typeof Worker !== 'undefined' && typeof URL !== 'undefined';
-}
-
-function workerCount() {
-    if (typeof navigator === 'undefined' || !Number.isFinite(navigator.hardwareConcurrency)) {
-        throw new Error('Domain dynamics requires a finite browser hardware-concurrency value.');
-    }
-    const cores = navigator.hardwareConcurrency;
-    return Math.max(1, Math.min(MAX_WORKERS, cores));
-}
-
-function createTileList(width, height) {
-    const tiles = [];
-    for (let y = 0; y < height; y += TILE_SIZE) {
-        for (let x = 0; x < width; x += TILE_SIZE) {
-            tiles.push({
-                x,
-                y,
-                width: Math.min(TILE_SIZE, width - x),
-                height: Math.min(TILE_SIZE, height - y),
-                scale: 1,
-                adaptiveQuality: true
-            });
-        }
-    }
-    return tiles;
-}
-
-function createImageDataFromPixels(pixels, width, height) {
-    if (typeof ImageData === 'undefined') {
-        throw new Error('Domain dynamics requires ImageData support.');
-    }
-    return new ImageData(pixels, width, height);
-}
-
 function clearRenderTarget(job) {
     job.targetCtx.save();
     try {
         job.targetCtx.setTransform(1, 0, 0, 1, 0, 0);
         job.targetCtx.clearRect(0, 0, job.snapshot.viewport.width, job.snapshot.viewport.height);
-    } finally {
-        job.targetCtx.restore();
-    }
-}
-
-function snapshotViewport(viewport) {
-    return Object.freeze({ ...viewport });
+    } finally { job.targetCtx.restore(); }
 }
 
 export const domainProcessing = signal(false);
-
-function setDomainProcessing(isProcessing) {
-    runtime.rendering.processingDomainDynamics = isProcessing;
-    domainProcessing.value = isProcessing;
+export const domainError = signal(null);
+function setDomainProcessing(value) {
+    runtime.rendering.processingDomainDynamics = value;
+    domainProcessing.value = value;
 }
 
-class WorkerNativeDomainDynamicsBackend {
-    constructor() {
-        this.id = 'worker-native';
-        this.workers = [];
-        this.queue = [];
-        this.queueIndex = 0;
-        this.remainingTiles = 0;
-        this.activeJob = null;
-    }
-
+class DomainBackend {
+    constructor() { this.id = 'webgl2-delta'; this.activeJob = null; this.worker = null; this.ready = false; }
     start(job) {
-        if (this.activeJob && !this.activeJob.cancelled && !this.activeJob.complete) {
-            throw new Error('Domain dynamics cannot start a second native job before cancellation.');
-        }
-        this.activeJob = {
-            ...job,
-            cancelled: false,
-            complete: false,
-            startedAt: performance.now(),
-            workerMilliseconds: 0,
-            maximumTileMilliseconds: 0
-        };
-        clearRenderTarget(this.activeJob);
-        runtime.rendering.domainViewport = snapshotViewport(job.snapshot.viewport);
+        this.activeJob = { ...job, complete: false, cancelled: false };
+        clearRenderTarget(job);
+        domainError.value = null;
+        runtime.rendering.domainViewport = Object.freeze({ ...job.snapshot.viewport });
         const previous = runtime.rendering.domainDynamicsStats;
         runtime.rendering.domainDynamicsStats = Object.freeze({
-            state: 'rendering',
-            jobId: job.id,
-            width: job.snapshot.viewport.width,
-            height: job.snapshot.viewport.height,
-            totalTiles: Math.ceil(job.snapshot.viewport.width / TILE_SIZE) *
-                Math.ceil(job.snapshot.viewport.height / TILE_SIZE),
-            completedTiles: 0,
-            completedJobs: previous.completedJobs,
-            cancelledJobs: previous.cancelledJobs
+            state: 'rendering', jobId: job.id, width: job.snapshot.viewport.width,
+            height: job.snapshot.viewport.height, completedSamples: 0,
+            totalSamples: job.snapshot.viewport.width * job.snapshot.viewport.height * 4 * (job.snapshot.derivativeOrder ? 2 : 1),
+            completedJobs: previous.completedJobs, cancelledJobs: previous.cancelledJobs
         });
-        this.ensureWorkers();
-        this.initializeWorkerJobs(this.activeJob);
-        this.startTiles();
-        return true;
-    }
-
-    cancel(jobId = null) {
-        const job = this.activeJob;
-        if (!job || job.complete || job.cancelled || (jobId !== null && job.id !== jobId)) return false;
-        job.cancelled = true;
-        setDomainProcessing(false);
-        this.queue = [];
-        this.queueIndex = 0;
-        this.remainingTiles = 0;
-        this.cancelWorkers(job.id);
-        const previous = runtime.rendering.domainDynamicsStats;
-        runtime.rendering.domainDynamicsStats = Object.freeze({
-            ...previous,
-            state: 'cancelled',
-            cancelledJobs: previous.cancelledJobs + 1
-        });
-        return true;
-    }
-
-    cancelWorkers(jobId) {
-        this.workers.forEach(entry => {
-            entry.busy = false;
-            entry.jobId = 0;
-            entry.worker.postMessage({ type: 'cancel', jobId });
-        });
-    }
-
-    ensureWorkers() {
-        if (this.workers.length) return;
-        if (!canUseWorker()) throw new Error('Domain dynamics requires a module Worker.');
-        const count = workerCount();
-        for (let i = 0; i < count; i += 1) {
-            const worker = new Worker(new URL('./domain-dynamics-worker.js', import.meta.url), { type: 'module' });
-            const entry = { worker, busy: false, ready: false, jobId: 0 };
-            worker.onmessage = event => this.handleWorkerMessage(entry, event.data);
-            worker.onerror = error => {
-                this.cancel();
-                throw new Error(`Native domain worker failed: ${error?.message || error}`);
+        if (typeof Worker === 'undefined') throw new Error('Domain coloring requires a module Worker.');
+        if (!this.worker) {
+            this.worker = new Worker(new URL('./domain/worker.js', import.meta.url), { type: 'module' });
+            const worker = this.worker;
+            worker.onmessage = ({ data }) => {
+                if (this.worker === worker) this.receive(data);
+                else data.bitmap?.close();
             };
-            this.workers.push(entry);
+            worker.onerror = error => {
+                if (this.worker === worker) this.fail(error.message || 'Domain worker failed.');
+            };
         }
+        setDomainProcessing(true);
+        if (this.ready) this.worker.postMessage({ type: 'start', jobId: job.id, snapshot: job.snapshot });
+        return true;
     }
-
-    initializeWorkerJobs(job) {
-        this.workers.forEach(entry => {
-            entry.busy = false;
-            entry.jobId = 0;
-            if (entry.ready) {
-                entry.worker.postMessage({
-                    type: 'start',
-                    jobId: job.id,
-                    snapshot: job.snapshot
-                });
-            }
-        });
-    }
-
-    startTiles() {
+    receive(message) {
         const job = this.activeJob;
-        if (!job || job.cancelled) return;
-
-        const width = job.snapshot.viewport.width;
-        const height = job.snapshot.viewport.height;
-        this.queue = createTileList(width, height);
-        this.queueIndex = 0;
-        this.remainingTiles = this.queue.length;
-
-        this.workers.forEach(worker => {
-            worker.busy = false;
-            worker.jobId = 0;
-            this.dispatchWorker(worker);
-        });
-    }
-
-    dispatchWorker(entry) {
-        const job = this.activeJob;
-        if (!entry.ready || !job || job.cancelled || entry.busy || this.remainingTiles === 0) return;
-
-        const tile = this.queue[this.queueIndex];
-        if (!tile) return;
-        this.queueIndex += 1;
-
-        entry.busy = true;
-        entry.jobId = job.id;
-        const message = {
-            type: 'tile',
-            jobId: job.id,
-            tile
-        };
-        entry.worker.postMessage(message);
-    }
-
-    handleWorkerMessage(entry, message) {
-        if (message?.type === 'ready') {
-            entry.ready = true;
-            if (this.activeJob && !this.activeJob.cancelled && !this.activeJob.complete) {
-                entry.worker.postMessage({
-                    type: 'start',
-                    jobId: this.activeJob.id,
-                    snapshot: this.activeJob.snapshot
-                });
-                this.dispatchWorker(entry);
-            }
+        if (message.type === 'ready') {
+            this.ready = true;
+            if (job && !job.cancelled && !job.complete) this.worker.postMessage({ type: 'start', jobId: job.id, snapshot: job.snapshot });
             return;
         }
-
-        if (message?.jobId !== entry.jobId) return;
-        entry.busy = false;
-        entry.jobId = 0;
-        this.handleTileMessage(message);
-        this.dispatchWorker(entry);
-    }
-
-    handleTileMessage(message) {
-        const job = this.activeJob;
-        if (!job || job.cancelled || message.jobId !== job.id) return;
-
-        if (message.type === 'error') {
-            this.cancel(job.id);
-            if (activeJobId === job.id) {
-                activeSignature = null;
-                activeJobId = 0;
-            }
-            queueMicrotask(() => { throw new Error(`Native domain worker failed: ${message.message}`); });
-            return;
-        } else if (message.type === 'tile') {
-            const image = createImageDataFromPixels(message.pixels, message.tile.width, message.tile.height);
-            job.targetCtx.putImageData(image, message.tile.x, message.tile.y);
-            const tileMilliseconds = Number(message.renderMilliseconds);
-            if (!Number.isFinite(tileMilliseconds) || tileMilliseconds < 0) {
-                this.cancel(job.id);
-                throw new Error('Native domain worker returned invalid timing data.');
-            }
-            job.workerMilliseconds += tileMilliseconds;
-            job.maximumTileMilliseconds = Math.max(job.maximumTileMilliseconds, tileMilliseconds);
-            this.remainingTiles -= 1;
-            runtime.rendering.domainDynamicsStats = Object.freeze({
-                ...runtime.rendering.domainDynamicsStats,
-                completedTiles: runtime.rendering.domainDynamicsStats.completedTiles + 1
-            });
-            requestUiRedraw();
-        } else {
-            this.cancel(job.id);
-            throw new Error(`Unsupported native domain worker message: ${message.type}.`);
-        }
-
-        if (this.remainingTiles === 0) {
-            job.complete = true;
-            runtime.rendering.domainViewport = snapshotViewport(job.snapshot.viewport);
-            setDomainProcessing(false);
-            this.queue = [];
-            this.queueIndex = 0;
-            this.cancelWorkers(job.id);
+        if (!job || job.cancelled || job.complete || message.jobId !== job.id) { message.bitmap?.close(); return; }
+        if (message.type === 'error') { this.fail(message.message); return; }
+        if (message.type === 'progress') {
+            runtime.rendering.domainDynamicsStats = Object.freeze({ ...runtime.rendering.domainDynamicsStats, stage: message.stage, terms: message.terms, precisionBits: message.precisionBits, pendingSamples: message.pendingSamples });
+        } else if (message.type === 'frame') {
+            job.targetCtx.save();
+            try {
+                job.targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+                job.targetCtx.clearRect(0, 0, job.snapshot.viewport.width, job.snapshot.viewport.height);
+                job.targetCtx.drawImage(message.bitmap, 0, 0);
+            } finally { job.targetCtx.restore(); message.bitmap.close(); }
+            runtime.rendering.domainDynamicsStats = Object.freeze({ ...runtime.rendering.domainDynamicsStats, ...message.stats });
+        } else if (message.type === 'complete') {
+            job.complete = true; setDomainProcessing(false);
             const previous = runtime.rendering.domainDynamicsStats;
-            runtime.rendering.domainDynamicsStats = Object.freeze({
-                ...previous,
-                state: 'complete',
-                wallMilliseconds: performance.now() - job.startedAt,
-                workerMilliseconds: job.workerMilliseconds,
-                maximumTileMilliseconds: job.maximumTileMilliseconds,
-                completedJobs: previous.completedJobs + 1
-            });
-            requestUiRedraw();
-        }
+            runtime.rendering.domainDynamicsStats = Object.freeze({ ...previous, state: 'complete', completedJobs: previous.completedJobs + 1 });
+        } else { this.fail(`Unknown domain renderer message: ${message.type}`); return; }
+        requestUiRedraw();
     }
-
+    fail(message) {
+        this.worker?.terminate(); this.worker = null; this.ready = false;
+        const job = this.activeJob;
+        if (job) job.complete = true;
+        setDomainProcessing(false); domainError.value = message;
+        runtime.rendering.domainDynamicsStats = Object.freeze({ ...runtime.rendering.domainDynamicsStats, state: 'failed', error: message });
+        requestUiRedraw();
+    }
+    shutdown() {
+        this.cancel();
+        this.worker?.terminate(); this.worker = null; this.ready = false;
+    }
+    cancel() {
+        const job = this.activeJob;
+        if (!job || job.complete || job.cancelled) return false;
+        job.cancelled = true;
+        if (this.ready) this.worker.postMessage({ type: 'cancel', jobId: job.id });
+        setDomainProcessing(false);
+        const previous = runtime.rendering.domainDynamicsStats;
+        runtime.rendering.domainDynamicsStats = Object.freeze({ ...previous, state: 'cancelled', cancelledJobs: previous.cancelledJobs + 1 });
+        return true;
+    }
 }
-
-const workerBackend = new WorkerNativeDomainDynamicsBackend();
-
-export function selectDomainDynamicsBackend() {
-    return workerBackend;
-}
-
+const backend = new DomainBackend();
+export function selectDomainDynamicsBackend() { return backend; }
 export function renderPlanarDomainDynamics(targetCtx, planeParams, snapshot) {
-    if (!targetCtx || !planeParams || !snapshot) {
-        throw new Error('Domain dynamics rendering requires a target, plane parameters, and snapshot.');
-    }
-
+    if (!targetCtx || !planeParams || !snapshot) throw new Error('Domain rendering requires a target and snapshot.');
     const signature = domainDynamicsSignature(snapshot);
     if (signature === activeSignature) return true;
-
-    if (activeBackend) activeBackend.cancel();
-
-    activeSignature = signature;
-
-    activeJobId = nextJobId;
-    nextJobId += 1;
-
-    const job = {
-        id: activeJobId,
-        signature,
-        targetCtx,
-        snapshot
-    };
-
-    activeBackend = selectDomainDynamicsBackend();
-    activeBackend.start(job);
-    setDomainProcessing(true);
-    return true;
+    backend.cancel(); activeSignature = signature; activeJobId = nextJobId++;
+    try { return backend.start({ id: activeJobId, signature, targetCtx, snapshot }); }
+    catch (error) { backend.fail(error.message); return false; }
 }
-
 export function cancelPlanarDomainDynamics() {
-    if (activeBackend) activeBackend.cancel();
-    activeSignature = null;
-    activeJobId = 0;
+    backend.shutdown(); activeSignature = null; activeJobId = 0; domainError.value = null;
     runtime.rendering.domainViewport = null;
     const previous = runtime.rendering.domainDynamicsStats;
-    runtime.rendering.domainDynamicsStats = Object.freeze({
-        state: 'idle',
-        completedJobs: previous.completedJobs,
-        cancelledJobs: previous.cancelledJobs
-    });
+    runtime.rendering.domainDynamicsStats = Object.freeze({ state: 'idle', completedJobs: previous.completedJobs, cancelledJobs: previous.cancelledJobs });
 }

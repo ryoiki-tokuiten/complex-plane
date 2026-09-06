@@ -1,57 +1,92 @@
 # Repository Architecture & Performance Decisions
 
-Concise log of architectural constraints, post-mortem learnings, and established patterns for the complex plane rendering engine.
+## Unified planar domain rendering
 
----
+All planar domain coloring uses the C-compiled expression program, arbitrary-precision
+FLINT/Arb references, and WebGL2 delta evaluation. There is one decimal viewport at
+all zoom levels. Do not introduce zoom thresholds, named fractal render kernels,
+CPU pixel renderers, or compatibility/fallback render paths.
 
-### 1. Universal Domain Dynamics Pipeline (No Dual Viewports)
-* **Decision**: All domain coloring and algebraic dynamics use a single unified MPFR-centered coordinate pipeline from $1\times$ to $10^{100}\times$ zoom.
-* **Rule**: Never introduce dual viewports, zoom-level switching (`if zoom > 1e14`), or legacy fallback paths. Keep exactly one source of truth.
+## Numerical accuracy
 
----
+Propagate algebraic differences through every composition and output iteration.
+Do not approximate an entire orbit with a truncated Taylor polynomial. Primitive
+library series require an analytic domain and an explicit remainder bound;
+convergence is determined by that domain, not by a universal unit disk rule.
 
-### 2. Exact Algebraic Delta Perturbation (No Truncated Taylor)
-* **Decision**: Perturbation uses exact algebraic difference identities ($\delta z_{n+1} = \Delta f(Z_n, \delta z_n, \Delta c)$) such as $e^{Z+\delta z} - e^Z = e^Z \text{expm1}(\delta z)$.
-* **Rule**: Never use truncated polynomial Taylor approximations; they diverge outside the unit disk when span is wide ($|\delta z| > 1$).
+Coordinates must meet a 1/64 sample-spacing error budget. GPU complex balls use
+compensated high/low native FP32 mantissas, a separate binary exponent, and an
+outward L1 error radius. Preserve explicit rounding barriers: WebGL shader
+optimization must not erase the residual that carries the low component.
+Do not emulate arbitrary-precision integer arithmetic in the sample shader.
+The final relative value-error limit is min(2^-16, 1/(64*max(width,height)));
+series truncation is included in that bound and budgeted across graph nodes,
+iterations, and analytic range reduction. Increasing a term cap without changing
+an inadequate stopping budget cannot resolve a rejected sample. Reference precision, local series
+effort, and collective reference assignment may increase when bounds require it.
+These changes never reduce image resolution. Refinement is coverage-driven, not
+limited to a fixed number of rounds: try each unresolved sample center once per
+numerical effort level in collective batches, then increase reference precision
+and series effort. Stop on completion, viewport cancellation, actual resource
+failure, or exhausted coverage at the supported numerical limits. Do not cycle
+through the same centers indefinitely or treat elapsed time as numerical failure.
+A new viewport job owns fresh coverage state. This does not guarantee that every
+arbitrary expression or singular sample can be certified.
+Never classify insufficient precision, range exhaustion, or overflow as escape.
+Report a failed render if available numerical or GPU resources cannot resolve it.
 
----
+## Coloring modes
 
-### 3. Pure Delta Iteration (No Hardcoded Fallbacks)
-* **Decision**: Delta perturbation runs through the entire chain depth without artificial double-precision downgrades or hardcoded distance thresholds.
-* **Rule**: Do not add heuristic fallback branches that drop perturbation early. Keep the inner loop pure, exact, and un-overengineered.
+Final Value evaluates the entire requested chain. Escape observes the configured
+radius crossing at every iteration (radius 10,000). Attractor observes the finite-iteration convergence criterion using Brent
+checkpoints and C-computed reference differences; it never subtracts rounded
+absolute checkpoint coordinates. Period and detection iteration remain distinct.
+Hybrid observes both events and otherwise colors the final value. These are
+numerical rendering criteria, not proofs of asymptotic divergence or attraction.
+A growing reference origin is recentered to its initial origin between iterations,
+using a range bound scaled to that initial magnitude (and at least four). Do not
+recenter arbitrary maps to zero: zero can be a pole or branch point. C exports the exact origin shift and the GPU adds it to every delta;
+this never changes a sample's trajectory or supplies an escape/attractor event.
+Reference growth must not make nearby finite sample orbits unevaluable.
+Derivative presentation retains its finite-difference definition, evaluates both
+full chains against the same reference, and subtracts their deltas before scaling.
 
----
+## Samples and presentation
 
-### 4. Escape Bailout Scoping
-* **Decision**: Bailout radius checks ($|z| > 2.0$) apply strictly to escape-time fractals (`orbit_mode == 1u`).
-* **Rule**: Continuous domain coloring (`orbit_mode == 0u`) must never bail out at magnitude 2.0; it iterates through the full chain depth.
+Every backing pixel retains four antialiasing samples. Evaluate samples in parallel
+on WebGL2; batch iterations to bound submissions and reference memory. Assign a collective
+batch of reference orbits to unresolved samples in each pass. Never schedule
+one full-frame reference pass per pending pixel. Synchronize/read completion
+only at publication boundaries; Final Value publishes at the requested depth.
+Compact unresolved sample IDs before another reference pass; preserve global
+pixel IDs and derivative pairing. Never dispatch the full viewport for a sparse
+retry. A change in series effort updates reference data and uniforms, not shader
+compilation. Estimate the degree once, evaluate Horner once, and include the
+Cauchy tail M*q^(n+1)/(1-q) over the supplied analytic disk. Upload invariant
+primitive coefficients once per reference batch; stream only changing anchors,
+defects, and local series. Reciprocal nodes carry no unused series payload.
+Bound iteration batches by graph work and reference memory, not only iteration
+count. Copy C reference output directly into the aggregate upload buffer. Do not use
+spatial tiles, perimeter matching, constant block fills, or color interpolation to
+substitute for sample evaluation. Matching phase colors do not establish matching
+complex values.
 
----
+Clear immediately when a new job is dispatched. Commit completed pixels from the
+current job at their actual dimensions, and leave unfinished pixels transparent.
+Never stretch an old/coarse frame, debounce input, or silently reduce resolution.
+Cancel superseded jobs between bounded submissions, retain the GPU context across
+viewport changes, and discard stale bitmaps. Disabling domain rendering or a
+worker failure terminates the worker and releases its resources.
 
-### 5. Continuous Domain Coloring vs. Mariani-Silver
-* **Decision**: Mariani-Silver quadtree / microblock skipping is prohibited for continuous phase domain coloring.
-* **Rule**: Because phase wraps $2\pi$ (multiple distinct complex values map to identical palette stops), perimeter matching produces false block fills. Always use full scanline evaluation.
+## Memory ownership
 
----
+Mutable numerical memory belongs to a WASM instance or a render/reference object.
+Free C references/programs and transferred images per job. The worker owns reusable
+GPU buffers and compiled shaders for the active expression until rendering is
+disabled or the worker fails. No shared mutable C scratch buffers.
 
-### 6. Thread-Safe WebAssembly Worker Memory
-* **Decision**: All worker memory must be per-instance or per-call allocated (`calloc`/`malloc` freed in scope).
-* **Rule**: Never declare `static` global buffers in WASM C code shared across concurrent Web Worker threads.
+## Viewport and UI precision
 
----
-
-### 7. Zero Fake Upscaling or Canvas Blur
-* **Decision**: Immediate canvas clearing on pan/zoom without progressive stretching or artificial debounce delays.
-* **Rule**: Do not apply projective canvas blits or `setTimeout` interaction debounce. Clear the target canvas instantly on new job dispatch and commit native tiles directly.
-
-### 8. Canvas Grid Coordinate Float Absorption
-* **Decision**: Standard canvas primitive loops must include `if (val + step === val) break;` safeguards.
-* **Rule**: When viewport scale drops near 64-bit float limits ($10^{-15}$), simple loop iterators (`val += step`) suffer from float absorption. Unchecked, they infinite-loop and permanently freeze the browser's UI thread.
-
-### 9. 64-Bit UI Event Binding
-* **Decision**: The browser UI event layer (mouse coordinates, pan offsets) inherently operates on 64-bit JS Numbers.
-* **Rule**: Deep zoom engines rely on MPFR arbitrary precision, but the mouse delta inputs themselves become vanishingly small relative to the origin coordinate, requiring string-based `preciseViewport` coordination rather than direct 64-bit `origin.x` mutations at extreme zoom.
-
-### 10. Progressive Native Tile Visibility
-* **Decision**: Domain coloring exposes completed native tiles immediately for every render, including function, expression, chain-depth, pan, and zoom changes.
-* **Rule**: The worker-tile path is the only planar domain renderer. Never hide pan/zoom tiles behind an old-viewport check, a staging canvas, or a final-frame-only commit.
+Deep viewport coordinates remain decimal strings. Mouse deltas must update the
+precise viewport rather than being absorbed into a JS Number origin. Canvas grid
+loops must retain `if (val + step === val) break` safeguards.
