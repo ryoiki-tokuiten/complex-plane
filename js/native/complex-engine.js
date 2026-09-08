@@ -20,15 +20,6 @@ async function loadBytes() {
 
 let wasmMemory = null;
 const wasi = {
-    fd_read() { return 8; }, // No input files exist in this numerical WASM instance.
-    environ_sizes_get(count, size) {
-        const view = new DataView(wasmMemory.buffer);
-        view.setUint32(count, 0, true); view.setUint32(size, 0, true); return 0;
-    },
-    environ_get() { return 0; },
-    clock_time_get(_clock, _precision, pointer) {
-        new DataView(wasmMemory.buffer).setBigUint64(pointer, BigInt(Date.now()) * 1000000n, true); return 0;
-    },
     fd_close() { return 0; },
     fd_seek(_fd, _offsetLow, _offsetHigh, _whence, newOffset) {
         if (wasmMemory && newOffset) new DataView(wasmMemory.buffer).setBigUint64(newOffset, 0n, true);
@@ -46,7 +37,7 @@ const wasi = {
     }
 };
 const { instance } = await WebAssembly.instantiate(await loadBytes(), {
-    env: { emscripten_notify_memory_growth() {}, __syscall_unlinkat() { return -52; }, __syscall_rmdir() { return -52; } },
+    env: { emscripten_notify_memory_growth() {} },
     wasi_snapshot_preview1: wasi
 });
 const wasm = instance.exports;
@@ -1847,7 +1838,7 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
     });
 }
 
-function writeNativePalette(palette, allocations) {
+function writeDomainPalette(palette, allocations) {
     if (!Array.isArray(palette) || palette.length < 2) {
         throw new Error('Native domain rendering requires at least two palette stops.');
     }
@@ -1863,6 +1854,68 @@ function writeNativePalette(palette, allocations) {
         paletteView.setFloat64(paletteBPointer + index * 8, stop[2], true);
     });
     return { paletteRgPointer, paletteBPointer, paletteCount: palette.length };
+}
+
+export function createCompiledDomainTileRenderer(snapshot) {
+    const allocations = [];
+    const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
+    writeMapConfig(configPointer, snapshot, allocations);
+    const palette = snapshot.paletteStops;
+    const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(palette, allocations);
+
+    const viewport = snapshot.viewport;
+    const orbitMode = ({ value: 0, escape: 1, attractor: 2, hybrid: 3 })[snapshot.orbitColoringMode];
+    if (orbitMode === undefined) throw new Error(`Unsupported native orbit-coloring mode: ${snapshot.orbitColoringMode}`);
+    const style = snapshot.style;
+    if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
+        throw new Error('Native domain rendering requires finite style parameters.');
+    }
+    if (typeof viewport.centerRe !== 'string' || typeof viewport.centerIm !== 'string' ||
+        typeof viewport.xSpan !== 'string' || typeof viewport.ySpan !== 'string' ||
+        !Number.isInteger(viewport.precisionBits)) {
+        throw new Error('Native domain rendering requires one MPFR-centered viewport.');
+    }
+    const centerRePointer = writeCString(viewport.centerRe, allocations);
+    const centerImPointer = writeCString(viewport.centerIm, allocations);
+    const xSpanPointer = writeCString(viewport.xSpan, allocations);
+    const ySpanPointer = writeCString(viewport.ySpan, allocations);
+    let outputCapacity = 0;
+    let outputPointer = 0;
+    const renderContextPointer = wasm.ce_create_domain_render_context(
+        configPointer, centerRePointer, centerImPointer, xSpanPointer, ySpanPointer,
+        viewport.precisionBits,
+        viewport.width, viewport.height,
+        orbitMode, paletteRgPointer, paletteBPointer, paletteCount,
+        style.brightness, style.contrast, style.saturation, style.lightnessCycles
+    );
+    if (!renderContextPointer) {
+        throw new Error('Native domain render-context allocation failed.');
+    }
+
+    const render = tile => {
+        const outputLength = tile.width * tile.height * 4;
+        if (outputLength > outputCapacity) {
+            if (outputPointer) wasm.ce_free(outputPointer);
+            outputCapacity = outputLength;
+            outputPointer = alloc(outputCapacity);
+        }
+        const status = wasm.ce_render_domain_tile(
+            renderContextPointer,
+            tile.x, tile.y, tile.width, tile.height, tile.scale,
+            tile.adaptiveQuality ? 1 : 0, outputPointer
+        );
+        if (status !== 0) throw new Error(`Native domain tile failed with status ${status}.`);
+        const result = new Uint8ClampedArray(outputLength);
+        result.set(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
+        return result;
+    };
+    render.dispose = () => {
+        if (outputPointer) wasm.ce_free(outputPointer);
+        if (renderContextPointer) wasm.ce_destroy_domain_render_context(renderContextPointer);
+        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
+    };
+
+    return render;
 }
 
 const CONTOUR_COMPONENT_IDS = Object.freeze({ real: 0, imaginary: 1, imag: 1, magnitude: 2, phase: 3 });
@@ -1896,7 +1949,7 @@ export function renderNativeMapContour(options) {
     return withAllocations((allocations, allocate) => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
-        const { paletteRgPointer, paletteBPointer, paletteCount } = writeNativePalette(options.paletteStops, allocations);
+        const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(options.paletteStops, allocations);
         const outputLength = width * height * 4;
         const outputPointer = trackAlloc(allocations, outputLength);
         const status = wasm.ce_render_map_contour(
@@ -2658,80 +2711,4 @@ export function renderNativeRealContour(options) {
         if (status !== 0) throw new Error(`Native real-contour rendering failed with status ${status}.`);
         return copyWasmArray(Uint8ClampedArray, outputPointer, outputLength);
     });
-}
-
-// The domain renderer owns one compiled C program and short-lived reference traces.
-export function compileDomainProgram(snapshot) {
-    const allocations = [];
-    let program = 0;
-    const references = new Set();
-    try {
-        const config = trackAlloc(allocations, MAP_CONFIG_SIZE);
-        writeMapConfig(config, { ...snapshot, chainMode: snapshot.chainingEnabled ? snapshot.chainMode : 'recursion' }, allocations);
-        program = wasm.ce_domain_compile(config);
-        if (!program) throw new Error('Domain program allocation failed.');
-        const errorPointer = wasm.ce_domain_error(program);
-        const bytes = new Uint8Array(wasm.memory.buffer);
-        let end = errorPointer;
-        while (bytes[end]) end++;
-        const error = new TextDecoder().decode(bytes.subarray(errorPointer, end));
-        if (error) throw new Error(error);
-        const count = wasm.ce_domain_node_count(program);
-        const nodes = new Uint32Array(count * 4);
-        nodes.set(new Uint32Array(wasm.memory.buffer, wasm.ce_domain_nodes(program), count * 4));
-        let disposed = false;
-        const viewport = snapshot.viewport;
-        const coordinateStrings = [viewport.centerRe, viewport.centerIm, viewport.xSpan, viewport.ySpan].map(value => writeCString(value, allocations));
-        const minimumPrecision = wasm.ce_domain_required_precision(...coordinateStrings, viewport.width, viewport.height);
-        if (!minimumPrecision) throw new Error('Domain viewport exceeds available coordinate precision.');
-        const result = {
-            minimumPrecision, nodes, output: wasm.ce_domain_output(program),
-            chainCount: snapshot.chainingEnabled ? snapshot.chainCount : 1,
-            reference({ x, y, precision, terms }) {
-                if (disposed) throw new Error('Domain program has been disposed.');
-                const strings = [];
-                let pointer;
-                try {
-                    const v = snapshot.viewport;
-                    const addresses = [v.centerRe, v.centerIm, v.xSpan, v.ySpan].map(s => writeCString(s, strings));
-                    pointer = wasm.ce_domain_reference_create(program, ...addresses, v.width, v.height, x, y, precision, terms);
-                } finally { for (const address of strings) wasm.ce_free(address); }
-                if (!pointer) throw new Error('Unable to construct a bounded domain reference.');
-                const ballSize = 8;
-                const header = new Float32Array(6 * ballSize);
-                header.set(new Float32Array(wasm.memory.buffer, wasm.ce_domain_reference_header(pointer), header.length));
-                const stride = wasm.ce_domain_reference_stride(pointer);
-                const coefficients = new Float32Array(terms * ballSize);
-                coefficients.set(new Float32Array(wasm.memory.buffer, wasm.ce_domain_reference_coefficients(pointer), coefficients.length));
-                const reference = {
-                    header, coefficients, stride,
-                    next(count, target = new Float32Array(stride * count), offset = 0) {
-                        if (!pointer) throw new Error('Domain reference has been disposed.');
-                        const address = wasm.ce_domain_reference_next(pointer, count);
-                        if (!address) throw new Error('Domain reference exceeds available memory.');
-                        target.set(new Float32Array(wasm.memory.buffer, address, stride * count), offset);
-                        return target;
-                    },
-                    dispose() {
-                        if (pointer) wasm.ce_domain_reference_free(pointer);
-                        pointer = 0; references.delete(reference);
-                    }
-                };
-                references.add(reference);
-                return reference;
-            },
-            dispose() {
-                if (disposed) return;
-                disposed = true;
-                for (const reference of references) reference.dispose();
-                wasm.ce_domain_program_free(program);
-                for (const pointer of allocations) wasm.ce_free(pointer);
-            }
-        };
-        return result;
-    } catch (error) {
-        if (program) wasm.ce_domain_program_free(program);
-        for (const pointer of allocations) wasm.ce_free(pointer);
-        throw error;
-    }
 }

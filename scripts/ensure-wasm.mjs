@@ -7,8 +7,6 @@ import { fileURLToPath } from 'node:url';
 const EMSCRIPTEN_VERSION = '4.0.12';
 const GMP_VERSION = '6.3.0';
 const MPFR_VERSION = '4.2.1';
-const FLINT_VERSION = '3.3.1';
-const FLINT_SHA256 = '64d70e513076cfa971e0410b58c1da5d35112913e9a56b44e2c681b459d3eafb';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const nativeRoot = join(root, 'native');
 const cacheRoot = join(root, '.cache', 'native-toolchain');
@@ -34,7 +32,7 @@ function sourceFiles(directory) {
 
 const sources = sourceFiles(nativeRoot);
 const hash = createHash('sha256');
-hash.update(`emscripten:${EMSCRIPTEN_VERSION}\ngmp:${GMP_VERSION}\nmpfr:${MPFR_VERSION}\nflint:${FLINT_VERSION}\nflags:-O3,-flto,-msimd128,-fno-fast-math\n`);
+hash.update(`emscripten:${EMSCRIPTEN_VERSION}\ngmp:${GMP_VERSION}\nmpfr:${MPFR_VERSION}\nflags:-O3,-flto,-msimd128,-fno-fast-math\n`);
 for (const source of sources) {
     hash.update(relative(root, source));
     hash.update('\0');
@@ -131,33 +129,7 @@ async function ensurePrecisionLibraries() {
 
 await ensurePrecisionLibraries();
 
-const flintLibrary = join(dependencyPrefix, 'lib', 'libflint.a');
-if (!existsSync(flintLibrary)) {
-    const source = join(cacheRoot, `flint-${FLINT_VERSION}`);
-    const archive = join(cacheRoot, `flint-${FLINT_VERSION}.tar.gz`);
-    if (!existsSync(archive)) {
-        const response = await fetch(`https://github.com/flintlib/flint/releases/download/v${FLINT_VERSION}/flint-${FLINT_VERSION}.tar.gz`);
-        if (!response.ok) throw new Error(`FLINT download failed: HTTP ${response.status}`);
-        writeFileSync(archive, Buffer.from(await response.arrayBuffer()));
-    }
-    if (createHash('sha256').update(readFileSync(archive)).digest('hex') !== FLINT_SHA256) {
-        throw new Error('FLINT source checksum mismatch.');
-    }
-    if (!existsSync(join(source, 'configure'))) {
-        execFileSync('tar', ['-xzf', archive, '-C', cacheRoot], { stdio: 'inherit' });
-    }
-    execFileSync(join(emscriptenBin, 'emconfigure'), [
-        join(source, 'configure'), '--host=none', '--disable-shared', '--enable-static',
-        '--disable-assembly', '--disable-pthread', '--disable-reentrant',
-        `--with-gmp=${dependencyPrefix}`, `--with-mpfr=${dependencyPrefix}`, `--prefix=${dependencyPrefix}`
-    ], { cwd: source, stdio: 'inherit', env: buildEnvironment });
-    execFileSync('make', [], { cwd: source, stdio: 'inherit', env: buildEnvironment });
-    execFileSync('make', ['install'], { cwd: source, stdio: 'inherit', env: buildEnvironment });
-}
-
 const exported = [
-    '_ce_domain_compile', '_ce_domain_program_free', '_ce_domain_nodes', '_ce_domain_node_count', '_ce_domain_output', '_ce_domain_error',
-    '_ce_domain_required_precision', '_ce_domain_reference_create', '_ce_domain_reference_free', '_ce_domain_reference_header', '_ce_domain_reference_coefficients', '_ce_domain_reference_stride', '_ce_domain_reference_next',
     '_ce_alloc', '_ce_free', '_ce_abi_version', '_ce_prepare_map_config',
     '_ce_evaluate_points', '_ce_evaluate_algebraic_points',
     '_ce_evaluate_sheets', '_ce_continuation_sheets',
@@ -173,6 +145,7 @@ const exported = [
     '_ce_render_map_contour', '_ce_render_real_contour',
     '_ce_build_image_mesh_precise', '_ce_build_grid_fold',
     '_ce_build_fold_preimage_markers',
+    '_ce_create_domain_render_context', '_ce_destroy_domain_render_context', '_ce_render_domain_tile',
     '_ce_project_precise_pixels',
     '_ce_project_precise_pixels_to_canvas', '_ce_project_values_to_precise',
     '_ce_trace_streamlines', '_ce_build_vector_field', '_ce_build_tissot',
@@ -185,7 +158,7 @@ const compileArgs = [
     '-I', join(dependencyPrefix, 'include'),
     '-std=c11', '-O3', '-flto', '-msimd128', '-fno-fast-math', '-Wall', '-Wextra', '-Werror',
     '-sSTANDALONE_WASM=1', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=16777216', '-sSTACK_SIZE=1048576',
-    flintLibrary, join(dependencyPrefix, 'lib', 'libmpfr.a'), join(dependencyPrefix, 'lib', 'libgmp.a'),
+    join(dependencyPrefix, 'lib', 'libmpfr.a'), join(dependencyPrefix, 'lib', 'libgmp.a'),
     '-sMALLOC=emmalloc', `-sEXPORTED_FUNCTIONS=${JSON.stringify(exported)}`,
     '--no-entry', '-o', output
 ];

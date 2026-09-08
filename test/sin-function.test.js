@@ -8,7 +8,7 @@ import {
     evaluateNativePoints,
     nativeMapOptions
 } from '../js/native/complex-engine.js';
-import { compileDomainProgram } from '../js/native/complex-engine.js';
+import { createDomainDynamicsTileRenderer } from '../js/native/domain-engine.js';
 import { buildPlanarDomainDynamicsSnapshot } from '../js/rendering/domain-dynamics.js';
 import {
     buildComplexMathLibraryGLSL,
@@ -56,7 +56,7 @@ test('sin is registered across native maps, expressions, and WebGL dispatch', ()
     assertComplexClose(expression({ z: points[2] }), expectedSin(points[2]));
 });
 
-test('sin compiles and generates bounded domain references', () => {
+test('sin renders through the native domain-dynamics path', () => {
     const keys = [
         'currentFunction', 'chainingEnabled', 'chainCount',
         'algebraicChainingEnabled', 'algebraicChainingTerms'
@@ -77,13 +77,15 @@ test('sin compiles and generates bounded domain references', () => {
             currentVisXRange: [Math.PI / 2, Math.PI / 2 + 1],
             currentVisYRange: [0, 1]
         });
-        const program = compileDomainProgram(snapshot);
+        const renderer = createDomainDynamicsTileRenderer(snapshot);
         try {
-            const reference = program.reference({ x: 0, y: 0, precision: 256, terms: 16 });
-            try { assert.ok(reference.next(1).every(Number.isFinite)); }
-            finally { reference.dispose(); }
-        } finally { program.dispose(); }
-
+            const pixel = renderer({ x: 0, y: 0, width: 1, height: 1, scale: 1 });
+            assert.equal(pixel.length, 4);
+            assert.equal(pixel[3], 255);
+            assert.ok(pixel[0] !== 0 || pixel[1] !== 0 || pixel[2] !== 0);
+        } finally {
+            renderer.dispose();
+        }
     } finally {
         Object.assign(state, before);
     }

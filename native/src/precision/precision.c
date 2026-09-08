@@ -1,4 +1,6 @@
 #include "complex_engine.h"
+#include "domain_delta_internal.h"
+#include "domain_internal.h"
 #include "precision_internal.h"
 
 #include <math.h>
@@ -11,11 +13,21 @@
 #define CE_MAX_PRECISION_BITS 4096u
 #define CE_PRECISE_STACK_LIMIT 128u
 #define CE_ESCAPE_RADIUS_SQ 1e8
+#define CE_ATTRACTOR_EPSILON_SQ 1e-14
 
 typedef struct {
     mpfr_t re;
     mpfr_t im;
 } ce_precise_complex;
+
+typedef struct {
+    uint32_t event;
+    uint32_t iteration;
+    double smooth_iteration;
+    ce_complex value;
+    uint32_t has_value;
+    ce_sphere_delta sphere;
+} ce_precise_trace;
 
 static void pc_init(ce_precise_complex *value, mpfr_prec_t precision) {
     mpfr_init2(value->re, precision);
@@ -261,7 +273,10 @@ static int pc_bailout(const ce_precise_complex *value) {
     return escaped;
 }
 
-
+static ce_complex pc_to_complex(const ce_precise_complex *value) {
+    const ce_complex result = { mpfr_get_d(value->re, MPFR_RNDN), mpfr_get_d(value->im, MPFR_RNDN) };
+    return result;
+}
 
 static void pc_gamma(ce_precise_complex *output, const ce_precise_complex *z);
 
@@ -1389,5 +1404,466 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
     mpfr_clear(scratch);
     pc_clear(&point); pc_clear(&mapped);
     pc_viewport_clear(&output_viewport);
+    return 0;
+}
+
+static ce_precise_trace pc_empty_trace(uint32_t count) {
+    ce_precise_trace trace = {0};
+    trace.iteration = count;
+    trace.smooth_iteration = (double)count;
+    trace.sphere.valid = 0;
+    return trace;
+}
+
+static int pc_delta_trace(const ce_map_config *config,
+                          double dc_re, double dc_im,
+                          ce_complex reference_point,
+                          uint32_t orbit_mode,
+                          ce_precise_trace *trace) {
+    const uint32_t count = config->chain_count;
+    if (!isfinite(dc_re) || !isfinite(dc_im)) return 0;
+
+    *trace = pc_empty_trace(count);
+    const ce_sphere_delta parameter = ce_delta_affine(
+        reference_point, (ce_complex){dc_re, dc_im}
+    );
+    ce_sphere_delta current = config->zero_seed
+        ? ce_delta_affine(config->chain_seed, (ce_complex){0.0, 0.0})
+        : parameter;
+    ce_complex checkpoint = config->zero_seed
+        ? config->chain_seed
+        : (ce_complex){reference_point.re + dc_re, reference_point.im + dc_im};
+    uint32_t power = 1u;
+
+    for (uint32_t iteration = 0; iteration < count; ++iteration) {
+        ce_sphere_delta next = ce_delta_map_step(config, current, parameter);
+        if (!next.valid) return 0;
+
+        if (!ce_delta_normalize(&next)) return 0;
+        ce_complex actual;
+        const int finite = ce_delta_actual(&next, &actual);
+
+        trace->sphere = next;
+        trace->has_value = 1u;
+        if (finite) trace->value = actual;
+
+        if (orbit_mode == 1u && (!finite || ce_domain_bailout(actual))) {
+            trace->event = 1u;
+            trace->iteration = iteration + 1u;
+            trace->smooth_iteration = finite
+                ? ce_domain_smooth_iteration(iteration, count, actual)
+                : iteration + 1.0;
+            return 1;
+        }
+
+        if (orbit_mode >= 2u && finite && iteration >= 1u) {
+            const double change_re = actual.re - checkpoint.re;
+            const double change_im = actual.im - checkpoint.im;
+            const double magnitude_sq = actual.re * actual.re + actual.im * actual.im;
+            if (change_re * change_re + change_im * change_im <=
+                CE_ATTRACTOR_EPSILON_SQ * fmax(1.0, magnitude_sq)) {
+                trace->event = 2u;
+                trace->iteration = iteration + 1u;
+                trace->smooth_iteration = iteration + 1.0;
+                return 1;
+            }
+            if (iteration == power) {
+                checkpoint = actual;
+                power <<= 1u;
+            }
+        }
+        current = next;
+    }
+    return 1;
+}
+static void pc_trace_value_color(const ce_precise_trace *trace,
+                                 const ce_complex *palette_rg, const double *palette_b,
+                                 uint32_t palette_count, double brightness, double contrast,
+                                 double saturation, double cycles,
+                                 double *red, double *green, double *blue) {
+    double phase, log_magnitude;
+    if (!ce_delta_log_polar(&trace->sphere, &phase, &log_magnitude)) {
+        *red = *green = *blue = 0.0;
+        return;
+    }
+    ce_domain_color_log_polar(
+        phase, log_magnitude, palette_rg, palette_b, palette_count,
+        brightness, contrast, saturation, cycles, red, green, blue
+    );
+}
+
+static void pc_trace_color(const ce_precise_trace *trace, uint32_t orbit_mode, uint32_t count,
+                           const ce_complex *palette_rg, const double *palette_b,
+                           uint32_t palette_count, double brightness, double contrast,
+                           double saturation, double cycles,
+                           double *red, double *green, double *blue) {
+    if (orbit_mode == 0u) {
+        if (!trace->has_value) { *red = *green = *blue = 0.0; return; }
+        pc_trace_value_color(trace, palette_rg, palette_b, palette_count,
+                             brightness, contrast, saturation, cycles, red, green, blue);
+    } else if (orbit_mode == 1u) {
+        if (trace->event != 1u) { *red = *green = *blue = 0.0; return; }
+        ce_domain_event_color(trace->value, trace->smooth_iteration / count, 0,
+                              palette_rg, palette_b, palette_count,
+                              brightness, contrast, saturation, red, green, blue);
+    } else if (orbit_mode == 2u) {
+        if (trace->event != 2u) { *red = *green = *blue = 0.0; return; }
+        ce_domain_event_color(trace->value, 1.0 - (trace->iteration - 1.0) / count, 1,
+                              palette_rg, palette_b, palette_count,
+                              brightness, contrast, saturation, red, green, blue);
+    } else if (trace->event == 1u) {
+        ce_domain_event_color(trace->value, 1.0 - trace->smooth_iteration / count, 1,
+                              palette_rg, palette_b, palette_count,
+                              brightness, contrast, saturation, red, green, blue);
+    } else if (trace->event == 2u) {
+        ce_domain_event_color(trace->value, 1.0 - (trace->iteration - 1.0) / count, 1,
+                              palette_rg, palette_b, palette_count,
+                              brightness, contrast, saturation, red, green, blue);
+    } else if (trace->has_value) {
+        pc_trace_value_color(trace, palette_rg, palette_b, palette_count,
+                             brightness, contrast, saturation, cycles, red, green, blue);
+    } else {
+        *red = *green = *blue = 0.0;
+    }
+}
+
+typedef struct {
+    const ce_map_config *config;
+    ce_complex primary_point;
+    uint32_t orbit_mode;
+    const ce_complex *palette_rg;
+    const double *palette_b;
+    uint32_t palette_count;
+    double brightness;
+    double contrast;
+    double saturation;
+    double cycles;
+    double derivative_step;
+} ce_precise_render_context;
+
+struct ce_domain_render_context {
+    ce_precise_render_context sample;
+    double x_span;
+    double y_span;
+    uint32_t frame_width;
+    uint32_t frame_height;
+};
+
+static int pc_sample(const ce_precise_render_context *context,
+                     double dc_re, double dc_im,
+                     double *red, double *green, double *blue) {
+    if (context->config->derivative) {
+        ce_precise_trace left_trace, right_trace;
+        const int valid = pc_delta_trace(
+            context->config, dc_re - context->derivative_step, dc_im, context->primary_point,
+            0u, &left_trace
+        ) && pc_delta_trace(
+            context->config, dc_re + context->derivative_step, dc_im, context->primary_point,
+            0u, &right_trace
+        );
+        ce_complex left, right;
+        const int finite = valid && ce_delta_actual(&left_trace.sphere, &left) &&
+            ce_delta_actual(&right_trace.sphere, &right);
+        const double divisor = 2.0 * context->derivative_step;
+        const ce_complex derivative = finite && divisor > 0.0
+            ? (ce_complex){(right.re - left.re) / divisor, (right.im - left.im) / divisor}
+            : (ce_complex){NAN, NAN};
+        ce_domain_color(derivative, context->palette_rg, context->palette_b,
+                        context->palette_count, context->brightness, context->contrast,
+                        context->saturation, context->cycles, red, green, blue);
+        return 1;
+    }
+    ce_precise_trace trace;
+    const int complete = pc_delta_trace(
+        context->config, dc_re, dc_im, context->primary_point, context->orbit_mode, &trace
+    );
+    if (!complete) {
+        *red = *green = *blue = 0.0;
+        return 1;
+    }
+    pc_trace_color(&trace, context->orbit_mode,
+                   context->config->chain_count,
+                   context->palette_rg, context->palette_b, context->palette_count,
+                   context->brightness, context->contrast, context->saturation,
+                   context->cycles, red, green, blue);
+    return 1;
+}
+
+ce_domain_render_context *ce_create_domain_render_context(
+        const ce_map_config *config,
+        const char *center_re, const char *center_im,
+        const char *x_span, const char *y_span,
+        uint32_t precision_bits,
+        uint32_t frame_width, uint32_t frame_height,
+        uint32_t orbit_mode, const ce_complex *palette_rg,
+        const double *palette_b, uint32_t palette_count,
+        double brightness, double contrast, double saturation,
+        double lightness_cycles) {
+    if (!config || !config->chain_count || config->chain_count > 1024u ||
+        !ce_precision_valid(precision_bits) || orbit_mode > 3u ||
+        !center_re || !center_im || !x_span || !y_span || !frame_width || !frame_height ||
+        !palette_rg || !palette_b || palette_count < 2u ||
+        !isfinite(brightness) || !isfinite(contrast) || !isfinite(saturation) ||
+        !isfinite(lightness_cycles)) return NULL;
+
+    ce_domain_render_context *context = calloc(1, sizeof(*context));
+    if (!context) return NULL;
+    context->frame_width = frame_width;
+    context->frame_height = frame_height;
+    const mpfr_prec_t precision = ce_precision(precision_bits);
+    ce_precise_complex center;
+    pc_init(&center, precision);
+    mpfr_t precise_x_span, precise_y_span;
+    mpfr_inits2(precision, precise_x_span, precise_y_span, (mpfr_ptr)0);
+
+    const int viewport_valid = ce_set_decimal(center.re, center_re) &&
+        ce_set_decimal(center.im, center_im) &&
+        ce_set_decimal(precise_x_span, x_span) &&
+        ce_set_decimal(precise_y_span, y_span) &&
+        mpfr_sgn(precise_x_span) > 0 && mpfr_sgn(precise_y_span) > 0;
+    if (viewport_valid) {
+        context->x_span = mpfr_get_d(precise_x_span, MPFR_RNDN);
+        context->y_span = mpfr_get_d(precise_y_span, MPFR_RNDN);
+    }
+
+    const ce_complex primary_point = pc_to_complex(&center);
+    mpfr_clears(precise_x_span, precise_y_span, (mpfr_ptr)0);
+    pc_clear(&center);
+
+    if (!viewport_valid || !isfinite(primary_point.re) || !isfinite(primary_point.im) ||
+        !(context->x_span > 0.0) || !(context->y_span > 0.0)) {
+        free(context);
+        return NULL;
+    }
+
+    context->sample = (ce_precise_render_context){
+        config, primary_point, orbit_mode,
+        palette_rg, palette_b, palette_count,
+        brightness, contrast, saturation, lightness_cycles,
+        context->x_span / ((double)frame_width * 4.0)
+    };
+    return context;
+}
+
+void ce_destroy_domain_render_context(ce_domain_render_context *context) {
+    free(context);
+}
+
+static double pc_domain_axis_offset(double span, uint32_t size,
+                                    double pixel, int inverted) {
+    double grid_offset = pixel + 0.5 - (double)(size / 2u);
+    if (size & 1u) grid_offset -= 0.5;
+    if (inverted) grid_offset = -grid_offset;
+    return grid_offset * span / (double)size;
+}
+
+static int pc_sample_pixel_bytes(const ce_precise_render_context *context,
+                                 double x_span, double y_span,
+                                 uint32_t frame_width, uint32_t frame_height,
+                                 double pixel_x, double pixel_y,
+                                 uint8_t rgb[3]) {
+    double red, green, blue;
+    if (!pc_sample(
+            context,
+            pc_domain_axis_offset(x_span, frame_width, pixel_x, 0),
+            pc_domain_axis_offset(y_span, frame_height, pixel_y, 1),
+            &red, &green, &blue)) return 0;
+    rgb[0] = ce_domain_byte(red);
+    rgb[1] = ce_domain_byte(green);
+    rgb[2] = ce_domain_byte(blue);
+    return 1;
+}
+
+static int pc_color_edge(const uint8_t *rgba, uint32_t offset,
+                         const uint8_t rgb[3], int threshold) {
+    return abs((int)rgba[offset] - (int)rgb[0]) >= threshold ||
+        abs((int)rgba[offset + 1u] - (int)rgb[1]) >= threshold ||
+        abs((int)rgba[offset + 2u] - (int)rgb[2]) >= threshold;
+}
+
+int32_t ce_render_domain_tile(ce_domain_render_context *renderer,
+                                      uint32_t tile_x, uint32_t tile_y,
+                                      uint32_t tile_width, uint32_t tile_height, uint32_t scale,
+                                      uint32_t adaptive_quality,
+                                      uint8_t *rgba) {
+    if (!renderer || !scale || !tile_width || !tile_height || !rgba) return -1;
+    if (adaptive_quality && (scale != 1u || tile_width > 512u || tile_height > 512u)) return -2;
+    const double x_span = renderer->x_span;
+    const double y_span = renderer->y_span;
+    if (!(x_span > 0.0) || !(y_span > 0.0)) return -5;
+    const uint32_t frame_width = renderer->frame_width;
+    const uint32_t frame_height = renderer->frame_height;
+    const ce_precise_render_context context = renderer->sample;
+    double *offsets = malloc((size_t)(tile_width + tile_height) * sizeof(*offsets));
+    if (!offsets) return -3;
+    double *x_offsets = offsets;
+    double *y_offsets = offsets + tile_width;
+    for (uint32_t x = 0; x < tile_width; ++x) {
+        x_offsets[x] = pc_domain_axis_offset(
+            x_span, frame_width, (tile_x + x + 0.5) * scale - 0.5, 0
+        );
+    }
+    for (uint32_t y = 0; y < tile_height; ++y) {
+        y_offsets[y] = pc_domain_axis_offset(
+            y_span, frame_height, (tile_y + y + 0.5) * scale - 0.5, 1
+        );
+    }
+
+    for (uint32_t y = 0; y < tile_height; ++y) {
+        for (uint32_t x = 0; x < tile_width; ++x) {
+            double sample_red, sample_green, sample_blue;
+            if (!pc_sample(&context, x_offsets[x], y_offsets[y],
+                           &sample_red, &sample_green, &sample_blue)) {
+                free(offsets);
+                return -4;
+            }
+            const uint32_t output_index = (y * tile_width + x) * 4u;
+            rgba[output_index] = ce_domain_byte(sample_red);
+            rgba[output_index + 1u] = ce_domain_byte(sample_green);
+            rgba[output_index + 2u] = ce_domain_byte(sample_blue);
+            rgba[output_index + 3u] = 255u;
+        }
+    }
+
+    // Refine only pixels that cross a strong color edge.
+    if (adaptive_quality && scale == 1 && tile_width <= 512 && tile_height <= 512) {
+        const uint32_t total_tile_pixels = tile_width * tile_height;
+        uint8_t *edge_mask = calloc(total_tile_pixels, sizeof(*edge_mask));
+        if (!edge_mask) {
+            free(offsets);
+            return -3;
+        }
+        {
+            const int threshold = 80;
+            int edge_count = 0;
+
+            for (uint32_t y = 0; y < tile_height; ++y) {
+                const uint32_t row = y * tile_width;
+                for (uint32_t x = 0; x < tile_width - 1; ++x) {
+                    const uint32_t idx1 = (row + x) * 4u;
+                    const uint32_t idx2 = (row + x + 1) * 4u;
+                    const int dr = abs((int)rgba[idx1] - (int)rgba[idx2]);
+                    const int dg = abs((int)rgba[idx1 + 1] - (int)rgba[idx2 + 1]);
+                    const int db = abs((int)rgba[idx1 + 2] - (int)rgba[idx2 + 2]);
+                    if (dr >= threshold || dg >= threshold || db >= threshold) {
+                        if (!edge_mask[row + x]) { edge_mask[row + x] = 1; edge_count++; }
+                        if (!edge_mask[row + x + 1]) { edge_mask[row + x + 1] = 1; edge_count++; }
+                    }
+                }
+            }
+
+            for (uint32_t y = 0; y < tile_height - 1; ++y) {
+                const uint32_t row1 = y * tile_width;
+                const uint32_t row2 = (y + 1) * tile_width;
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const uint32_t idx1 = (row1 + x) * 4u;
+                    const uint32_t idx2 = (row2 + x) * 4u;
+                    const int dr = abs((int)rgba[idx1] - (int)rgba[idx2]);
+                    const int dg = abs((int)rgba[idx1 + 1] - (int)rgba[idx2 + 1]);
+                    const int db = abs((int)rgba[idx1 + 2] - (int)rgba[idx2 + 2]);
+                    if (dr >= threshold || dg >= threshold || db >= threshold) {
+                        if (!edge_mask[row1 + x]) { edge_mask[row1 + x] = 1; edge_count++; }
+                        if (!edge_mask[row2 + x]) { edge_mask[row2 + x] = 1; edge_count++; }
+                    }
+                }
+            }
+
+            uint8_t neighbor[3];
+            if (tile_x > 0u) {
+                for (uint32_t y = 0; y < tile_height; ++y) {
+                    const uint32_t pixel = y * tile_width;
+                    if (!pc_sample_pixel_bytes(&context, x_span, y_span,
+                                               frame_width, frame_height,
+                                               (double)tile_x - 1.0, (double)(tile_y + y),
+                                               neighbor)) {
+                        free(edge_mask); free(offsets); return -4;
+                    }
+                    if (pc_color_edge(rgba, pixel * 4u, neighbor, threshold) && !edge_mask[pixel]) {
+                        edge_mask[pixel] = 1u; edge_count++;
+                    }
+                }
+            }
+            if (tile_x + tile_width < frame_width) {
+                for (uint32_t y = 0; y < tile_height; ++y) {
+                    const uint32_t pixel = y * tile_width + tile_width - 1u;
+                    if (!pc_sample_pixel_bytes(&context, x_span, y_span,
+                                               frame_width, frame_height,
+                                               (double)(tile_x + tile_width), (double)(tile_y + y),
+                                               neighbor)) {
+                        free(edge_mask); free(offsets); return -4;
+                    }
+                    if (pc_color_edge(rgba, pixel * 4u, neighbor, threshold) && !edge_mask[pixel]) {
+                        edge_mask[pixel] = 1u; edge_count++;
+                    }
+                }
+            }
+            if (tile_y > 0u) {
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const uint32_t pixel = x;
+                    if (!pc_sample_pixel_bytes(&context, x_span, y_span,
+                                               frame_width, frame_height,
+                                               (double)(tile_x + x), (double)tile_y - 1.0,
+                                               neighbor)) {
+                        free(edge_mask); free(offsets); return -4;
+                    }
+                    if (pc_color_edge(rgba, pixel * 4u, neighbor, threshold) && !edge_mask[pixel]) {
+                        edge_mask[pixel] = 1u; edge_count++;
+                    }
+                }
+            }
+            if (tile_y + tile_height < frame_height) {
+                for (uint32_t x = 0; x < tile_width; ++x) {
+                    const uint32_t pixel = (tile_height - 1u) * tile_width + x;
+                    if (!pc_sample_pixel_bytes(&context, x_span, y_span,
+                                               frame_width, frame_height,
+                                               (double)(tile_x + x), (double)(tile_y + tile_height),
+                                               neighbor)) {
+                        free(edge_mask); free(offsets); return -4;
+                    }
+                    if (pc_color_edge(rgba, pixel * 4u, neighbor, threshold) && !edge_mask[pixel]) {
+                        edge_mask[pixel] = 1u; edge_count++;
+                    }
+                }
+            }
+
+            if (edge_count > 0) {
+                static const double sub_dx[4] = { -0.375, 0.125, 0.375, -0.125 };
+                static const double sub_dy[4] = { -0.125, -0.375, 0.125, 0.375 };
+                for (uint32_t y = 0; y < tile_height; ++y) {
+                    const uint32_t row = y * tile_width;
+                    for (uint32_t x = 0; x < tile_width; ++x) {
+                        if (!edge_mask[row + x]) continue;
+                        double sum_red = 0.0, sum_green = 0.0, sum_blue = 0.0;
+                        for (uint32_t sample = 0; sample < 4u; ++sample) {
+                            const double sub_y = y + 0.5 + sub_dy[sample];
+                            const double sub_x = x + 0.5 + sub_dx[sample];
+                            const double dc_re = pc_domain_axis_offset(
+                                x_span, frame_width, (tile_x + sub_x) * scale - 0.5, 0
+                            );
+                            const double dc_im = pc_domain_axis_offset(
+                                y_span, frame_height, (tile_y + sub_y) * scale - 0.5, 1
+                            );
+                            double sub_r, sub_g, sub_b;
+                            if (!pc_sample(&context, dc_re, dc_im, &sub_r, &sub_g, &sub_b)) {
+                                free(edge_mask);
+                                free(offsets);
+                                return -4;
+                            }
+                            sum_red += sub_r;
+                            sum_green += sub_g;
+                            sum_blue += sub_b;
+                        }
+                        const uint32_t output_index = (row + x) * 4u;
+                        rgba[output_index] = ce_domain_byte(sum_red * 0.25);
+                        rgba[output_index + 1u] = ce_domain_byte(sum_green * 0.25);
+                        rgba[output_index + 2u] = ce_domain_byte(sum_blue * 0.25);
+                        rgba[output_index + 3u] = 255u;
+                    }
+                }
+            }
+        }
+        free(edge_mask);
+    }
+    free(offsets);
     return 0;
 }
