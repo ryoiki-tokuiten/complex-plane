@@ -15,8 +15,7 @@ export const runtime = {
     },
     interaction: {
         panZ: createPanState(),
-        panW: createPanState(),
-        lastInteractionTime: 0
+        panW: createPanState()
     },
     navigation: {
         keys: {},

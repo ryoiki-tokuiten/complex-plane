@@ -2,22 +2,19 @@ const jitter = [[-0.375, -0.125], [0.125, -0.375], [0.375, 0.125], [-0.125, 0.37
 const MAX_PRECISION = 16384;
 const MAX_TERMS = 64;
 
-// Clusters unresolved pending samples by pixel so subpixels share a single
-// high-precision reference orbit.
+// One plan belongs to one viewport job. A sweep gives every still-unresolved
+// sample a reference at its own position before increasing numerical effort.
 export class DomainRefinement {
-    constructor(width, height, precision, batchLimit = 32) {
+    constructor(width, height, precision) {
         this.width = width;
         this.precision = precision;
         this.terms = 16;
-        this.batchLimit = batchLimit;
         this.attempted = new Uint8Array(width * height * 4);
     }
     next(pending) {
-        if (!pending || !pending.length) return [];
+        if (!pending.length) return [];
         let available = 0;
-        for (let i = 0; i < pending.length; i++) {
-            if (!this.attempted[pending[i]]) available++;
-        }
+        for (const sample of pending) if (!this.attempted[sample]) available++;
         if (!available) {
             if (this.precision === MAX_PRECISION && this.terms === MAX_TERMS) {
                 throw new Error(`Cannot certify ${pending.length} domain samples after trying their reference centers at ${MAX_PRECISION}-bit reference precision and ${MAX_TERMS} terms.`);
@@ -25,46 +22,19 @@ export class DomainRefinement {
             this.precision = Math.min(MAX_PRECISION, this.precision * 2);
             this.terms = Math.min(MAX_TERMS, this.terms * 2);
             this.attempted.fill(0);
+            available = pending.length;
         }
-        const pixelMap = new Map();
-        for (let i = 0; i < pending.length; i++) {
-            const s = pending[i];
-            if (this.attempted[s]) continue;
-            const px = Math.floor(s / 4);
-            let list = pixelMap.get(px);
-            if (!list) {
-                list = [];
-                pixelMap.set(px, list);
-            }
-            list.push(s);
+        const count = Math.min(32, available), sites = [];
+        let rank = 0;
+        for (const sample of pending) {
+            if (this.attempted[sample]) continue;
+            const target = Math.floor((sites.length + 0.5) * available / count);
+            if (rank++ !== target) continue;
+            this.attempted[sample] = 1;
+            const pixel = Math.floor(sample / 4), offset = jitter[sample % 4];
+            sites.push({ x: pixel % this.width + offset[0], y: Math.floor(pixel / this.width) + offset[1] });
+            if (sites.length === count) break;
         }
-        if (pixelMap.size === 0) return [];
-        const limit = this.batchLimit || 32;
-        const count = Math.min(limit, pixelMap.size);
-        const sites = [];
-        const activeSamplesList = [];
-        const activeRefIndicesList = [];
-        let refIdx = 0;
-
-        for (const [px, subpixels] of pixelMap) {
-            if (refIdx >= count) break;
-            const lead = subpixels[0];
-            this.attempted[lead] = 1;
-            const offset = jitter[lead % 4];
-            sites.push({
-                x: (px % this.width) + offset[0],
-                y: Math.floor(px / this.width) + offset[1],
-                sample: lead
-            });
-            for (let j = 0; j < subpixels.length; j++) {
-                const s = subpixels[j];
-                activeSamplesList.push(s);
-                activeRefIndicesList.push(refIdx);
-            }
-            refIdx++;
-        }
-        sites.activeSamples = new Uint32Array(activeSamplesList);
-        sites.activeRefIndices = new Uint32Array(activeRefIndicesList);
         return sites;
     }
 }

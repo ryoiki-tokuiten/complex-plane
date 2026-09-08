@@ -533,9 +533,7 @@ function shouldUseWPlanarTransformedLayerCache() {
         && !state.navigationModeEnabled
         && !(isMediaInputShape() && runtime.media.video)
         && !isPanning(runtime.interaction.panZ)
-        && !isPanning(runtime.interaction.panW)
-        && !(runtime.interaction.lastInteractionTime &&
-             performance.now() - runtime.interaction.lastInteractionTime < 250);
+        && !isPanning(runtime.interaction.panW);
 }
 
 function shouldUseZPlanarInputLayerCache() {
@@ -1308,14 +1306,47 @@ function drawWTransformedShape(_index, map, targetCtx, options = null) {
 
 function drawWTransformedShapeChunk(index, map, targetCtx, fresh) {
     const cache = wPlanarTransformedLayerCache;
-    const renderJob = (fresh || !cache.renderJob)
-        ? (cache.renderJob = createPlanarTransformedShapeRenderJob(map))
-        : cache.renderJob;
 
-    const rendered = drawWTransformedShape(index, map, targetCtx, { renderJob });
+    if (fresh || !cache.renderJob) {
+        cache.renderJob = createPlanarTransformedShapeRenderJob(map);
+        cache.nextPointSet = 0;
+    }
+
+    const renderJob = cache.renderJob;
+    const pointSets = renderJob.pointSets;
+
+    if (!Array.isArray(pointSets) || pointSets.length === 0 || renderJob.transformProfile?.isConstant) {
+        const rendered = drawWTransformedShape(index, map, targetCtx, { renderJob });
+        if (rendered) {
+            cache.renderJob = null;
+            cache.nextPointSet = 0;
+        }
+        return rendered;
+    }
+
+    while (cache.nextPointSet < pointSets.length &&
+        (!wPlanarWorkPerformed || performance.now() < wPlanarRenderDeadline)) {
+        const startIndex = cache.nextPointSet;
+        const endIndex = Math.min(pointSets.length, startIndex + W_PLANAR_POINT_SET_BATCH_SIZE);
+
+        drawWTransformedShape(index, map, targetCtx, {
+            renderJob,
+            startIndex,
+            endIndex,
+            includeOverlays: endIndex === pointSets.length
+        });
+
+        cache.nextPointSet = endIndex;
+        wPlanarWorkPerformed = true;
+    }
+
+    if (cache.nextPointSet < pointSets.length) {
+        return false;
+    }
+
     cache.renderJob = null;
     cache.nextPointSet = 0;
-    return rendered;
+    return true;
 }
 
 function renderWPlanarTransformedShape(index, map) {

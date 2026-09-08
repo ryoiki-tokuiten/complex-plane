@@ -171,15 +171,11 @@ test('transformed grid sampling cannot certify oscillatory cos lines as flat', (
             currentVisYRange: [-2, 2]
         };
         const capture = new LineCaptureContext();
-        const mockPoints = [];
-        for (let i = 0; i <= 16; i++) {
-            mockPoints.push({ re: i * 2 * Math.PI, im: 0 });
-        }
         const pointSet = {
             role: 'grid-horizontal',
             color: '#fff',
             lineWidth: 1,
-            points: mockPoints
+            points: [{ re: 0, im: 0 }, { re: 32 * Math.PI, im: 0 }]
         };
 
         drawPointSetCollectionOnPlane(capture, planeParams, [pointSet], {

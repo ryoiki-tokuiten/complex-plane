@@ -1415,13 +1415,7 @@ function zoomPlaneAt(ctx, pos, factor) {
     ctx.params.origin.y = pos.y + world.y * ctx.params.scale.y;
 
     updatePlaneViewportRanges(ctx.params);
-    runtime.interaction.lastInteractionTime = performance.now();
     requestDomainRedraw(true);
-    clearTimeout(ctx.wheelSettleTimer);
-    ctx.wheelSettleTimer = setTimeout(() => {
-        runtime.interaction.lastInteractionTime = 0;
-        requestDomainRedraw(true);
-    }, 200);
 }
 
 function flushCanvasWheel(ctx) {

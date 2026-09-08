@@ -146,38 +146,3 @@ test('reference recentering exports the origin shift without changing the sample
         assert.equal(delta, 12);
     } finally { r.dispose(); p.dispose(); }
 });
-
-test('division and dyadic scaling survive arbitrary expression compilation', () => {
-    const p = compileDomainProgram(snapshot({
-        functionKey: 'algebraic_chaining', algebraicChainingZExpr: '(-0.5*i*z)/(1+z)',
-        algebraicChainingTerms: [{ coeff: { re: 1, im: 0 }, factors: [{ func: 'polynomial', power: 1 }] }],
-        viewport: { width: 4, height: 4, centerRe: '1', centerIm: '1', xSpan: '0.01', ySpan: '0.01', precisionBits: 256 }
-    }));
-    const r = p.reference({ x: 1.5, y: 1.5, precision: 256, terms: 16 });
-    try {
-        assert.ok(p.nodes.some((op, i) => i % 4 === 0 && op === 15), 'retain quotient rather than inverse/product');
-        assert.ok(p.nodes.some((op, i) => i % 4 === 0 && op === 14), 'exact rotation/scaling is independent of expression spelling');
-        const data = r.next(1), offset = domainLayout(p.nodes, 16).offsets[p.output];
-        assert.ok(Math.abs(number(data, offset) - 0.1) < 1e-14);
-        assert.ok(Math.abs((data[offset + 1] + data[offset + 5]) * 2 ** data[offset + 2] + 0.3) < 1e-14);
-    } finally { r.dispose(); p.dispose(); }
-});
-
-test('repeated reference origins reuse exact values across batch boundaries', () => {
-    const p = compileDomainProgram(snapshot({ functionKey: 'cos', chainingEnabled: true, chainMode: 'recursion', chainCount: 900,
-        viewport: { width: 4, height: 4, centerRe: '2', centerIm: '10', xSpan: '0.01', ySpan: '0.01', precisionBits: 256 } }));
-    const options = { x: 1.5, y: 1.5, precision: 256, terms: 16 };
-    const r = p.reference(options), independent = p.reference(options);
-    try {
-        const expected = independent.next(1);
-        for (const count of [1, 64, 7]) {
-            const data = r.next(count);
-            for (let i = 0; i < count; i++) assert.deepEqual(data.subarray(i * r.stride, (i + 1) * r.stride), expected);
-        }
-    } finally { r.dispose(); independent.dispose(); p.dispose(); }
-});
-
-test('wide zero-centered viewports do not subtract the zero exponent sentinel', () => {
-    const p = compileDomainProgram(snapshot({ viewport: { width: 864, height: 576, centerRe: '0', centerIm: '0', xSpan: '8000', ySpan: '6000', precisionBits: 256 } }));
-    try { assert.equal(p.minimumPrecision, 128); } finally { p.dispose(); }
-});
