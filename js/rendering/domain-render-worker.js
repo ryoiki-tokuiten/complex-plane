@@ -6,6 +6,12 @@ class DomainRenderer {
         if (!Number.isInteger(workerCount) || workerCount < 1) throw new Error('Domain rendering requires a CPU worker count.');
         this.canvas = canvas; this.onStatus = onStatus; this.workerCount = workerCount;
         this.workers = []; this.generation = 0; this.frame = null; this.job = null;
+        this.channel = new MessageChannel();
+        this.scheduledImmediate = false;
+        this.channel.port1.onmessage = () => {
+            this.scheduledImmediate = false;
+            this.step();
+        };
         this.gpu = new DomainWebGL(canvas);
         this.onLost = event => { event.preventDefault(); this.fail('The domain-coloring GPU context was lost.'); };
         this.onRestored = () => {
@@ -57,6 +63,10 @@ class DomainRenderer {
         job.program = compileDomainProgram(job.snapshot, job.words);
         job.submitted = false;
         job.cursor=0;
+        job.stage=0;
+        job.lastPresent=0;
+        job.batchSize=4096;
+        job.batchStart=0;
         this.gpu.prepare(job.program);
         const count = Math.min(this.workerCount, job.program.numbers.length);
         while (this.workers.length < count) {
@@ -101,43 +111,79 @@ class DomainRenderer {
         } catch (error) { this.fail(error.message); }
     }
     schedule(delay=0) {
-        if (this.frame !== null) return;
-        this.frame = setTimeout(() => {
-            this.frame = null;
-            if (!this.job || this.job.done) return;
-            try {
-                if(!this.job.submitted) {
-                    if(!this.gpu.ready() || this.job.pending) { this.schedule(16); return; }
-                    const job=this.job,total=job.snapshot.viewport.width*job.snapshot.viewport.height;
-                    if(this.gpu.drawFence) {
-                        if(!this.gpu.pollDraw()) { this.schedule(4); return; }
-                        this.gpu.present();
+        if (this.frame !== null || this.scheduledImmediate) return;
+        if (delay > 0) {
+            this.frame = setTimeout(() => {
+                this.frame = null;
+                this.step();
+            }, delay);
+        } else {
+            this.scheduledImmediate = true;
+            this.channel.port2.postMessage(null);
+        }
+    }
+    step() {
+        if (!this.job || this.job.done) return;
+        try {
+            if(!this.job.submitted) {
+                if(!this.gpu.ready() || this.job.pending) {
+                    if(!this.gpu.programs[0]) this.report('rendering', 'Compiling high-precision domain shader...');
+                    this.schedule(16);
+                    return;
+                }
+                const job=this.job,total=job.snapshot.viewport.width*job.snapshot.viewport.height;
+                if(this.gpu.drawFence) {
+                    if(!this.gpu.pollDraw()) { this.schedule(1); return; }
+                    if(job.batchStart) {
+                        const duration = performance.now() - job.batchStart;
+                        if(duration > 35) job.batchSize = Math.max(512, Math.floor(job.batchSize * 0.6));
+                        else if(duration < 12) job.batchSize = Math.min(16384, Math.floor(job.batchSize * 1.4));
                     }
+                }
+                if(job.stage===0) {
                     if(job.cursor<total) {
-                        // Submit bounded ranges of full-resolution samples. The
-                        // same shader completes each orbit; no CPU tiles or
-                        // approximation regions are involved in scheduling.
-                        const count=Math.min(4096,total-job.cursor);
-                        this.gpu.draw(job.cursor,count); job.cursor+=count;
-                        this.schedule(4); return;
+                        const count=Math.min(job.batchSize,total-job.cursor);
+                        job.batchStart = performance.now();
+                        this.gpu.draw(job.cursor,count,0); job.cursor+=count;
+                        if(performance.now()-job.lastPresent>=16) {
+                            this.gpu.present(); job.lastPresent=performance.now();
+                        }
+                        this.schedule(0); return;
                     }
+                    this.gpu.present(); job.lastPresent=performance.now();
+                    job.stage=1; job.cursor=0;
+                    this.schedule(0); return;
+                }
+                if(job.stage===1) {
+                    if(job.cursor<total) {
+                        const count=Math.min(job.batchSize,total-job.cursor);
+                        job.batchStart = performance.now();
+                        this.gpu.draw(job.cursor,count,1); job.cursor+=count;
+                        if(performance.now()-job.lastPresent>=16) {
+                            this.gpu.present(); job.lastPresent=performance.now();
+                        }
+                        this.schedule(0); return;
+                    }
+                    this.gpu.present(); job.lastPresent=performance.now();
                     this.gpu.requestCoverage(); job.submitted=true;
                 }
-                const status = this.gpu.pollCoverage();
-                if (!status) { this.schedule(4); return; }
-                this.job.remaining = status.remaining;
-                if (!status.remaining) { this.job.done = true; this.report('complete'); return; }
-                if (status.resource) { this.fail('Some samples exceed the numerical operation or exponent limit.'); return; }
-                if (this.job.words === 274) { this.fail('Some samples need more than the supported 4096-bit precision.'); return; }
-                this.job.words = Math.min(274, this.job.words * 2); this.prepare();
-            } catch (error) { this.fail(error.message); }
-        },delay);
+            }
+            const status = this.gpu.pollCoverage();
+            if (!status) { this.schedule(1); return; }
+            this.job.remaining = status.remaining;
+            if (!status.remaining) { this.job.done = true; this.report('complete'); return; }
+            if (status.resource) { this.fail('Some samples exceed the numerical operation or exponent limit.'); return; }
+            if (this.job.words === 274) { this.fail('Some samples need more than the supported 4096-bit precision.'); return; }
+            this.job.words = Math.min(274, this.job.words * 2); this.prepare();
+        } catch (error) { this.fail(error.message); }
     }
     cancel() {
         ++this.generation;
         this.requestedSnapshot=null;
         if (this.frame !== null) clearTimeout(this.frame);
-        this.frame = null; this.gpu.cancelReadback();
+        this.frame = null;
+        this.scheduledImmediate = false;
+        this.gpu.cancelReadback();
         this.workers.forEach(entry => { entry.request=null; });
         if (this.job) this.job.done = true;
     }

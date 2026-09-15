@@ -1,5 +1,8 @@
 # Repository Architecture & Performance Decisions
 
+This is about domain coloring:
+ It is a unified high precision (zoom upto 10^100) domain coloring pipeline that works for any function directly or any kind of combination that can be made of that functions using Algebraic Chaining + Output Chaining Pipeline. It is abstract and general in a sense that it doesn't switches to some special dual tracks or fallbacks or parallel pipelines. This is must and there are the rules of this mode. Over-engineering or adding specific special fallbacks after certain zoom for example is not allowed. This unified pipeline has already been productionized and working really well. The pipeline uses cpu + gpu and it must continue with that design. 
+
 ## Scope
 
 The planar z-plane domain-coloring evaluator and display are one GPU pipeline. Riemann surfaces, manifold transformations, mapped geometry, raster transformations, contours, and analysis retain their renderers and shared numerical helpers.

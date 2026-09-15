@@ -108,6 +108,7 @@ export class DomainWebGL {
         if(!this.textureLimit || !this.viewportLimit) throw new Error('The domain-coloring GPU context is unavailable.');
         const precision = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
         if (!precision || precision.precision < 23 || precision.rangeMax < 127) throw new Error('Domain rendering requires high-precision shader arithmetic.');
+        this.parallelCompile = gl.getExtension('KHR_parallel_shader_compile');
         this.programs = []; this.evaluators = new Map(); this.textures = [];
         this.framebuffers = new Map();
         this.readback = null;
@@ -251,8 +252,19 @@ export class DomainWebGL {
         let cached=this.evaluators.get(key);
         if(!cached) {
             const source=domainFragment(this.words,!!this.snapshot.derivativeOrder);
-            cached={handle:program(gl,source,SAMPLE_VERTEX),locations:new Map()};
+            const compilation=beginProgram(gl,source,SAMPLE_VERTEX);
+            cached={compilation,handle:null,locations:new Map(),attempts:0};
             this.evaluators.set(key,cached);
+        }
+        if(!cached.handle) {
+            if(this.parallelCompile) {
+                const complete=gl.getProgramParameter(cached.compilation.handle,this.parallelCompile.COMPLETION_STATUS_KHR);
+                if(!complete) return false;
+            } else {
+                if(++cached.attempts < 4) return false;
+            }
+            cached.handle=finishProgram(gl,cached.compilation);
+            cached.compilation=null;
         }
         this.programs[0]=cached.handle; this.locations[0]=cached.locations;
         return true;
@@ -268,7 +280,7 @@ export class DomainWebGL {
             offset+=count;
         }
     }
-    draw(start=0,count=this.width*this.height) {
+    draw(start=0,count=this.width*this.height,stage=-1) {
         const gl=this.gl,index=0,loc=name=>this.uniform(index,name);
         gl.useProgram(this.programs[0]); gl.bindVertexArray(this.vao);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,this.numbers); gl.uniform1i(loc('uNumbers'),0);
@@ -293,7 +305,9 @@ export class DomainWebGL {
             uPrincipalCut: this.snapshot.branchCutAngle===Math.PI ? 1 : 0,
             uPaletteCount: this.snapshot.paletteStops.length })) gl.uniform1i(loc(name), value);
         const offsets = [[0, 0], [-0.375, -0.125], [0.125, -0.375], [0.375, 0.125], [-0.125, 0.375]];
-        this.samples.forEach((texture, sample) => {
+        const sampleIndices = stage === 0 ? [0] : stage === 1 ? [1, 2, 3, 4] : [0, 1, 2, 3, 4];
+        sampleIndices.forEach(sample => {
+            const texture = this.samples[sample];
             this.target(texture, this.width, this.height);
             gl.uniform2f(loc('uOffset'), ...offsets[sample]);
             gl.uniform1i(loc('uAA'), sample === 0 ? 0 : 1);
@@ -381,7 +395,14 @@ export class DomainWebGL {
         this.cancelReadback();
         this.textures.forEach(texture => this.gl.deleteTexture(texture));
         this.programs.slice(1).forEach(p => this.gl.deleteProgram(p));
-        this.evaluators.forEach(p => this.gl.deleteProgram(p.handle)); this.evaluators.clear();
+        this.evaluators.forEach(p => {
+            if(p.handle) this.gl.deleteProgram(p.handle);
+            if(p.compilation) {
+                this.gl.deleteProgram(p.compilation.handle);
+                p.compilation.shaders.forEach(s => this.gl.deleteShader(s));
+            }
+        });
+        this.evaluators.clear();
         this.framebuffers.forEach(framebuffer => this.gl.deleteFramebuffer(framebuffer));
         this.gl.deleteVertexArray(this.vao ?? null);
     }

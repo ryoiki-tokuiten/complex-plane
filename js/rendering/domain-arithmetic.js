@@ -17,7 +17,10 @@ uniform int uNumberRows,uWords,uNewtonSteps,uComponents;
 float up(float x) { return x+max(0.00002,abs(x)*0.000001); }
 float errorSum(float a,float b) {
     if(a==EXACT) return b; if(b==EXACT) return a;
-    float m=max(a,b); return up(m+log2(1.0+exp2(max(-126.0,min(a,b)-m))));
+    float m=max(a,b);
+    float d=min(a,b)-m;
+    if(d < -24.0) return up(m);
+    return up(m+log2(1.0+exp2(max(-126.0,d))));
 }
 F fzero() { F a; for(int i=0;i<(uWords+3)/4;i++) a.d[i]=uvec4(0u); a.e=0; a.s=0; a.error=EXACT; return a; }
 F fconstant(int row) {
@@ -101,9 +104,13 @@ F fadd(F a,F b) {
 F fsub(F a,F b) { return fadd(a,fneg(b)); }
 F fmul(F a,F b) {
     F c=fzero();
-    c.error=errorSum(a.error==EXACT || b.s==0 ? EXACT : a.error+up(flog(b)),
-        b.error==EXACT || a.s==0 ? EXACT : b.error+up(flog(a)));
-    c.error=errorSum(c.error,a.error==EXACT || b.error==EXACT ? EXACT : up(a.error+b.error));
+    if(a.error==EXACT && b.error==EXACT) {
+        c.error=EXACT;
+    } else {
+        c.error=errorSum(a.error==EXACT || b.s==0 ? EXACT : a.error+up(flog(b)),
+            b.error==EXACT || a.s==0 ? EXACT : b.error+up(flog(a)));
+        c.error=errorSum(c.error,a.error==EXACT || b.error==EXACT ? EXACT : up(a.error+b.error));
+    }
     if(a.s==0 || b.s==0) return c;
     uvec4 t[(2*W+3)/4]; for(int i=0;i<(2*uWords+3)/4;i++) t[i]=uvec4(0u);
     for(int i=uWords-1;i>=0;i--) {
