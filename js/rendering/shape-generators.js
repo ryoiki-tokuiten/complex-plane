@@ -1,3 +1,4 @@
+import { requiresPreciseProjection } from '../native/precise-viewport.js';
 import { state } from '../store/state.js';
 import { NUM_POINTS_CURVE } from '../constants/numerical.js';
 import {
@@ -446,7 +447,7 @@ export function buildInputShapeGeometryConfig(planeParams, options = {}) {
         arbitraryShapeTMax: options.arbitraryShapeTMax ?? state.arbitraryShapeTMax,
         arbitraryShapeClosed: options.arbitraryShapeClosed ?? state.arbitraryShapeClosed,
         arbitraryShapePoints: options.arbitraryShapePoints ?? state.arbitraryShapePoints,
-        preciseViewport: planeParams?.preciseViewport ? {
+        preciseViewport: requiresPreciseProjection(planeParams) ? {
             ...planeParams.preciseViewport,
             width: planeParams.width,
             height: planeParams.height

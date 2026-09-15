@@ -11,6 +11,9 @@ export function requireVisibleViewport(planeParams, label = 'Plane viewport') {
     if (!planeParams || typeof planeParams !== 'object') {
         throw new Error(`${label} is missing.`);
     }
+    const precise = planeParams.preciseViewport;
+    if (precise && ['centerRe', 'centerIm', 'xSpan', 'ySpan'].every(key => typeof precise[key] === 'string') &&
+        Number(precise.xSpan) > 0 && Number(precise.ySpan) > 0) return planeParams;
     requireFiniteRange(planeParams.currentVisXRange, `${label} x-axis`);
     requireFiniteRange(planeParams.currentVisYRange, `${label} y-axis`);
     return planeParams;

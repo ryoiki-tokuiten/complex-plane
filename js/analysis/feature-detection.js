@@ -1,3 +1,4 @@
+import { requiresPreciseProjection } from '../native/precise-viewport.js';
 import { state, zPlaneParams } from '../store/state.js';
 import { resolveActiveMap } from '../math/active-map.js';
 import {
@@ -48,7 +49,7 @@ let criticalKey = null;
 
 export function findCriticalPoints() {
     if (!state.showCriticalPoints || (state.manifold3dViewEnabled && state.manifoldTransformationEnabled) ||
-        zPlaneParams.preciseViewport) {
+        requiresPreciseProjection(zPlaneParams)) {
         state.criticalPoints = [];
         state.criticalValues = [];
         criticalKey = null;
@@ -261,7 +262,7 @@ function certifyCandidates(map, candidates, allCandidates, sign, span) {
 
 export function findZerosAndPoles() {
     if (!state.showZerosPoles || (state.manifold3dViewEnabled && state.manifoldTransformationEnabled) ||
-        zPlaneParams.preciseViewport) {
+        requiresPreciseProjection(zPlaneParams)) {
         state.zeros = [];
         state.poles = [];
         zerosPolesKey = null;

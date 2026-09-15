@@ -479,7 +479,7 @@ int32_t ce_build_image_mesh_precise(const ce_map_config *config,
                                     double source_center_re, double source_center_im,
                                     double source_width, double source_height,
                                     const char *view_center_re, const char *view_center_im,
-                                    double zoom_power, uint32_t precision_bits,
+                                    const char *view_x_span, const char *view_y_span, uint32_t precision_bits,
                                     uint32_t pixel_width, uint32_t pixel_height,
                                     uint32_t base_resolution, uint32_t max_depth,
                                     uint32_t max_cells, uint32_t max_vertices,
@@ -489,7 +489,7 @@ int32_t ce_build_image_mesh_precise(const ce_map_config *config,
                                     uint32_t stats[4]) {
     void *precision_context = ce_precision_image_context_create(
         config, source_center_re, source_center_im, source_width, source_height,
-        view_center_re, view_center_im, zoom_power, precision_bits, pixel_width, pixel_height
+        view_center_re, view_center_im, view_x_span, view_y_span, precision_bits, pixel_width, pixel_height
     );
     if (!precision_context) return -4;
     const int32_t status = ce_build_image_mesh_internal(

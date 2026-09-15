@@ -68,7 +68,7 @@ test('point-set endpoints reflect interior point mutations', () => {
 });
 
 const PRECISE_VIEWPORT = Object.freeze({
-    centerRe: '0', centerIm: '0', zoomPower: 0, precisionBits: 128
+    centerRe: '0', centerIm: '0', xSpan: '1e-20', ySpan: '1e-20', precisionBits: 128
 });
 
 for (const source of ['ordinary', 'precise']) {

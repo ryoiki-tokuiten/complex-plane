@@ -2,7 +2,8 @@ import { state, context } from '../store/state.js';
 import { requestDomainRedraw, requestUiRedraw } from '../rendering/redraw-scheduler.js';
 import { fitConformalGridOutputViewport } from './view-model.js';
 import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
-import { downloadCanvasImage } from '../utils/dom-utils.js';
+import { composeCanvasLayers, downloadCanvasImage } from '../utils/dom-utils.js';
+import { exportPlanarDomainImage } from '../rendering/domain-dynamics.js';
 import { isGraphViewSupported, isFullGridPerspectiveSupported, disposeTransformationGraphRenderer } from '../rendering/transformation-graph.js';
 import { syncGridDensityControls } from './grid-density.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
@@ -10,6 +11,16 @@ import { updateDynamicPlotting } from './dynamic-plotting-state.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
 
 function contextPanelSubmenu(panel) { return [{ type: 'custom', panel }]; }
+
+export async function composeZPlaneImage() {
+    const overlay = context.zCanvas;
+    const domain = context.zDomainColorCanvas;
+    if (!domain || domain.hidden) return overlay;
+    const overlayImage=composeCanvasLayers([overlay]);
+    const image=await exportPlanarDomainImage();
+    try { return composeCanvasLayers([image,overlayImage]); }
+    finally { image.close(); }
+}
 
 function enableFoldSurface3d() {
     state.riemannSurfaceEnabled = false;
@@ -141,7 +152,10 @@ export function getZPlaneMenuItems() {
             label: 'Download Image',
             icon: 'download',
             type: 'action',
-            onClick: () => downloadCanvasImage(context.zCanvas, 'z-plane.png')
+            onClick: async () => {
+                try { downloadCanvasImage(await composeZPlaneImage(), 'z-plane.png'); }
+                catch(error) { console.error('Failed to download z-plane image:',error); }
+            }
         },
         { type: 'divider' },
         {

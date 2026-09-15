@@ -70,19 +70,6 @@ int ce_domain_valid(ce_complex value) {
         fabs(value.re) < CE_DOMAIN_MAGNITUDE_MAX && fabs(value.im) < CE_DOMAIN_MAGNITUDE_MAX;
 }
 
-int ce_domain_bailout(ce_complex value) {
-    return fabs(value.re) >= CE_CHAIN_BAILOUT || fabs(value.im) >= CE_CHAIN_BAILOUT ||
-        value.re * value.re + value.im * value.im > CE_ESCAPE_RADIUS_SQ;
-}
-
-double ce_domain_smooth_iteration(uint32_t iteration, uint32_t count, ce_complex value) {
-    if (!ce_domain_valid(value)) return iteration + 1.0;
-    const double magnitude = fmax(hypot(value.re, value.im), CE_ESCAPE_RADIUS);
-    if (!isfinite(magnitude) || magnitude <= 1.0001) return iteration + 1.0;
-    const double adjustment = log(fmax(log(magnitude) / log(CE_ESCAPE_RADIUS), 1e-6)) / 0.693147180559945309417;
-    return fmax(0.0, fmin(count, iteration + 1.0 - adjustment));
-}
-
 static void ce_init_color_lut(ce_color_lut *lut,
                               const ce_complex *palette_rg, const double *palette_b,
                               uint32_t palette_count, double brightness,
@@ -261,20 +248,4 @@ void ce_domain_color(ce_complex value, const ce_complex *palette_rg, const doubl
         palette_rg, palette_b, palette_count, brightness, contrast,
         saturation, cycles, red, green, blue
     );
-}
-
-void ce_domain_event_color(ce_complex value, double intensity, int use_phase,
-                           const ce_complex *palette_rg, const double *palette_b, uint32_t palette_count,
-                           double brightness, double contrast, double saturation,
-                           double *red, double *green, double *blue) {
-    double hue = use_phase ? ce_fast_atan2(value.im, value.re) * CE_INV_TWO_PI : ce_clamp(intensity, 0.0, 0.9999);
-    if (hue < 0.0) hue += 1.0;
-    intensity = ce_clamp(intensity, 0.0, 1.0);
-    const double base_lightness = use_phase
-        ? 0.24 + 0.58 * pow(intensity, 0.55)
-        : 0.22 + 0.58 * pow(intensity, 0.65);
-    const double lightness = ce_clamp((0.5 + (base_lightness - 0.5) * contrast) * brightness, 0.05, 0.95);
-    double base_red, base_green, base_blue;
-    ce_palette_color(palette_rg, palette_b, palette_count, hue, &base_red, &base_green, &base_blue);
-    ce_styled_color(base_red, base_green, base_blue, lightness, ce_clamp(saturation, 0.0, 1.0), red, green, blue);
 }

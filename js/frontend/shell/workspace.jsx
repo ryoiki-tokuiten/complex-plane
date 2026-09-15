@@ -4,8 +4,11 @@ import { AnimationSpeedSelect } from '../components/animation-speed-select.jsx';
 import { RiemannSurfaceHud } from '../components/riemann-surface-hud.jsx';
 import { attachWorkspace, snapIndicator, workspaceExtent } from '../../ui/panel-layout-manager.js';
 import { Icon } from '../components/icon.jsx';
+import { useEffect } from 'preact/hooks';
+import { disposePlanarDomainDynamics } from '../../rendering/domain-dynamics.js';
 
 export function Workspace() {
+  useEffect(() => disposePlanarDomainDynamics, []);
   return (
     <>
       <Ui as="section" id={"canvases_section"}>
@@ -28,6 +31,7 @@ export function Workspace() {
               </div>
             </div>
             <Ui as="div" id={"z_plane_canvas_wrapper"} class={"canvas-layer-host"}>
+              <Ui as="canvas" id={"z_plane_domain_canvas"} aria-hidden="true" hidden />
               <Ui as="canvas" id={"z_plane_canvas"} />
               <Ui as="div" id={"z_plane_rendering_indicator"} class={"domain-rendering-indicator hidden"} />
               <Ui as="div" id={"z_plane_probe_info"} class={"probe-info-overlay hidden"} />

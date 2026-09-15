@@ -16,7 +16,7 @@ static ce_complex ce_make(double re, double im) {
 
 void *ce_alloc(size_t size) { return malloc(size); }
 void ce_free(void *pointer) { free(pointer); }
-uint32_t ce_abi_version(void) { return 3; }
+uint32_t ce_abi_version(void) { return 5; }
 
 ce_complex ce_add(ce_complex a, ce_complex b) {
     return ce_make(a.re + b.re, a.im + b.im);

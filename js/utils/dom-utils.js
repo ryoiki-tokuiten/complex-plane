@@ -9,7 +9,7 @@ import { requireInteger } from './numeric-contracts.js';
 
 const { controls } = context;
 
-let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas, zDomainColorCtx;
+let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas;
 let wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList;
 
 export function formatTaylorNumericValue(value) {
@@ -40,8 +40,8 @@ export function setupCanvasReferences() {
     wCtx.imageSmoothingEnabled = true;
     wCtx.imageSmoothingQuality = 'high';
 
-    zDomainColorCanvas = new OffscreenCanvas(DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT);
-    zDomainColorCtx = zDomainColorCanvas.getContext('2d');
+    zDomainColorCanvas = controls.zPlaneDomainCanvas;
+    if (!zDomainColorCanvas) throw new Error('Domain canvas must be mounted before renderer initialization.');
 
     wCanvasList = [wCanvas];
     wCtxList = [wCtx];
@@ -53,7 +53,6 @@ export function setupCanvasReferences() {
     context.zCtx = zCtx;
     context.wCtx = wCtx;
     context.zDomainColorCanvas = zDomainColorCanvas;
-    context.zDomainColorCtx = zDomainColorCtx;
     context.wCanvasList = wCanvasList;
     context.wCtxList = wCtxList;
     context.wPlaneParamsList = wPlaneParamsList;
@@ -76,8 +75,8 @@ function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen = false)
             newHeight = DEFAULT_CANVAS_HEIGHT;
         }
     }
-    // Hard upper limits to prevent runaway canvas memory allocation and GPU/browser crashes
-    const MAX_CANVAS_DIM = 2560;
+    // Domain coloring retains every viewport pixel; its GPU validates hardware limits.
+    const MAX_CANVAS_DIM = canvasElement === zCanvas ? Infinity : 2560;
     newWidth = Math.min(MAX_CANVAS_DIM, Math.max(1, Math.round(newWidth)));
     newHeight = Math.min(MAX_CANVAS_DIM, Math.max(1, Math.round(newHeight)));
 
@@ -86,60 +85,28 @@ function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen = false)
     planeParams.width = canvasElement.width;
     planeParams.height = canvasElement.height;
 
-    if (canvasElement === zCanvas) {
-        if (zDomainColorCanvas && zDomainColorCanvas.width !== planeParams.width) zDomainColorCanvas.width = planeParams.width;
-        if (zDomainColorCanvas && zDomainColorCanvas.height !== planeParams.height) zDomainColorCanvas.height = planeParams.height;
-    }
+    // The domain render worker resizes its own OffscreenCanvas from the same
+    // viewport snapshot. A transferred HTML canvas cannot be resized here.
 }
 
 export function setupVisualParameters(updateZFromSlider = true, updateWFromSlider = true) {
     const zIsFullscreen = state.isZFullScreen;
     const wIsFullscreen = state.isWFullScreen;
 
-    let zWorldCenterX = (zPlaneParams.currentVisXRange[0] + zPlaneParams.currentVisXRange[1]) / 2;
-    let zWorldCenterY = (zPlaneParams.currentVisYRange[0] + zPlaneParams.currentVisYRange[1]) / 2;
-
-    let wWorldCenterX = (wPlaneParams.currentVisXRange[0] + wPlaneParams.currentVisXRange[1]) / 2;
-    let wWorldCenterY = (wPlaneParams.currentVisYRange[0] + wPlaneParams.currentVisYRange[1]) / 2;
-
     setupCanvasBaseParams(zPlaneParams, zCanvas, zIsFullscreen);
-
     setupCanvasBaseParams(wPlaneParams, wCanvas, wIsFullscreen);
 
-    let zIsPrecise = !!zPlaneParams.preciseViewport;
-    if (updateZFromSlider) { 
-        const zoomZ = state.zPlaneZoom;
-        zIsPrecise = synchronizePreciseViewport(zPlaneParams, zoomZ);
-    }
-    if (!zIsPrecise) {
-        const initialXSpanZ = zPlaneInitialRanges.x[1] - zPlaneInitialRanges.x[0];
-        const initialYSpanZ = zPlaneInitialRanges.y[1] - zPlaneInitialRanges.y[0];
-        if (initialXSpanZ > 0 && initialYSpanZ > 0) {
-            const baseScaleZ = Math.min(zPlaneParams.width / initialXSpanZ, zPlaneParams.height / initialYSpanZ);
-            const scaleZ = baseScaleZ * (state.zPlaneZoom || 1);
-            zPlaneParams.scale.x = zPlaneParams.scale.y = scaleZ; 
-            zPlaneParams.origin.x = (zPlaneParams.width * 0.5) - zWorldCenterX * scaleZ;
-            zPlaneParams.origin.y = (zPlaneParams.height * 0.5) + zWorldCenterY * scaleZ; 
-            updatePlaneViewportRanges(zPlaneParams);
-        }
-    }
-
-    let wIsPrecise = !!wPlaneParams.preciseViewport;
-    if (updateWFromSlider) { 
-        const zoomW = state.wPlaneZoom;
-        wIsPrecise = synchronizePreciseViewport(wPlaneParams, zoomW);
-    }
-    if (!wIsPrecise) {
-        const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
-        const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
-        if (initialXSpanW > 0 && initialYSpanW > 0) {
-            const baseScaleW = Math.min(wPlaneParams.width / initialXSpanW, wPlaneParams.height / initialYSpanW);
-            const scaleW = baseScaleW * (state.wPlaneZoom || 1);
-            wPlaneParams.scale.x = wPlaneParams.scale.y = scaleW;
-            wPlaneParams.origin.x = (wPlaneParams.width * 0.5) - wWorldCenterX * scaleW;
-            wPlaneParams.origin.y = (wPlaneParams.height * 0.5) + wWorldCenterY * scaleW;
-            updatePlaneViewportRanges(wPlaneParams);
-        }
+    for (const [plane, ranges, zoom, fromSlider] of [
+        [zPlaneParams, zPlaneInitialRanges, state.zPlaneZoom, updateZFromSlider],
+        [wPlaneParams, wPlaneInitialRanges, state.wPlaneZoom, updateWFromSlider]
+    ]) {
+        const fittedScale = Math.min(plane.width / (ranges.x[1] - ranges.x[0]),
+            plane.height / (ranges.y[1] - ranges.y[0]));
+        const previous = plane.preciseViewport;
+        const baseScale = !fromSlider && previous
+            ? previous.baseScale * Math.min(plane.width / previous.width, plane.height / previous.height)
+            : fittedScale;
+        synchronizePreciseViewport(plane, fromSlider ? zoom : previous?.zoom ?? zoom, baseScale);
     }
 
 
@@ -204,6 +171,15 @@ function formatChainingSeed(seed) {
     return `${re} ${imValue < 0 ? '-' : '+'} ${im}i`;
 }
 
+
+export function composeCanvasLayers(layers) {
+    const image = document.createElement('canvas');
+    image.width = layers[0].width;
+    image.height = layers[0].height;
+    const ctx = image.getContext('2d');
+    for (const layer of layers) ctx.drawImage(layer, 0, 0);
+    return image;
+}
 
 export function downloadCanvasImage(canvas, filename = 'complex-plane.png') {
     if (!canvas) return;

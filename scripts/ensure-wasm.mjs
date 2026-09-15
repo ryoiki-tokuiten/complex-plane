@@ -145,7 +145,7 @@ const exported = [
     '_ce_render_map_contour', '_ce_render_real_contour',
     '_ce_build_image_mesh_precise', '_ce_build_grid_fold',
     '_ce_build_fold_preimage_markers',
-    '_ce_create_domain_render_context', '_ce_destroy_domain_render_context', '_ce_render_domain_tile',
+    '_ce_encode_domain_number', '_ce_transform_viewport',
     '_ce_project_precise_pixels',
     '_ce_project_precise_pixels_to_canvas', '_ce_project_values_to_precise',
     '_ce_trace_streamlines', '_ce_build_vector_field', '_ce_build_tissot',

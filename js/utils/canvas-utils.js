@@ -1,6 +1,7 @@
 // js/utils/canvas-utils.js
 
-import { requireVisibleViewport } from './viewport.js';
+import { requireVisibleViewport, requireFiniteRange } from './viewport.js';
+import { resetPreciseViewport } from '../native/precise-viewport.js';
 
 export function mapToCanvasCoords(wX,wY,p){return{x:p.origin.x+wX*p.scale.x,y:p.origin.y-wY*p.scale.y};}
 export function mapCanvasToWorldCoords(cX,cY,p){
@@ -30,20 +31,24 @@ export function updatePlaneViewportRanges(planeParams) {
 }
 
 export function setPlaneViewport(planeParams, xRange, yRange) {
-    const xSpan = Math.max(1e-6, xRange[1] - xRange[0]);
-    const ySpan = Math.max(1e-6, yRange[1] - yRange[0]);
+    requireFiniteRange(xRange, 'Viewport x-axis'); requireFiniteRange(yRange, 'Viewport y-axis');
+    const xSpan = xRange[1] - xRange[0];
+    const ySpan = yRange[1] - yRange[0];
     const scale = Math.min(planeParams.width / xSpan, planeParams.height / ySpan);
     const centerX = (xRange[0] + xRange[1]) * 0.5;
     const centerY = (yRange[0] + yRange[1]) * 0.5;
     const targetXRange = planeParams.currentVisXRange;
     const targetYRange = planeParams.currentVisYRange;
 
-    targetXRange[0] = xRange[0];
-    targetXRange[1] = xRange[1];
-    targetYRange[0] = yRange[0];
-    targetYRange[1] = yRange[1];
+    targetXRange[0] = centerX - planeParams.width / scale * 0.5;
+    targetXRange[1] = centerX + planeParams.width / scale * 0.5;
+    targetYRange[0] = centerY - planeParams.height / scale * 0.5;
+    targetYRange[1] = centerY + planeParams.height / scale * 0.5;
     planeParams.scale.x = planeParams.scale.y = scale;
     planeParams.origin.x = planeParams.width * 0.5 - centerX * scale;
     planeParams.origin.y = planeParams.height * 0.5 + centerY * scale;
+    // Explicit range changes replace the canonical viewport. Pan and zoom use
+    // MPFR-relative edits instead of rebuilding a center from these doubles.
+    resetPreciseViewport(planeParams);
     updatePlaneViewportRanges(planeParams);
 }

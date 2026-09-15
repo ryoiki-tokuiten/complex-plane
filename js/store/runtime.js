@@ -1,7 +1,6 @@
 const createPanState = () => ({
     isPanning: false,
-    panStart: { x: 0, y: 0 },
-    panStartOrigin: { x: 0, y: 0 }
+    panStart: { x: 0, y: 0 }
 });
 
 export const runtime = {
@@ -25,14 +24,7 @@ export const runtime = {
         heading: 0
     },
     rendering: {
-        processingDomainDynamics: false,
-        domainViewport: null,
-        domainDynamicsStats: Object.freeze({
-            state: 'idle',
-            jobId: 0,
-            completedJobs: 0,
-            cancelledJobs: 0
-        }),
+        domainDynamicsStats: Object.freeze({ state: 'idle' }),
         wOriginGlowTime: 0,
         previousWindingNumber: null
     },

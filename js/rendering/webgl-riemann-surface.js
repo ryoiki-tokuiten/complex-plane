@@ -835,7 +835,7 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
       break;
     }
 
-    if ((orbitMode == 2 || orbitMode == 3) && dot(nextValue - current, nextValue - current) <= convergenceEpsilonSq * max(1.0, magSq)) {
+    if (orbitMode == 2 && dot(nextValue - current, nextValue - current) <= convergenceEpsilonSq * max(1.0, magSq)) {
       converged = true;
       eventValue = nextValue;
       eventIteration = float(i) + 1.0;
@@ -853,16 +853,6 @@ vec4 iteratedDynamicsColor(vec2 parameterValue, int chainMode, float brightnessF
   if (orbitMode == 2) return converged
     ? dynamicsPhaseEventColor(eventValue, convergenceIntensity(eventIteration), brightnessFactor)
     : vec4(0.0, 0.0, 0.0, 1.0);
-
-  if (orbitMode == 3) {
-    if (escaped) {
-      return dynamicsPhaseEventColor(eventValue, 1.0 - clamp(smoothIteration / max(float(u_chainCount), 1.0), 0.0, 1.0), brightnessFactor);
-    }
-    if (converged) {
-      return dynamicsPhaseEventColor(eventValue, convergenceIntensity(eventIteration), brightnessFactor);
-    }
-    return dynamicsValueColor(current, brightnessFactor);
-  }
 
   return dynamicsValueColor(current, brightnessFactor);
 }`

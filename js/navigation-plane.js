@@ -3,7 +3,7 @@ import { runtime } from './store/runtime.js';
 import { requestDomainRedraw } from './rendering/redraw-scheduler.js';
 import { ROCKET_DATA_URIS } from './rocket-assets.js';
 import { getChainedTransformFunction } from './native/map-runtime.js';
-import { updatePlaneViewportRanges } from './utils/canvas-utils.js';
+import { recenterPreciseViewport, requiresPreciseProjection } from './native/precise-viewport.js';
 import { drawRasterWithWebGL } from './rendering/draw-image-webgl.js';
 import { drawPlanarTransformedLine, drawComplexLineSetOnPlane } from './rendering/draw-planar.js';
 import { isFiniteComplex } from './utils/numeric-contracts.js';
@@ -163,12 +163,10 @@ function centerPlaneOnNavigationPoint(planeParams, point, panState) {
 
     const nextOriginX = planeParams.width / 2 - point.re * planeParams.scale.x;
     const nextOriginY = planeParams.height / 2 + point.im * planeParams.scale.y;
-    const shifted = Math.abs(nextOriginX - planeParams.origin.x) > 0.01 ||
-        Math.abs(nextOriginY - planeParams.origin.y) > 0.01;
-
-    planeParams.origin.x = nextOriginX;
-    planeParams.origin.y = nextOriginY;
-    updatePlaneViewportRanges(planeParams);
+    const shifted = requiresPreciseProjection(planeParams)
+        ? planeParams.preciseViewport.centerRe !== String(point.re) || planeParams.preciseViewport.centerIm !== String(point.im)
+        : Math.abs(nextOriginX - planeParams.origin.x) > 0.01 || Math.abs(nextOriginY - planeParams.origin.y) > 0.01;
+    recenterPreciseViewport(planeParams, point);
     return shifted;
 }
 

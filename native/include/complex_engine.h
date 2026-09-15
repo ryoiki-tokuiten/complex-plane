@@ -13,7 +13,11 @@ typedef struct {
     double im;
 } ce_complex;
 
-typedef struct ce_domain_render_context ce_domain_render_context;
+
+int32_t ce_transform_viewport(const char *const input[4], uint32_t precision,
+                              double scale_x, double scale_y, double shift_x, double shift_y,
+                              char *output, uint32_t row_bytes);
+
 
 typedef struct {
     uint32_t function_id;
@@ -117,6 +121,9 @@ typedef struct {
     ce_complex chain_seed;
 } ce_map_config;
 
+int32_t ce_encode_domain_number(uint32_t kind, uint32_t index, const char *text,
+                                uint32_t words, uint32_t *output);
+
 void *ce_alloc(size_t size);
 void ce_free(void *pointer);
 uint32_t ce_abi_version(void);
@@ -215,37 +222,20 @@ int32_t ce_build_planar_polyline(const ce_map_config *config,
                                  double max_segment_sq, uint32_t max_depth,
                                  uint32_t has_branch_cuts, double branch_cut_angle,
                                  ce_complex *output, uint32_t output_capacity);
-ce_domain_render_context *ce_create_domain_render_context(
-                              const ce_map_config *config,
-                              const char *center_re, const char *center_im,
-                              const char *x_span, const char *y_span,
-                              uint32_t precision_bits,
-                              uint32_t frame_width, uint32_t frame_height,
-                              uint32_t orbit_mode,
-                              const ce_complex *palette_rg, const double *palette_b,
-                              uint32_t palette_count, double brightness, double contrast,
-                              double saturation, double lightness_cycles);
-void ce_destroy_domain_render_context(ce_domain_render_context *context);
-int32_t ce_render_domain_tile(ce_domain_render_context *context,
-                              uint32_t tile_x, uint32_t tile_y,
-                              uint32_t tile_width, uint32_t tile_height, uint32_t scale,
-                              uint32_t adaptive_quality,
-                              uint8_t *rgba);
-
 int32_t ce_project_precise_pixels(const ce_map_config *config,
                                   const char *input_center_re, const char *input_center_im,
-                                  double input_zoom_power, uint32_t precision_bits,
+                                  const char *input_x_span, const char *input_y_span, uint32_t precision_bits,
                                   uint32_t input_width, uint32_t input_height,
                                   const float *input_pixels, uint32_t point_count,
                                   uint32_t map_points,
                                   const char *output_center_re, const char *output_center_im,
-                                  double output_zoom_power,
+                                  const char *output_x_span, const char *output_y_span,
                                   uint32_t output_width, uint32_t output_height,
                                   float *output_pixels, uint8_t *valid);
 int32_t ce_project_precise_pixels_to_canvas(const ce_map_config *config,
                                             const char *input_center_re,
                                             const char *input_center_im,
-                                            double input_zoom_power,
+                                            const char *input_x_span, const char *input_y_span,
                                             uint32_t precision_bits,
                                             uint32_t input_width, uint32_t input_height,
                                             const float *input_pixels, uint32_t point_count,
@@ -257,7 +247,7 @@ int32_t ce_project_values_to_precise(const ce_map_config *config,
                                      const ce_complex *source_points, uint32_t point_count,
                                      uint32_t map_points,
                                      const char *output_center_re, const char *output_center_im,
-                                     double output_zoom_power, uint32_t precision_bits,
+                                     const char *output_x_span, const char *output_y_span, uint32_t precision_bits,
                                      uint32_t output_width, uint32_t output_height,
                                      float *output_pixels, uint8_t *valid);
 int32_t ce_generate_transform_signal(uint32_t signal_type, double frequency, double amplitude,
@@ -347,7 +337,7 @@ int32_t ce_build_image_mesh_precise(const ce_map_config *config,
                                      double source_center_re, double source_center_im,
                                      double source_width, double source_height,
                                      const char *view_center_re, const char *view_center_im,
-                                     double zoom_power, uint32_t precision_bits,
+                                     const char *view_x_span, const char *view_y_span, uint32_t precision_bits,
                                      uint32_t pixel_width, uint32_t pixel_height,
                                      uint32_t base_resolution, uint32_t max_depth,
                                      uint32_t max_cells, uint32_t max_vertices,

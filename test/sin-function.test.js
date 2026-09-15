@@ -8,8 +8,6 @@ import {
     evaluateNativePoints,
     nativeMapOptions
 } from '../js/native/complex-engine.js';
-import { createDomainDynamicsTileRenderer } from '../js/native/domain-engine.js';
-import { buildPlanarDomainDynamicsSnapshot } from '../js/rendering/domain-dynamics.js';
 import {
     buildComplexMathLibraryGLSL,
     getWebGLFunctionIdShared
@@ -54,39 +52,4 @@ test('sin is registered across native maps, expressions, and WebGL dispatch', ()
 
     const expression = compileExpression('sin(z)', { allowedVariables: ['z'] });
     assertComplexClose(expression({ z: points[2] }), expectedSin(points[2]));
-});
-
-test('sin renders through the native domain-dynamics path', () => {
-    const keys = [
-        'currentFunction', 'chainingEnabled', 'chainCount',
-        'algebraicChainingEnabled', 'algebraicChainingTerms'
-    ];
-    const before = Object.fromEntries(keys.map(key => [key, state[key]]));
-
-    try {
-        Object.assign(state, {
-            currentFunction: 'sin',
-            chainingEnabled: false,
-            chainCount: 1,
-            algebraicChainingEnabled: false,
-            algebraicChainingTerms: []
-        });
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, {
-            width: 1,
-            height: 1,
-            currentVisXRange: [Math.PI / 2, Math.PI / 2 + 1],
-            currentVisYRange: [0, 1]
-        });
-        const renderer = createDomainDynamicsTileRenderer(snapshot);
-        try {
-            const pixel = renderer({ x: 0, y: 0, width: 1, height: 1, scale: 1 });
-            assert.equal(pixel.length, 4);
-            assert.equal(pixel[3], 255);
-            assert.ok(pixel[0] !== 0 || pixel[1] !== 0 || pixel[2] !== 0);
-        } finally {
-            renderer.dispose();
-        }
-    } finally {
-        Object.assign(state, before);
-    }
 });

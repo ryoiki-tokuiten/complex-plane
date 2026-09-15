@@ -525,3 +525,18 @@ export function collectExpressionDependencies(ast) {
     }
     return { variables, functions };
 }
+
+export function normalizeExpressionNode(node) {
+    if (typeof node === 'number') return { type: 'literal', value: { re: node, im: 0 } };
+    if (typeof node === 'string') return { type: 'variable', name: node };
+    if (!node || typeof node !== 'object') throw new Error('Invalid native expression node.');
+    if (node.type === 'number') return { type: 'literal', value: { re: Number(node.value), im: 0 } };
+    if (node.op && node.left !== undefined && node.right !== undefined && !node.type) {
+        return {
+            type: 'binary', op: node.op,
+            left: normalizeExpressionNode(node.left),
+            right: normalizeExpressionNode(node.right)
+        };
+    }
+    return node;
+}

@@ -51,7 +51,6 @@ export function Overlays({ contextPanel = '' }) {
                 <option value={"value"}>Final Value</option>
                 <option value={"escape"}>Escape</option>
                 <option value={"attractor"}>Attractor</option>
-                <option value={"hybrid"}>Hybrid</option>
               </Ui>
             </Ui>
             <RangeControls controls={DOMAIN_RANGES} labelClass="compact-text" />

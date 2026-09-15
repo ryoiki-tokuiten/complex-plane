@@ -1,4 +1,4 @@
-import { collectExpressionDependencies, parseExpression } from '../math/expression/parser.js';
+import { collectExpressionDependencies, parseExpression, normalizeExpressionNode } from '../math/expression/parser.js';
 import {
     requireFiniteComplex,
     requireFiniteNumber,
@@ -44,7 +44,7 @@ const wasm = instance.exports;
 wasmMemory = wasm.memory;
 wasm._initialize();
 
-if (wasm.ce_abi_version() !== 3) {
+if (wasm.ce_abi_version() !== 5) {
     throw new Error(`Unsupported native complex engine ABI ${wasm.ce_abi_version()}.`);
 }
 
@@ -132,24 +132,16 @@ export const EXPRESSION_ERROR_MESSAGES = Object.freeze({
     9: 'Expression result is undefined or outside the supported numeric range'
 });
 
-function normalizeExpressionNode(node) {
-    if (typeof node === 'number') return { type: 'literal', value: { re: node, im: 0 } };
-    if (typeof node === 'string') return { type: 'variable', name: node };
-    if (!node || typeof node !== 'object') throw new Error('Invalid native expression node.');
-    if (node.type === 'number') return { type: 'literal', value: { re: Number(node.value), im: 0 } };
-    if (node.op && node.left !== undefined && node.right !== undefined && !node.type) {
-        return {
-            type: 'binary', op: node.op,
-            left: normalizeExpressionNode(node.left),
-            right: normalizeExpressionNode(node.right)
-        };
-    }
-    return node;
-}
-
 function nativeLiteral(value, label) {
     if (typeof value === 'number') return { re: requireFiniteNumber(value, label), im: 0 };
     return requireFiniteComplex(value, label);
+}
+
+function identicalExpression(left, right) {
+    // Source locations do not change expression identity. Both operands still
+    // execute, so this proof never hides an undefined intermediate value.
+    const syntax = (key, value) => key === 'start' || key === 'end' ? undefined : value;
+    return JSON.stringify(left, syntax) === JSON.stringify(right, syntax);
 }
 
 function parseNativeExpression(source) {
@@ -197,7 +189,7 @@ function compileNativeExpression(root) {
                     '^': EXPRESSION_OPS.power
                 })[node.op];
                 if (opcode === undefined) throw new Error(`Unsupported native binary operator: ${node.op}`);
-                emit(opcode);
+                emit(opcode, node.op === '-' && identicalExpression(node.left, node.right) ? 1 : 0);
                 return;
             }
             case 'call': {
@@ -313,7 +305,7 @@ export function compileNativeExpressionProgram(root, variableNames) {
                     '>=': GENERIC_EXPRESSION_OPS.greaterEqual
                 })[node.op];
                 if (opcode === undefined) throw new Error(`Unsupported native binary operator: ${node.op}`);
-                emit(opcode);
+                emit(opcode, node.op === '-' && identicalExpression(node.left, node.right) ? 1 : 0);
                 return;
             }
             case 'conditional': {
@@ -460,7 +452,7 @@ function functionIdFor(name) {
     return id;
 }
 
-function writeAlgebraicConfig(view, pointer, options, allocations) {
+function writeAlgebraicConfig(pointer, options, allocations) {
     if (!Array.isArray(options.algebraicChainingTerms)) {
         throw new Error('Native algebraic evaluation requires an explicit terms array.');
     }
@@ -495,8 +487,8 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
             termsView.setUint32(at + 16, term.factorOffset, true);
             termsView.setUint32(at + 20, term.factorCount, true);
         });
-        view.setUint32(pointer + FUNCTION_TERMS_PTR, termsPointer, true);
-        view.setUint32(pointer + FUNCTION_TERMS_COUNT, packedTerms.length, true);
+        memoryView().setUint32(pointer + FUNCTION_TERMS_PTR, termsPointer, true);
+        memoryView().setUint32(pointer + FUNCTION_TERMS_COUNT, packedTerms.length, true);
     }
     if (packedFactors.length) {
         const factorsPointer = trackAlloc(allocations, packedFactors.length * 24);
@@ -509,8 +501,8 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
             factorsView.setUint32(at + 12, 0, true);
             factorsView.setFloat64(at + 16, factor.power, true);
         });
-        view.setUint32(pointer + FUNCTION_FACTORS_PTR, factorsPointer, true);
-        view.setUint32(pointer + FUNCTION_FACTORS_COUNT, packedFactors.length, true);
+        memoryView().setUint32(pointer + FUNCTION_FACTORS_PTR, factorsPointer, true);
+        memoryView().setUint32(pointer + FUNCTION_FACTORS_COUNT, packedFactors.length, true);
     }
     const instructions = options.algebraicExpressionAst
         ? compileNativeExpression(options.algebraicExpressionAst)
@@ -525,8 +517,8 @@ function writeAlgebraicConfig(view, pointer, options, allocations) {
             expressionView.setFloat64(at + 8, instruction.re, true);
             expressionView.setFloat64(at + 16, instruction.im, true);
         });
-        view.setUint32(pointer + FUNCTION_EXPRESSION_PTR, expressionPointer, true);
-        view.setUint32(pointer + FUNCTION_EXPRESSION_COUNT, instructions.length, true);
+        memoryView().setUint32(pointer + FUNCTION_EXPRESSION_PTR, expressionPointer, true);
+        memoryView().setUint32(pointer + FUNCTION_EXPRESSION_COUNT, instructions.length, true);
     }
 }
 
@@ -642,23 +634,24 @@ function writeInstructionBuffer(program, allocations) {
     return pointer;
 }
 
-function writeDynamicConfig(view, pointer, dynamic, allocations) {
+function writeDynamicConfig(pointer, dynamic, allocations) {
     if (!dynamic) return;
     if (!dynamic?.pointProgram?.instructions?.length || !dynamic?.termProgram?.instructions?.length ||
-        !dynamic.variables?.length || !dynamic.variableNames?.length) {
+        !Array.isArray(dynamic.variables) || !Array.isArray(dynamic.variableNames)) {
         throw new Error('Native dynamic aggregate is incomplete.');
     }
     const pointPointer = writeInstructionBuffer(dynamic.pointProgram, allocations);
     const termPointer = writeInstructionBuffer(dynamic.termProgram, allocations);
     const variableCount = dynamic.variableNames.length;
     const sourceCount = dynamic.variables.length;
-    const variablesPointer = trackAlloc(allocations, sourceCount * variableCount * 16);
+    const variablesPointer = trackAlloc(allocations, Math.max(1, sourceCount * variableCount * 16));
     const variablesView = memoryView();
     dynamic.variables.forEach((row, source) => row.forEach((value, slot) => writeComplex(
         variablesView, variablesPointer + (source * variableCount + slot) * 16, value, NaN, NaN
     )));
-    const flagsPointer = trackAlloc(allocations, variableCount);
+    const flagsPointer = trackAlloc(allocations, Math.max(1, variableCount));
     new Uint8Array(wasm.memory.buffer, flagsPointer, variableCount).set(dynamic.variableFlags);
+    const view = memoryView();
     view.setUint32(pointer + MAP_DYNAMIC_POINT_PTR, pointPointer, true);
     view.setUint32(pointer + MAP_DYNAMIC_POINT_COUNT, dynamic.pointProgram.instructions.length, true);
     view.setUint32(pointer + MAP_DYNAMIC_TERM_PTR, termPointer, true);
@@ -673,7 +666,7 @@ function writeDynamicConfig(view, pointer, dynamic, allocations) {
 
 function writeMapConfig(pointer, options, allocations) {
     if (!options || typeof options !== 'object') throw new Error('Native map options are required.');
-    const view = memoryView();
+    let view = memoryView();
     new Uint8Array(wasm.memory.buffer, pointer, MAP_CONFIG_SIZE).fill(0);
     const functionKey = options.functionKey;
     const functionId = NATIVE_FUNCTION_IDS[functionKey];
@@ -722,6 +715,7 @@ function writeMapConfig(pointer, options, allocations) {
     if (coefficients.length) {
         const coefficientPointer = alloc(coefficients.length * 16);
         allocations.push(coefficientPointer);
+        view = memoryView();
         const coefficientView = memoryView();
         coefficients.forEach((coefficient, index) => writeComplex(coefficientView, coefficientPointer + index * 16, coefficient));
         view.setUint32(pointer + FUNCTION_POLYNOMIAL_PTR, coefficientPointer, true);
@@ -739,7 +733,7 @@ function writeMapConfig(pointer, options, allocations) {
     view.setFloat64(pointer + FUNCTION_BRANCH_ANGLE, branchCutAngle, true);
     view.setUint32(pointer + FUNCTION_BRANCH_RAY, 1, true);
     view.setUint32(pointer + FUNCTION_ZETA_CONTINUATION, options.zetaContinuationEnabled ? 1 : 0, true);
-    if (functionKey === 'algebraic_chaining') writeAlgebraicConfig(view, pointer, options, allocations);
+    if (functionKey === 'algebraic_chaining') writeAlgebraicConfig(pointer, options, allocations);
     const taylor = options.taylor;
     if (taylor) {
         const coefficients = Array.isArray(taylor.coefficients) ? taylor.coefficients : [];
@@ -761,7 +755,7 @@ function writeMapConfig(pointer, options, allocations) {
         configView.setFloat64(pointer + MAP_TAYLOR_RADIUS_SQ, radius * radius, true);
         configView.setUint32(pointer + MAP_USE_TAYLOR, 1, true);
     }
-    writeDynamicConfig(view, pointer, options.dynamicAggregate, allocations);
+    writeDynamicConfig(pointer, options.dynamicAggregate, allocations);
     wasm.ce_prepare_map_config(pointer);
 }
 
@@ -1838,6 +1832,23 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
     });
 }
 
+export function encodeDomainNumbers(numbers, words) {
+    if (!Number.isInteger(words) || words < 3 || words > 274) throw new Error('Domain precision is outside the supported range.');
+    const stride = Math.ceil((words + 4) / 4) * 4;
+    return withAllocations(allocations => {
+        const pointer = trackAlloc(allocations, stride * 4);
+        const result = new Uint32Array(numbers.length * stride);
+        for (let i = 0; i < numbers.length; i++) {
+            const descriptor = numbers[i];
+            const string = writeCString(descriptor.text, allocations);
+            const status = wasm.ce_encode_domain_number(descriptor.kind, descriptor.index, string, words, pointer);
+            if (status !== 0) throw new Error(`Domain constant preparation failed (${status}).`);
+            result.set(new Uint32Array(wasm.memory.buffer, pointer, words + 4), i * stride);
+        }
+        return result;
+    });
+}
+
 function writeDomainPalette(palette, allocations) {
     if (!Array.isArray(palette) || palette.length < 2) {
         throw new Error('Native domain rendering requires at least two palette stops.');
@@ -1854,68 +1865,6 @@ function writeDomainPalette(palette, allocations) {
         paletteView.setFloat64(paletteBPointer + index * 8, stop[2], true);
     });
     return { paletteRgPointer, paletteBPointer, paletteCount: palette.length };
-}
-
-export function createCompiledDomainTileRenderer(snapshot) {
-    const allocations = [];
-    const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
-    writeMapConfig(configPointer, snapshot, allocations);
-    const palette = snapshot.paletteStops;
-    const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(palette, allocations);
-
-    const viewport = snapshot.viewport;
-    const orbitMode = ({ value: 0, escape: 1, attractor: 2, hybrid: 3 })[snapshot.orbitColoringMode];
-    if (orbitMode === undefined) throw new Error(`Unsupported native orbit-coloring mode: ${snapshot.orbitColoringMode}`);
-    const style = snapshot.style;
-    if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
-        throw new Error('Native domain rendering requires finite style parameters.');
-    }
-    if (typeof viewport.centerRe !== 'string' || typeof viewport.centerIm !== 'string' ||
-        typeof viewport.xSpan !== 'string' || typeof viewport.ySpan !== 'string' ||
-        !Number.isInteger(viewport.precisionBits)) {
-        throw new Error('Native domain rendering requires one MPFR-centered viewport.');
-    }
-    const centerRePointer = writeCString(viewport.centerRe, allocations);
-    const centerImPointer = writeCString(viewport.centerIm, allocations);
-    const xSpanPointer = writeCString(viewport.xSpan, allocations);
-    const ySpanPointer = writeCString(viewport.ySpan, allocations);
-    let outputCapacity = 0;
-    let outputPointer = 0;
-    const renderContextPointer = wasm.ce_create_domain_render_context(
-        configPointer, centerRePointer, centerImPointer, xSpanPointer, ySpanPointer,
-        viewport.precisionBits,
-        viewport.width, viewport.height,
-        orbitMode, paletteRgPointer, paletteBPointer, paletteCount,
-        style.brightness, style.contrast, style.saturation, style.lightnessCycles
-    );
-    if (!renderContextPointer) {
-        throw new Error('Native domain render-context allocation failed.');
-    }
-
-    const render = tile => {
-        const outputLength = tile.width * tile.height * 4;
-        if (outputLength > outputCapacity) {
-            if (outputPointer) wasm.ce_free(outputPointer);
-            outputCapacity = outputLength;
-            outputPointer = alloc(outputCapacity);
-        }
-        const status = wasm.ce_render_domain_tile(
-            renderContextPointer,
-            tile.x, tile.y, tile.width, tile.height, tile.scale,
-            tile.adaptiveQuality ? 1 : 0, outputPointer
-        );
-        if (status !== 0) throw new Error(`Native domain tile failed with status ${status}.`);
-        const result = new Uint8ClampedArray(outputLength);
-        result.set(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
-        return result;
-    };
-    render.dispose = () => {
-        if (outputPointer) wasm.ce_free(outputPointer);
-        if (renderContextPointer) wasm.ce_destroy_domain_render_context(renderContextPointer);
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    };
-
-    return render;
 }
 
 const CONTOUR_COMPONENT_IDS = Object.freeze({ real: 0, imaginary: 1, imag: 1, magnitude: 2, phase: 3 });
@@ -1966,15 +1915,40 @@ export function renderNativeMapContour(options) {
     });
 }
 
+export function transformNativeViewport(viewport, { scaleX = 1, scaleY = 1, shiftX = 0, shiftY = 0 } = {}) {
+    const keys = ['centerRe', 'centerIm', 'xSpan', 'ySpan'];
+    if (!keys.every(key => typeof viewport?.[key] === 'string') ||
+        !Number.isInteger(viewport.precisionBits) || viewport.precisionBits < 128 || viewport.precisionBits > 4096 ||
+        ![scaleX, scaleY, shiftX, shiftY].every(Number.isFinite) || scaleX <= 0 || scaleY <= 0) {
+        throw new Error('Viewport edits require canonical decimal coordinates and finite affine factors.');
+    }
+    return withAllocations((allocations, allocate) => {
+        const strings = keys.map(key => writeCString(viewport[key], allocations));
+        const pointers = allocate(16), rowBytes = 2048, output = allocate(rowBytes * 4);
+        new Uint32Array(wasm.memory.buffer, pointers, 4).set(strings);
+        const status = wasm.ce_transform_viewport(pointers, viewport.precisionBits, scaleX, scaleY, shiftX, shiftY, output, rowBytes);
+        if (status !== 0) throw new Error('The viewport edit exceeded its supported precision or exponent range.');
+        const bytes = new Uint8Array(wasm.memory.buffer, output, rowBytes * 4), decoder = new TextDecoder();
+        return Object.fromEntries(keys.map((key, index) => {
+            const begin = index * rowBytes, end = bytes.indexOf(0, begin);
+            if (end < begin || end >= begin + rowBytes) throw new Error('Native viewport returned an invalid decimal string.');
+            return [key, decoder.decode(bytes.subarray(begin, end))];
+        }));
+    });
+}
+
 function preciseViewportArguments(viewport) {
     const width = requireInteger(viewport?.width, 'Precise viewport width');
     const height = requireInteger(viewport?.height, 'Precise viewport height');
-    const zoomPower = Number(viewport?.zoomPower);
     const precisionBits = requireInteger(viewport?.precisionBits, 'Precise viewport precision');
-    if (typeof viewport?.centerRe !== 'string' || typeof viewport?.centerIm !== 'string' ||
+    if (!['centerRe', 'centerIm', 'xSpan', 'ySpan'].every(key => typeof viewport?.[key] === 'string') ||
         width < 1 || height < 1 || precisionBits < 128 || precisionBits > 4096 ||
-        !Number.isFinite(zoomPower)) throw new Error('Native precise geometry requires a precise viewport.');
-    return { width, height, zoomPower, precisionBits };
+        !viewport.xSpan || !viewport.ySpan) throw new Error('Native precise geometry requires a precise viewport.');
+    return { width, height, xSpan: viewport.xSpan, ySpan: viewport.ySpan, precisionBits };
+}
+
+function writePreciseSpans(viewport, allocations) {
+    return [writeCString(viewport.xSpan, allocations), writeCString(viewport.ySpan, allocations)];
 }
 
 function packPrecisePixelPairs(pixels, label) {
@@ -2014,9 +1988,9 @@ export function projectNativePrecisePixels(options, pixels) {
         const validPointer = trackAlloc(allocations, pointCount);
         new Float32Array(wasm.memory.buffer, pixelsPointer, packed.length).set(packed);
         const status = wasm.ce_project_precise_pixels(
-            mapPointer, inputRePointer, inputImPointer, input.zoomPower, input.precisionBits,
+            mapPointer, inputRePointer, inputImPointer, ...writePreciseSpans(input, allocations), input.precisionBits,
             input.width, input.height, pixelsPointer, pointCount, options.mapPoints ? 1 : 0,
-            outputRePointer, outputImPointer, output.zoomPower, output.width, output.height,
+            outputRePointer, outputImPointer, ...writePreciseSpans(output, allocations), output.width, output.height,
             resultPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native precise pixel geometry failed with status ${status}.`);
@@ -2039,7 +2013,7 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
         const validPointer = trackAlloc(allocations, pointCount);
         new Float32Array(wasm.memory.buffer, pixelsPointer, packed.length).set(packed);
         const status = wasm.ce_project_precise_pixels_to_canvas(
-            mapPointer, inputRePointer, inputImPointer, input.zoomPower, input.precisionBits,
+            mapPointer, inputRePointer, inputImPointer, ...writePreciseSpans(input, allocations), input.precisionBits,
             input.width, input.height, pixelsPointer, pointCount, options.mapPoints ? 1 : 0,
             requireFiniteNumber(options.outputOrigin?.x, 'Precise canvas origin x'),
             requireFiniteNumber(options.outputOrigin?.y, 'Precise canvas origin y'),
@@ -2066,7 +2040,7 @@ export function projectNativeValuesToPrecise(options, points) {
         points.forEach((point, index) => writeComplex(view, pointsPointer + index * 16, point, NaN, NaN));
         const status = wasm.ce_project_values_to_precise(
             mapPointer, pointsPointer, points.length, options.mapPoints ? 1 : 0,
-            outputRePointer, outputImPointer, output.zoomPower, output.precisionBits,
+            outputRePointer, outputImPointer, ...writePreciseSpans(output, allocations), output.precisionBits,
             output.width, output.height, resultPointer, validPointer
         );
         if (status !== 0) throw new Error(`Native precise value geometry failed with status ${status}.`);
@@ -2391,7 +2365,7 @@ export function buildNativeImageMesh(options) {
             status = wasm.ce_build_image_mesh_precise(
                 configPointer,
                 sourceCenter.re, sourceCenter.im, sourceWidth, sourceHeight,
-                centerRePointer, centerImPointer, viewport.zoomPower, viewport.precisionBits,
+                centerRePointer, centerImPointer, ...writePreciseSpans(viewport, allocations), viewport.precisionBits,
                 pixelWidth, pixelHeight,
                 baseResolution, maxDepth, maxCells, maxVertices, maxSamples,
                 texturePointer, mappedPointer, indicesPointer, indexCapacity, statsPointer

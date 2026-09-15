@@ -1,3 +1,4 @@
+import { requiresPreciseProjection } from '../native/precise-viewport.js';
 import { state } from '../store/state.js';
 import { createWebGLProgramShared } from './webgl-shared.js';
 import { buildNativeImageMesh, nativeMapOptions } from '../native/complex-engine.js';
@@ -214,7 +215,7 @@ export function buildRasterSurfaceMesh(planeParams, map, raster) {
         pixelHeight: planeParams.height,
         buildFold: true,
         foldHeightScale: state.foldSurfaceHeightScale,
-        preciseViewport: planeParams.preciseViewport
+        preciseViewport: requiresPreciseProjection(planeParams) ? planeParams.preciseViewport : null
     });
     return {
         ...mesh,
@@ -227,14 +228,15 @@ export function buildRasterSurfaceMesh(planeParams, map, raster) {
 function meshKey(planeParams, map, isWPlane, width, height, raster) {
     const bounds = viewBounds(planeParams);
     const sourceSize = raster.size;
-    const precise = planeParams.preciseViewport;
+    const precise = requiresPreciseProjection(planeParams) ? planeParams.preciseViewport : null;
     return [
         isWPlane ? map.signature : 'identity',
         isWPlane ? getImageRenderStage(map) : 0,
         raster.center.re, raster.center.im,
         precise?.centerRe ?? bounds.x0,
         precise?.centerIm ?? bounds.x1,
-        precise?.zoomPower ?? bounds.y0,
+        precise?.xSpan ?? bounds.y0,
+        precise?.ySpan ?? bounds.y1,
         precise?.precisionBits ?? bounds.y1,
         sourceSize.width, sourceSize.height,
         width, height
@@ -266,7 +268,7 @@ function ensureMesh(active, planeParams, map, isWPlane, width, height, raster) {
         sourceCenter: raster.center,
         sourceSize: raster.size,
         mapOptions: rasterMapOptions(map, isWPlane),
-        preciseViewport: planeParams.preciseViewport,
+        preciseViewport: requiresPreciseProjection(planeParams) ? planeParams.preciseViewport : null,
         pixelWidth: width,
         pixelHeight: height
     });

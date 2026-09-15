@@ -302,6 +302,16 @@
     overflow: hidden;
 }
 
+#z_plane_domain_canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+#z_plane_domain_canvas[hidden] { display: none; }
+#z_plane_canvas { position: relative; background: transparent; }
+
 .canvas-overlay {
     position: absolute;
     inset: 0;

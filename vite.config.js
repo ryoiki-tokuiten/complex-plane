@@ -30,6 +30,7 @@ export default defineConfig({
     format: 'es'
   },
   server: {
+    hmr: process.env.VITE_BROWSER_TEST === '1' ? false : undefined,
     port: 3000,
     watch: {
       ignored: ['**/.cache/**', '**/native/build/**', '**/dist/**']
