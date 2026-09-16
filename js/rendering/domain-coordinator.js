@@ -41,7 +41,7 @@ export class DomainCoordinator {
         const revision=++this.revision;
         this.report({state:'rendering',message:null,jobId:revision,width:snapshot.viewport.width,height:snapshot.viewport.height,
             precisionBits:0,remainingPixels:snapshot.viewport.width*snapshot.viewport.height,workerMilliseconds:0,wallMilliseconds:0});
-        if(this.workerError) { this.fail(this.workerError); return; }
+        this.workerError = null;
         this.send({type:'render',revision,snapshot});
     }
     cancel() {

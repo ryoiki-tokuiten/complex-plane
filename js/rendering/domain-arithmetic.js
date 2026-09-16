@@ -179,7 +179,7 @@ F fdiv(F a,F b) {
         // All products stay below 2^30, including their carries.
         uvec4 denominator[(W+3)/4],remainder[(W+4)/4],quotient[(W+4)/4];
         int shift=0; uint top=word(b.d,0);
-        while(top<16384u) { top<<=1; shift++; }
+        for(int s=0;s<15 && top>0u && top<16384u;s++) { top<<=1; shift++; }
         uint ac=0u,bc=0u;
         for(int i=uWords-1;i>=0;i--) {
             uint av=(word(a.d,i)<<uint(shift))+ac,bv=(word(b.d,i)<<uint(shift))+bc;
@@ -190,7 +190,7 @@ F fdiv(F a,F b) {
         for(int digit=0;digit<=uWords;digit++) {
             uint head=word(remainder,0)*RADIX+word(remainder,1);
             uint q=min(MASK,head/word(denominator,0)),r=head-q*word(denominator,0);
-            while(r<RADIX && q*word(denominator,1)>r*RADIX+word(remainder,2)) {
+            for(int step=0;step<2 && r<RADIX && q*word(denominator,1)>r*RADIX+word(remainder,2);step++) {
                 q--; r+=word(denominator,0);
             }
             uint carry=0u; int borrow=0;

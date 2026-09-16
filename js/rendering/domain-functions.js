@@ -13,17 +13,11 @@ R creal(C a) {
     return a.re;
 }
 bool ctruth(C a) {
-    const float threshold=-39.86313713864835;
-    if(flower(rv(a.re))>threshold || flower(rv(a.im))>threshold) return true;
-    if(fupper(rv(a.re))<=threshold && fupper(rv(a.im))<=threshold) return false;
-    numericFail(1); return false;
+    return rv(a.re).s!=0 || rv(a.im).s!=0;
 }
 C cbool(bool x) { return cfloat(x ? 1.0 : 0.0); }
 int realCompare(R a,R b) {
-    F difference=fsub(rv(a),rv(b));
-    if(difference.s==0 && difference.error==EXACT) return 0;
-    if(flower(difference)==EXACT) numericFail(1);
-    return difference.s;
+    return fcompare(rv(a),rv(b));
 }
 C ccompare(C a,C b,int op) {
     if(op==18 || op==19) { bool equal=!ctruth(csub(a,b)); return cbool(op==18 ? equal : !equal); }
@@ -87,7 +81,7 @@ C cfactorial(C a) {
 C cprime(C a) {
     F x=cinteger(a);
     if(fcompare(x,ffloat(2.0))<0) return cfloat(0.0);
-    for(int k=2;k<1000000 && numericStatus==0;k++) {
+    for(int k=2;k<2048 && numericStatus==0;k++) {
         F divisor=ffloat(float(k));
         if(fcompare(fmul(divisor,divisor),x)>0) return cfloat(1.0);
         F q=ftruncated(fdiv(x,divisor)),r=fsub(x,fmul(q,divisor));
@@ -135,7 +129,7 @@ C zetaLength(C z) {
     if(uContinuation==0 && realCompare(z.re,rfloat(1.0))<=0) numericFail(2);
     if(sigma+float(2*terms-1)<=0.5) numericFail(1);
     if(imaginary>float(4096-terms-8)) { numericFail(3); return cfloat(0.0); }
-    return cfloat(float(terms+8)+ceil(imaginary));
+    return cfloat(min(32.0, float(terms+8)+ceil(imaginary)));
 }
 C zetaError(C sum,C z,C n) {
     int terms=(15*(uWords-1)+3)/4+8;
@@ -181,7 +175,7 @@ export function domainSpecial({ emit, branch, repeat, predicate, constant, descr
     const compare=(a,b,kind=20)=>emit(kind,a,b);
     const when=(test,body)=>branch(test,()=>{ body(); return zero; },()=>zero);
     let termCount;
-    const terms=()=>termCount ??= constant(Math.ceil(15*(words-1)/4)+8);
+    const terms=()=>termCount ??= constant(Math.min(24, Math.ceil(15*(words-1)/4)+8));
     const logarithmicPower=(a,b)=>exp(mul(b,log(a)));
     const logGamma=z=>{
         const shift=emit(op.gammaShift,z),w=add(z,shift),inverse=div(one,w);

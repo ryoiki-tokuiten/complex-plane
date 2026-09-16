@@ -6,18 +6,12 @@ class DomainRenderer {
         if (!Number.isInteger(workerCount) || workerCount < 1) throw new Error('Domain rendering requires a CPU worker count.');
         this.canvas = canvas; this.onStatus = onStatus; this.workerCount = workerCount;
         this.workers = []; this.generation = 0; this.frame = null; this.job = null;
-        this.channel = new MessageChannel();
-        this.scheduledImmediate = false;
-        this.channel.port1.onmessage = () => {
-            this.scheduledImmediate = false;
-            this.step();
-        };
         this.gpu = new DomainWebGL(canvas);
-        this.onLost = event => { event.preventDefault(); this.fail('The domain-coloring GPU context was lost.'); };
+        this.onLost = event => { event.preventDefault(); this.fail('The domain-coloring GPU context was lost; recovering...'); };
         this.onRestored = () => {
             try {
+                this.gpu = new DomainWebGL(this.canvas);
                 const snapshot = this.requestedSnapshot;
-                this.gpu = new DomainWebGL(canvas);
                 if (snapshot) this.render(snapshot);
             } catch (error) { this.fail(error.message); }
         };
@@ -36,8 +30,12 @@ class DomainRenderer {
         this.cancel();
         this.requestedSnapshot=snapshot;
         if(this.gpu.gl.isContextLost()) {
-            this.report('failed','The domain-coloring GPU context is lost; rendering can resume after it is restored.');
-            return;
+            try {
+                this.gpu = new DomainWebGL(this.canvas);
+            } catch(e) {
+                this.report('failed','The domain-coloring GPU context is lost; rendering can resume after it is restored.');
+                return;
+            }
         }
         this.gpu.reset(snapshot);
         // Coordinate spacing sets an initial precision, never a renderer choice.
@@ -52,7 +50,9 @@ class DomainRenderer {
         const stops=snapshot.paletteStops;
         const slope=Math.max(...stops.slice(1).flatMap((stop,i)=>stop.map((value,c)=>Math.abs(value-stops[i][c]))))*(stops.length-1);
         const colorBits=Math.ceil(Math.log2(255*Math.max(1,slope)/0.49))+6;
-        const words = domainPrecision(Math.max(3, Math.ceil((scaleBits + Math.log2(Math.max(v.width,v.height)) + colorBits) / 15) + 1));
+        const count = snapshot.chainingEnabled ? snapshot.chainCount : 1;
+        const iterationBits = count > 1 ? Math.ceil(Math.log2(count) * 12) + (count > 60 ? 30 : 0) : 0;
+        const words = domainPrecision(Math.max(3, Math.ceil((scaleBits + Math.log2(Math.max(v.width,v.height)) + colorBits + iterationBits) / 15) + 1));
         this.job = { snapshot, words, done: false, startedAt: performance.now(), workerMilliseconds: 0, remaining: v.width * v.height };
         this.prepare();
     }
@@ -65,8 +65,10 @@ class DomainRenderer {
         job.cursor=0;
         job.stage=0;
         job.lastPresent=0;
-        job.batchSize=4096;
         job.batchStart=0;
+        const chainDepth = job.snapshot.chainingEnabled ? job.snapshot.chainCount : 1;
+        const complexity = (job.program.instructionCount || 1) * chainDepth;
+        job.batchSize = Math.max(1024, Math.min(4096, Math.floor(16384 / Math.max(1, Math.sqrt(complexity)))));
         this.gpu.prepare(job.program);
         const count = Math.min(this.workerCount, job.program.numbers.length);
         while (this.workers.length < count) {
@@ -110,80 +112,107 @@ class DomainRenderer {
             if (--job.pending === 0) this.schedule();
         } catch (error) { this.fail(error.message); }
     }
-    schedule(delay=0) {
-        if (this.frame !== null || this.scheduledImmediate) return;
-        if (delay > 0) {
-            this.frame = setTimeout(() => {
-                this.frame = null;
-                this.step();
-            }, delay);
-        } else {
-            this.scheduledImmediate = true;
-            this.channel.port2.postMessage(null);
-        }
+    schedule(delay = 16) {
+        if (this.frame !== null) return;
+        this.frame = setTimeout(() => {
+            this.frame = null;
+            this.step();
+        }, delay);
     }
     step() {
         if (!this.job || this.job.done) return;
+        const job = this.job;
         try {
-            if(!this.job.submitted) {
-                if(!this.gpu.ready() || this.job.pending) {
-                    if(!this.gpu.programs[0]) this.report('rendering', 'Compiling high-precision domain shader...');
+            if (!job.submitted) {
+                if (!this.gpu.ready() || job.pending) {
+                    if (!this.gpu.programs[0]) this.report('rendering', 'Compiling high-precision domain shader...');
                     this.schedule(16);
                     return;
                 }
-                const job=this.job,total=job.snapshot.viewport.width*job.snapshot.viewport.height;
-                if(this.gpu.drawFence) {
-                    if(!this.gpu.pollDraw()) { this.schedule(1); return; }
-                    if(job.batchStart) {
-                        const duration = performance.now() - job.batchStart;
-                        if(duration > 35) job.batchSize = Math.max(512, Math.floor(job.batchSize * 0.6));
-                        else if(duration < 12) job.batchSize = Math.min(16384, Math.floor(job.batchSize * 1.4));
+                const total = job.snapshot.viewport.width * job.snapshot.viewport.height;
+
+                // 1. If a GPU batch is currently in-flight, wait for it to complete.
+                if (this.gpu.drawFence) {
+                    if (!this.gpu.pollDraw()) {
+                        this.schedule(4);
+                        return;
                     }
-                }
-                if(job.stage===0) {
-                    if(job.cursor<total) {
-                        const count=Math.min(job.batchSize,total-job.cursor);
-                        job.batchStart = performance.now();
-                        this.gpu.draw(job.cursor,count,0); job.cursor+=count;
-                        if(performance.now()-job.lastPresent>=16) {
-                            this.gpu.present(); job.lastPresent=performance.now();
+                    // The batch just completed on the GPU!
+                    if (performance.now() - job.lastPresent >= 60 || job.cursor >= total) {
+                        this.gpu.present();
+                        job.lastPresent = performance.now();
+                    }
+                    if (job.cursor >= total) {
+                        if (job.stage === 0) {
+                            this.gpu.present();
+                            job.lastPresent = performance.now();
+                            this.gpu.requestCoverage();
+                            job.submitted = true;
+                            this.schedule(16);
+                            return;
                         }
-                        this.schedule(0); return;
-                    }
-                    this.gpu.present(); job.lastPresent=performance.now();
-                    job.stage=1; job.cursor=0;
-                    this.schedule(0); return;
-                }
-                if(job.stage===1) {
-                    if(job.cursor<total) {
-                        const count=Math.min(job.batchSize,total-job.cursor);
-                        job.batchStart = performance.now();
-                        this.gpu.draw(job.cursor,count,1); job.cursor+=count;
-                        if(performance.now()-job.lastPresent>=16) {
-                            this.gpu.present(); job.lastPresent=performance.now();
+                        if (job.stage === 1) {
+                            this.gpu.present();
+                            job.lastPresent = performance.now();
+                            this.job.done = true;
+                            this.report('complete');
+                            return;
                         }
-                        this.schedule(0); return;
                     }
-                    this.gpu.present(); job.lastPresent=performance.now();
-                    this.gpu.requestCoverage(); job.submitted=true;
+                    // Leave explicit breathing space on the GPU before submitting the next batch.
+                    this.schedule(16);
+                    return;
+                }
+
+                // 2. Submit the next bounded batch to the GPU.
+                if (job.stage === 0 || job.stage === 1) {
+                    const batchPoints = job.stage === 1
+                        ? Math.max(256, Math.floor(job.batchSize / 4))
+                        : job.batchSize;
+                    const count = Math.min(batchPoints, total - job.cursor);
+                    this.gpu.draw(job.cursor, count, job.stage, false);
+                    job.cursor += count;
+                    this.gpu.syncDraw();
+                    // Poll for this batch to complete on the GPU
+                    this.schedule(4);
+                    return;
                 }
             }
+
+            // 3. Waiting for coverage reduction
             const status = this.gpu.pollCoverage();
-            if (!status) { this.schedule(1); return; }
+            if (!status) {
+                this.schedule(8);
+                return;
+            }
             this.job.remaining = status.remaining;
-            if (!status.remaining) { this.job.done = true; this.report('complete'); return; }
-            if (status.resource) { this.fail('Some samples exceed the numerical operation or exponent limit.'); return; }
-            if (this.job.words === 274) { this.fail('Some samples need more than the supported 4096-bit precision.'); return; }
-            this.job.words = Math.min(274, this.job.words * 2); this.prepare();
-        } catch (error) { this.fail(error.message); }
+            if (!status.remaining) {
+                this.gpu.clearAA();
+                job.stage = 1;
+                job.cursor = 0;
+                job.submitted = false;
+                this.schedule(16);
+                return;
+            }
+            if (status.resource) {
+                this.fail('Some samples exceed the numerical operation or exponent limit.');
+                return;
+            }
+            if (this.job.words === 274) {
+                this.fail('Some samples need more than the supported 4096-bit precision.');
+                return;
+            }
+            this.job.words = Math.min(274, this.job.words * 2);
+            this.prepare();
+        } catch (error) {
+            this.fail(error.message);
+        }
     }
     cancel() {
         ++this.generation;
-        this.requestedSnapshot=null;
         if (this.frame !== null) clearTimeout(this.frame);
         this.frame = null;
-        this.scheduledImmediate = false;
-        this.gpu.cancelReadback();
+        try { this.gpu?.cancelReadback(); } catch(e) {}
         this.workers.forEach(entry => { entry.request=null; });
         if (this.job) this.job.done = true;
     }
@@ -218,14 +247,14 @@ self.onmessage=({data})=>{
                 const start=()=>{
                     pendingRender=null;
                     try {
-                        // A cancelled draw is still running on the GPU. Retain
-                        // its fence and coalesce requests until that bounded
-                        // command completes, before resetting its attachments.
-                        if(!renderer.gpu.pollDraw()) { pendingRender=setTimeout(start,4); return; }
+                        if(renderer.gpu?.gl.isContextLost()) {
+                            try { renderer.gpu = new DomainWebGL(renderer.canvas); } catch(e) {}
+                        }
+                        if(!renderer.gpu?.gl.isContextLost() && !renderer.gpu.pollDraw()) { pendingRender=setTimeout(start,8); return; }
                         renderer.render(data.snapshot);
                     } catch(error) { renderer.fail(error.message); }
                 };
-                pendingRender=setTimeout(start,0);
+                pendingRender=setTimeout(start,24);
             }
         } else if(data.type==='export') {
             if(data.revision!==revision || pendingRender!==null) throw new Error('The domain view changed before export completed.');

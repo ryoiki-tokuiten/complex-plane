@@ -232,7 +232,7 @@ export function synchronizePlanarDomainVisibility(runtimeState) {
 export function renderPlanarDomainDynamics(canvas, planeParams, snapshot) {
     if (!canvas || !planeParams || !snapshot) throw new Error('Domain rendering requires its canvas, viewport, and map snapshot.');
     const signature = JSON.stringify(snapshot);
-    if (signature === activeSignature) return;
+    if (signature === activeSignature && domainStatus.value?.state !== 'failed') return;
     try {
         if (coordinator && coordinator.canvas !== canvas) { coordinator.dispose(); coordinator = null; }
         coordinator ??= new DomainCoordinator(canvas, report);
@@ -243,6 +243,7 @@ export function renderPlanarDomainDynamics(canvas, planeParams, snapshot) {
 
 export function failPlanarDomainDynamics(error) {
     coordinator?.cancel();
+    activeSignature = null;
     report(Object.freeze({ ...domainStatus.value, state: 'failed', message: error?.message || String(error) }));
 }
 

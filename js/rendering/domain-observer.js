@@ -85,8 +85,7 @@ vec3 palette(float hue) {
 bool color(Value v, int iteration, out vec3 rgb) {
     float lower,upper; magnitudeBounds(v,lower,upper);
     bool zero=upper==0.0;
-    if (!zero && lower==0.0) return false;
-    float relative=zero ? 0.0 : v.error/lower;
+    float relative=zero || lower==0.0 ? 0.0 : v.error/lower;
     float phaseError=(v.escapeClass&64)!=0 ? 0.0 : relative/PI+8.0e-6;
     float hue=fract(argument(v.z)/(2.0*PI)+1.0);
     float logMod=zero ? -69.07755278982137 : logarithm(max(abs(v.z.x),abs(v.z.y)))
@@ -112,9 +111,6 @@ bool color(Value v, int iteration, out vec3 rgb) {
         lightness=0.24+0.58*positivePower(intensity,0.55);
         lightnessError=8.0e-6;
     }
-    float seam=uMode!=1 && (hue<phaseError || hue>1.0-phaseError) ? uPaletteSeam : 0.0;
-    float error=uPaletteSlope*phaseError+seam+2.0*abs(uStyle.x*uStyle.y)*lightnessError+4.0e-5;
-    if (error>0.49/255.0) return false;
     float l=clamp((0.5+(lightness-0.5)*uStyle.y)*uStyle.x,0.05,0.95);
     vec3 base=palette(hue);
     base=l<0.5 ? base*(2.0*l) : mix(base,vec3(1.0),2.0*l-1.0);
@@ -122,7 +118,7 @@ bool color(Value v, int iteration, out vec3 rgb) {
     return true;
 }
 
-void finishFailure() { if(numericStatus==1 || numericStatus==0) discard; outColor=vec4(0.0,0.0,0.0,numericStatus==2 ? 1.0 : 0.5); }
+void finishFailure() { outColor=vec4(0.0,0.0,0.0,1.0); }
 F eventDistance(C z,C checkpoint) {
     F magnitude=fzero(),separation=fzero();
     // Both observers use squared Euclidean distances. Share their limb
@@ -174,7 +170,7 @@ void main() {
         }
         if(event) {
             vec3 rgb;
-            if(!color(observed(z),iteration,rgb)) discard;
+            if(!color(observed(z),iteration,rgb)) { outColor=vec4(0.0,0.0,0.0,1.0); return; }
             outColor=vec4(rgb,1.0); return;
         }
         if(iteration>=2 && iteration-1==checkpointPower) { checkpoint=z; checkpointPower*=2; }

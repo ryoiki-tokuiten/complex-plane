@@ -60,8 +60,8 @@ C evaluateMap(C inputValue,C parameter) {
         C initial=inputValue; if(i==1) initial=parameter;
         storeRegister(i,initial);
     }
-    int pc=0,source=0,skipUndefined=-1; bool anyValue=false;
-    while(pc<uInstructionCount && numericStatus==0) {
+    int pc=0,source=0,skipUndefined=-1,safety=0; bool anyValue=false;
+    while(pc<uInstructionCount && numericStatus==0 && ++safety<32768) {
         ivec4 command=instruction(pc++);
         int op=command.x;
         if(op==27) { pc=command.w; continue; }
@@ -183,6 +183,7 @@ C evaluateMap(C inputValue,C parameter) {
             }
         }
     }
+    if(safety>=32768) numericFail(3);
     return cfloat(0.0);
 }
 `;
