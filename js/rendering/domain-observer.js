@@ -158,15 +158,27 @@ void main() {
     R x=radd(rconstant(4),rmul(rconstant(6),rdivideSmall(rfloat(pixel.x-uSize.x*0.5),uint(uSize.x))));
     R y=radd(rconstant(5),rmul(rconstant(7),rdivideSmall(rfloat(uSize.y*0.5-pixel.y),uint(uSize.y))));
     C parameter=C(rseed(x),y),z=parameter; if(uZeroSeed!=0) z=cconstant(uSeed,uSeed+1); C checkpoint=z;
+    initParameter(parameter);
     int checkpointPower=1;
     for(int iteration=1;iteration<=uCount;iteration++) {
         z=evaluateMap(z,parameter);
         if(numericStatus!=0) { finishFailure(); return; }
         bool event=uMode==0 && iteration==uCount;
-        if(uMode==1 || (uMode==2 && iteration>=2)) {
+        if(uMode==1) {
+            F re=rv(z.re),im=rv(z.im);
+            if(re.s!=0 && (re.e>=2 || im.e>=2)) {
+                event=true;
+            } else if(re.s==0 || (re.e<0 && im.e<0)) {
+                event=false;
+            } else {
+                F distance=eventDistance(z,checkpoint);
+                if(distance.error!=EXACT && flower(distance)==EXACT) { numericFail(1); finishFailure(); return; }
+                event=distance.s>0;
+            }
+        } else if(uMode==2 && iteration>=2) {
             F distance=eventDistance(z,checkpoint);
             if(distance.error!=EXACT && flower(distance)==EXACT) { numericFail(1); finishFailure(); return; }
-            event=uMode==1 ? distance.s>0 : distance.s<=0;
+            event=distance.s<=0;
         }
         if(event) {
             vec3 rgb;

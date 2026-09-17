@@ -105,10 +105,34 @@ function program(gl, fragment, vertex = VERTEX) {
 export class DomainWebGL {
     constructor(canvas) {
         this.canvas = canvas;
-        const gl = canvas.getContext('webgl2', { alpha: true, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false });
+        const attributes = {
+            powerPreference: 'high-performance',
+            alpha: true,
+            antialias: false,
+            depth: false,
+            stencil: false,
+            preserveDrawingBuffer: false,
+            failIfMajorPerformanceCaveat: false
+        };
+        let gl = canvas.getContext('webgl2', attributes);
+        if (!gl) {
+            delete attributes.powerPreference;
+            gl = canvas.getContext('webgl2', attributes);
+        }
         if (!gl) throw new Error('Planar domain coloring requires WebGL 2.');
         this.gl = gl;
         if(gl.isContextLost()) throw new Error('The domain-coloring GPU context is unavailable.');
+        let rendererName = gl.getParameter(gl.RENDERER);
+        if (!rendererName || rendererName.includes('WebKit')) {
+            try {
+                const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                if (debugInfo) {
+                    const unmasked = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                    if (unmasked) rendererName = unmasked;
+                }
+            } catch (_) {}
+        }
+        console.log(`[WebGL2 Active GPU] ${rendererName}`);
         this.textureLimit=gl.getParameter(gl.MAX_TEXTURE_SIZE);
         this.viewportLimit=gl.getParameter(gl.MAX_VIEWPORT_DIMS);
         if(!this.textureLimit || !this.viewportLimit) throw new Error('The domain-coloring GPU context is unavailable.');
@@ -340,7 +364,7 @@ export class DomainWebGL {
     pollDraw() {
         if(!this.drawFence) return true;
         const gl=this.gl,status=gl.clientWaitSync(this.drawFence,gl.SYNC_FLUSH_COMMANDS_BIT,0);
-        if(status===gl.TIMEOUT_EXPIRED) return false;
+        if(status===gl.TIMEOUT_EXPIRED) { gl.flush(); return false; }
         gl.deleteSync(this.drawFence); this.drawFence=null;
         if(status===gl.WAIT_FAILED || gl.getError()!==gl.NO_ERROR) throw new Error('Domain GPU evaluation failed.');
         return true;

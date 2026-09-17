@@ -15,7 +15,8 @@ export const DOMAIN_OP = Object.freeze({
     rotate: 113, principalSqrt: 114, normSquared: 115, divideReal: 116,
     realExp: 117, realLog: 118, sincos: 119, sinhcosh: 120, branchArgument: 121,
     realSqrt: 122, checkRadial: 123, argumentCheck: 124, logScale: 125, oddSeries: 126,
-    value: 127, derivative: 128, jet: 129, realAtan: 130
+    value: 127, derivative: 128, jet: 129, realAtan: 130,
+    square: 131
 });
 export const DOMAIN_PRECISIONS = Object.freeze([3, 6, 12, 24, 48, 96, 192, 274]);
 export function domainPrecision(required) {
@@ -99,13 +100,21 @@ export function compileDomainProgram(snapshot, words) {
     };
     number('', 1); number('', 2); number('', 9); number('', 10);
     for (const key of ['centerRe','centerIm','xSpan','ySpan']) number(snapshot.viewport[key], 0);
+    const constantMap = new Map();
     const constant = value => {
         if (typeof value === 'boolean') value = Number(value);
         if (typeof value === 'number') value = { re: value, im: 0 };
         if (!value || !Number.isFinite(value.re) || !Number.isFinite(value.im)) throw new Error('Domain program requires finite complex constants.');
-        const row = number(value.re); number(value.im); return { row };
+        const key = `${value.re},${value.im}`;
+        if (!constantMap.has(key)) {
+            const row = number(value.re); number(value.im);
+            constantMap.set(key, { row });
+        }
+        return constantMap.get(key);
     };
     const zero = constant(0), one = constant(1);
+    const isZero = x => typeof x === 'object' && x !== null && x.row === zero.row;
+    const isOne = x => typeof x === 'object' && x !== null && x.row === one.row;
     const parameterConstant = (name, logarithm = false) => {
         if (!constants.has(name)) {
             const value = snapshot[name];
@@ -122,7 +131,29 @@ export function compileDomainProgram(snapshot, words) {
     const valueOf = a => snapshot.derivativeOrder ? emit(DOMAIN_OP.value, a) : a;
     const withDerivative = (value, input, slope) => snapshot.derivativeOrder
         ? emit(DOMAIN_OP.jet, emit(38, value, slope()), input) : value;
-    const emit = (op, a = zero, b = zero, immediate = 0, dest = nextRegister++) => {
+    const emit = (op, a = zero, b = zero, immediate = 0, dest = undefined) => {
+        if (dest === undefined) {
+            if (op === 3) {
+                if (isZero(a)) return b;
+                if (isZero(b)) return a;
+            }
+            if (op === 4) {
+                if (isZero(b)) return a;
+                if (a === b) return zero;
+            }
+            if (op === 5) {
+                if (isOne(a)) return b;
+                if (isOne(b)) return a;
+                if (isZero(a) || isZero(b)) return zero;
+                if (a === b) return emit(DOMAIN_OP.square, a);
+            }
+            if (op === DOMAIN_OP.integerPower) {
+                if (immediate === 0) return one;
+                if (immediate === 1) return a;
+                if (immediate === 2) return emit(DOMAIN_OP.square, a);
+            }
+            dest = nextRegister++;
+        }
         // Complex primitives are compositions of the same tape operations as
         // user expressions. The shader contains each scalar kernel only once.
         if(op === DOMAIN_OP.realLog) {
@@ -206,7 +237,7 @@ export function compileDomainProgram(snapshot, words) {
             while(count > 0) {
                 if(count & 1) result = emit(5, result, factor);
                 count >>>= 1;
-                if(count > 0) factor = emit(5, factor, factor);
+                if(count > 0) factor = emit(DOMAIN_OP.square, factor);
             }
             return emit(0, result, zero, 0, dest);
         }
@@ -255,6 +286,7 @@ export function compileDomainProgram(snapshot, words) {
     const predicate = (a, kind) => emit(DOMAIN_OP.predicate, a, zero, kind);
     const power = (a, b, n) => {
         if(n !== null) {
+            if(n === 2) return emit(DOMAIN_OP.square, a);
             const value = emit(DOMAIN_OP.integerPower, a, zero, Math.abs(n));
             return n < 0 ? emit(6, one, value) : value;
         }
@@ -295,9 +327,33 @@ export function compileDomainProgram(snapshot, words) {
         if (['gamma','loggamma','zeta'].includes(name)) { special = true; return specialMap(name, a); }
         if (name in calls) return simple(calls[name], args);
         if (['cos','sin','sinh'].includes(name)) return emit(DOMAIN_OP[name], a);
-        if (name === 'tan') return emit(6, emit(DOMAIN_OP.sin, a), emit(DOMAIN_OP.cos, a));
-        if (name === 'sec') return emit(6, one, emit(DOMAIN_OP.cos, a));
-        if (name === 'tanh') return emit(6, emit(DOMAIN_OP.sinh, a), emit(DOMAIN_OP.cosh, a));
+        if (name === 'tan') {
+            const twoRe = emit(DOMAIN_OP.scale, emit(13, a), zero, 1);
+            const twoIm = emit(DOMAIN_OP.scale, emit(14, a), zero, 1);
+            const sc = emit(DOMAIN_OP.sincos, twoRe);
+            const shch = emit(DOMAIN_OP.sinhcosh, twoIm);
+            const num = emit(38, emit(13, sc), emit(13, shch));
+            const denom = emit(3, emit(14, sc), emit(14, shch));
+            return emit(DOMAIN_OP.divideReal, num, denom);
+        }
+        if (name === 'sec') {
+            const circular = emit(DOMAIN_OP.sincos, emit(13, a));
+            const hyper = emit(DOMAIN_OP.sinhcosh, emit(14, a));
+            const s = emit(13, circular), c = emit(14, circular), sh = emit(13, hyper), ch = emit(14, hyper);
+            const u = emit(5, c, ch), v = emit(5, s, sh);
+            const denom = emit(3, emit(DOMAIN_OP.square, u), emit(DOMAIN_OP.square, v));
+            const num = emit(38, u, v);
+            return emit(DOMAIN_OP.divideReal, num, denom);
+        }
+        if (name === 'tanh') {
+            const twoRe = emit(DOMAIN_OP.scale, emit(13, a), zero, 1);
+            const twoIm = emit(DOMAIN_OP.scale, emit(14, a), zero, 1);
+            const shch = emit(DOMAIN_OP.sinhcosh, twoRe);
+            const sc = emit(DOMAIN_OP.sincos, twoIm);
+            const num = emit(38, emit(13, shch), emit(13, sc));
+            const denom = emit(3, emit(14, shch), emit(14, sc));
+            return emit(DOMAIN_OP.divideReal, num, denom);
+        }
         if (name === 'exp') return emit(DOMAIN_OP.exp, emit(5, a, parameterConstant('expBase', true)));
         if (name === 'ln') return emit(6, emit(DOMAIN_OP.log, a), parameterConstant('logBase', true));
         if (name === 'power') return power(a, parameterConstant('fractionalPowerN'), integer(literal(snapshot.fractionalPowerN)));
@@ -358,6 +414,7 @@ export function compileDomainProgram(snapshot, words) {
         node.args.map((child, index) => ({ child, index })).sort((a, b) => weight(b.child) - weight(a.child))
             .forEach(({ child, index }) => { args[index] = evaluate(child, variables, bindings); });
         if ((node.kind === 'op' && node.op === 7) || (node.kind === 'call' && node.name === 'pow')) return power(args[0], args[1], integer(node.args[1]));
+        if (node.kind === 'op' && node.op === 5 && args.length === 2 && args[0] === args[1]) return emit(DOMAIN_OP.square, args[0]);
         if (node.kind === 'op' && node.op === 6) {
             const n = integer(node.args[1]);
             if (n !== null && n !== 0 && Math.abs(n) < 65536) return emit(DOMAIN_OP.divideSmall, args[0], zero, n);

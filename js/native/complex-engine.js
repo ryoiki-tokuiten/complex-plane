@@ -36,11 +36,25 @@ const wasi = {
         return 0;
     }
 };
-const { instance } = await WebAssembly.instantiate(await loadBytes(), {
+const wasmImports = {
     env: { emscripten_notify_memory_growth() {} },
     wasi_snapshot_preview1: wasi
-});
-const wasm = instance.exports;
+};
+let wasmInstance;
+if (typeof WebAssembly.instantiateStreaming === 'function' && wasmUrl.protocol !== 'file:') {
+    try {
+        const streamResponse = fetch(wasmUrl, { cache: 'no-cache' });
+        const result = await WebAssembly.instantiateStreaming(streamResponse, wasmImports);
+        wasmInstance = result.instance;
+    } catch (_) {
+        const result = await WebAssembly.instantiate(await loadBytes(), wasmImports);
+        wasmInstance = result.instance;
+    }
+} else {
+    const result = await WebAssembly.instantiate(await loadBytes(), wasmImports);
+    wasmInstance = result.instance;
+}
+const wasm = wasmInstance.exports;
 wasmMemory = wasm.memory;
 wasm._initialize();
 

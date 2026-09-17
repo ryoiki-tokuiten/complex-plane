@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "node --import ./test/setup.js --test test/*.test.js",
     "test:e2e": "playwright test",
+    "open:gpu": "env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia google-chrome http://127.0.0.1:4173/complex-plane/ &",
     "benchmark": "node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
     "benchmark:smoke": "BENCH_PROFILE=smoke node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
     "build:wasm": "node scripts/ensure-wasm.mjs --force"

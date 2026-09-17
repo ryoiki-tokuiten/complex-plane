@@ -11,9 +11,8 @@ void numericFail(int code) { if(numericStatus==0) numericStatus=code; }
 #define word(a,i) a[(i)>>2][(i)&3]
 struct F { uvec4 d[(W+3)/4]; int e; int s; float error; };
 uniform highp usampler2D uNumbers;
-// Dynamic loop bounds keep drivers from expanding every limb operation into
-// thousands of instructions at high precision. W only sizes the storage.
-uniform int uNumberRows,uWords,uNewtonSteps,uComponents;
+uniform int uNumberRows,uWords,uNewtonSteps;
+const int uComponents = 2;
 float up(float x) { return x+max(0.00002,abs(x)*0.000001); }
 float errorSum(float a,float b) {
     if(a==EXACT) return b; if(b==EXACT) return a;
@@ -107,17 +106,20 @@ F fmul(F a,F b) {
     if(a.error==EXACT && b.error==EXACT) {
         c.error=EXACT;
     } else {
-        c.error=errorSum(a.error==EXACT || b.s==0 ? EXACT : a.error+up(flog(b)),
-            b.error==EXACT || a.s==0 ? EXACT : b.error+up(flog(a)));
-        c.error=errorSum(c.error,a.error==EXACT || b.error==EXACT ? EXACT : up(a.error+b.error));
+        float eb=EXACT,ea=EXACT;
+        if(a.error!=EXACT && b.s!=0) eb=a.error+up(flog(b));
+        if(b.error!=EXACT && a.s!=0) ea=b.error+up(flog(a));
+        c.error=errorSum(eb,ea);
+        if(a.error!=EXACT && b.error!=EXACT) c.error=errorSum(c.error,up(a.error+b.error));
     }
     if(a.s==0 || b.s==0) return c;
     uvec4 t[(2*W+3)/4]; for(int i=0;i<(2*uWords+3)/4;i++) t[i]=uvec4(0u);
     for(int i=uWords-1;i>=0;i--) {
-        if(word(a.d,i)==0u) continue;
+        uint ai=word(a.d,i);
+        if(ai==0u) continue;
         uint carry=0u;
         for(int j=uWords-1;j>=0;j--) {
-            uint v=word(a.d,i)*word(b.d,j)+word(t,i+j+1)+carry;
+            uint v=ai*word(b.d,j)+word(t,i+j+1)+carry;
             word(t,i+j+1)=v&MASK; carry=v>>15;
         }
         word(t,i)=carry;
@@ -150,7 +152,8 @@ F fdivideSmall(F a,uint divisor) {
     uvec4 digits[(W+5)/4]; uint carry=0u;
     for(int i=0;i<uWords+2;i++) {
         uint value=carry*RADIX+(i<W ? word(a.d,i) : 0u);
-        word(digits,i)=value/divisor; carry=value%divisor;
+        uint q=value/divisor;
+        word(digits,i)=q; carry=value-q*divisor;
     }
     F result=fzero(); result.s=a.s;
     int start=0; for(int i=0;i<2;i++) { if(word(digits,i)!=0u) break; start++; }
@@ -347,8 +350,8 @@ void fsincos(F x,out F sine,out F cosine) {
     F q=fneg(fmul(r,r)),s=r,c=ffloat(1.0),st=s,ct=c;
     bool finished=false;
     for(int n=1;n<2*uWords+32 && numericStatus==0;n++) {
-        st=fdivideSmall(fdivideSmall(fmul(st,q),uint(2*n)),uint(2*n+1));
-        ct=fdivideSmall(fdivideSmall(fmul(ct,q),uint(2*n-1)),uint(2*n));
+        st=fdivideSmall(fmul(st,q),uint((2*n)*(2*n+1)));
+        ct=fdivideSmall(fmul(ct,q),uint((2*n-1)*(2*n)));
         if(fseriesSmall(st,s) && fseriesSmall(ct,c)) { s=fseriesTail(s,st,1.0); c=fseriesTail(c,ct,1.0); finished=true; break; }
         s=fadd(s,st); c=fadd(c,ct);
     }
@@ -368,8 +371,8 @@ void fsinhcosh(F x,out F sine,out F cosine) {
     if(fupper(r)>1.0) { numericFail(1); sine=r; cosine=r; return; }
     bool finished=false;
     for(int n=1;n<2*uWords+32 && numericStatus==0;n++) {
-        st=fdivideSmall(fdivideSmall(fmul(st,q),uint(2*n)),uint(2*n+1));
-        ct=fdivideSmall(fdivideSmall(fmul(ct,q),uint(2*n-1)),uint(2*n));
+        st=fdivideSmall(fmul(st,q),uint((2*n)*(2*n+1)));
+        ct=fdivideSmall(fmul(ct,q),uint((2*n-1)*(2*n)));
         if(fseriesSmall(st,s) && fseriesSmall(ct,c)) { s=fseriesTail(s,st,1.0); c=fseriesTail(c,ct,1.0); finished=true; break; }
         s=fadd(s,st); c=fadd(c,ct);
     }
@@ -404,52 +407,25 @@ struct C { R re; R im; };
 R component(C a,int i) { if(i==0) return a.re; return a.im; }
 C cfloat(float x) { return C(rfloat(x),rfloat(0.0)); }
 C cconstant(int re,int im) { return C(rconstant(re),rconstant(im)); }
-C cadd(C a,C b) {
-    C result;
-    for(int i=0;i<uComponents;i++) {
-        R value=radd(component(a,i),component(b,i));
-        if(i==0) result.re=value; else result.im=value;
-    }
-    return result;
-}
+C cadd(C a,C b) { return C(radd(a.re,b.re),radd(a.im,b.im)); }
 C cneg(C a) { return C(rneg(a.re),rneg(a.im)); }
-C csub(C a,C b) { return cadd(a,cneg(b)); }
+C csub(C a,C b) { return C(rsub(a.re,b.re),rsub(a.im,b.im)); }
 C cmul(C a,C b) {
-    C result;
-    // Share one limb-product body across the four real products. Runtime
-    // component bounds prevent driver inlining from replicating its loops.
-    for(int i=0;i<uComponents;i++) {
-        R value=rfloat(0.0);
-        for(int j=0;j<uComponents;j++) {
-            R product=rmul(component(a,j),component(b,i^j));
-            if(i==0 && j==1) product=rneg(product);
-            value=radd(value,product);
-        }
-        if(i==0) result.re=value; else result.im=value;
-    }
-    return result;
+    R ac=rmul(a.re,b.re);
+    R bd=rmul(a.im,b.im);
+    R ad=rmul(a.re,b.im);
+    R bc=rmul(a.im,b.re);
+    return C(rsub(ac,bd),radd(ad,bc));
 }
-C cscale(C a,int k) {
-    C result;
-    for(int i=0;i<uComponents;i++) {
-        R value=rscale(component(a,i),k);
-        if(i==0) result.re=value; else result.im=value;
-    }
-    return result;
+C csquare(C a) {
+    R x2=rmul(a.re,a.re);
+    R y2=rmul(a.im,a.im);
+    R xy=rmul(a.re,a.im);
+    return C(rsub(x2,y2),rscale(xy,1));
 }
-C cdivideSmall(C a,uint n) {
-    C result;
-    for(int i=0;i<uComponents;i++) {
-        R value=rdivideSmall(component(a,i),n);
-        if(i==0) result.re=value; else result.im=value;
-    }
-    return result;
-}
-R cnormSquared(C a) {
-    R result=rfloat(0.0);
-    for(int i=0;i<uComponents;i++) { R x=component(a,i); result=radd(result,rmul(x,x)); }
-    return result;
-}
+C cscale(C a,int k) { return C(rscale(a.re,k),rscale(a.im,k)); }
+C cdivideSmall(C a,uint n) { return C(rdivideSmall(a.re,n),rdivideSmall(a.im,n)); }
+R cnormSquared(C a) { return radd(rmul(a.re,a.re),rmul(a.im,a.im)); }
 float cupper(C a) { return errorSum(fupper(rv(a.re)),fupper(rv(a.im))); }
 float cderivative(C a) { return errorSum(fupper(rd(a.re)),fupper(rd(a.im))); }
 C cerror(C a,float value,float slope) { a.re=rerrors(a.re,value,slope); a.im=rerrors(a.im,value,slope); return a; }
