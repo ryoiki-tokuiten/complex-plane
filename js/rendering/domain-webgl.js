@@ -27,18 +27,13 @@ vec4 resolved(ivec2 p) {
         ivec2 d=i==0 ? ivec2(-1,0) : i==1 ? ivec2(1,0) : i==2 ? ivec2(0,-1) : ivec2(0,1),q=p+d;
         if(any(lessThan(q,ivec2(0))) || any(greaterThanEqual(q,uSize))) continue;
         vec4 neighbor=texelFetch(uCenter,q,0);
-        if(neighbor.a!=1.0) continue;
+        if(neighbor.a!=1.0) return neighbor;
         edge=edge || any(greaterThanEqual(abs(center.rgb-neighbor.rgb),vec3(79.5/255.0)));
     }
     if(!edge) return center;
     vec4 a=texelFetch(uAA0,p,0),b=texelFetch(uAA1,p,0),c=texelFetch(uAA2,p,0),d=texelFetch(uAA3,p,0);
-    vec3 sum=vec3(0.0); float weight=0.0;
-    if(a.a==1.0) { sum+=a.rgb; weight+=1.0; }
-    if(b.a==1.0) { sum+=b.rgb; weight+=1.0; }
-    if(c.a==1.0) { sum+=c.rgb; weight+=1.0; }
-    if(d.a==1.0) { sum+=d.rgb; weight+=1.0; }
-    if(weight>0.0) return vec4((sum+center.rgb*(4.0-weight))*0.25,1.0);
-    return center;
+    if(a.a!=1.0) return a; if(b.a!=1.0) return b; if(c.a!=1.0) return c; if(d.a!=1.0) return d;
+    return vec4((a.rgb+b.rgb+c.rgb+d.rgb)*0.25,1.0);
 }`;
 const PRESENT = `#version 300 es
 precision highp float;
@@ -80,7 +75,6 @@ function beginProgram(gl, fragment, vertex = VERTEX) {
         }
         handle = gl.createProgram(); shaders.forEach(shader => gl.attachShader(handle, shader));
         gl.linkProgram(handle);
-        gl.flush();
         return { handle, shaders };
     } catch (error) {
         if (handle) gl.deleteProgram(handle);
@@ -162,7 +156,6 @@ export class DomainWebGL {
         this.gl.deleteTexture(texture); this.textures.splice(this.textures.indexOf(texture),1);
     }
     reset(snapshot) {
-        if(this.drawFence) { this.gl.deleteSync(this.drawFence); this.drawFence=null; }
         this.cancelReadback();
         const gl = this.gl;
         if(gl.isContextLost()) throw new Error('The domain-coloring GPU context is lost; rendering can resume after it is restored.');
@@ -179,12 +172,14 @@ export class DomainWebGL {
         if(resized) { this.canvas.width = this.width; this.canvas.height = this.height; }
         this.samples ??= Array.from({ length: 5 }, () => this.texture(this.width,this.height,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE));
         this.accepted ??= Array.from({ length: 5 }, () => this.texture(this.width,this.height,gl.R8,gl.RED,gl.UNSIGNED_BYTE));
-        for (let i = 0; i < 5; i++) {
-            this.target(this.samples[i], this.width, this.height);
+        this.samples.forEach(texture => {
+            this.target(texture,this.width,this.height);
             gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
-            this.target(this.accepted[i], this.width, this.height);
+        });
+        this.accepted.forEach(texture => {
+            this.target(texture,this.width,this.height);
             gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
-        }
+        });
         const stops = snapshot.paletteStops, colors=Float32Array.from(stops.flatMap(stop => [...stop,1]));
         if(!this.palette || this.paletteLength!==stops.length) {
             this.deleteTexture(this.palette);
@@ -211,13 +206,7 @@ export class DomainWebGL {
             this.statusWidth = width; this.statusHeight = height;
             this.coveragePlaceholder = this.texture(1, 1, gl.RGBA32UI, gl.RGBA_INTEGER, gl.UNSIGNED_INT, new Uint32Array(4));
         }
-    }
-    clearAA() {
-        const gl = this.gl;
-        for (let i = 1; i < 5; i++) {
-            this.target(this.samples[i], this.width, this.height);
-            gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
-        }
+        this.present();
     }
     prepare(compiled) {
         const gl=this.gl;
@@ -264,13 +253,15 @@ export class DomainWebGL {
         if(!cached) {
             const source=domainFragment(this.words,!!this.snapshot.derivativeOrder);
             const compilation=beginProgram(gl,source,SAMPLE_VERTEX);
-            cached={compilation,handle:null,locations:new Map()};
+            cached={compilation,handle:null,locations:new Map(),attempts:0};
             this.evaluators.set(key,cached);
         }
         if(!cached.handle) {
             if(this.parallelCompile) {
                 const complete=gl.getProgramParameter(cached.compilation.handle,this.parallelCompile.COMPLETION_STATUS_KHR);
-                if(!complete) { gl.flush(); return false; }
+                if(!complete) return false;
+            } else {
+                if(++cached.attempts < 4) return false;
             }
             cached.handle=finishProgram(gl,cached.compilation);
             cached.compilation=null;
@@ -289,7 +280,7 @@ export class DomainWebGL {
             offset+=count;
         }
     }
-    draw(start=0,count=this.width*this.height,stage=-1,sync=false) {
+    draw(start=0,count=this.width*this.height,stage=-1) {
         const gl=this.gl,index=0,loc=name=>this.uniform(index,name);
         gl.useProgram(this.programs[0]); gl.bindVertexArray(this.vao);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,this.numbers); gl.uniform1i(loc('uNumbers'),0);
@@ -328,18 +319,13 @@ export class DomainWebGL {
             gl.uniform1i(loc('uAccepted'),3);
             gl.drawArrays(gl.POINTS,start,count);
         });
-        if(sync) this.syncDraw();
-    }
-    syncDraw() {
-        const gl=this.gl;
-        if(this.drawFence) { gl.deleteSync(this.drawFence); this.drawFence=null; }
         this.drawFence=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);
         if(!this.drawFence) throw new Error('Domain GPU evaluation could not be submitted.');
         gl.flush();
     }
     pollDraw() {
         if(!this.drawFence) return true;
-        const gl=this.gl,status=gl.clientWaitSync(this.drawFence,gl.SYNC_FLUSH_COMMANDS_BIT,0);
+        const gl=this.gl,status=gl.clientWaitSync(this.drawFence,0,0);
         if(status===gl.TIMEOUT_EXPIRED) return false;
         gl.deleteSync(this.drawFence); this.drawFence=null;
         if(status===gl.WAIT_FAILED || gl.getError()!==gl.NO_ERROR) throw new Error('Domain GPU evaluation failed.');
@@ -357,11 +343,9 @@ export class DomainWebGL {
     present() {
         this.bindSamples(1); this.target(null, this.width, this.height);
         this.gl.drawArrays(this.gl.TRIANGLES, 0, 3);
-        this.gl.flush();
     }
     requestCoverage() {
         if (this.readback) return;
-        if (this.drawFence) { this.gl.deleteSync(this.drawFence); this.drawFence = null; }
         const gl = this.gl;
         this.bindSamples(2);
         let previous = { texture: this.coveragePlaceholder }, width = this.width, height = this.height;
@@ -392,7 +376,7 @@ export class DomainWebGL {
     pollCoverage() {
         if (!this.readback) return null;
         const gl = this.gl, { buffer, fence, bytes } = this.readback;
-        const status = gl.clientWaitSync(fence, gl.SYNC_FLUSH_COMMANDS_BIT, 0);
+        const status = gl.clientWaitSync(fence, 0, 0);
         if (status === gl.TIMEOUT_EXPIRED) return null;
         if (status === gl.WAIT_FAILED) throw new Error('Domain GPU coverage synchronization failed.');
         if (gl.getError() !== gl.NO_ERROR) throw new Error('Domain GPU evaluation or coverage reduction failed.');
