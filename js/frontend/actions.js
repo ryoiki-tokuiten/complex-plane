@@ -3,8 +3,7 @@ import { runtime } from '../store/runtime.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { loadUploadedMediaFile, pauseUploadedVideoPlayback, startVideoProcessingLoop, publishVideoPlaybackStatus, isMediaInputShape } from '../utils/raster-media.js';
 import { hidePlaneContextMenu, openPlaneContextMenu } from './plane-context-menu-state.js';
-import { mapCanvasToWorldCoords, setPlaneViewport } from '../utils/canvas-utils.js';
-import { panPreciseViewport, zoomPreciseViewport, resetPreciseViewport } from '../native/precise-viewport.js';
+import { updatePlaneViewportRanges, mapCanvasToWorldCoords, setPlaneViewport } from '../utils/canvas-utils.js';
 import { requireFiniteComplex, requireFiniteNumber } from '../utils/numeric-contracts.js';
 import { clonePlain } from '../utils/clone-utils.js';
 import {
@@ -515,13 +514,11 @@ function snapshotNormalViewports() {
     transformViewportSnapshot = {
         z: {
             xRange: copyRange(zPlaneParams.currentVisXRange),
-            yRange: copyRange(zPlaneParams.currentVisYRange),
-            preciseViewport: zPlaneParams.preciseViewport && { ...zPlaneParams.preciseViewport }
+            yRange: copyRange(zPlaneParams.currentVisYRange)
         },
         w: {
             xRange: copyRange(wPlaneParams.currentVisXRange),
-            yRange: copyRange(wPlaneParams.currentVisYRange),
-            preciseViewport: wPlaneParams.preciseViewport && { ...wPlaneParams.preciseViewport }
+            yRange: copyRange(wPlaneParams.currentVisYRange)
         },
         zZoom: state.zPlaneZoom,
         wZoom: state.wPlaneZoom
@@ -544,8 +541,6 @@ function restoreNormalViewports() {
 
     state.zPlaneZoom = snapshot.zZoom;
     state.wPlaneZoom = snapshot.wZoom;
-    zPlaneParams.preciseViewport = snapshot.z.preciseViewport;
-    wPlaneParams.preciseViewport = snapshot.w.preciseViewport;
 }
 
 function fitTransformViewports() {
@@ -1088,8 +1083,8 @@ function updatePointerSnapshot(snapshot, event) {
 
 function canvasPosition(ctx, pointer) {
     const rect = canvasRect(ctx);
-    ctx.pos.x = (pointer.clientX - rect.left) * ctx.canvas.width / rect.width;
-    ctx.pos.y = (pointer.clientY - rect.top) * ctx.canvas.height / rect.height;
+    ctx.pos.x = pointer.clientX - rect.left;
+    ctx.pos.y = pointer.clientY - rect.top;
     return ctx.pos;
 }
 
@@ -1145,7 +1140,9 @@ function panPlane(ctx, pos) {
     }
     const deltaX = pos.x - ctx.pan.panStart.x;
     const deltaY = pos.y - ctx.pan.panStart.y;
-    panPreciseViewport(ctx.params, ctx.precisePanStart, deltaX, deltaY);
+    ctx.params.origin.x = ctx.pan.panStartOrigin.x + deltaX;
+    ctx.params.origin.y = ctx.pan.panStartOrigin.y + deltaY;
+    updatePlaneViewportRanges(ctx.params);
     requestDomainRedraw(true);
 }
 
@@ -1172,6 +1169,8 @@ function startPan(ctx, pos) {
     ctx.clickStart.x = pos.x;
     ctx.clickStart.y = pos.y;
     ctx.hasDragged = false;
+    ctx.pan.panStartOrigin.x = ctx.params.origin.x;
+    ctx.pan.panStartOrigin.y = ctx.params.origin.y;
     ctx.precisePanStart = ctx.params.preciseViewport ? { ...ctx.params.preciseViewport } : null;
     ctx.canvas.style.cursor = 'grabbing';
     updateProbe(ctx, pos, false);
@@ -1406,8 +1405,16 @@ function zoomPlaneAt(ctx, pos, factor) {
         throw new Error(`${ctx.planeType}-plane zoom is outside the supported range.`);
     }
     const nextZoom = clamp(oldZoom * factor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
-    zoomPreciseViewport(ctx.params, pos.x, pos.y, oldZoom, nextZoom);
+    const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
+
     state[zoomKey] = nextZoom;
+    const applied = nextZoom / oldZoom;
+    ctx.params.scale.x *= applied;
+    ctx.params.scale.y *= applied;
+    ctx.params.origin.x = pos.x - world.x * ctx.params.scale.x;
+    ctx.params.origin.y = pos.y + world.y * ctx.params.scale.y;
+
+    updatePlaneViewportRanges(ctx.params);
     requestDomainRedraw(true);
 }
 
@@ -1496,7 +1503,6 @@ export function createPlaneViewportProps(planeParams, onRedraw) {
             planeParams.scale.y = planeParams.height / (yRange[1] - yRange[0]);
             planeParams.origin.x = -xRange[0] * planeParams.scale.x;
             planeParams.origin.y = yRange[1] * planeParams.scale.y;
-            resetPreciseViewport(planeParams);
         },
         scaleZoom: (_current, deltaY) => ({ factor: deltaY < 0 ? 0.85 : 1.15 }),
         onRedraw
@@ -1554,7 +1560,6 @@ function bindContourCanvasInteractions() {
             zPlaneParams.scale.y = zPlaneParams.height / (yRange[1] - yRange[0]);
             zPlaneParams.origin.x = -xRange[0] * zPlaneParams.scale.x;
             zPlaneParams.origin.y = yRange[1] * zPlaneParams.scale.y;
-            resetPreciseViewport(zPlaneParams);
         },
         scaleZoom(current, deltaY) {
             const oldZoom = requireFiniteNumber(current.zoom, 'Contour zoom');

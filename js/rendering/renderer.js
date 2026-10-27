@@ -1,4 +1,3 @@
-import { requiresPreciseProjection } from '../native/precise-viewport.js';
 import { state, context, zPlaneParams as defaultZPlaneParams, wPlaneParams as defaultWPlaneParams } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import {
@@ -60,6 +59,7 @@ import { requestRedrawAll, requestUiRedraw } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
 import { renderPlanarDomainColoring } from './domain-coloring.js';
+import { matchesPlanarDomainViewport } from './domain-dynamics.js';
 import { updateWindingNumberDisplay } from '../analysis/cauchy.js';
 import {
     getDynamicPlottingCacheKey
@@ -110,6 +110,7 @@ let wCanvas;
 let zCtx;
 let wCtx;
 let zDomainColorCanvas;
+let zDomainColorCtx;
 let wCanvasList;
 let wCtxList;
 let wPlaneParamsList;
@@ -229,6 +230,7 @@ function invalidateCache(cache) {
 function syncZRenderContext() {
     zCtx = context.zCtx;
     zDomainColorCanvas = context.zDomainColorCanvas;
+    zDomainColorCtx = context.zDomainColorCtx;
 }
 
 function syncWRenderContext() {
@@ -558,12 +560,13 @@ function fillCanvasBackground(ctx, planeParams) {
 }
 
 function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
-    if (domainCanvas && !domainCanvas.hidden) {
+    if (state.domainColoringEnabled && domainCanvas) {
         withCanvasState(ctx, () => {
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.clearRect(0, 0, planeParams.width, planeParams.height);
+            fillCanvasBackground(ctx, planeParams);
+            if (matchesPlanarDomainViewport(runtime.rendering.domainViewport, planeParams)) {
+                ctx.drawImage(domainCanvas, 0, 0);
+            }
         });
-        domainCanvas.style.background = getCanvasBackgroundColor();
         return;
     }
 
@@ -846,15 +849,16 @@ export function drawZPlaneContent(timestamp) {
     }
 
     // The ordinary planar path below uses the active-map evaluator for shapes,
-    // overlays, and transformed geometry. Domain coloring evaluates its GPU
-    // expression program independently of this map object.
+    // overlays, and transformed geometry. Domain coloring is a separate pixel
+    // pipeline: it snapshots state and dispatches native RGBA tile work to
+    // workers rather than evaluating through this map object.
     const map = resolveActiveMap();
     if (state.manifoldTransformationEnabled) {
         return;
     }
 
-    if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCanvas) {
-        renderPlanarDomainColoring(zDomainColorCanvas, zPlaneParams);
+    if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCtx) {
+        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams);
     }
     if (!zCtx || !zPlaneParams) {
         if (state.navigationModeEnabled) {
@@ -1126,7 +1130,7 @@ function renderRiemannSurfaceIfEnabled(index, map, enabled) {
         return false;
     }
 
-    if (requiresPreciseProjection(wPlaneParams)) {
+    if (wPlaneParams?.preciseViewport) {
         hideRiemannSurface(wCanvas);
         setWThreeHidden(true);
         setWPresentation('canvas');

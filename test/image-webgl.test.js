@@ -89,7 +89,7 @@ test('native adaptive image mesh evaluates deep source coordinates with MPFR', (
         preciseViewport: {
             centerRe: '0',
             centerIm: '0',
-            xSpan: '7e-125', ySpan: '7e-125',
+            zoomPower: 125,
             precisionBits: 512,
             width: 1024,
             height: 1024

@@ -1,4 +1,3 @@
-import { requiresPreciseProjection } from '../native/precise-viewport.js';
 import { state as appState, zPlaneParams } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
@@ -210,7 +209,7 @@ function drawCanvasPointPairs(ctx, points, color, lineWidth) {
 }
 
 function preciseMappedGeometry(pointSet, planeParams, mappedTransform, map) {
-    const outputViewport = requiresPreciseProjection(planeParams) && {
+    const outputViewport = planeParams.preciseViewport && {
         ...planeParams.preciseViewport,
         width: planeParams.width,
         height: planeParams.height
@@ -221,7 +220,7 @@ function preciseMappedGeometry(pointSet, planeParams, mappedTransform, map) {
         stage: map?.stage,
         derivativeOrder: map?.presentation === 'derivative' ? 1 : 0
     }) : nativeMapOptions(appState, { functionKey: 'identity', chainingEnabled: false, chainCount: 1 });
-    if (pointSet.canvasPoints && requiresPreciseProjection(zPlaneParams)) {
+    if (pointSet.canvasPoints && zPlaneParams.preciseViewport) {
         const inputViewport = {
             ...zPlaneParams.preciseViewport,
             width: zPlaneParams.width,
@@ -938,8 +937,8 @@ export function drawPointSetCollectionOnPlane(ctx, planeParams, pointSets, optio
 
         for (let i = startIndex; i < endIndex; i++) {
             const sourcePointSet = pointSets[i];
-            const preciseGeometry = sourcePointSet && (requiresPreciseProjection(planeParams) ||
-                (mappedTransform && sourcePointSet.canvasPoints && requiresPreciseProjection(zPlaneParams)))
+            const preciseGeometry = sourcePointSet && (planeParams.preciseViewport ||
+                (mappedTransform && sourcePointSet.canvasPoints && zPlaneParams.preciseViewport))
                 ? preciseMappedGeometry(sourcePointSet, planeParams, mappedTransform, options.map)
                 : null;
             if (preciseGeometry) {

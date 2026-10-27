@@ -384,6 +384,7 @@ export const context = {
     zCtx: null,
     wCtx: null,
     zDomainColorCanvas: null,
+    zDomainColorCtx: null,
 
     wCanvasList: [],
     wCtxList: [],

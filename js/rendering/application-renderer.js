@@ -27,7 +27,6 @@ import {
 import { draw2DContourPlot } from './contour-2d.js';
 import { setupVisualParameters } from '../utils/dom-utils.js';
 import { requestUiRedraw } from './redraw-scheduler.js';
-import { synchronizePlanarDomainVisibility } from './domain-dynamics.js';
 
 const { controls } = context;
 let surfaceRedrawFrame = null;
@@ -98,7 +97,6 @@ function syncOptionalRenderer(key, visible, onHide) {
 }
 
 export function renderApplicationFrame(timestamp) {
-    synchronizePlanarDomainVisibility(state);
     const graphActive = state.graphViewEnabled
         && !state.laplaceModeEnabled;
     const zIsPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);

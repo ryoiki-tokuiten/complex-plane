@@ -2,8 +2,7 @@ import { state, context, subscribeState } from '../store/state.js';
 import {
     buildPlanarDomainDynamicsSnapshot,
     cancelPlanarDomainDynamics,
-    renderPlanarDomainDynamics,
-    failPlanarDomainDynamics
+    renderPlanarDomainDynamics
 } from './domain-dynamics.js';
 import { getDomainPaletteStops } from '../constants/domain-palettes.js';
 import {
@@ -25,10 +24,6 @@ subscribeState(() => {
     'expBase',
     'logBase',
     'besselOrder',
-    'mobiusA',
-    'mobiusB',
-    'mobiusC',
-    'mobiusD',
     'algebraicChainingEnabled',
     'algebraicChainingZExpr',
     'algebraicChainingTerms',
@@ -72,12 +67,13 @@ function domainMagnitudeLightness(logMod, cycles) {
     return DOMAIN_LIGHTNESS_MIN + (DOMAIN_LIGHTNESS_MAX - DOMAIN_LIGHTNESS_MIN) * tone;
 }
 
-export function renderPlanarDomainColoring(canvas, pP) {
+export function renderPlanarDomainColoring(tCtx, pP) {
     const w = pP.width; const h = pP.height; if (w === 0 || h === 0) return;
 
-    try {
-        renderPlanarDomainDynamics(canvas, pP, buildPlanarDomainDynamicsSnapshot(state, pP));
-    } catch (error) { failPlanarDomainDynamics(error); }
+    // Domain coloring intentionally bypasses active-map evaluators. Its native
+    // worker pipeline renders viewport tiles directly into RGBA pixel buffers.
+    const dynamicsSnapshot = buildPlanarDomainDynamicsSnapshot(state, pP);
+    renderPlanarDomainDynamics(tCtx, pP, dynamicsSnapshot);
 }
 
 function getPaletteColor(paletteId, h) {
