@@ -46,16 +46,13 @@ class DomainRenderer {
             const digits = match[1].replace('.', ''), first = digits.search(/[1-9]/);
             return first < 0 ? -Infinity : (Number(match[2]) || 0) + (match[1].includes('.') ? match[1].indexOf('.') : digits.length) - first - 1;
         };
-        const maxCoordExp = Math.max(decimalExponent(v.centerRe), decimalExponent(v.centerIm), decimalExponent(v.xSpan), decimalExponent(v.ySpan));
-        const minSpanExp = Math.min(decimalExponent(v.xSpan), decimalExponent(v.ySpan));
-        const scaleBits = Math.max(0, (maxCoordExp - minSpanExp) * Math.LOG2E * Math.LN10);
-        const integerBits = Math.max(0, Math.ceil(maxCoordExp * Math.LOG2E * Math.LN10));
+        const scaleBits = Math.max(0, (Math.max(decimalExponent(v.centerRe), decimalExponent(v.centerIm)) - Math.min(decimalExponent(v.xSpan), decimalExponent(v.ySpan))) * Math.LOG2E * Math.LN10);
         const stops=snapshot.paletteStops;
         const slope=Math.max(...stops.slice(1).flatMap((stop,i)=>stop.map((value,c)=>Math.abs(value-stops[i][c]))))*(stops.length-1);
         const colorBits=Math.ceil(Math.log2(255*Math.max(1,slope)/0.49))+6;
         const count = snapshot.chainingEnabled ? snapshot.chainCount : 1;
-        const iterationBits = count > 1 ? Math.ceil(Math.log2(count)) : 0;
-        const words = domainPrecision(Math.max(3, Math.ceil((scaleBits + integerBits + Math.log2(Math.max(v.width,v.height)) + colorBits + iterationBits) / 15) + 1));
+        const iterationBits = count > 1 ? Math.ceil(Math.log2(count) * 12) + (count > 60 ? 30 : 0) : 0;
+        const words = domainPrecision(Math.max(3, Math.ceil((scaleBits + Math.log2(Math.max(v.width,v.height)) + colorBits + iterationBits) / 15) + 1));
         this.job = { snapshot, words, done: false, startedAt: performance.now(), workerMilliseconds: 0, remaining: v.width * v.height };
         this.prepare();
     }
@@ -69,8 +66,9 @@ class DomainRenderer {
         job.stage=0;
         job.lastPresent=0;
         job.batchStart=0;
-        const chainDepth = job.snapshot.chainingEnabled ? Math.max(1, job.snapshot.chainCount) : 1;
-        job.batchSize = Math.max(2048, Math.min(32768, Math.floor(2000000 / chainDepth)));
+        const chainDepth = job.snapshot.chainingEnabled ? job.snapshot.chainCount : 1;
+        const complexity = (job.program.instructionCount || 1) * chainDepth;
+        job.batchSize = Math.max(1024, Math.min(4096, Math.floor(16384 / Math.max(1, Math.sqrt(complexity)))));
         this.gpu.prepare(job.program);
         const count = Math.min(this.workerCount, job.program.numbers.length);
         while (this.workers.length < count) {
@@ -97,7 +95,7 @@ class DomainRenderer {
             this.dispatch(entry);
         }
         this.report('rendering');
-        this.schedule(0);
+        this.schedule();
     }
     dispatch(entry) {
         if(!entry.ready || entry.busy || !entry.request) return;
@@ -111,10 +109,10 @@ class DomainRenderer {
             if (data.error) { this.fail(data.error); return; }
             this.gpu.uploadNumbers(data.start, data.values);
             job.workerMilliseconds += data.milliseconds;
-            if (--job.pending === 0) this.schedule(0);
+            if (--job.pending === 0) this.schedule();
         } catch (error) { this.fail(error.message); }
     }
-    schedule(delay = 0) {
+    schedule(delay = 16) {
         if (this.frame !== null) return;
         this.frame = setTimeout(() => {
             this.frame = null;
@@ -124,84 +122,76 @@ class DomainRenderer {
     step() {
         if (!this.job || this.job.done) return;
         const job = this.job;
-        const total = job.snapshot.viewport.width * job.snapshot.viewport.height;
-        const sliceStart = performance.now();
-
         try {
             if (!job.submitted) {
-                if (job.pending) return; // receive() will schedule step when numbers are ready
-                if (!this.gpu.ready()) {
+                if (!this.gpu.ready() || job.pending) {
                     if (!this.gpu.programs[0]) this.report('rendering', 'Compiling high-precision domain shader...');
                     this.schedule(16);
                     return;
                 }
+                const total = job.snapshot.viewport.width * job.snapshot.viewport.height;
 
-                while (!job.submitted && (job.stage === 0 || job.stage === 1)) {
-                    // 1. If a GPU batch is currently in-flight, wait for it to complete.
-                    if (this.gpu.drawFence) {
-                        if (!this.gpu.pollDraw()) {
-                            this.schedule(2);
-                            return;
-                        }
+                // 1. If a GPU batch is currently in-flight, wait for it to complete.
+                if (this.gpu.drawFence) {
+                    if (!this.gpu.pollDraw()) {
+                        this.schedule(4);
+                        return;
                     }
-
-                    if (job.cursor >= total) {
+                    // The batch just completed on the GPU!
+                    if (performance.now() - job.lastPresent >= 60 || job.cursor >= total) {
                         this.gpu.present();
                         job.lastPresent = performance.now();
+                    }
+                    if (job.cursor >= total) {
                         if (job.stage === 0) {
+                            this.gpu.present();
+                            job.lastPresent = performance.now();
                             this.gpu.requestCoverage();
                             job.submitted = true;
-                            this.schedule(2);
+                            this.schedule(16);
                             return;
                         }
                         if (job.stage === 1) {
+                            this.gpu.present();
+                            job.lastPresent = performance.now();
                             this.job.done = true;
                             this.report('complete');
                             return;
                         }
                     }
+                    // Leave explicit breathing space on the GPU before submitting the next batch.
+                    this.schedule(16);
+                    return;
+                }
 
-                    if (performance.now() - job.lastPresent >= 60) {
-                        this.gpu.present();
-                        job.lastPresent = performance.now();
-                    }
-
-                    // 2. Submit the next bounded batch to the GPU.
-                    const count = Math.min(job.batchSize, total - job.cursor);
-                    job.batchStartTime = performance.now();
+                // 2. Submit the next bounded batch to the GPU.
+                if (job.stage === 0 || job.stage === 1) {
+                    const batchPoints = job.stage === 1
+                        ? Math.max(256, Math.floor(job.batchSize / 4))
+                        : job.batchSize;
+                    const count = Math.min(batchPoints, total - job.cursor);
                     this.gpu.draw(job.cursor, count, job.stage, false);
                     job.cursor += count;
                     this.gpu.syncDraw();
-
-                    // Yield to event loop if we've spent more than 16ms in this JS slice
-                    if (performance.now() - sliceStart >= 16) {
-                        this.schedule(0);
-                        return;
-                    }
-
-                    // If the batch completed immediately, loop to next batch; otherwise wait
-                    if (!this.gpu.pollDraw()) {
-                        this.schedule(2);
-                        return;
-                    }
+                    // Poll for this batch to complete on the GPU
+                    this.schedule(4);
+                    return;
                 }
             }
 
             // 3. Waiting for coverage reduction
             const status = this.gpu.pollCoverage();
             if (!status) {
-                this.schedule(2);
+                this.schedule(8);
                 return;
             }
-            console.log(`[COVERAGE POLL] remaining=${status.remaining}, resource=${status.resource} in ${Math.round(performance.now() - job.startedAt)}ms`);
             this.job.remaining = status.remaining;
             if (!status.remaining) {
                 this.gpu.clearAA();
                 job.stage = 1;
                 job.cursor = 0;
                 job.submitted = false;
-                job.batchSize = Math.max(1024, Math.min(16384, Math.floor(2000000 / (4 * (job.snapshot.chainingEnabled ? Math.max(1, job.snapshot.chainCount) : 1)))));
-                this.schedule(0);
+                this.schedule(16);
                 return;
             }
             if (status.resource) {
@@ -212,7 +202,6 @@ class DomainRenderer {
                 this.fail('Some samples need more than the supported 4096-bit precision.');
                 return;
             }
-            console.log(`[PRECISION RETRY] doubling words from ${this.job.words} to ${Math.min(274, this.job.words * 2)}`);
             this.job.words = Math.min(274, this.job.words * 2);
             this.prepare();
         } catch (error) {
