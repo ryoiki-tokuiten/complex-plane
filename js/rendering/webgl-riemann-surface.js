@@ -162,7 +162,6 @@ const GRID_DATA_CACHE = new Map();
 const SHADER_LIBRARY_CACHE = new Map();
 const SHADER_LIBRARY_CACHE_LIMIT = 256;
 
-const EMPTY_ARRAY = Object.freeze([]);
 const ZERO_COMPLEX = Object.freeze({ re: 0, im: 0 });
 const UINT16_INDEX_LIMIT = 0xffff;
 
@@ -2134,11 +2133,6 @@ class RiemannSurfaceRendererFactory {
       .forEach(baseCanvas => this.dispose(baseCanvas));
   }
 
-  canvasFor(baseCanvas) {
-    const renderer = baseCanvas ? this.#rendererByBaseCanvas.get(baseCanvas) : null;
-    return renderer ? renderer.canvas : null;
-  }
-
   resetViews() {
     this.#activeRenderers.forEach(renderer => {
       resetRendererCamera(renderer);
@@ -2248,10 +2242,6 @@ export function hideRiemannSurface(baseCanvas) {
 
 export function disposeRiemannSurface(baseCanvas) {
   rendererFactory.dispose(baseCanvas);
-}
-
-export function getRiemannSurfaceCanvas(baseCanvas) {
-  return rendererFactory.canvasFor(baseCanvas);
 }
 
 export function resetRiemannSurfaceViews() {

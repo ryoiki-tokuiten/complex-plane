@@ -1,11 +1,6 @@
 // js/constants/colors.js
 
-// Background and Text Colors
-export const COLOR_CANVAS_BACKGROUND = '#0a0c10';
-export const COLOR_TEXT_ON_CANVAS = '#d0d7e2';
-
 // Grid and Axes
-export const COLOR_AXES = 'rgba(130, 130, 180, 0.8)';
 export const COLOR_Z_GRID_ZETA_UNDEFINED_SUM_REGION = 'rgba(160, 168, 216, 0.25)';
 
 // Input Shapes

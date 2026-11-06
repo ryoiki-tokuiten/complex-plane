@@ -31,11 +31,13 @@
     width: 6px;
 }
 
-.application-root.vertical-layout #controls_options_section::-webkit-scrollbar-track {
+.application-root.vertical-layout #controls_options_section::-webkit-scrollbar-track,
+.application-root.vertical-layout #canvases_section::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.application-root.vertical-layout #controls_options_section::-webkit-scrollbar-thumb {
+.application-root.vertical-layout #controls_options_section::-webkit-scrollbar-thumb,
+.application-root.vertical-layout #canvases_section::-webkit-scrollbar-thumb {
     background-color: var(--border-color);
     border-radius: 3px;
 }
@@ -231,15 +233,6 @@
 .application-root.vertical-layout #canvases_section::-webkit-scrollbar {
     width: 6px;
     height: 6px;
-}
-
-.application-root.vertical-layout #canvases_section::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.application-root.vertical-layout #canvases_section::-webkit-scrollbar-thumb {
-    background-color: var(--border-color);
-    border-radius: 3px;
 }
 
 .application-root.vertical-layout #canvases_section .two-column-layout {

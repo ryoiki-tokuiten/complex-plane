@@ -3,6 +3,7 @@ import { findZerosAndPoles, findCriticalPoints } from '../analysis/feature-detec
 import { updateTaylorSeriesCenterAndRadius } from '../native/map-runtime.js';
 import { performCauchyAnalysis } from '../analysis/cauchy.js';
 import { drawZPlaneContent, drawWPlaneContent } from './renderer.js';
+import { synchronizePlanarDomainVisibility } from './domain-coloring.js';
 import { drawLaplaceSpectrum, drawLaplaceComGraph } from './draw-laplace-panels.js';
 import { drawFourier3DPipeline, disposeFourier3DPipeline } from './fourier-3d-pipeline.js';
 import {
@@ -97,6 +98,7 @@ function syncOptionalRenderer(key, visible, onHide) {
 }
 
 export function renderApplicationFrame(timestamp) {
+    synchronizePlanarDomainVisibility();
     const graphActive = state.graphViewEnabled
         && !state.laplaceModeEnabled;
     const zIsPlanar = !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled);

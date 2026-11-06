@@ -24,7 +24,6 @@ import { requireVisibleViewport } from '../utils/viewport.js';
 import { requireFiniteNumber, requireInteger } from '../utils/numeric-contracts.js';
 import { getCanvasBackgroundColor } from '../frontend/theme.js';
 
-const BACKGROUND = 0x070812;
 const DEFAULT_CAMERA = Object.freeze({ x: 6.0, y: 5.0, z: 8.0 });
 const DEFAULT_CAMERA_TARGET = Object.freeze({ x: 0, y: 0, z: 0 });
 const DEFAULT_FRAME = Object.freeze({

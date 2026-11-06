@@ -683,8 +683,8 @@ function writeMapConfig(pointer, options, allocations) {
     }
     view.setUint32(pointer, functionId, true);
     const requestedChainCount = Number(options.chainCount);
-    if (options.chainingEnabled && (!Number.isInteger(requestedChainCount) || requestedChainCount < 1 || requestedChainCount > 1024)) {
-        throw new Error('Native map options require a chain count from 1 through 1024.');
+    if (options.chainingEnabled && (!Number.isInteger(requestedChainCount) || requestedChainCount < 1 || requestedChainCount > 3000)) {
+        throw new Error('Native map options require a chain count from 1 through 3000.');
     }
     if (options.chainingEnabled && options.chainMode !== 'zero_seed' && options.chainMode !== 'recursion') {
         throw new Error(`Unsupported native chain mode: ${options.chainMode}`);
@@ -802,7 +802,7 @@ export function evaluateNativeExpressionProgram(program, environments, mapOption
     if (!Array.isArray(environments)) throw new Error('Native expression environments must be an array.');
     if (!environments.length) return [];
     if (!program.instructions.length) throw new Error('Native expression programs cannot be empty.');
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, mapOptions, allocations);
         const instructionPointer = writeInstructionBuffer(program, allocations);
@@ -912,7 +912,7 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
         }
     }
 
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const outputPointer = trackAlloc(allocations, requestedCount * 16);
         const statsPointer = trackAlloc(allocations, 12);
         const generatorPointer = writeInstructionBuffer(generatorProgram, allocations);
@@ -967,7 +967,7 @@ export function generateNativeDiscreteValues(config, runtime = {}) {
 
 export function evaluateNativePoints(options, points) {
     if (!Array.isArray(points) || !points.length) return { values: [], valid: new Uint8Array() };
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options, allocations);
         const inputPointer = trackAlloc(allocations, points.length * 16);
@@ -988,7 +988,7 @@ export function evaluateNativeAlgebraic(options, points, parameters = points) {
         throw new Error('Native algebraic evaluation requires equally sized point and parameter arrays.');
     }
     if (!points.length) return { values: [], valid: new Uint8Array() };
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, { ...options, functionKey: 'algebraic_chaining' }, allocations);
         const inputPointer = trackAlloc(allocations, points.length * 16);
@@ -1014,7 +1014,7 @@ export function evaluateNativeSheets(options, points, sheets) {
     if (!points.length) {
         return { values: [], valid: new Uint8Array() };
     }
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options, allocations);
         const inputPointer = trackAlloc(allocations, points.length * 16);
@@ -1049,7 +1049,7 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
         };
     }
     const count = dynamic.variables.length;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, { ...mapOptions, dynamicAggregate: dynamic }, allocations);
         const pointPointer = trackAlloc(allocations, count * 16);
@@ -1112,7 +1112,7 @@ export function evaluateNativeDynamic(mapOptions, aggregate, parameter) {
 export function continuationNativeSheet(path, branchCutAngle) {
     if (!Array.isArray(path) || path.length < 2) return 0;
     const angle = requireFiniteNumber(branchCutAngle, 'Native continuation branch angle');
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const pathPointer = trackAlloc(allocations, path.length * 16);
         writePointBuffer(pathPointer, path);
         return wasm.ce_continuation_sheets(pathPointer, path.length, angle);
@@ -1127,7 +1127,7 @@ export function computeNativeTaylorCoefficients(map, center, radius, order) {
         throw new Error('Native Taylor radius must be positive and order must be between zero and 128.');
     }
     const stepCount = Math.max(192, 48 * (boundedOrder + 1));
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, { ...map, taylor: null }, allocations);
         const outputPointer = trackAlloc(allocations, (boundedOrder + 1) * 16);
@@ -1265,7 +1265,7 @@ export function generateNativeInputShape(config, mapOptions) {
     } else if (shape === 7) {
         lineCapacity = 2; pointCapacity = 2 * (curvePoints + 1);
     }
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, mapOptions, allocations);
         const expressionPointer = writeInstructionBuffer(expressionProgram, allocations);
@@ -1332,7 +1332,7 @@ export function generateNativeViewportGridPixels(config) {
     const pointCapacity = shape === 0
         ? lineCapacity * (samples + 1)
         : (density + 1) * (density + 1);
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const outputPointer = trackAlloc(allocations, pointCapacity * 8);
         const offsetsPointer = trackAlloc(allocations, (lineCapacity + 1) * 4);
         const rolesPointer = trackAlloc(allocations, lineCapacity * 4);
@@ -1369,7 +1369,7 @@ export function generateNativeRadialSteps(mapOptions, domain, stepCount, curvePo
     if (domainMin >= domainMax) throw new Error('Native radial domain must increase.');
     const pointsPerCircle = curvePointCount + 1;
     const pointCapacity = steps * pointsPerCircle;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, mapOptions, allocations);
         const outputPointer = trackAlloc(allocations, pointCapacity * 16);
@@ -1402,7 +1402,7 @@ export function buildNativePlanarLine(options) {
     requireFiniteComplex(options.end, 'Native planar-line end');
     requirePlanarRenderOptions(options);
     const outputCapacity = (sampleCount + 1) * 2 + 2;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const outputPointer = trackAlloc(allocations, outputCapacity * 16);
@@ -1422,7 +1422,7 @@ export function buildNativePlanarLine(options) {
 export function buildNativePlanarLines(options) {
     if (!Array.isArray(options.lines) || !options.lines.length) return [];
     requirePlanarRenderOptions(options);
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const lineCount = options.lines.length;
@@ -1480,7 +1480,7 @@ export function buildNativePlanarPolyline(options) {
     const effectiveMaxDepth = Math.min(maxDepth, safeDepth);
     const theoretical = inputCount * 2 + Math.max(0, inputCount - 1) * 2 ** effectiveMaxDepth;
     const outputCapacity = Math.min(outputLimit, Math.max(4096, theoretical));
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const inputPointer = trackAlloc(allocations, options.points.length * 16);
@@ -1522,7 +1522,7 @@ export function traceNativeStreamlines(options) {
     if (stepSize <= 0) throw new Error('Native streamline step size must be positive.');
     requireBoolean(options.inverse, 'Native streamline inverse');
     const capacity = seeds.length * maxSteps;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const seedsPointer = trackAlloc(allocations, seeds.length * 16);
@@ -1562,7 +1562,7 @@ export function buildNativeVectorField(options) {
     const yRange = requireIncreasingRange(options.yRange, 'Native vector-field y range');
     requireBoolean(options.inverse, 'Native vector-field inverse');
     const count = (density + 1) ** 2;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const positionsPointer = trackAlloc(allocations, count * 16);
@@ -1673,7 +1673,7 @@ export function findNativePreimages(options) {
     if (tolerance <= 0 || derivativeStep <= 0 || mergeDistance <= 0 || maxIterations < 1) {
         throw new Error('Native preimage search tolerances and iteration limit must be positive.');
     }
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.map, allocations);
         const rootsPointer = trackAlloc(allocations, capacity * 16);
@@ -1696,7 +1696,7 @@ export function findNativePolynomialRoots(coefficients, options) {
     if (maxIterations < 1 || tolerance <= 0) {
         throw new Error('Native polynomial-root iterations and tolerance must be positive.');
     }
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const coefficientsPointer = trackAlloc(allocations, coefficients.length * 16);
         writePointBuffer(coefficientsPointer, coefficients.map(value => typeof value === 'number' ? { re: value, im: 0 } : value));
         const rootsPointer = trackAlloc(allocations, (coefficients.length - 1) * 16);
@@ -1712,7 +1712,7 @@ export function findNativePolynomialRoots(coefficients, options) {
 export function analyzeNativeContour(map, points) {
     if (!Array.isArray(points) || points.length < 2) return null;
     points.forEach((point, index) => requireFiniteComplex(point, `Native contour point ${index}`));
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, map, allocations);
         const pointsPointer = trackAlloc(allocations, points.length * 16);
@@ -1744,7 +1744,7 @@ export function estimateNativeResidue(map, pole, radius, samples) {
     if (radiusValue <= 0 || sampleCount < 8) {
         throw new Error('Native residue radius must be positive and sample count must be at least eight.');
     }
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, map, allocations);
         const outputPointer = trackAlloc(allocations, 16);
@@ -1767,7 +1767,7 @@ export function generateNativeContourPoints(type, params, stepCount) {
     const paramA = requireFiniteNumber(typeId === 1 ? params?.r : params?.a, 'Native contour first radius');
     const paramB = typeId === 1 ? 0 : requireFiniteNumber(params?.b, 'Native contour second radius');
     if (paramA <= 0 || (typeId === 2 && paramB <= 0)) throw new Error('Native contour radii must be positive.');
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const outputPointer = trackAlloc(allocations, (count + 1) * 16);
         const total = wasm.ce_generate_contour_points(
             typeId, centerX, centerY, paramA, paramB, count, outputPointer
@@ -1790,7 +1790,7 @@ export function classifyNativeContourSingularities(contourType, params, polygonC
     if (epsilonValue < 0) throw new Error('Native contour epsilon must be non-negative.');
     singularities.forEach((singularity, index) =>
         requireFiniteComplex(singularity, `Native contour singularity ${index}`));
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         let polygonPointsPointer = 0;
         let polygonOffsetsPointer = 0;
         let polygonCount = 0;
@@ -1856,68 +1856,6 @@ function writeDomainPalette(palette, allocations) {
     return { paletteRgPointer, paletteBPointer, paletteCount: palette.length };
 }
 
-export function createCompiledDomainTileRenderer(snapshot) {
-    const allocations = [];
-    const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
-    writeMapConfig(configPointer, snapshot, allocations);
-    const palette = snapshot.paletteStops;
-    const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(palette, allocations);
-
-    const viewport = snapshot.viewport;
-    const orbitMode = ({ value: 0, escape: 1, attractor: 2, hybrid: 3 })[snapshot.orbitColoringMode];
-    if (orbitMode === undefined) throw new Error(`Unsupported native orbit-coloring mode: ${snapshot.orbitColoringMode}`);
-    const style = snapshot.style;
-    if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
-        throw new Error('Native domain rendering requires finite style parameters.');
-    }
-    if (typeof viewport.centerRe !== 'string' || typeof viewport.centerIm !== 'string' ||
-        typeof viewport.xSpan !== 'string' || typeof viewport.ySpan !== 'string' ||
-        !Number.isInteger(viewport.precisionBits)) {
-        throw new Error('Native domain rendering requires one MPFR-centered viewport.');
-    }
-    const centerRePointer = writeCString(viewport.centerRe, allocations);
-    const centerImPointer = writeCString(viewport.centerIm, allocations);
-    const xSpanPointer = writeCString(viewport.xSpan, allocations);
-    const ySpanPointer = writeCString(viewport.ySpan, allocations);
-    let outputCapacity = 0;
-    let outputPointer = 0;
-    const renderContextPointer = wasm.ce_create_domain_render_context(
-        configPointer, centerRePointer, centerImPointer, xSpanPointer, ySpanPointer,
-        viewport.precisionBits,
-        viewport.width, viewport.height,
-        orbitMode, paletteRgPointer, paletteBPointer, paletteCount,
-        style.brightness, style.contrast, style.saturation, style.lightnessCycles
-    );
-    if (!renderContextPointer) {
-        throw new Error('Native domain render-context allocation failed.');
-    }
-
-    const render = tile => {
-        const outputLength = tile.width * tile.height * 4;
-        if (outputLength > outputCapacity) {
-            if (outputPointer) wasm.ce_free(outputPointer);
-            outputCapacity = outputLength;
-            outputPointer = alloc(outputCapacity);
-        }
-        const status = wasm.ce_render_domain_tile(
-            renderContextPointer,
-            tile.x, tile.y, tile.width, tile.height, tile.scale,
-            tile.adaptiveQuality ? 1 : 0, outputPointer
-        );
-        if (status !== 0) throw new Error(`Native domain tile failed with status ${status}.`);
-        const result = new Uint8ClampedArray(outputLength);
-        result.set(new Uint8Array(wasm.memory.buffer, outputPointer, outputLength));
-        return result;
-    };
-    render.dispose = () => {
-        if (outputPointer) wasm.ce_free(outputPointer);
-        if (renderContextPointer) wasm.ce_destroy_domain_render_context(renderContextPointer);
-        for (let index = allocations.length - 1; index >= 0; index -= 1) wasm.ce_free(allocations[index]);
-    };
-
-    return render;
-}
-
 const CONTOUR_COMPONENT_IDS = Object.freeze({ real: 0, imaginary: 1, imag: 1, magnitude: 2, phase: 3 });
 
 export function renderNativeMapContour(options) {
@@ -1946,7 +1884,7 @@ export function renderNativeMapContour(options) {
     if (!style || ![style.brightness, style.contrast, style.saturation, style.lightnessCycles].every(Number.isFinite)) {
         throw new Error('Native contour rendering requires finite style parameters.');
     }
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
         const { paletteRgPointer, paletteBPointer, paletteCount } = writeDomainPalette(options.paletteStops, allocations);
@@ -2003,7 +1941,7 @@ export function projectNativePrecisePixels(options, pixels) {
     if (packed.length % 2) throw new Error('Native precise pixel geometry requires x/y pairs.');
     const pointCount = packed.length / 2;
     if (!pointCount) return new Float32Array();
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const mapPointer = optionalMapPointer(options, allocations);
         const inputRePointer = writeCString(options.inputViewport.centerRe, allocations);
         const inputImPointer = writeCString(options.inputViewport.centerIm, allocations);
@@ -2030,7 +1968,7 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
     if (packed.length % 2) throw new Error('Native precise canvas geometry requires x/y pairs.');
     const pointCount = packed.length / 2;
     if (!pointCount) return new Float32Array();
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const mapPointer = optionalMapPointer(options, allocations);
         const inputRePointer = writeCString(options.inputViewport.centerRe, allocations);
         const inputImPointer = writeCString(options.inputViewport.centerIm, allocations);
@@ -2055,7 +1993,7 @@ export function projectNativePrecisePixelsToCanvas(options, pixels) {
 export function projectNativeValuesToPrecise(options, points) {
     if (!Array.isArray(points) || !points.length) return new Float32Array();
     const output = preciseViewportArguments(options.outputViewport);
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const mapPointer = optionalMapPointer(options, allocations);
         const outputRePointer = writeCString(options.outputViewport.centerRe, allocations);
         const outputImPointer = writeCString(options.outputViewport.centerIm, allocations);
@@ -2103,7 +2041,7 @@ export function generateNativeTransformSignal(funcType, frequency, amplitude, ti
     if (window <= 0) throw new Error('Transform time window must be positive.');
     const seed = requireInteger(randomSeed, 'Transform random seed');
     if (seed < 0 || seed > 0xffffffff) throw new Error('Transform random seed must be an unsigned 32-bit integer.');
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const timesPointer = trackAlloc(allocations, samples * 8);
         const valuesPointer = trackAlloc(allocations, samples * 8);
         const status = wasm.ce_generate_transform_signal(
@@ -2123,7 +2061,7 @@ export function generateNativeTransformSignal(funcType, frequency, amplitude, ti
 export function computeNativeSpectrum(values) {
     if (!Array.isArray(values) || !values.length) return [];
     const count = values.length;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const valuesPointer = trackAlloc(allocations, count * 8);
         const freqPointer = trackAlloc(allocations, count * 8);
         const realPointer = trackAlloc(allocations, count * 8);
@@ -2170,7 +2108,7 @@ export function buildNativeLaplaceWinding(signal, sigma, omega, progress = 1) {
         throw new Error('Laplace animation progress must be between zero and one.');
     }
 
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const timesPointer = trackAlloc(allocations, count * 8);
         const valuesPointer = trackAlloc(allocations, count * 8);
         const woundPointer = trackAlloc(allocations, count * 16);
@@ -2246,7 +2184,7 @@ export function buildNativeLaplaceAnalysis(options) {
     const amplitude = requireFiniteNumber(options.amplitude, 'Laplace amplitude');
     const timeWindow = requireFiniteNumber(options.timeWindow, 'Laplace time window');
     if (timeWindow <= 0) throw new Error('Laplace time window must be positive.');
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const timesPointer = trackAlloc(allocations, sampleCount * 8);
         const signalPointer = trackAlloc(allocations, sampleCount * 8);
         const polesPointer = trackAlloc(allocations, 2 * 16);
@@ -2308,7 +2246,7 @@ export function buildNativeLaplaceSurface(specification, options) {
     const mode = options.mode === 'magnitude' ? 0 : options.mode === 'phase' ? 1
         : options.mode === 'combined' ? 2 : -1;
     if (mode < 0) throw new Error(`Unsupported Laplace surface mode: ${options.mode}.`);
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const positionsPointer = trackAlloc(allocations, vertexCount * 12);
         const normalsPointer = trackAlloc(allocations, vertexCount * 12);
         const magnitudesPointer = trackAlloc(allocations, vertexCount * 4);
@@ -2369,7 +2307,7 @@ export function buildNativeImageMesh(options) {
         }
     }
     const indexCapacity = maxCells * 24;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
         const texturePointer = trackAlloc(allocations, maxVertices * 8);
@@ -2461,7 +2399,7 @@ export function buildNativeGridFold(options, pointSets) {
     if (!sourceCount) throw new Error('Native grid-fold rendering requires source points.');
     const lineCapacity = sourceCount + pointSets.length * 4096 + 8;
     const pointCapacity = sourceCount;
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
         const sourcePointer = trackAlloc(allocations, sourceCount * 16);
@@ -2521,7 +2459,7 @@ export function buildNativeGridFold(options, pointSets) {
 
 export function buildNativeFoldPreimageMarkers(options, roots) {
     if (!Array.isArray(roots) || !roots.length) return new Float32Array();
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const mapPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(mapPointer, options.mapOptions, allocations);
         const rootsPointer = trackAlloc(allocations, roots.length * 16);
@@ -2571,7 +2509,7 @@ export function buildNativeRealSurface(options) {
         !palette.every(value => Number.isFinite(value) && value >= 0 && value <= 1))) {
         throw new Error('Native real surface requires a normalized RGB Float32 palette.');
     }
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = trackAlloc(allocations, MAP_CONFIG_SIZE);
         writeMapConfig(configPointer, options.mapOptions, allocations);
         const inputUPointer = writeInstructionBuffer(options.inputUProgram, allocations);
@@ -2677,7 +2615,7 @@ export function renderNativeRealContour(options) {
         throw new Error('Native real-contour rendering requires a normalized RGB Float32 palette.');
     }
 
-    return withAllocations((allocations, allocate) => {
+    return withAllocations(allocations => {
         const configPointer = gridEnabled ? 0 : alloc(MAP_CONFIG_SIZE);
         if (configPointer) {
             allocations.push(configPointer);

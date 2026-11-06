@@ -261,7 +261,8 @@ select {
     color: var(--text-color);
 }
 
-select:focus {
+select:focus,
+.small-number-input:focus {
     outline: none;
     border-color: var(--accent-purple);
     box-shadow: 0 0 0 3px var(--glow-color);
@@ -295,43 +296,34 @@ select:focus {
     flex-grow: 1;
 }
 
-.control-group .slider-container button {
-    padding: 0.4rem 0.6rem;
-    font-size: 0.8rem;
-    flex-shrink: 0;
-}
-
+.control-group .slider-container button,
 .control-group .slider-container select {
     padding: 0.4rem 0.6rem;
     font-size: 0.8rem;
     flex-shrink: 0;
 }
 
-.probe-info-overlay {
+.probe-info-overlay,
+.cauchy-info-overlay {
     position: absolute;
     bottom: 10px;
-    left: 10px;
     background: rgba(var(--bg-color-rgb, 13, 15, 38), 0.85);
-    /* Use the new RGB variable */
-    color: var(--text-color);
-    border: 1px solid var(--border-color);
     border-radius: 8px;
-    /* Consistent with other elements */
     padding: 0.75rem 1rem;
-    /* Decent padding */
     font-size: 0.85rem;
     line-height: 1.5;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    /* For Safari */
     z-index: 100;
-
     pointer-events: none;
-    /* So it doesn't interfere with mouse events on canvas */
-    max-width: calc(100% - 20px);
-
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-    /* Subtle shadow */
+}
+
+.probe-info-overlay {
+    left: 10px;
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    max-width: calc(100% - 20px);
 }
 
 .probe-info-overlay .probe-output-error {
@@ -340,26 +332,11 @@ select:focus {
 }
 
 .cauchy-info-overlay {
-    position: absolute;
-    bottom: 10px;
     right: 10px;
-    /* Typically on the other side */
-    background: rgba(var(--bg-color-rgb, 13, 15, 38), 0.85);
     color: var(--accent-yellow);
-    /* Use an accent for highlight */
     border: 1px solid var(--accent-yellow);
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
-    font-size: 0.85rem;
-    line-height: 1.5;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    z-index: 100;
-    pointer-events: none;
     max-width: calc(100% - 70px);
-
     text-align: left;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
 
@@ -495,12 +472,4 @@ select:focus {
         min-height: 220px;
     }
 }
-
-
-.small-number-input:focus {
-    outline: none;
-    border-color: var(--accent-purple);
-    box-shadow: 0 0 0 3px var(--glow-color);
-}
-
 

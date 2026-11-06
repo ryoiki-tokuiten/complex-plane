@@ -218,15 +218,6 @@ export function startManifoldTransformationAnimation() {
     animationHandle = requestAnimationFrame(animateFrame);
 }
 
-export function stopManifoldTransformationAnimation() {
-    if (animationHandle) {
-        cancelAnimationFrame(animationHandle);
-        animationHandle = null;
-    }
-    state.manifoldTransformationPlayingZ = false;
-    state.manifoldTransformationPlayingW = false;
-}
-
 export function toggleManifoldTransformationAnimation(plane) {
     const controller = controllers.find(candidate => candidate.id === plane);
     if (!controller) throw new Error(`Unknown manifold plane: ${plane}.`);

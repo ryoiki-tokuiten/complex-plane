@@ -2,7 +2,7 @@ import { state, context } from '../store/state.js';
 import { requestDomainRedraw, requestUiRedraw } from '../rendering/redraw-scheduler.js';
 import { fitConformalGridOutputViewport } from './view-model.js';
 import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
-import { downloadCanvasImage } from '../utils/dom-utils.js';
+import { composeCanvasLayers, downloadCanvasImage } from '../utils/dom-utils.js';
 import { isGraphViewSupported, isFullGridPerspectiveSupported, disposeTransformationGraphRenderer } from '../rendering/transformation-graph.js';
 import { syncGridDensityControls } from './grid-density.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
@@ -141,7 +141,13 @@ export function getZPlaneMenuItems() {
             label: 'Download Image',
             icon: 'download',
             type: 'action',
-            onClick: () => downloadCanvasImage(context.zCanvas, 'z-plane.png')
+            onClick: () => {
+                const domain = context.zDomainColorCanvas;
+                const canvas = domain && !domain.hidden
+                    ? composeCanvasLayers([domain, context.zCanvas])
+                    : context.zCanvas;
+                downloadCanvasImage(canvas, 'z-plane.png');
+            }
         },
         { type: 'divider' },
         {

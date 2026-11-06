@@ -45,5 +45,11 @@ export function setPlaneViewport(planeParams, xRange, yRange) {
     planeParams.scale.x = planeParams.scale.y = scale;
     planeParams.origin.x = planeParams.width * 0.5 - centerX * scale;
     planeParams.origin.y = planeParams.height * 0.5 + centerY * scale;
+    planeParams.preciseViewport = null;
+    planeParams.centerBigX = undefined;
+    planeParams.centerBigY = undefined;
+    planeParams.scaleMant = undefined;
+    planeParams.scaleExp10 = undefined;
+    planeParams._lastSyncedOriginX = undefined;
     updatePlaneViewportRanges(planeParams);
 }

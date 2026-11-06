@@ -316,8 +316,8 @@ export function getEffectiveBaseTransformFunction(functionKey = state.currentFun
 }
 
 function stageTransform(functionKey, stage) {
-    if (!Number.isInteger(stage) || stage < 0 || stage >= 1024) {
-        throw new Error('Native map stage must be an integer from zero through 1023.');
+    if (!Number.isInteger(stage) || stage < 0 || stage >= 3000) {
+        throw new Error('Native map stage must be an integer from zero through 2999.');
     }
     const base = getEffectiveBaseTransformFunction(functionKey);
     if (!state.chainingEnabled) {

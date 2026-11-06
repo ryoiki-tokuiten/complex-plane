@@ -15,3 +15,11 @@ test-results/
 Experiment/
 .cache/
 bertbaron_mandelbrot/
+
+# ---- Generated / local artifacts ----
+build.log
+*.bendtt
+
+# ---- Bend toolchain (installed locally via the official installer, never committed) ----
+.bend/
+public/bend/

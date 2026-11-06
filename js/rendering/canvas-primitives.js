@@ -1,4 +1,3 @@
-import { COLOR_AXES, COLOR_TEXT_ON_CANVAS } from '../constants/colors.js';
 import {
     getCanvasAxesColor,
     getCanvasTextColor,

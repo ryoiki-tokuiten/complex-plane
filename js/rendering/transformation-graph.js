@@ -37,7 +37,6 @@ const GRID_INPUT_SHAPES = new Set([
     'grid_logcartesian'
 ]);
 
-const BACKGROUND = 0x05060b;
 const AXIS_COLOR = 0xaeb8cc;
 const GRID_COLOR = 0x43506b;
 const INPUT_TICK_COLOR = 0xf3f6ff;
@@ -1231,7 +1230,6 @@ class TransformationGraphRenderer {
             cameraTarget: [0.1, 0, 0],
             cameraOffset: [6.7, 4.9, 6.5],
             cameraDistance: 2000,
-            background: BACKGROUND,
             getFrustum(aspect) {
                 let halfHeight = FRUSTUM_HEIGHT * 0.5;
                 let halfWidth = halfHeight * aspect;

@@ -392,58 +392,6 @@
     letter-spacing: 0.8px;
 }
 
-.domain-rendering-indicator {
-    position: absolute;
-    bottom: 12px;
-    left: 12px;
-    z-index: 40;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 20px;
-    background: var(--overlay-glass-bg);
-    border: 1px solid var(--overlay-glass-border);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    color: var(--text-color);
-    font-size: 0.72rem;
-    font-weight: 500;
-    pointer-events: none;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.domain-rendering-indicator.hidden {
-    opacity: 0;
-    transform: translateY(5px);
-    pointer-events: none;
-}
-
-.domain-rendering-indicator__dot {
-    width: 6px;
-    height: 6px;
-    background-color: #a78bfa;
-    border-radius: 50%;
-    box-shadow: 0 0 8px #a78bfa;
-    animation: pulse-dot-animation 1.2s infinite ease-in-out;
-}
-
-@keyframes pulse-dot-animation {
-    0% {
-        transform: scale(0.8);
-        opacity: 0.5;
-    }
-    50% {
-        transform: scale(1.3);
-        opacity: 1;
-        box-shadow: 0 0 12px #a78bfa;
-    }
-    100% {
-        transform: scale(0.8);
-        opacity: 0.5;
-    }
-}
-
 /* Light Theme Mode Refinements */
 [data-theme-mode="light"] .theme-modal-backdrop {
     background: rgba(46, 52, 64, 0.4);
@@ -453,10 +401,5 @@
     box-shadow: 0 25px 50px -12px rgba(46, 52, 64, 0.18);
 }
 
-[data-theme-mode="light"] .domain-rendering-indicator {
-    background: color-mix(in srgb, var(--card-bg-color) 85%, transparent);
-    border-color: var(--border-color);
-    color: var(--text-color);
-}
 
 

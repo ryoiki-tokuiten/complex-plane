@@ -58,8 +58,7 @@ import {
 import { requestRedrawAll, requestUiRedraw } from './redraw-scheduler.js';
 import { drawPlanarTaylorApproximation } from './taylor-series.js';
 import { drawNavigationLayer } from '../navigation-plane.js';
-import { renderPlanarDomainColoring } from './domain-coloring.js';
-import { matchesPlanarDomainViewport } from './domain-dynamics.js';
+import { renderPlanarDomainColoring, synchronizePlanarDomainVisibility } from './domain-coloring.js';
 import { updateWindingNumberDisplay } from '../analysis/cauchy.js';
 import {
     getDynamicPlottingCacheKey
@@ -110,7 +109,6 @@ let wCanvas;
 let zCtx;
 let wCtx;
 let zDomainColorCanvas;
-let zDomainColorCtx;
 let wCanvasList;
 let wCtxList;
 let wPlaneParamsList;
@@ -230,7 +228,6 @@ function invalidateCache(cache) {
 function syncZRenderContext() {
     zCtx = context.zCtx;
     zDomainColorCanvas = context.zDomainColorCanvas;
-    zDomainColorCtx = context.zDomainColorCtx;
 }
 
 function syncWRenderContext() {
@@ -560,12 +557,13 @@ function fillCanvasBackground(ctx, planeParams) {
 }
 
 function drawDomainOrSolidBackground(ctx, domainCanvas, planeParams) {
-    if (state.domainColoringEnabled && domainCanvas) {
+    if (domainCanvas && !domainCanvas.hidden) {
+        if (domainCanvas.style) {
+            domainCanvas.style.background = getCanvasBackgroundColor();
+        }
         withCanvasState(ctx, () => {
-            fillCanvasBackground(ctx, planeParams);
-            if (matchesPlanarDomainViewport(runtime.rendering.domainViewport, planeParams)) {
-                ctx.drawImage(domainCanvas, 0, 0);
-            }
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, planeParams.width, planeParams.height);
         });
         return;
     }
@@ -839,6 +837,7 @@ function drawCriticalMarkers(ctx, planeParams, points, color) {
 
 export function drawZPlaneContent(timestamp) {
     syncZRenderContext();
+    synchronizePlanarDomainVisibility();
 
     if (state.laplaceModeEnabled) {
         if (zCtx && zPlaneParams) {
@@ -849,16 +848,15 @@ export function drawZPlaneContent(timestamp) {
     }
 
     // The ordinary planar path below uses the active-map evaluator for shapes,
-    // overlays, and transformed geometry. Domain coloring is a separate pixel
-    // pipeline: it snapshots state and dispatches native RGBA tile work to
-    // workers rather than evaluating through this map object.
+    // overlays, and transformed geometry. Domain coloring runs on its dedicated
+    // WebGL2 canvas layer underneath the Z-plane overlay canvas.
     const map = resolveActiveMap();
     if (state.manifoldTransformationEnabled) {
         return;
     }
 
-    if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCtx) {
-        renderPlanarDomainColoring(zDomainColorCtx, zPlaneParams);
+    if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCanvas && !zDomainColorCanvas.hidden) {
+        renderPlanarDomainColoring(zDomainColorCanvas, zPlaneParams);
     }
     if (!zCtx || !zPlaneParams) {
         if (state.navigationModeEnabled) {
@@ -1388,8 +1386,8 @@ export function drawWPlaneContent(options = {}) {
             return;
         }
         const requested = requireInteger(state.chainCount, 'W-plane chain count');
-        if (requested < 1 || requested > 1024) {
-            throw new Error('W-plane chain count must be from one through 1024.');
+        if (requested < 1 || requested > 3000) {
+            throw new Error('W-plane chain count must be from one through 3000.');
         }
         const mapIndex = state.chainingEnabled ? requested - 1 : 0;
         renderSingleWPlane(0, resolveActiveMap(mapIndex), false, options);

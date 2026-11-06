@@ -23,11 +23,9 @@ export class AbstractManifold {
 
     /**
      * Maps the 2D complex plane coordinate (u, v) onto the 3D surface at t = 1.
-     * @param {number} u Real part of complex point
-     * @param {number} v Imaginary part of complex point
      * @returns {{X: number, Y: number, Z: number}} 3D point
      */
-    project(u, v) {
+    project() {
         throw new Error(`Manifold '${this.id}' must implement project(u, v)`);
     }
 

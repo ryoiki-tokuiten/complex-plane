@@ -961,7 +961,7 @@ int32_t ce_evaluate_dynamic(const ce_map_config *config, double parameter_re, do
                             ce_complex *partial_values, double *partial_product_metadata,
                             ce_complex *final_value,
                             double product_metadata[6]) {
-    if (!config || !config->chain_count || config->chain_count > 1024u ||
+    if (!config || !config->chain_count || config->chain_count > 3000u ||
         !point_values || !term_values || !errors || !reduction_status ||
         !partial_values || !final_value || !product_metadata) return -1;
     int valid = 0;
@@ -992,7 +992,7 @@ static ce_complex ce_eval_map_derivative(const ce_map_config *config, ce_complex
 
 int32_t ce_evaluate_points(const ce_map_config *config, const ce_complex *input,
                            uint32_t count, ce_complex *output, uint8_t *valid) {
-    if (!config || !input || !output || !config->chain_count || config->chain_count > 1024u ||
+    if (!config || !input || !output || !config->chain_count || config->chain_count > 3000u ||
         config->derivative > 2u) return -1;
     for (uint32_t i = 0; i < count; ++i) {
         int ok = 0;
@@ -1005,7 +1005,7 @@ int32_t ce_evaluate_points(const ce_map_config *config, const ce_complex *input,
 int32_t ce_evaluate_algebraic_points(const ce_map_config *config, const ce_complex *input,
                                      const ce_complex *parameters, uint32_t count,
                                      ce_complex *output, uint8_t *valid) {
-    if (!config || !input || !parameters || !output || !config->chain_count || config->chain_count > 1024u ||
+    if (!config || !input || !parameters || !output || !config->chain_count || config->chain_count > 3000u ||
         config->function_id != CE_FN_ALGEBRAIC) return -1;
     const uint32_t chain_count = config->chain_count;
     for (uint32_t point = 0; point < count; ++point) {
@@ -1180,7 +1180,7 @@ int32_t ce_evaluate_sheets(const ce_map_config *config, const ce_complex *input,
                            const int32_t *sheets, uint32_t count,
                            ce_complex *output, uint8_t *valid) {
     if (!config || !input || !sheets || !output || !valid ||
-        !config->chain_count || config->chain_count > 1024u) return -1;
+        !config->chain_count || config->chain_count > 3000u) return -1;
     const uint32_t chain_count = config->chain_count;
     if (config->dynamic_source_count) {
         for (uint32_t point = 0; point < count; ++point) {

@@ -8,8 +8,11 @@ import {
     evaluateNativePoints,
     nativeMapOptions
 } from '../js/native/complex-engine.js';
-import { createDomainDynamicsTileRenderer } from '../js/native/domain-engine.js';
-import { buildPlanarDomainDynamicsSnapshot } from '../js/rendering/domain-dynamics.js';
+import {
+    compileStateToUnifiedExpression,
+    buildComputeShader,
+    domainColorForValue
+} from '../js/rendering/domain-coloring.js';
 import {
     buildComplexMathLibraryGLSL,
     getWebGLFunctionIdShared
@@ -56,7 +59,7 @@ test('sin is registered across native maps, expressions, and WebGL dispatch', ()
     assertComplexClose(expression({ z: points[2] }), expectedSin(points[2]));
 });
 
-test('sin renders through the native domain-dynamics path', () => {
+test('sin compiles and colors through the unified cqs domain-coloring pipeline', () => {
     const keys = [
         'currentFunction', 'chainingEnabled', 'chainCount',
         'algebraicChainingEnabled', 'algebraicChainingTerms'
@@ -71,21 +74,15 @@ test('sin renders through the native domain-dynamics path', () => {
             algebraicChainingEnabled: false,
             algebraicChainingTerms: []
         });
-        const snapshot = buildPlanarDomainDynamicsSnapshot(state, {
-            width: 1,
-            height: 1,
-            currentVisXRange: [Math.PI / 2, Math.PI / 2 + 1],
-            currentVisYRange: [0, 1]
-        });
-        const renderer = createDomainDynamicsTileRenderer(snapshot);
-        try {
-            const pixel = renderer({ x: 0, y: 0, width: 1, height: 1, scale: 1 });
-            assert.equal(pixel.length, 4);
-            assert.equal(pixel[3], 255);
-            assert.ok(pixel[0] !== 0 || pixel[1] !== 0 || pixel[2] !== 0);
-        } finally {
-            renderer.dispose();
-        }
+        const compiled = compileStateToUnifiedExpression(state);
+        assert.equal(compiled.fullGLSL, 'cds_sin(z)');
+        const shader = buildComputeShader(compiled);
+        assert.match(shader, /cqs cds_sin\(cqs z\)/);
+
+        const val = expectedSin({ re: Math.PI / 2, im: 0 });
+        const rgb = domainColorForValue(val.re, val.im, state);
+        assert.equal(rgb.length, 3);
+        assert.ok(rgb[0] !== 0 || rgb[1] !== 0 || rgb[2] !== 0);
     } finally {
         Object.assign(state, before);
     }

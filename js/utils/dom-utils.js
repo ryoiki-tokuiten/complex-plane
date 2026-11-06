@@ -1,15 +1,13 @@
 import { state, context, zPlaneParams, wPlaneParams, wPlaneInitialRanges, zPlaneInitialRanges, laplaceComPlaneParams, laplaceSpectrumPlaneParams } from '../store/state.js';
-import { invalidateAllCanvasRects } from '../frontend/actions.js';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '../constants/rendering.js';
 import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
+import { invalidateAllCanvasRects } from './canvas-interaction.js';
 import { synchronizePreciseViewport } from '../native/precise-viewport.js';
-import { disposeRiemannSurface } from '../rendering/webgl-riemann-surface.js';
-import { requireInteger } from './numeric-contracts.js';
 
 const { controls } = context;
 
-let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas, zDomainColorCtx;
+let zCanvas, wCanvas, zCtx, wCtx, zDomainColorCanvas;
 let wCanvasList, wCtxList, wPlaneParamsList, wPlaneThreeContainersList;
 
 export function formatTaylorNumericValue(value) {
@@ -40,8 +38,8 @@ export function setupCanvasReferences() {
     wCtx.imageSmoothingEnabled = true;
     wCtx.imageSmoothingQuality = 'high';
 
-    zDomainColorCanvas = new OffscreenCanvas(DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT);
-    zDomainColorCtx = zDomainColorCanvas.getContext('2d');
+    zDomainColorCanvas = controls.zPlaneDomainCanvas;
+    if (!zDomainColorCanvas) throw new Error('Domain canvas must be mounted before renderer initialization.');
 
     wCanvasList = [wCanvas];
     wCtxList = [wCtx];
@@ -53,7 +51,6 @@ export function setupCanvasReferences() {
     context.zCtx = zCtx;
     context.wCtx = wCtx;
     context.zDomainColorCanvas = zDomainColorCanvas;
-    context.zDomainColorCtx = zDomainColorCtx;
     context.wCanvasList = wCanvasList;
     context.wCtxList = wCtxList;
     context.wPlaneParamsList = wPlaneParamsList;
@@ -85,89 +82,77 @@ function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen = false)
     if (canvasElement.height !== newHeight) canvasElement.height = newHeight;
     planeParams.width = canvasElement.width;
     planeParams.height = canvasElement.height;
+}
 
-    if (canvasElement === zCanvas) {
-        if (zDomainColorCanvas && zDomainColorCanvas.width !== planeParams.width) zDomainColorCanvas.width = planeParams.width;
-        if (zDomainColorCanvas && zDomainColorCanvas.height !== planeParams.height) zDomainColorCanvas.height = planeParams.height;
+function setupPrimaryPlaneParameters(planeParams, initialRanges, zoom, updateFromSlider) {
+    const worldCenterX = (planeParams.currentVisXRange[0] + planeParams.currentVisXRange[1]) / 2;
+    const worldCenterY = (planeParams.currentVisYRange[0] + planeParams.currentVisYRange[1]) / 2;
+
+    const initialXSpan = initialRanges.x[1] - initialRanges.x[0];
+    const initialYSpan = initialRanges.y[1] - initialRanges.y[0];
+    if (
+        initialXSpan > 0 &&
+        initialYSpan > 0 &&
+        updateFromSlider &&
+        typeof planeParams.centerBigX === 'bigint' &&
+        typeof planeParams.centerBigY === 'bigint'
+    ) {
+        const baseScale = Math.min(planeParams.width / initialXSpan, planeParams.height / initialYSpan);
+        const minDim = Math.max(1, Math.min(planeParams.width || 1, planeParams.height || 1));
+        const baseRawScale = (0.5 * minDim) / baseScale;
+        const zoomLog10 = Math.log10(Math.max(1e-100, Number(zoom) || 1));
+        const totalLog10 = Math.log10(baseRawScale) - zoomLog10;
+        const exp10 = Math.max(-100, Math.floor(totalLog10));
+        planeParams.scaleExp10 = exp10;
+        planeParams.scaleMant = Math.pow(10, totalLog10 - exp10);
     }
+
+    let isPrecise = !!planeParams.preciseViewport;
+    if (updateFromSlider) isPrecise = synchronizePreciseViewport(planeParams, zoom);
+    if (isPrecise) return;
+
+    if (initialXSpan <= 0 || initialYSpan <= 0) return;
+
+    const baseScale = Math.min(planeParams.width / initialXSpan, planeParams.height / initialYSpan);
+    const scale = baseScale * (zoom || 1);
+    planeParams.scale.x = planeParams.scale.y = scale;
+    planeParams.origin.x = planeParams.width * 0.5 - worldCenterX * scale;
+    planeParams.origin.y = planeParams.height * 0.5 + worldCenterY * scale;
+    if (updateFromSlider && typeof planeParams.centerBigX === 'bigint' && typeof planeParams.centerBigY === 'bigint') {
+        planeParams._lastSyncedOriginX = planeParams.origin.x;
+        planeParams._lastSyncedOriginY = planeParams.origin.y;
+        planeParams._lastSyncedScaleX = planeParams.scale.x;
+        planeParams._lastSyncedWidth = planeParams.width;
+        planeParams._lastSyncedHeight = planeParams.height;
+    }
+    updatePlaneViewportRanges(planeParams);
+}
+
+function setupAuxiliaryPlaneParameters(planeParams, canvasElement, isFullscreen, originAtBottom) {
+    setupCanvasBaseParams(planeParams, canvasElement, isFullscreen);
+    const xSpan = planeParams.currentVisXRange[1] - planeParams.currentVisXRange[0];
+    const ySpan = planeParams.currentVisYRange[1] - planeParams.currentVisYRange[0];
+    if (xSpan <= 0 || ySpan <= 0) return;
+
+    planeParams.scale.x = planeParams.width / xSpan;
+    planeParams.scale.y = planeParams.height / ySpan;
+    planeParams.origin.x = -planeParams.currentVisXRange[0] * planeParams.scale.x;
+    planeParams.origin.y = originAtBottom ? planeParams.height - 20 : planeParams.height * 0.5;
+    updatePlaneViewportRanges(planeParams);
 }
 
 export function setupVisualParameters(updateZFromSlider = true, updateWFromSlider = true) {
-    const zIsFullscreen = state.isZFullScreen;
-    const wIsFullscreen = state.isWFullScreen;
-
-    let zWorldCenterX = (zPlaneParams.currentVisXRange[0] + zPlaneParams.currentVisXRange[1]) / 2;
-    let zWorldCenterY = (zPlaneParams.currentVisYRange[0] + zPlaneParams.currentVisYRange[1]) / 2;
-
-    let wWorldCenterX = (wPlaneParams.currentVisXRange[0] + wPlaneParams.currentVisXRange[1]) / 2;
-    let wWorldCenterY = (wPlaneParams.currentVisYRange[0] + wPlaneParams.currentVisYRange[1]) / 2;
-
-    setupCanvasBaseParams(zPlaneParams, zCanvas, zIsFullscreen);
-
-    setupCanvasBaseParams(wPlaneParams, wCanvas, wIsFullscreen);
-
-    let zIsPrecise = !!zPlaneParams.preciseViewport;
-    if (updateZFromSlider) { 
-        const zoomZ = state.zPlaneZoom;
-        zIsPrecise = synchronizePreciseViewport(zPlaneParams, zoomZ);
-    }
-    if (!zIsPrecise) {
-        const initialXSpanZ = zPlaneInitialRanges.x[1] - zPlaneInitialRanges.x[0];
-        const initialYSpanZ = zPlaneInitialRanges.y[1] - zPlaneInitialRanges.y[0];
-        if (initialXSpanZ > 0 && initialYSpanZ > 0) {
-            const baseScaleZ = Math.min(zPlaneParams.width / initialXSpanZ, zPlaneParams.height / initialYSpanZ);
-            const scaleZ = baseScaleZ * (state.zPlaneZoom || 1);
-            zPlaneParams.scale.x = zPlaneParams.scale.y = scaleZ; 
-            zPlaneParams.origin.x = (zPlaneParams.width * 0.5) - zWorldCenterX * scaleZ;
-            zPlaneParams.origin.y = (zPlaneParams.height * 0.5) + zWorldCenterY * scaleZ; 
-            updatePlaneViewportRanges(zPlaneParams);
-        }
-    }
-
-    let wIsPrecise = !!wPlaneParams.preciseViewport;
-    if (updateWFromSlider) { 
-        const zoomW = state.wPlaneZoom;
-        wIsPrecise = synchronizePreciseViewport(wPlaneParams, zoomW);
-    }
-    if (!wIsPrecise) {
-        const initialXSpanW = wPlaneInitialRanges.x[1] - wPlaneInitialRanges.x[0];
-        const initialYSpanW = wPlaneInitialRanges.y[1] - wPlaneInitialRanges.y[0];
-        if (initialXSpanW > 0 && initialYSpanW > 0) {
-            const baseScaleW = Math.min(wPlaneParams.width / initialXSpanW, wPlaneParams.height / initialYSpanW);
-            const scaleW = baseScaleW * (state.wPlaneZoom || 1);
-            wPlaneParams.scale.x = wPlaneParams.scale.y = scaleW;
-            wPlaneParams.origin.x = (wPlaneParams.width * 0.5) - wWorldCenterX * scaleW;
-            wPlaneParams.origin.y = (wPlaneParams.height * 0.5) + wWorldCenterY * scaleW;
-            updatePlaneViewportRanges(wPlaneParams);
-        }
-    }
-
-
+    setupCanvasBaseParams(zPlaneParams, zCanvas, state.isZFullScreen);
+    setupCanvasBaseParams(wPlaneParams, wCanvas, state.isWFullScreen);
+    setupPrimaryPlaneParameters(zPlaneParams, zPlaneInitialRanges, state.zPlaneZoom, updateZFromSlider);
+    setupPrimaryPlaneParameters(wPlaneParams, wPlaneInitialRanges, state.wPlaneZoom, updateWFromSlider);
 
     if (controls.laplaceComCanvas) {
-        setupCanvasBaseParams(laplaceComPlaneParams, controls.laplaceComCanvas, state.isLaplaceComFullScreen);
-        const xSpan = laplaceComPlaneParams.currentVisXRange[1] - laplaceComPlaneParams.currentVisXRange[0];
-        const ySpan = laplaceComPlaneParams.currentVisYRange[1] - laplaceComPlaneParams.currentVisYRange[0];
-        if (xSpan > 0 && ySpan > 0) {
-            laplaceComPlaneParams.scale.x = laplaceComPlaneParams.width / xSpan;
-            laplaceComPlaneParams.scale.y = laplaceComPlaneParams.height / ySpan;
-            laplaceComPlaneParams.origin.x = -laplaceComPlaneParams.currentVisXRange[0] * laplaceComPlaneParams.scale.x;
-            laplaceComPlaneParams.origin.y = laplaceComPlaneParams.height * 0.5;
-            updatePlaneViewportRanges(laplaceComPlaneParams);
-        }
+        setupAuxiliaryPlaneParameters(laplaceComPlaneParams, controls.laplaceComCanvas, state.isLaplaceComFullScreen, false);
     }
 
     if (controls.laplaceSpectrumCanvas) {
-        setupCanvasBaseParams(laplaceSpectrumPlaneParams, controls.laplaceSpectrumCanvas, state.isLaplaceSpectrumFullScreen);
-        const xSpan = laplaceSpectrumPlaneParams.currentVisXRange[1] - laplaceSpectrumPlaneParams.currentVisXRange[0];
-        const ySpan = laplaceSpectrumPlaneParams.currentVisYRange[1] - laplaceSpectrumPlaneParams.currentVisYRange[0];
-        if (xSpan > 0 && ySpan > 0) {
-            laplaceSpectrumPlaneParams.scale.x = laplaceSpectrumPlaneParams.width / xSpan;
-            laplaceSpectrumPlaneParams.scale.y = laplaceSpectrumPlaneParams.height / ySpan;
-            laplaceSpectrumPlaneParams.origin.x = -laplaceSpectrumPlaneParams.currentVisXRange[0] * laplaceSpectrumPlaneParams.scale.x;
-            laplaceSpectrumPlaneParams.origin.y = laplaceSpectrumPlaneParams.height - 20;
-            updatePlaneViewportRanges(laplaceSpectrumPlaneParams);
-        }
+        setupAuxiliaryPlaneParameters(laplaceSpectrumPlaneParams, controls.laplaceSpectrumCanvas, state.isLaplaceSpectrumFullScreen, true);
     }
 
     invalidateAllCanvasRects();
@@ -204,6 +189,18 @@ function formatChainingSeed(seed) {
     return `${re} ${imValue < 0 ? '-' : '+'} ${im}i`;
 }
 
+
+export function composeCanvasLayers(layers) {
+    const target = layers[layers.length - 1] || layers[0];
+    const image = document.createElement('canvas');
+    image.width = target.width;
+    image.height = target.height;
+    const ctx = image.getContext('2d');
+    for (const layer of layers) {
+        if (layer) ctx.drawImage(layer, 0, 0, image.width, image.height);
+    }
+    return image;
+}
 
 export function downloadCanvasImage(canvas, filename = 'complex-plane.png') {
     if (!canvas) return;

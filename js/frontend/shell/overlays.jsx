@@ -4,9 +4,9 @@ import { RangeControl } from '../components/range-control.jsx';
 import { Icon } from '../components/icon.jsx';
 
 const DOMAIN_RANGES = [
-  ['domain_brightness_slider', 'Brightness:', 'domain_brightness_value_display', '1.0', '0.5', '1.5', '0.05', 'Adjust overall brightness of the domain coloring'],
+  ['domain_brightness_slider', 'Brightness:', 'domain_brightness_value_display', '1.0', '0.5', '1.5', '0.02', 'Adjust overall brightness of the domain coloring'],
   ['domain_contrast_slider', 'Contrast:', 'domain_contrast_value_display', '1.0', '0.5', '2.0', '0.05', 'Adjust contrast of the domain coloring'],
-  ['domain_saturation_slider', 'Saturation:', 'domain_saturation_value_display', '1.0', '0.0', '1.0', '0.05', 'Adjust color saturation of the domain coloring'],
+  ['domain_saturation_slider', 'Saturation:', 'domain_saturation_value_display', '1.0', '0.0', '2.0', '0.05', 'Adjust color saturation of the domain coloring'],
   ['domain_lightness_cycles_slider', 'Lightness Cycles:', 'domain_lightness_cycles_value_display', '1.00', '0.0', '4.0', '0.25', '0 disables magnitude lightness modulation; higher values add optional magnitude shading']
 ];
 
@@ -51,9 +51,29 @@ export function Overlays({ contextPanel = '' }) {
                 <option value={"value"}>Final Value</option>
                 <option value={"escape"}>Escape</option>
                 <option value={"attractor"}>Attractor</option>
-                <option value={"hybrid"}>Hybrid</option>
               </Ui>
             </Ui>
+            <div class={"control-group"}>
+              <label for={"domain_res_scale_select"} class={"compact-text"}>Render Quality (SSAA):</label>
+              <Ui as="select" id={"domain_res_scale_select"} class={"control-select"} data-tooltip={"Hardware supersampling resolution scale for domain coloring"}>
+                <option value={"1"}>1× Standard</option>
+                <option value={"1.5"} selected>1.5× High SSAA</option>
+                <option value={"2"}>2× Ultra SSAA</option>
+                <option value={"3"}>3× Extreme SSAA</option>
+              </Ui>
+            </div>
+            <div class={"control-group viz-control-span-2"}>
+              <label for={"domain_show_modulus_cb"} class={"slider-label"}>
+                <Ui as="input" type={"checkbox"} id={"domain_show_modulus_cb"} checked />
+                <span class={"custom-checkbox-visual"} />
+                |f(z)| Modulus Rings
+              </label>
+              <label for={"domain_show_phase_cb"} class={"slider-label"}>
+                <Ui as="input" type={"checkbox"} id={"domain_show_phase_cb"} />
+                <span class={"custom-checkbox-visual"} />
+                arg(f) Phase Rays
+              </label>
+            </div>
             <RangeControls controls={DOMAIN_RANGES} labelClass="compact-text" />
             <div class={"control-group viz-control-span-2"}>
               <label for={"show_domain_coloring_key_cb"} class={"slider-label"}>

@@ -25,14 +25,6 @@ export const runtime = {
         heading: 0
     },
     rendering: {
-        processingDomainDynamics: false,
-        domainViewport: null,
-        domainDynamicsStats: Object.freeze({
-            state: 'idle',
-            jobId: 0,
-            completedJobs: 0,
-            cancelledJobs: 0
-        }),
         wOriginGlowTime: 0,
         previousWindingNumber: null
     },

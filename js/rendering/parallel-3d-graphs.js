@@ -19,7 +19,6 @@ export function createOrthographicSceneHost(container, {
     cameraTarget,
     cameraOffset,
     cameraDistance,
-    background,
     getFrustum,
     getSize = () => ({ width: container.clientWidth || 1, height: container.clientHeight || 1 }),
     render

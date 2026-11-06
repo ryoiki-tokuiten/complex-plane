@@ -287,20 +287,19 @@
 .fill-container,
 .fill-relative { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .flex-relative-host,
-.canvas-fill-host { position: relative; display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.canvas-fill-host,
+.canvas-layer-host { position: relative; display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .full-width-control { min-width: 100%; }
 
-.canvas-layer-host {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
+#z_plane_domain_canvas {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    min-height: 0;
-    min-width: 0;
-    overflow: hidden;
+    pointer-events: none;
 }
+#z_plane_domain_canvas[hidden] { display: none; }
+#z_plane_canvas { position: relative; background: transparent; }
 
 .canvas-overlay {
     position: absolute;

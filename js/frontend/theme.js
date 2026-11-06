@@ -63,6 +63,7 @@ const hexToRgbStr = hex => {
 
 const THEME_PREFERENCES_KEY = 'complex-plane-theme-preferences';
 const isHexColor = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+const canvasColor = (themeId, key, fallback) => themes.find(theme => theme.id === themeId)?.colors?.[key] || fallback;
 
 export function loadThemePreferences() {
     if (typeof localStorage === 'undefined') return;
@@ -99,18 +100,15 @@ export function applyTheme(themeId, { preserveGridColors = false } = {}) {
 }
 
 export function getCanvasBackgroundColor(themeId = state.themeId) {
-    const theme = themes.find(t => t.id === themeId);
-    return theme?.colors?.canvasBg || '#0a0c10';
+    return canvasColor(themeId, 'canvasBg', '#0a0c10');
 }
 
 export function getCanvasTextColor(themeId = state.themeId) {
-    const theme = themes.find(t => t.id === themeId);
-    return theme?.colors?.canvasText || '#d0d7e2';
+    return canvasColor(themeId, 'canvasText', '#d0d7e2');
 }
 
 export function getCanvasAxesColor(themeId = state.themeId) {
-    const theme = themes.find(t => t.id === themeId);
-    return theme?.colors?.canvasAxes || 'rgba(130, 130, 180, 0.8)';
+    return canvasColor(themeId, 'canvasAxes', 'rgba(130, 130, 180, 0.8)');
 }
 
 export function getCanvasGridColors(themeId = state.themeId) {

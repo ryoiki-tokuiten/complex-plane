@@ -6,7 +6,7 @@ const DOMAIN_COLOR_MAGNITUDE_MAX = 1e30;
 export const DOMAIN_COLOR_LOG_MAGNITUDE_MIN = Math.log(DOMAIN_COLOR_MAGNITUDE_MIN);
 export const DOMAIN_COLOR_LOG_MAGNITUDE_MAX = Math.log(DOMAIN_COLOR_MAGNITUDE_MAX);
 export const DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE = 1e30;
-export const DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH = 1024;
+export const DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH = 3000;
 
 function glslFloat(value) {
     const source = String(value);
@@ -19,36 +19,6 @@ export function normalizeDomainDynamicsChainCount(value) {
         throw new Error(`Domain-dynamics chain count must be an integer from 1 through ${DOMAIN_DYNAMICS_MAX_CHAIN_LENGTH}.`);
     }
     return count;
-}
-
-export function isFiniteDomainDynamicsValue(re, im) {
-    return Math.abs(re) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE &&
-        Math.abs(im) < DOMAIN_DYNAMICS_MAX_FINITE_MAGNITUDE;
-}
-
-export function domainDynamicsLogMagnitude(re, im) {
-    return Math.log1p(Math.hypot(re, im));
-}
-
-export function normalizeDomainColorLogMagnitude(logMagnitude) {
-    if (Number.isNaN(logMagnitude)) {
-        throw new Error('Domain-color log magnitude must be a number.');
-    }
-    return Math.min(1, Math.max(0,
-        (logMagnitude - DOMAIN_COLOR_LOG_MAGNITUDE_MIN) /
-        (DOMAIN_COLOR_LOG_MAGNITUDE_MAX - DOMAIN_COLOR_LOG_MAGNITUDE_MIN)
-    ));
-}
-
-export function domainDynamicsSmoothIteration(iteration, chainCount, re, im) {
-    if (!isFiniteDomainDynamicsValue(re, im)) return iteration + 1;
-    const magnitude = Math.max(Math.hypot(re, im), DYNAMICS_ESCAPE_RADIUS);
-    if (!Number.isFinite(magnitude) || magnitude <= 1.0001) return iteration + 1;
-    const adjustment = Math.log(Math.max(
-        Math.log(magnitude) / Math.log(DYNAMICS_ESCAPE_RADIUS),
-        1e-6
-    )) / Math.LN2;
-    return Math.max(0, Math.min(chainCount, iteration + 1 - adjustment));
 }
 
 export const DOMAIN_DYNAMICS_GLSL = `

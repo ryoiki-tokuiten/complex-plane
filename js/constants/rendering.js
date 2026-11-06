@@ -9,22 +9,19 @@ export const PLANAR_CANVAS_SUPERSAMPLE = 2;
 export const ORBIT_COLORING_MODES = Object.freeze({
     value: 'value',
     escape: 'escape',
-    attractor: 'attractor',
-    hybrid: 'hybrid'
+    attractor: 'attractor'
 });
 
 export const ORBIT_COLORING_MODE_LABELS = Object.freeze({
     value: 'Final Value',
     escape: 'Escape',
-    attractor: 'Attractor',
-    hybrid: 'Hybrid'
+    attractor: 'Attractor'
 });
 
 const ORBIT_COLORING_MODE_IDS = Object.freeze({
     value: 0,
     escape: 1,
-    attractor: 2,
-    hybrid: 3
+    attractor: 2
 });
 
 export function normalizeOrbitColoringMode(mode) {

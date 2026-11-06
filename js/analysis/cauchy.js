@@ -1,4 +1,4 @@
-import { state, context } from '../store/state.js';
+import { state } from '../store/state.js';
 import { runtime } from '../store/runtime.js';
 import { nativeOptionsForActiveMap } from '../native/map-runtime.js';
 import { resolveActiveMap } from '../math/active-map.js';
@@ -13,8 +13,6 @@ import {
     RESIDUE_BOUNDARY_CHECK_FACTOR
 } from '../constants/numerical.js';
 import { buildInputShapeGeometryConfig, generateInputShapePointSets } from '../rendering/shape-generators.js';
-
-const { controls } = context;
 
 let cauchyDisplay = { key: null, text: '', html: null, hidden: true };
 let windingDisplay = '';

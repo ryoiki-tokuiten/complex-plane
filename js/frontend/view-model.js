@@ -60,7 +60,6 @@ export function fitConformalGridOutputViewport() {
 }
 
 const HIDDEN_CLASS = 'hidden';
-const VISUALLY_HIDDEN_CLASS = 'hidden-visually';
 const EPS = 1e-9;
 
 function syncLaplacePlayPauseButton() {
@@ -224,10 +223,6 @@ function setHtml(key, html) {
 
 function setChecked(key, checked) {
     patchProps(key, { checked: Boolean(checked) });
-}
-
-function setDisabled(key, disabled) {
-    patchProps(key, { disabled: Boolean(disabled) });
 }
 
 function setValue(target, value) {
@@ -678,7 +673,7 @@ function transformedProbeHtml() {
     return `w = ${formatProbeComplex(pW.re, pW.im)}<br>${derivativeProbeHtml()}`;
 }
 
-export function updateProbeInfo() {
+function updateProbeInfo() {
     const probeCanRender = state.probeActive
         && !(state.manifold3dViewEnabled && state.manifoldTransformationEnabled)
         && !state.navigationModeEnabled
@@ -1095,6 +1090,9 @@ function syncDomainColoringControls() {
 
     const normalized = normalizeOrbitColoringMode(state.orbitColoringMode);
     setValue('orbitColoringModeSelect', normalized);
+    setValue('domainResScaleSelect', String(state.domainResScale || 1.5));
+    setChecked('domainShowModulusCb', state.domainShowModulus !== false);
+    setChecked('domainShowPhaseCb', Boolean(state.domainShowPhase));
 
     setChecked('showDomainColoringKeyCb', state.domainColoringKeyVisible);
     setHidden(

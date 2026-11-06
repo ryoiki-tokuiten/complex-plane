@@ -15,7 +15,35 @@ const emcc = join(emsdkRoot, 'upstream', 'emscripten', process.platform === 'win
 const emConfig = join(emsdkRoot, '.emscripten');
 const output = join(nativeRoot, 'build', 'complex_engine.wasm');
 const stamp = join(nativeRoot, 'build', '.source-hash');
+const bendStamp = join(nativeRoot, 'build', '.bend-hash');
 const force = process.argv.includes('--force');
+
+const bendMainSrc = join(root, 'public', 'bend_complex_plane', 'main.bend');
+const bendProofSrc = join(root, 'public', 'bend_complex_plane', 'PROOF.bend');
+const bendEngineOut = join(root, 'js', 'rendering', 'bend_engine.mjs');
+const bendProofOut = join(root, 'public', 'bend_complex_plane', 'PROOF.bendtt');
+if (existsSync(bendMainSrc) && existsSync(bendProofSrc)) {
+    const bendHash = createHash('sha256')
+        .update(readFileSync(bendMainSrc))
+        .update('\0')
+        .update(readFileSync(bendProofSrc))
+        .digest('hex');
+    const bendUpToDate =
+        !force &&
+        existsSync(bendEngineOut) &&
+        existsSync(bendProofOut) &&
+        existsSync(bendStamp) &&
+        readFileSync(bendStamp, 'utf8').trim() === bendHash;
+    if (!bendUpToDate) {
+        const bunBin = process.env.BUN_BIN || (existsSync('/home/roshan/.bun/bin/bun') ? '/home/roshan/.bun/bin/bun' : 'bun');
+        const bendCompiler = join(root, 'public', 'bend', 'bend2', 'main.ts');
+        console.log('[bend] Verifying PROOF.bend and compiling main.bend -> js/rendering/bend_engine.mjs...');
+        execFileSync(bunBin, [bendCompiler, bendProofSrc, '-o', bendProofOut], { cwd: root, stdio: 'inherit' });
+        execFileSync(bunBin, [bendCompiler, bendMainSrc, '-o', bendEngineOut], { cwd: root, stdio: 'inherit' });
+        mkdirSync(dirname(bendStamp), { recursive: true });
+        writeFileSync(bendStamp, `${bendHash}\n`);
+    }
+}
 
 function sourceFiles(directory) {
     const files = [];
@@ -145,7 +173,6 @@ const exported = [
     '_ce_render_map_contour', '_ce_render_real_contour',
     '_ce_build_image_mesh_precise', '_ce_build_grid_fold',
     '_ce_build_fold_preimage_markers',
-    '_ce_create_domain_render_context', '_ce_destroy_domain_render_context', '_ce_render_domain_tile',
     '_ce_project_precise_pixels',
     '_ce_project_precise_pixels_to_canvas', '_ce_project_values_to_precise',
     '_ce_trace_streamlines', '_ce_build_vector_field', '_ce_build_tissot',

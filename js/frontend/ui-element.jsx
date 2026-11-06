@@ -23,7 +23,6 @@ import { getPanelProps } from '../ui/panel-layout-manager.js';
 import { ManifoldTransformationControls } from './components/manifold-transformation-controls.jsx';
 import { NavigationKeyHints } from './components/navigation-key-hints.jsx';
 import { VideoPlaybackButton, VideoPlaybackStatus } from './components/video-playback-status.jsx';
-import { DomainRenderingIndicator } from './components/domain-rendering-indicator.jsx';
 
 const SLOTS = {
     polynomial_coeffs_container: PolynomialCoefficients,
@@ -40,7 +39,6 @@ const SLOTS = {
     navigation_keyhint_overlay: NavigationKeyHints,
     video_play_pause_btn: VideoPlaybackButton,
     video_status_display: VideoPlaybackStatus,
-    z_plane_rendering_indicator: DomainRenderingIndicator,
     z_plane_transformation_overlay: () => <ManifoldTransformationControls plane="z" />,
     w_plane_transformation_overlay: () => <ManifoldTransformationControls plane="w" />,
     domain_palette_circles: DomainPaletteOptions,
@@ -55,7 +53,7 @@ const SLOTS = {
 
 const ROOT_SLOTS = new Set([
     'input_shape_picker', 'navigation_keyhint_overlay', 'video_play_pause_btn',
-    'video_status_display', 'z_plane_rendering_indicator'
+    'video_status_display'
 ]);
 const WORKSPACE_PANELS = new Set([
     'z_plane_column', 'w_plane_column', 'laplace_spectrum_column', 'laplace_com_column',

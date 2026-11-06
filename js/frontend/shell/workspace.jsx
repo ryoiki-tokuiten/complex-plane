@@ -28,8 +28,8 @@ export function Workspace() {
               </div>
             </div>
             <Ui as="div" id={"z_plane_canvas_wrapper"} class={"canvas-layer-host"}>
+              <Ui as="canvas" id={"z_plane_domain_canvas"} aria-hidden="true" hidden />
               <Ui as="canvas" id={"z_plane_canvas"} />
-              <Ui as="div" id={"z_plane_rendering_indicator"} class={"domain-rendering-indicator hidden"} />
               <Ui as="div" id={"z_plane_probe_info"} class={"probe-info-overlay hidden"} />
               <Ui as="div" id={"z_plane_threejs_container"} class={"hidden canvas-overlay"} />
               <Ui as="div" id={"z_plane_transformation_overlay"} class={"transformation-hud hidden"} />

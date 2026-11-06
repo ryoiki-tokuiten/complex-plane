@@ -8,7 +8,6 @@ export const MAX_POLY_DEGREE = 10;
 export const ZERO_POLE_GRID_SIZE = 100;
 export const CRITICAL_POINT_FIND_GRID_SIZE = 60;
 export const CRITICAL_POINT_EPSILON = 1e-5;
-export const ZP_CP_CHECK_DISTANCE_FACTOR = 1.5;
 
 export const MAX_POINTS_ADAPTIVE_DEFAULT = 10000;
 export const DEFAULT_POINTS_PER_LINE = 2500;

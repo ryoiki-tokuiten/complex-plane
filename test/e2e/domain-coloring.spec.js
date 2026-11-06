@@ -9,29 +9,21 @@ async function enableDomainColoring(page) {
     });
 }
 
-async function domainStats(page) {
-    return page.evaluate(() => {
-        return window.__runtime?.rendering?.domainDynamicsStats || { state: 'idle', jobId: 0, completedJobs: 0, cancelledJobs: 0 };
-    });
-}
-
-async function waitForCompletedDomainFrame(page, completedJobs) {
-    await page.waitForFunction(minimumCompletedJobs => {
-        const stats = window.__runtime?.rendering?.domainDynamicsStats;
-        return Boolean(stats && stats.state === 'complete' && stats.completedJobs >= minimumCompletedJobs);
-    }, completedJobs, { timeout: 15000 });
-    return domainStats(page);
-}
-
-async function waitForNextCompletedDomainFrame(page, previousJobId) {
-    return page.waitForFunction(jobId => {
-        const stats = window.__runtime?.rendering?.domainDynamicsStats;
-        return stats?.state === 'complete' && stats.jobId !== jobId ? stats : false;
-    }, previousJobId, { timeout: 15000 }).then(handle => handle.jsonValue());
+async function waitForDomainFrameSettled(page) {
+    await page.waitForFunction(async () => {
+        const { hasPlanarDomainDisplay } = await import('./js/rendering/domain-coloring.js');
+        const domainCanvas = document.getElementById('z_plane_domain_canvas');
+        return Boolean(
+            domainCanvas &&
+            !domainCanvas.hidden &&
+            hasPlanarDomainDisplay() &&
+            !window.__context?.domainColoringDirty
+        );
+    }, null, { timeout: 15000 });
 }
 
 async function setZZoomExponentBurst(page, exponents) {
-    await page.evaluate(async (values) => {
+    await page.evaluate(async values => {
         const { setupVisualParameters } = await import('./js/utils/dom-utils.js');
         const { requestDomainRedraw } = await import('./js/rendering/redraw-scheduler.js');
         for (const value of values) {
@@ -48,76 +40,63 @@ test.describe('Domain Coloring Rendering', () => {
         await page.waitForFunction(() => window.__state && document.getElementById('z_plane_canvas')?.width > 0);
     });
 
-    test('function and algebraic expression changes finish a fresh domain frame', async ({ page }) => {
+    test('function and algebraic expression changes finish a fresh WebGL2 domain frame on #z_plane_domain_canvas', async ({ page }) => {
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
 
         await enableDomainColoring(page);
-        const initial = await waitForCompletedDomainFrame(page, 1);
+        await waitForDomainFrameSettled(page);
 
         await page.locator('#select_polynomial_btn').click();
-        const polynomial = await waitForNextCompletedDomainFrame(page, initial.jobId);
+        await waitForDomainFrameSettled(page);
 
         await page.locator('#enable_algebraic_chaining_cb').evaluate(checkbox => {
             checkbox.checked = true;
             checkbox.dispatchEvent(new Event('change', { bubbles: true }));
         });
-        const algebraic = await waitForNextCompletedDomainFrame(page, polynomial.jobId);
+        await waitForDomainFrameSettled(page);
 
         await page.locator('#algebraic_chaining_z_input').evaluate(input => {
             input.value = 'z + 1';
             input.dispatchEvent(new Event('input', { bubbles: true }));
         });
-        const expression = await waitForNextCompletedDomainFrame(page, algebraic.jobId);
+        await waitForDomainFrameSettled(page);
 
-        const finalState = await page.evaluate(() => ({
-            expression: window.__state?.algebraicChainingZExpr,
-            processing: window.__runtime?.rendering?.processingDomainDynamics,
-            indicatorHidden: document.getElementById('z_plane_rendering_indicator')?.classList.contains('hidden')
-        }));
-        expect(finalState).toEqual({ expression: 'z + 1', processing: false, indicatorHidden: true });
-        expect(expression.completedJobs).toBe(polynomial.completedJobs + 2);
+        const finalState = await page.evaluate(async () => {
+            const { hasPlanarDomainDisplay } = await import('./js/rendering/domain-coloring.js');
+            const domainCanvas = document.getElementById('z_plane_domain_canvas');
+            return {
+                expression: window.__state?.algebraicChainingZExpr,
+                hasDisplay: hasPlanarDomainDisplay(),
+                domainCanvasHidden: Boolean(domainCanvas?.hidden)
+            };
+        });
+        expect(finalState).toEqual({
+            expression: 'z + 1',
+            hasDisplay: true,
+            domainCanvasHidden: false
+        });
         expect(errors).toEqual([]);
     });
 
-    test('coalesces extreme zoom input into one native frame without overflow bands', async ({ page }) => {
+    test('renders extreme zoom input on the unified 96-bit WebGL2 pipeline without overflow bands or blackout', async ({ page }) => {
         const errors = [];
         page.on('pageerror', err => errors.push(err.message));
         await page.locator('#select_cos_btn').click();
         await enableDomainColoring(page);
-        const initial = await waitForCompletedDomainFrame(page, 1);
-
-        await page.evaluate(() => {
-            const target = window.__context.zDomainColorCtx;
-            const originalPutImageData = target.putImageData.bind(target);
-            window.__domainTileCommits = 0;
-            target.putImageData = (...args) => {
-                window.__domainTileCommits += 1;
-                return originalPutImageData(...args);
-            };
-        });
+        await waitForDomainFrameSettled(page);
 
         await setZZoomExponentBurst(page, [-1.5, -2, -2.5, -3]);
-        await page.waitForFunction(previousJobId => {
-            const stats = window.__runtime?.rendering?.domainDynamicsStats;
-            const state = window.__state;
-            return Boolean(state && stats && state.zPlaneZoom === 1e-3 && stats.jobId !== previousJobId &&
-                (stats.state === 'rendering' || stats.state === 'complete'));
-        }, initial.jobId);
-        const completed = await page.waitForFunction(previousJobId => {
-            const stats = window.__runtime?.rendering?.domainDynamicsStats;
-            const state = window.__state;
-            return Boolean(state && stats && state.zPlaneZoom === 1e-3 && stats.jobId !== previousJobId && stats.state === 'complete')
-                ? stats
-                : false;
-        }, initial.jobId, { timeout: 15000 }).then(handle => handle.jsonValue());
+        await waitForDomainFrameSettled(page);
 
         const result = await page.evaluate(() => {
             const state = window.__state;
-            const context = window.__context;
-            const runtime = window.__runtime;
-            const canvas = context.zDomainColorCanvas;
-            const pixels = context.zDomainColorCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+            const canvas = document.getElementById('z_plane_domain_canvas');
+            const gl = canvas.getContext('webgl2');
+            const w = canvas.width;
+            const h = canvas.height;
+            const pixels = new Uint8Array(w * h * 4);
+            gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
             let blackPixels = 0;
             for (let offset = 0; offset < pixels.length; offset += 4) {
                 if (pixels[offset] <= 2 && pixels[offset + 1] <= 2 && pixels[offset + 2] <= 2) {
@@ -126,20 +105,13 @@ test.describe('Domain Coloring Rendering', () => {
             }
 
             return {
-                blackRatio: blackPixels / (canvas.width * canvas.height),
-                commits: window.__domainTileCommits,
-                zoom: state.zPlaneZoom,
-                stats: runtime.rendering.domainDynamicsStats
+                blackRatio: blackPixels / (w * h),
+                zoom: state.zPlaneZoom
             };
         });
 
         expect(result.zoom).toBe(1e-3);
         expect(result.blackRatio, JSON.stringify(result)).toBeLessThan(0.001);
-        expect(result.commits).toBe(completed.totalTiles);
-        expect(completed.completedJobs).toBe(initial.completedJobs + 1);
-        expect(completed.totalTiles).toBe(completed.completedTiles);
-        expect(completed.wallMilliseconds).toBeGreaterThan(0);
-        expect(completed.workerMilliseconds).toBeGreaterThan(0);
         expect(errors).toEqual([]);
     });
 });

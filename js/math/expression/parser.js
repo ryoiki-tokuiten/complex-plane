@@ -18,8 +18,8 @@ export const EXPRESSION_LIMITS = Object.freeze({
 export const FUNCTION_ARITY = Object.freeze({
     sin: [1, 1], cos: [1, 1], tan: [1, 1], sec: [1, 1], asin: [1, 1], atan: [1, 1],
     exp: [1, 1], ln: [1, 1], log: [1, 1], gamma: [1, 1], loggamma: [1, 1],
-    bessel: [1, 2], sinh: [1, 1], tanh: [1, 1], sqrt: [1, 1],
-    zeta: [1, 1], abs: [1, 1], arg: [1, 1], re: [1, 1],
+    bessel: [1, 2], sinh: [1, 1], cosh: [1, 1], tanh: [1, 1], sqrt: [1, 1],
+    zeta: [1, 1], zeta_ac: [1, 1], abs: [1, 1], arg: [1, 1], re: [1, 1],
     im: [1, 1], conj: [1, 1], complex: [1, 2], floor: [1, 1], ceil: [1, 1],
     round: [1, 1], trunc: [1, 1], sign: [1, 1], min: [1, Infinity], max: [1, Infinity],
     mod: [2, 2], gcd: [2, 2], factorial: [1, 1], isPrime: [1, 1], pow: [2, 2],
@@ -268,58 +268,24 @@ class Parser {
         return { type: 'conditional', test, consequent, alternate, ...span(test, alternate) };
     }
 
-    parseLogicalOr() {
-        let expression = this.parseLogicalAnd();
-        while (this.tokens[this.index].value === '||') {
-            const operator = this.advance();
-            const right = this.parseLogicalAnd();
-            expression = { type: 'binary', op: operator.value, left: expression, right, ...span(expression, right) };
-        }
-        return expression;
-    }
+    parseLogicalOr() { return this.parseBinary(this.parseLogicalAnd, ['||']); }
 
-    parseLogicalAnd() {
-        let expression = this.parseEquality();
-        while (this.tokens[this.index].value === '&&') {
-            const operator = this.advance();
-            const right = this.parseEquality();
-            expression = { type: 'binary', op: operator.value, left: expression, right, ...span(expression, right) };
-        }
-        return expression;
-    }
+    parseLogicalAnd() { return this.parseBinary(this.parseEquality, ['&&']); }
 
-    parseEquality() {
-        let expression = this.parseComparison();
-        let value = this.tokens[this.index].value;
-        while (value === '==' || value === '!=') {
-            const operator = this.advance();
-            const right = this.parseComparison();
-            expression = { type: 'binary', op: operator.value, left: expression, right, ...span(expression, right) };
-            value = this.tokens[this.index].value;
-        }
-        return expression;
-    }
+    parseEquality() { return this.parseBinary(this.parseComparison, ['==', '!=']); }
 
     parseComparison() {
-        let expression = this.parseAdditive();
-        let value = this.tokens[this.index].value;
-        while (value === '<' || value === '<=' || value === '>' || value === '>=') {
-            const operator = this.advance();
-            const right = this.parseAdditive();
-            expression = { type: 'binary', op: operator.value, left: expression, right, ...span(expression, right) };
-            value = this.tokens[this.index].value;
-        }
-        return expression;
+        return this.parseBinary(this.parseAdditive, ['<', '<=', '>', '>=']);
     }
 
-    parseAdditive() {
-        let expression = this.parseMultiplicative();
-        let value = this.tokens[this.index].value;
-        while (value === '+' || value === '-') {
+    parseAdditive() { return this.parseBinary(this.parseMultiplicative, ['+', '-']); }
+
+    parseBinary(parseOperand, operators) {
+        let expression = parseOperand.call(this);
+        while (operators.includes(this.tokens[this.index].value)) {
             const operator = this.advance();
-            const right = this.parseMultiplicative();
+            const right = parseOperand.call(this);
             expression = { type: 'binary', op: operator.value, left: expression, right, ...span(expression, right) };
-            value = this.tokens[this.index].value;
         }
         return expression;
     }

@@ -634,7 +634,7 @@ export function ControlPanel() {
                         </Ui>
                       </label>
                       <div class={"slider-container"}>
-                        <Ui as="input" type={"range"} id={"chain_count_slider"} name={"chain_count_slider"} min={"1"} max={"1024"} step={"1"} value={"1"} data-tooltip={"Number of repeated applications"} />
+                        <Ui as="input" type={"range"} id={"chain_count_slider"} name={"chain_count_slider"} min={"1"} max={"3000"} step={"1"} value={"1"} data-tooltip={"Number of repeated applications"} />
                       </div>
                     </Ui>
                   </Ui>

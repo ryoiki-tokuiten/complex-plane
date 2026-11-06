@@ -11,6 +11,10 @@ import {
     requestUiRedraw as requestScheduledUiRedraw
 } from '../rendering/redraw-scheduler.js';
 import {
+    numberToBigFixed,
+    syncBigIntCameraFromPlaneParams
+} from '../rendering/domain-coloring.js';
+import {
     setLaplaceSurfaceViewport,
     updateLaplaceEvaluationPoint,
     updateLaplaceTransform
@@ -58,6 +62,7 @@ import { findNearestDynamicSample, formatDynamicSampleTooltip } from '../renderi
 import { drawFourier3DPipeline } from '../rendering/fourier-3d-pipeline.js';
 import { showDynamicTooltip, hideDynamicTooltip } from './tooltip-state.js';
 import { controlKeyFromId } from './control-key.js';
+import { canvasInteractionContexts, invalidateAllCanvasRects } from '../utils/canvas-interaction.js';
 
 const { controls = {} } = context;
 
@@ -114,7 +119,6 @@ function registerUiProps(controlKey, props) {
     uiActions.set(controlKey, { ...uiActions.get(controlKey), ...props });
 }
 
-const canvasInteractionContexts = { z: null, w: null };
 const canvasContextByElement = new WeakMap();
 const EMPTY_RECT = Object.freeze({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
 
@@ -810,15 +814,31 @@ function bindVideoControls() {
 
 function bindDomainColoringControls() {
     bindCheckbox('showDomainColoringKeyCb', 'domainColoringKeyVisible');
+    bindCheckbox('domainShowModulusCb', 'domainShowModulus', (_event, checked) => {
+        state.domainLightnessCycles = checked ? 1.0 : 0.0;
+        requestDomainRedraw(true);
+    });
+    bindCheckbox('domainShowPhaseCb', 'domainShowPhase', () => requestDomainRedraw(true));
+    bindControlListener('domainResScaleSelect', 'change', event => {
+        const val = parseFloat(event.target.value);
+        if (Number.isFinite(val) && val > 0) {
+            state.domainResScale = val;
+            requestDomainRedraw(true);
+        }
+    });
     bindControlListener('orbitColoringModeSelect', 'change', event => {
         setOrbitColoringMode(event.target.value);
         state.currentFunctionPreset = null;
         requestDomainRedraw(true);
     });
 
-
-    ['domainBrightness', 'domainContrast', 'domainSaturation', 'domainLightnessCycles']
-        .forEach(key => bindSlider(`${key}Slider`, key, parseFloat, () => requestDomainRedraw(true)));
+    ['domainBrightness', 'domainContrast', 'domainSaturation'].forEach(key =>
+        bindSlider(`${key}Slider`, key, parseFloat, () => requestDomainRedraw(true))
+    );
+    bindSlider('domainLightnessCyclesSlider', 'domainLightnessCycles', parseFloat, value => {
+        state.domainShowModulus = value > 0.0001;
+        requestDomainRedraw(true);
+    });
 }
 
 function disableRiemannSurface() {
@@ -1064,10 +1084,6 @@ function invalidateCanvasRect(ctx) {
     if (ctx) ctx.hasFreshRect = false;
 }
 
-export function invalidateAllCanvasRects() {
-    Object.values(canvasInteractionContexts).forEach(invalidateCanvasRect);
-}
-
 function canvasRect(ctx) {
     return ctx.hasFreshRect ? ctx.rect : refreshCanvasRect(ctx);
 }
@@ -1143,6 +1159,23 @@ function panPlane(ctx, pos) {
     ctx.params.origin.x = ctx.pan.panStartOrigin.x + deltaX;
     ctx.params.origin.y = ctx.pan.panStartOrigin.y + deltaY;
     updatePlaneViewportRanges(ctx.params);
+    if (
+        typeof ctx.pan.panStartCenterBigX === 'bigint' &&
+        typeof ctx.pan.panStartCenterBigY === 'bigint' &&
+        Number.isFinite(ctx.params.scaleMant) &&
+        Number.isFinite(ctx.params.scaleExp10)
+    ) {
+        const minDim = Math.max(1, Math.min(ctx.params.width || 1, ctx.params.height || 1));
+        const normDx = (deltaX / minDim) * 2.0 * ctx.params.scaleMant;
+        const normDy = (deltaY / minDim) * 2.0 * ctx.params.scaleMant;
+        ctx.params.centerBigX = ctx.pan.panStartCenterBigX - numberToBigFixed(normDx, ctx.params.scaleExp10);
+        ctx.params.centerBigY = ctx.pan.panStartCenterBigY + numberToBigFixed(normDy, ctx.params.scaleExp10);
+        ctx.params._lastSyncedOriginX = ctx.params.origin.x;
+        ctx.params._lastSyncedOriginY = ctx.params.origin.y;
+        ctx.params._lastSyncedScaleX = ctx.params.scale.x;
+        ctx.params._lastSyncedWidth = ctx.params.width;
+        ctx.params._lastSyncedHeight = ctx.params.height;
+    }
     requestDomainRedraw(true);
 }
 
@@ -1163,6 +1196,7 @@ function updateProbe(ctx, pos, active = true) {
 }
 
 function startPan(ctx, pos) {
+    syncBigIntCameraFromPlaneParams(ctx.params);
     ctx.pan.isPanning = true;
     ctx.pan.panStart.x = pos.x;
     ctx.pan.panStart.y = pos.y;
@@ -1171,6 +1205,8 @@ function startPan(ctx, pos) {
     ctx.hasDragged = false;
     ctx.pan.panStartOrigin.x = ctx.params.origin.x;
     ctx.pan.panStartOrigin.y = ctx.params.origin.y;
+    ctx.pan.panStartCenterBigX = ctx.params.centerBigX;
+    ctx.pan.panStartCenterBigY = ctx.params.centerBigY;
     ctx.precisePanStart = ctx.params.preciseViewport ? { ...ctx.params.preciseViewport } : null;
     ctx.canvas.style.cursor = 'grabbing';
     updateProbe(ctx, pos, false);
@@ -1404,6 +1440,7 @@ function zoomPlaneAt(ctx, pos, factor) {
     if (oldZoom < MIN_STATE_ZOOM_LEVEL || oldZoom > MAX_STATE_ZOOM_LEVEL) {
         throw new Error(`${ctx.planeType}-plane zoom is outside the supported range.`);
     }
+    syncBigIntCameraFromPlaneParams(ctx.params);
     const nextZoom = clamp(oldZoom * factor, MIN_STATE_ZOOM_LEVEL, MAX_STATE_ZOOM_LEVEL);
     const world = mapCanvasToWorldCoords(pos.x, pos.y, ctx.params);
 
@@ -1415,6 +1452,38 @@ function zoomPlaneAt(ctx, pos, factor) {
     ctx.params.origin.y = pos.y + world.y * ctx.params.scale.y;
 
     updatePlaneViewportRanges(ctx.params);
+
+    const zoomFactor = 1 / applied;
+    if (
+        typeof ctx.params.centerBigX === 'bigint' &&
+        typeof ctx.params.centerBigY === 'bigint' &&
+        Number.isFinite(ctx.params.scaleMant) &&
+        Number.isFinite(ctx.params.scaleExp10)
+    ) {
+        const w = Math.max(1, ctx.params.width || 1);
+        const h = Math.max(1, ctx.params.height || 1);
+        const minDim = Math.min(w, h);
+        const uvX = (pos.x - 0.5 * w) / minDim;
+        const uvY = (0.5 * h - pos.y) / minDim;
+        const offsetScale = (1.0 - zoomFactor) * 2.0 * ctx.params.scaleMant;
+        ctx.params.centerBigX += numberToBigFixed(uvX * offsetScale, ctx.params.scaleExp10);
+        ctx.params.centerBigY += numberToBigFixed(uvY * offsetScale, ctx.params.scaleExp10);
+
+        let newMant = ctx.params.scaleMant * zoomFactor;
+        let newExp = ctx.params.scaleExp10;
+        while (newMant >= 10.0) { newMant /= 10.0; newExp += 1; }
+        while (newMant < 1.0 && newMant > 0) { newMant *= 10.0; newExp -= 1; }
+        if (newExp >= -100 && newExp <= 2) {
+            ctx.params.scaleMant = newMant;
+            ctx.params.scaleExp10 = newExp;
+        }
+        ctx.params._lastSyncedOriginX = ctx.params.origin.x;
+        ctx.params._lastSyncedOriginY = ctx.params.origin.y;
+        ctx.params._lastSyncedScaleX = ctx.params.scale.x;
+        ctx.params._lastSyncedWidth = ctx.params.width;
+        ctx.params._lastSyncedHeight = ctx.params.height;
+    }
+
     requestDomainRedraw(true);
 }
 
@@ -1434,7 +1503,7 @@ function handleCanvasWheel(ctx, event) {
     flushCanvasWheel(ctx);
 }
 
-export function createViewportInteractionProps({ getViewport, setViewport, scaleZoom, onRedraw }) {
+function createViewportInteractionProps({ getViewport, setViewport, scaleZoom, onRedraw }) {
     let drag = null;
 
     const end = event => {
@@ -1489,7 +1558,7 @@ export function createViewportInteractionProps({ getViewport, setViewport, scale
     };
 }
 
-export function createPlaneViewportProps(planeParams, onRedraw) {
+function createPlaneViewportProps(planeParams, onRedraw) {
     if (!planeParams) return;
     return createViewportInteractionProps({
         getViewport: () => ({
@@ -1799,7 +1868,7 @@ function isPlaneFullscreen(isZ) {
     return isZ ? state.isZFullScreen : state.isWFullScreen;
 }
 
-export function handleFullScreenToggle(planeType, index = 0) {
+function handleFullScreenToggle(planeType, index = 0) {
     const isZ = planeType === 'z';
     setPlaneFullscreen(isZ, !isPlaneFullscreen(isZ), index);
     setupVisualParameters(false, false);

@@ -11,7 +11,6 @@ import {
 import { computeCenterOfMassFrequencySweep } from '../analysis/laplace-transform.js';
 import { createOrthographicSceneHost } from './parallel-3d-graphs.js';
 
-const BACKGROUND = 0x05060b;
 const AXIS_COLOR = 0xaeb8cc;
 const GRID_COLOR = 0x43506b;
 const INPUT_TICK_COLOR = 0xf3f6ff;
@@ -26,8 +25,6 @@ const INPUT_AXIS_HALF = 4.4;
 const OUTPUT_AXIS_HALF = 2.05;
 const STACK_X_SPACING = 11.0;
 const STACK_Z_SPACING = 7.5;
-const EPSILON = 1e-10;
-
 let activeRenderer = null;
 
 function clamp(value, min, max) {
@@ -98,7 +95,6 @@ class Fourier3DPipelineRenderer {
             cameraTarget: [0, 0, 0],
             cameraOffset: [6.7, 4.9, 6.5],
             cameraDistance: 2500,
-            background: BACKGROUND,
             getSize: () => ({
                 width: container.clientWidth || window.innerWidth || 1,
                 height: container.clientHeight || window.innerHeight || 1

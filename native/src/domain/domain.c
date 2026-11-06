@@ -70,19 +70,6 @@ int ce_domain_valid(ce_complex value) {
         fabs(value.re) < CE_DOMAIN_MAGNITUDE_MAX && fabs(value.im) < CE_DOMAIN_MAGNITUDE_MAX;
 }
 
-int ce_domain_bailout(ce_complex value) {
-    return fabs(value.re) >= CE_CHAIN_BAILOUT || fabs(value.im) >= CE_CHAIN_BAILOUT ||
-        value.re * value.re + value.im * value.im > CE_ESCAPE_RADIUS_SQ;
-}
-
-double ce_domain_smooth_iteration(uint32_t iteration, uint32_t count, ce_complex value) {
-    if (!ce_domain_valid(value)) return iteration + 1.0;
-    const double magnitude = fmax(hypot(value.re, value.im), CE_ESCAPE_RADIUS);
-    if (!isfinite(magnitude) || magnitude <= 1.0001) return iteration + 1.0;
-    const double adjustment = log(fmax(log(magnitude) / log(CE_ESCAPE_RADIUS), 1e-6)) / 0.693147180559945309417;
-    return fmax(0.0, fmin(count, iteration + 1.0 - adjustment));
-}
-
 static void ce_init_color_lut(ce_color_lut *lut,
                               const ce_complex *palette_rg, const double *palette_b,
                               uint32_t palette_count, double brightness,
@@ -204,77 +191,3 @@ int32_t ce_domain_color_points(const ce_complex *values, const uint8_t *valid, u
     return 0;
 }
 
-static void ce_palette_color(const ce_complex *palette_rg, const double *palette_b,
-                             uint32_t count, double hue, double *red, double *green, double *blue) {
-    hue = ce_clamp(hue, 0.0, 0.999999);
-    const double value = hue * (count - 1);
-    uint32_t index = (uint32_t)floor(value);
-    if (index >= count - 1) index = count - 2;
-    const double blend = value - index;
-    *red = palette_rg[index].re * (1.0 - blend) + palette_rg[index + 1].re * blend;
-    *green = palette_rg[index].im * (1.0 - blend) + palette_rg[index + 1].im * blend;
-    *blue = palette_b[index] * (1.0 - blend) + palette_b[index + 1] * blend;
-}
-
-static void ce_styled_color(double red, double green, double blue, double lightness,
-                            double saturation, double *out_red, double *out_green, double *out_blue) {
-    if (lightness < 0.5) {
-        const double scale = lightness * 2.0;
-        red *= scale; green *= scale; blue *= scale;
-    } else {
-        const double blend = (lightness - 0.5) * 2.0;
-        red = red * (1.0 - blend) + blend;
-        green = green * (1.0 - blend) + blend;
-        blue = blue * (1.0 - blend) + blend;
-    }
-    const double gray = 0.299 * red + 0.587 * green + 0.114 * blue;
-    *out_red = gray * (1.0 - saturation) + red * saturation;
-    *out_green = gray * (1.0 - saturation) + green * saturation;
-    *out_blue = gray * (1.0 - saturation) + blue * saturation;
-}
-
-void ce_domain_color_log_polar(double phase, double log_magnitude,
-                               const ce_complex *palette_rg, const double *palette_b,
-                               uint32_t palette_count, double brightness, double contrast,
-                               double saturation, double cycles,
-                               double *red, double *green, double *blue) {
-    if (!isfinite(phase) || isnan(log_magnitude)) { *red = *green = *blue = 0.0; return; }
-    double hue = phase * CE_INV_TWO_PI;
-    if (hue < 0.0) hue += 1.0;
-    double base_lightness = 0.5;
-    if (cycles > 0.0001) {
-        const double tone = ce_magnitude_tone(log_magnitude, cycles);
-        base_lightness = 0.34 + (0.72 - 0.34) * tone;
-    }
-    const double lightness = ce_clamp((0.5 + (base_lightness - 0.5) * contrast) * brightness, 0.05, 0.95);
-    double base_red, base_green, base_blue;
-    ce_palette_color(palette_rg, palette_b, palette_count, hue, &base_red, &base_green, &base_blue);
-    ce_styled_color(base_red, base_green, base_blue, lightness, ce_clamp(saturation, 0.0, 1.0), red, green, blue);
-}
-
-void ce_domain_color(ce_complex value, const ce_complex *palette_rg, const double *palette_b,
-                     uint32_t palette_count, double brightness, double contrast,
-                     double saturation, double cycles, double *red, double *green, double *blue) {
-    if (!ce_domain_valid(value)) { *red = *green = *blue = 0.0; return; }
-    ce_domain_color_log_polar(
-        ce_fast_atan2(value.im, value.re), ce_log_magnitude(value),
-        palette_rg, palette_b, palette_count, brightness, contrast,
-        saturation, cycles, red, green, blue
-    );
-}
-
-void ce_domain_event_color(ce_complex value, double intensity, int use_phase,
-                           const ce_complex *palette_rg, const double *palette_b, uint32_t palette_count,
-                           double brightness, double contrast, double saturation,
-                           double *red, double *green, double *blue) {
-    double hue = use_phase ? ce_fast_atan2(value.im, value.re) * CE_INV_TWO_PI : ce_clamp(intensity, 0.0, 0.9999);
-    if (hue < 0.0) hue += 1.0;
-    intensity = ce_clamp(intensity, 0.0, 1.0);
-    const double base_lightness = use_phase
-        ? 0.24 + 0.58 * pow(intensity, 0.55)
-        : 0.22 + 0.58 * pow(intensity, 0.65);
-    const double lightness = ce_clamp((0.5 + (base_lightness - 0.5) * contrast) * brightness, 0.05, 0.95);
-    double base_red, base_green, base_blue;
-    ce_palette_color(palette_rg, palette_b, palette_count, hue, &base_red, &base_green, &base_blue);
-    ce_styled_color(base_red, base_green, base_blue, lightness, ce_clamp(saturation, 0.0, 1.0), red, green, blue);
-}

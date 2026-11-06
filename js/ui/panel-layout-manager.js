@@ -149,7 +149,7 @@ function box(id, panel) {
     return { id, left, top, width, height, right: left + width, bottom: top + height };
 }
 
-export function resolvePanelCollisions(panels, activeId = null) {
+function resolvePanelCollisions(panels, activeId = null) {
     const result = Object.fromEntries(Object.entries(panels).map(([id, panel]) => [id, { ...panel }]));
     const boxes = Object.entries(result).map(([id, panel]) => box(id, panel));
     for (let pass = 0; pass < 8; pass++) {

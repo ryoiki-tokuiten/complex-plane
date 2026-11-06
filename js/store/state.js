@@ -157,6 +157,9 @@ const rawState = {
     domainContrast: 1.0,
     domainSaturation: 1.0,
     domainLightnessCycles: 1.0,
+    domainResScale: 1.5,
+    domainShowModulus: true,
+    domainShowPhase: false,
     domainPalette: 'arctic-frost',
 
     themeId: 'rose',
@@ -384,7 +387,6 @@ export const context = {
     zCtx: null,
     wCtx: null,
     zDomainColorCanvas: null,
-    zDomainColorCtx: null,
 
     wCanvasList: [],
     wCtxList: [],
