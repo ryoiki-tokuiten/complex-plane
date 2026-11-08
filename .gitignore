@@ -22,4 +22,3 @@ build.log
 
 # ---- Bend toolchain (installed locally via the official installer, never committed) ----
 .bend/
-public/bend/

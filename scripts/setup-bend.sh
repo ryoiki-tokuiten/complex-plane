@@ -2,26 +2,21 @@
 # Sets up the Bend 2 toolchain required by this repo. Idempotent. Run from repo root.
 # The agent/dev MUST get this passing before running dev/build/test/verify:bend.
 set -euo pipefail
-BEND_VERSION="2.0.39"
 cd "$(dirname "$0")/.."
 
-# 1. bun (runs public/bend/bend2/main.ts)
-command -v bun >/dev/null 2>&1 || { curl -fsSL https://bun.sh/install | bash; export PATH="$HOME/.bun/bin:$PATH"; }
-echo "bun $(bun --version)"
+export PATH="$HOME/.bend/bin:$PATH"
 
-# 2. Bend runtime sources -> public/bend/bend2 (+ LICENSE)
-if [ ! -f public/bend/bend2/main.ts ]; then
-  tmp="$(mktemp -d)"
-  git clone --depth 1 https://github.com/bendlang/bend.git "$tmp/bend"
-  mkdir -p public/bend
-  cp -r "$tmp/bend/bend2" public/bend/
-  rm -rf public/bend/bend2/docs public/bend/bend2/bendtt.lean   # not needed to check proofs
-  cp "$tmp/bend/LICENSE" public/bend/
-  rm -rf "$tmp"
+# 1. Install bend via the official installer if missing or broken (e.g. stale symlink)
+if ! command -v bend >/dev/null 2>&1 || ! bend version >/dev/null 2>&1; then
+  rm -f "$HOME/.bend/bin/bend"
+  curl -fsSL https://bend-lang.com/install.sh | sh
+  export PATH="$HOME/.bend/bin:$PATH"
 fi
-grep -q "VERSION = \"$BEND_VERSION\"" public/bend/bend2/main.ts \
-  || echo "WARNING: Bend version differs from $BEND_VERSION; proofs were checked on $BEND_VERSION"
+if [ -x "$HOME/.bend/bin/bend" ] && [ -w /usr/local/bin ]; then
+  ln -sf "$HOME/.bend/bin/bend" /usr/local/bin/bend
+fi
+echo "$(bend version)"
 
-# 3. Prove it works: all 65 laws must check
-bun public/bend/bend2/main.ts public/bend_complex_plane/PROOF.bend | tail -3
+# 2. Prove it works: all laws must check
+bend public/bend_complex_plane/PROOF.bend | tail -3
 echo "Bend OK. Now: npm install && npm run verify:bend && npm test"

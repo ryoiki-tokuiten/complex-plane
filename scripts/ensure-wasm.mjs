@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,6 +19,38 @@ const stamp = join(nativeRoot, 'build', '.source-hash');
 const bendStamp = join(nativeRoot, 'build', '.bend-hash');
 const force = process.argv.includes('--force');
 
+function resolveBendBin() {
+    const homeBend = join(homedir(), '.bend', 'bin', 'bend');
+    const candidates = [
+        process.env.BEND_BIN,
+        homeBend,
+        'bend'
+    ].filter(Boolean);
+    for (const candidate of candidates) {
+        try {
+            execFileSync(candidate, ['version'], { stdio: 'ignore' });
+            return candidate;
+        } catch {
+            // Try next candidate
+        }
+    }
+    execFileSync('bash', [join(root, 'scripts', 'setup-bend.sh')], { cwd: root, stdio: 'inherit' });
+    return existsSync(homeBend) ? homeBend : 'bend';
+}
+
+try {
+    const homeBend = join(homedir(), '.bend', 'bin', 'bend');
+    execFileSync(homeBend, ['version'], { stdio: 'ignore' });
+} catch {
+    // If ~/.bend/bin/bend is missing or a broken symlink, heal it via setup-bend.sh
+    try {
+        execFileSync('bash', [join(root, 'scripts', 'setup-bend.sh')], { cwd: root, stdio: 'inherit' });
+    } catch {
+        // Non-fatal if pre-compiled artifacts are already present
+    }
+}
+
+
 const bendMainSrc = join(root, 'public', 'bend_complex_plane', 'main.bend');
 const bendProofSrc = join(root, 'public', 'bend_complex_plane', 'PROOF.bend');
 const bendEngineOut = join(root, 'js', 'rendering', 'bend_engine.mjs');
@@ -31,15 +64,13 @@ if (existsSync(bendMainSrc) && existsSync(bendProofSrc)) {
     const bendUpToDate =
         !force &&
         existsSync(bendEngineOut) &&
-        existsSync(bendProofOut) &&
         existsSync(bendStamp) &&
         readFileSync(bendStamp, 'utf8').trim() === bendHash;
     if (!bendUpToDate) {
-        const bunBin = process.env.BUN_BIN || (existsSync('/home/roshan/.bun/bin/bun') ? '/home/roshan/.bun/bin/bun' : 'bun');
-        const bendCompiler = join(root, 'public', 'bend', 'bend2', 'main.ts');
+        const bendBin = resolveBendBin();
         console.log('[bend] Verifying PROOF.bend and compiling main.bend -> js/rendering/bend_engine.mjs...');
-        execFileSync(bunBin, [bendCompiler, bendProofSrc, '-o', bendProofOut], { cwd: root, stdio: 'inherit' });
-        execFileSync(bunBin, [bendCompiler, bendMainSrc, '-o', bendEngineOut], { cwd: root, stdio: 'inherit' });
+        execFileSync(bendBin, [bendProofSrc, '-o', bendProofOut], { cwd: root, stdio: 'inherit' });
+        execFileSync(bendBin, [bendMainSrc, '-o', bendEngineOut], { cwd: root, stdio: 'inherit' });
         mkdirSync(dirname(bendStamp), { recursive: true });
         writeFileSync(bendStamp, `${bendHash}\n`);
     }

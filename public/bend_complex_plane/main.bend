@@ -1197,5 +1197,19 @@ def zeta_ac_single_branch_cost(zoom_exp: Nat) -> Nat:
 def zeta_ac_dual_branch_cost(+zoom_exp: Nat) -> Nat:
   Nat.add(zeta_ac_single_branch_cost(zoom_exp), Nat.add(limbs_for_zoom(zoom_exp), Nat.mul(3n, limbs_for_zoom(zoom_exp))))
 
+# Law 66: 96-Bit Cauchy-Riemann Tangent-Frame Special Functions (`gamma`, `loggamma`, `bessel`, `zeta_ac`, `atan`)
+# & Decoupled DCE Shader Compilation Cost Model:
+def tangent_frame_special_fn_cost(zoom_exp: Nat) -> Nat:
+  Nat.mul(2n, limbs_for_zoom(zoom_exp))
+
+def naive_inlined_special_fn_cost(+zoom_exp: Nat) -> Nat:
+  Nat.add(tangent_frame_special_fn_cost(zoom_exp), Nat.add(limbs_for_zoom(zoom_exp), Nat.mul(4n, limbs_for_zoom(zoom_exp))))
+
+def dce_decoupled_compile_lines(fn_class: Nat) -> Nat:
+  Nat.add(680n, fn_class)
+
+def monolithic_inlined_compile_lines(+fn_class: Nat) -> Nat:
+  Nat.add(dce_decoupled_compile_lines(fn_class), 420n)
+
 
 

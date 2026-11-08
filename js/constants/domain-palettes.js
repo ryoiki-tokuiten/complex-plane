@@ -1,8 +1,73 @@
+export const DEFAULT_DOMAIN_PALETTE = 'arctic-fox';
+
 const RAW_DOMAIN_PALETTES = [
+    {
+        id: 'arctic-fox',
+        shaderId: 15,
+        name: 'Arctic Fox',
+        desc: 'Glacial cyan, polar slate, frost ivory, twilight amber',
+        hexStops: [
+            '#0D2430',
+            '#1E6078',
+            '#7AD1E6',
+            '#F4F9FC',
+            '#E66C4C',
+            '#243E52'
+        ],
+        stops: [
+            [13, 36, 48],
+            [30, 96, 120],
+            [122, 209, 230],
+            [244, 249, 252],
+            [230, 108, 76],
+            [36, 62, 82],
+            [13, 36, 48]
+        ],
+        key: [
+            { label: 'Frost Ivory', hex: '#F4F9FC', color: 'rgb(244, 249, 252)', angle: '0° (Positive Real)' },
+            { label: 'Twilight Amber', hex: '#E66C4C', color: 'rgb(230, 108, 76)', angle: '60° / 90° (Positive Imaginary)' },
+            { label: 'Polar Slate', hex: '#243E52', color: 'rgb(36, 62, 82)', angle: '120° (Upper-Left Phase)' },
+            { label: 'Deep Polar Slate', hex: '#0D2430', color: 'rgb(13, 36, 48)', angle: '180° (Negative Real)' },
+            { label: 'Glacial Teal', hex: '#1E6078', color: 'rgb(30, 96, 120)', angle: '-120° (Lower-Left Phase)' },
+            { label: 'Glacial Cyan', hex: '#7AD1E6', color: 'rgb(122, 209, 230)', angle: '-60° / -90° (Negative Imaginary)' }
+        ]
+    },
+    {
+        id: 'silent-colors',
+        shaderId: 20,
+        name: 'Silent Colors',
+        desc: 'Muted sage, warm stone, dusty clay, mist charcoal',
+        hexStops: [
+            '#26302B',
+            '#5E7268',
+            '#C6CEBE',
+            '#F0ECE1',
+            '#C87D65',
+            '#3D4641'
+        ],
+        stops: [
+            [38, 48, 43],
+            [94, 114, 104],
+            [198, 206, 190],
+            [240, 236, 225],
+            [200, 125, 101],
+            [61, 70, 65],
+            [38, 48, 43]
+        ],
+        key: [
+            { label: 'Warm Stone', hex: '#F0ECE1', color: 'rgb(240, 236, 225)', angle: '0° (Positive Real)' },
+            { label: 'Dusty Clay', hex: '#C87D65', color: 'rgb(200, 125, 101)', angle: '60° / 90° (Positive Imaginary)' },
+            { label: 'Mist Charcoal', hex: '#3D4641', color: 'rgb(61, 70, 65)', angle: '120° (Upper-Left Phase)' },
+            { label: 'Deep Pine Charcoal', hex: '#26302B', color: 'rgb(38, 48, 43)', angle: '180° (Negative Real)' },
+            { label: 'Muted Sage', hex: '#5E7268', color: 'rgb(94, 114, 104)', angle: '-120° (Lower-Left Phase)' },
+            { label: 'Pale Sage Mist', hex: '#C6CEBE', color: 'rgb(198, 206, 190)', angle: '-60° / -90° (Negative Imaginary)' }
+        ]
+    },
     {
         id: 'analytic-base',
         shaderId: 0,
         name: 'Analytic Base',
+        desc: 'Classical HSV phase wheel — crimson, emerald, cyan, cobalt',
         stops: [
             [173, 31, 31],
             [153, 153, 28],
@@ -23,6 +88,7 @@ const RAW_DOMAIN_PALETTES = [
         id: 'arctic-frost',
         shaderId: 4,
         name: 'Arctic Frost',
+        desc: 'Deep slate, steel blue, ice blue, frost blue',
         stops: [
             [15, 23, 42],
             [30, 41, 59],
@@ -43,6 +109,7 @@ const RAW_DOMAIN_PALETTES = [
         id: 'calming',
         shaderId: 11,
         name: 'Calming',
+        desc: 'Warm cream, caramel, mahogany, soft copper',
         stops: [
             [217, 197, 193],
             [196, 139, 128],
@@ -63,6 +130,7 @@ const RAW_DOMAIN_PALETTES = [
         id: 'three-b1b-newton-deep',
         shaderId: 21,
         name: '3Blue1Brown Newton Deep',
+        desc: 'Deep violet, indigo, teal, emerald, bright cyan',
         stops: [
             [68, 1, 84],
             [59, 82, 139],
@@ -83,6 +151,7 @@ const RAW_DOMAIN_PALETTES = [
         id: 'mandelbrot',
         shaderId: 14,
         name: 'Mandelbrot',
+        desc: 'Ultramarine, sky cyan, ivory, solar gold, obsidian',
         stops: [
             [0, 7, 100],
             [19, 86, 189],
@@ -100,29 +169,10 @@ const RAW_DOMAIN_PALETTES = [
         ]
     },
     {
-        id: 'lava',
-        shaderId: 15,
-        name: 'Lava',
-        stops: [
-            [0, 0, 0],
-            [80, 0, 0],
-            [255, 160, 0],
-            [255, 255, 255],
-            [255, 160, 0],
-            [80, 0, 0],
-            [0, 0, 0]
-        ],
-        key: [
-            { label: 'Black', color: 'rgb(0, 0, 0)', angle: '0° (Positive Real)' },
-            { label: 'Dark Red', color: 'rgb(80, 0, 0)', angle: '90° (Positive Imaginary)' },
-            { label: 'Orange', color: 'rgb(255, 160, 0)', angle: '180° (Negative Real)' },
-            { label: 'White', color: 'rgb(255, 255, 255)', angle: '-90° (Negative Imaginary)' }
-        ]
-    },
-    {
         id: 'fall',
         shaderId: 16,
         name: 'Fall',
+        desc: 'Charcoal, crimson, burnt orange, harvest gold',
         stops: [
             [25, 25, 25],
             [128, 0, 0],
@@ -138,31 +188,15 @@ const RAW_DOMAIN_PALETTES = [
             { label: 'Gold', color: 'rgb(255, 215, 0)', angle: '180° (Negative Real)' },
             { label: 'Pale Yellow', color: 'rgb(255, 239, 184)', angle: '-90° (Negative Imaginary)' }
         ]
-    },
-    {
-        id: 'jewellery',
-        shaderId: 20,
-        name: 'Jewellery',
-        stops: [
-            [0, 0, 51],
-            [0, 21, 170],
-            [13, 115, 142],
-            [204, 204, 255],
-            [255, 0, 66],
-            [123, 198, 255],
-            [0, 0, 51]
-        ],
-        key: [
-            { label: 'Deep Blue', color: 'rgb(0, 0, 51)', angle: '0° (Positive Real)' },
-            { label: 'Teal', color: 'rgb(13, 115, 142)', angle: '90° (Positive Imaginary)' },
-            { label: 'Rose', color: 'rgb(255, 0, 66)', angle: '180° (Negative Real)' },
-            { label: 'Light Blue', color: 'rgb(123, 198, 255)', angle: '-90° (Negative Imaginary)' }
-        ]
     }
 ];
 
 function rgbCss(stop) {
     return `rgb(${stop[0]}, ${stop[1]}, ${stop[2]})`;
+}
+
+function rgbToHex(stop) {
+    return `#${stop.map(channel => Number(channel).toString(16).padStart(2, '0').toUpperCase()).join('')}`;
 }
 
 function unitStop(stop) {
@@ -172,8 +206,21 @@ function unitStop(stop) {
 function freezePalette(palette) {
     const stops = Object.freeze(palette.stops.map(stop => Object.freeze([...stop])));
     const stopsUnit = Object.freeze(stops.map(unitStop));
+    const uniqueRgbStops = stops.length > 1 &&
+        stops[0][0] === stops[stops.length - 1][0] &&
+        stops[0][1] === stops[stops.length - 1][1] &&
+        stops[0][2] === stops[stops.length - 1][2]
+        ? stops.slice(0, -1)
+        : stops;
+    const hexStops = Object.freeze(
+        Array.isArray(palette.hexStops)
+            ? [...palette.hexStops]
+            : uniqueRgbStops.map(rgbToHex)
+    );
     return Object.freeze({
         ...palette,
+        desc: palette.desc || '',
+        hexStops,
         stops,
         stopsUnit,
         colors: stops.map(rgbCss).join(', '),
@@ -186,6 +233,8 @@ const DOMAIN_PALETTES = Object.freeze(RAW_DOMAIN_PALETTES.map(freezePalette));
 export const domainPalettes = Object.freeze(DOMAIN_PALETTES.map(palette => Object.freeze({
     id: palette.id,
     name: palette.name,
+    desc: palette.desc,
+    hexStops: palette.hexStops,
     colors: palette.colors,
     key: palette.key
 })));

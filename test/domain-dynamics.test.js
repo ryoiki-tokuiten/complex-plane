@@ -106,7 +106,7 @@ function configureDynamics(overrides = {}) {
         domainContrast: 1,
         domainSaturation: 1,
         domainLightnessCycles: 0,
-        domainPalette: 'arctic-frost',
+        domainPalette: 'arctic-fox',
         chainingEnabled: true,
         chainingMode: 'recursion',
         chainCount: 4,
@@ -312,15 +312,17 @@ test('Bend 2 generalized orbit coloring modes and Catmull-Rom domain color evalu
     assert.equal(ui.mode, 2);
     assert.equal(Number(bendEngine.live_ui_is_recurrence(ui.mode, ui.chain_enabled)), 2);
 
-    const rgb = domainColorForValue(1, 1, {
-        domainLightnessCycles: 1,
-        domainContrast: 1,
-        domainBrightness: 1,
-        domainSaturation: 1,
-        domainPalette: 'arctic-frost'
-    });
-    assert.equal(rgb.length, 3);
-    assert.ok(rgb.every(c => Number.isInteger(c) && c >= 0 && c <= 255));
+    for (const paletteId of ['arctic-fox', 'silent-colors']) {
+        const rgb = domainColorForValue(1, 1, {
+            domainLightnessCycles: 1,
+            domainContrast: 1,
+            domainBrightness: 1,
+            domainSaturation: 1,
+            domainPalette: paletteId
+        });
+        assert.equal(rgb.length, 3);
+        assert.ok(rgb.every(c => Number.isInteger(c) && c >= 0 && c <= 255));
+    }
 });
 
 test('native precise planar projection keeps neighboring source pixels distinct at 10^125', () => {
@@ -429,6 +431,102 @@ test('zeta continuation chains match the mapped transform in the critical strip'
                 1e-10
             );
         }
+    } finally {
+        restoreState(before);
+    }
+});
+
+test('full matrix audit: every function × orbit mode × chain depth × derivative × Taylor × multi-term algebraic × custom z-expr × branch/base/continuation', () => {
+    const before = snapshotState();
+
+    try {
+        const allFns = [
+            'cos', 'sin', 'tan', 'sec', 'exp', 'ln', 'sinh', 'tanh',
+            'asin', 'atan', 'gamma', 'loggamma', 'bessel', 'power',
+            'mobius', 'polynomial', 'zeta'
+        ];
+        const modes = ['value', 'escape', 'attractor'];
+
+        for (const fnKey of allFns) {
+            for (const mode of modes) {
+                configureDynamics({
+                    currentFunction: fnKey,
+                    chainingEnabled: true,
+                    chainingMode: mode === 'escape' ? 'zero_seed' : 'recursion',
+                    chainCount: 12,
+                    orbitColoringMode: mode,
+                    mapPresentation: 'function',
+                    zetaContinuationEnabled: fnKey === 'zeta',
+                    branchCutAngle: 0.5,
+                    expBase: { re: 2.0, im: 0.5 },
+                    logBase: { re: 3.0, im: -0.25 },
+                    besselOrder: { re: 1.5, im: 0.25 }
+                });
+                const compiled = compileStateToUnifiedExpression(state);
+                const shader = buildComputeShader(compiled);
+                assert.match(shader, /#version 300 es/);
+                assert.ok(compiled.batchSize >= 1 && compiled.batchSize <= 32);
+            }
+
+            // Derivative presentation + Taylor approximation
+            configureDynamics({
+                currentFunction: fnKey,
+                mapPresentation: 'derivative',
+                chainingEnabled: false
+            });
+            const deriv = compileStateToUnifiedExpression(state);
+            assert.equal(deriv.isDerivative, true);
+            assert.match(buildComputeShader(deriv), /inv2h = 32768\.0/);
+
+            configureDynamics({
+                currentFunction: fnKey,
+                mapPresentation: 'function',
+                taylorSeriesEnabled: true,
+                taylorSeriesOrder: 4,
+                taylorSeriesCenter: { re: 2.5, im: 0.5 },
+                taylorSeriesConvergenceRadius: 1.5
+            });
+            const taylor = compileStateToUnifiedExpression(state);
+            assert.match(taylor.fullGLSL, /cds_mask_radius/);
+        }
+
+        // Non-analytic Taylor center (e.g. pole/branch point at 0 for ln) must not throw
+        configureDynamics({
+            currentFunction: 'ln',
+            taylorSeriesEnabled: true,
+            taylorSeriesOrder: 3,
+            taylorSeriesCenter: { re: 0, im: 0 },
+            taylorSeriesConvergenceRadius: 1.0
+        });
+        assert.doesNotThrow(() => compileStateToUnifiedExpression(state));
+
+        // Multi-term algebraic with custom z-expression, log/exp/reciprocal modifiers
+        configureDynamics({
+            currentFunction: 'algebraic_chaining',
+            algebraicChainingEnabled: true,
+            algebraicChainingZExpr: 'z^2 + c',
+            chainingEnabled: true,
+            chainCount: 25,
+            orbitColoringMode: 'escape',
+            algebraicChainingTerms: [
+                {
+                    coeff: { re: 1.5, im: -0.5 },
+                    factors: [
+                        algebraicFactor('gamma', { chainedFunc: 'sin', power: 2, reciprocal: true }),
+                        algebraicFactor('loggamma', { log: true, exp: true })
+                    ]
+                },
+                {
+                    coeff: { re: -0.75, im: 0.25 },
+                    factors: [algebraicFactor('bessel', { power: -2 })]
+                }
+            ]
+        });
+        const multiAlg = compileStateToUnifiedExpression(state);
+        const multiShader = buildComputeShader(multiAlg);
+        assert.match(multiShader, /cds_gamma/);
+        assert.match(multiShader, /cds_loggamma/);
+        assert.match(multiShader, /cds_bessel/);
     } finally {
         restoreState(before);
     }

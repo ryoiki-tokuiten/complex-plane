@@ -68,7 +68,9 @@ function MenuButton({ item, topLevel = false, openSubmenu, hideSubmenu, close, c
         onMouseLeave={children?.length ? scheduleClose : undefined}>
         {item.type === 'checkbox'
             ? <span class="plane-context-menu-check">{item.checked && <CheckIcon />}</span>
-            : topLevel && <span class="plane-context-menu-icon">{item.icon === 'download' && <DownloadIcon />}</span>}
+            : topLevel
+                ? <span class="plane-context-menu-icon">{item.icon === 'download' && <DownloadIcon />}</span>
+                : <span class="plane-context-menu-check" />}
         <span class="plane-context-menu-label">{item.label}</span>
         {children?.length ? <span class="plane-context-menu-arrow"><SubmenuArrow /></span> : null}
     </button>;

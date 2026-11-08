@@ -77,11 +77,13 @@ test('the application store enforces cross-feature UI invariants', async () => {
     assert.equal(state.probeActive, true);
 
     state.chainingEnabled = true;
-    assert.equal(state.probeActive, false);
+    assert.equal(state.probeActive, true);
+    state.probeActive = false;
     state.probeActive = true;
-    assert.equal(state.probeActive, false);
+    assert.equal(state.probeActive, true);
 
     state.chainingEnabled = false;
+    state.probeActive = false;
 
     state.realPlotsEnabled = false;
     state.riemannSurfaceEnabled = false;

@@ -19,9 +19,12 @@ function cmp_new(a, b) {
   return {$: a < b ? "LT" : a === b ? "EQ" : "GT"};
 }
 
+function tup_new(a, b) {
+  return {$: "Tuple", fst: a, snd: b};
+}
+
 function nat_divmod(a, b) {
-  return b === 0 ? {$: "Tuple", fst: 0, snd: a}
-    : {$: "Tuple", fst: Math.trunc(a / b), snd: a % b};
+  return tup_new(b && Math.trunc(a / b), b ? a % b : a);
 }
 
 function nat_chk(n) {
@@ -56,18 +59,26 @@ function f32_from_bits(u) {
 
 function f32_read(s) {
   const re = /^[\t\n\v\f\r ]*[+-]?((\d+(?:\.\d*)?|\.\d+)(e[+-]?\d+)?|inf(inity)?|nan)$/i;
-  const v = f32_round(s.replace(/inf\w*/i, "Infinity"));
-  return re.test(s) ? {$: "Some", value: v} : {$: "None"};
+  return re.test(s) ? {$: "Some", value: f32_round(
+    s.replace(/inf\w*/i, "Infinity"))} : {$: "None"};
 }
 
 const f32_round = function f32_round(s) {
-  const d = Number(s), a = Math.abs(d), f = Math.fround(a), g = 2 * a - Math.min(f, 340282366920938500000000000000000000000);
-  if (g === f || Math.fround(g) !== g || g === 1 / 0)
+  const d = Number(s);
+  const a = Math.abs(d);
+  const f = Math.fround(a);
+  const g = 2 * a - Math.min(f, 2 ** 128);
+  if (g === f || Math.fround(g) !== g || g === Infinity) {
     return Math.sign(d) * f;
+  }
   let k = 0;
-  while (a * 2 ** k % 1 !== 0)
+  while (a * 2 ** k % 1 !== 0) {
     k += 1;
-  const [, i, r, e] = /(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s), n = Number(e ?? 0) - r.length, x = BigInt(i + r) * 2n ** BigInt(k) * 10n ** BigInt(Math.max(n, 0)), y = BigInt(a * 2 ** k) * 10n ** BigInt(Math.max(-n, 0));
+  }
+  const [, i, r, e] = /(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s);
+  const n = Number(e ?? 0) - r.length;
+  const x = BigInt(i + r) * 2n ** BigInt(k) * 10n ** BigInt(Math.max(n, 0));
+  const y = BigInt(a * 2 ** k) * 10n ** BigInt(Math.max(-n, 0));
   return Math.sign(d) * (x === y || x > y !== g > f ? f : g);
 };
 
@@ -85,7 +96,7 @@ function char_code(s) {
 }
 
 function string_contains(s, p) {
-  // A match must start at a Char boundary, not inside a packed U32 code.
+  // A match starts at a Char, not inside a packed U32 code.
   for (let at = 0; at <= s.length; at += char_len(s, at)) {
     if (s.startsWith(p, at)) {
       return true;
@@ -105,9 +116,9 @@ function str_in(s) {
 // Array
 // =====
 
-function array_new(d, v) {
-  if (d > 31) {
-    throw "bend: an array past the deepest block class 31";
+function array_new(d, v, lgs) {
+  if (d > 31 - lgs) {
+    throw "bend: an array past the deepest block class 31 (depth + log2 words per cell)";
   }
   return Array(2 ** d).fill(v);
 }
@@ -120,10 +131,9 @@ function array_node(a, b) {
 }
 
 function array_rmw(a, i, f) {
-  const at = i % a.length;
-  const old = a[at];
-  a[at] = f(old);
-  return {$: "Tuple", fst: a, snd: old};
+  const old = a[i %= a.length];
+  a[i] = f(old);
+  return tup_new(a, old);
 }
 
 // Run
@@ -156,6 +166,7 @@ function run_lib(f, n) {
 // ======
 
 const $0eff = Object.create(null);
+const io_file_append = new Set();
 
 function io_eff(k, run) {
   if (arguments.length > 2) {
@@ -178,11 +189,11 @@ function $extra_limbs(_zoom_exp_0) {
 }
 
 function $limbs_for_zoom(_zoom_exp_0) {
-  return nat_chk(($extra_limbs(_zoom_exp_0)) + 12);
+  return nat_chk($$extra_limbs(_zoom_exp_0) + 12);
 }
 
 function $mantissa_bits(_zoom_exp_0) {
-  const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
   return nat_chk(_x_0 * 32);
 }
 
@@ -203,8 +214,9 @@ function $bitwise_split_lo(_a_hi_0, _a_lo_0) {
 }
 
 function $dekker_fma_hi(_a_hi_0, _a_lo_0) {
-  const _x_0 = nat_chk(4097 * _a_lo_0);
-  return nat_chk(_a_hi_0 + _x_0);
+  const _x_0 = (4097 );
+  const _x_1 = nat_chk(_x_0 * _a_lo_0);
+  return nat_chk(_a_hi_0 + _x_1);
 }
 
 function $fenced_two_sum_err(_a_hi_0, _b_lo_0) {
@@ -234,7 +246,7 @@ function $sadd(_a_0, _b_0) {
 }
 
 function $ssub(_a_0, _b_0) {
-  return $sadd(_a_0, ($sneg(_b_0)));
+  return $sadd(_a_0, $$sneg(_b_0));
 }
 
 function $smul(_a_0, _b_0) {
@@ -270,7 +282,7 @@ function $sreal_eq_repr(_a_0, _b_0) {
   const _n1_0 = _a_0["neg"];
   const _p2_0 = _b_0["pos"];
   const _n2_0 = _b_0["neg"];
-  return $Bool_and(($Nat_is_eq(_p1_0, _p2_0)), ($Nat_is_eq(_n1_0, _n2_0)));
+  return $Bool_and($$Nat_is_eq(_p1_0, _p2_0), $$Nat_is_eq(_n1_0, _n2_0));
 }
 
 function $cpx_zoom_exp(_z_0) {
@@ -303,7 +315,7 @@ function $cpx_eq(_a_0, _b_0) {
   const _ph2_0 = _b_0["phase"];
   const _mg2_0 = _b_0["mag"];
   const _ze2_0 = _b_0["zoom_exp"];
-  return $Bool_and(($Bool_and(($Nat_is_eq(_rl1_0, _rl2_0)), ($Nat_is_eq(_il1_0, _il2_0)))), ($Bool_and(($Bool_and(($sreal_eq_repr(_re1_0, _re2_0)), ($sreal_eq_repr(_im1_0, _im2_0)))), ($Bool_and(($Nat_is_eq(_ze1_0, _ze2_0)), ($Bool_and(($Nat_is_eq(_ph1_0, _ph2_0)), ($Nat_is_eq(_mg1_0, _mg2_0)))))))));
+  return $Bool_and($$Bool_and($$Nat_is_eq(_rl1_0, _rl2_0), $$Nat_is_eq(_il1_0, _il2_0)), $$Bool_and($$Bool_and($$sreal_eq_repr(_re1_0, _re2_0), $$sreal_eq_repr(_im1_0, _im2_0)), $$Bool_and($$Nat_is_eq(_ze1_0, _ze2_0), $$Bool_and($$Nat_is_eq(_ph1_0, _ph2_0), $$Nat_is_eq(_mg1_0, _mg2_0)))));
 }
 
 function $make_const(_re_0, _im_0, _ze_0) {
@@ -318,7 +330,7 @@ function $cpx_neg(_z_0) {
   const _ph_0 = _z_0["phase"];
   const _mg_0 = _z_0["mag"];
   const _ze_0 = _z_0["zoom_exp"];
-  return {$: "Cpx", "re": ($sneg(_re_0)), "im": ($sneg(_im_0)), "re_lo": _rl_0, "im_lo": _il_0, "phase": _ph_0, "mag": _mg_0, "zoom_exp": _ze_0};
+  return {$: "Cpx", "re": $$sneg(_re_0), "im": $$sneg(_im_0), "re_lo": _rl_0, "im_lo": _il_0, "phase": _ph_0, "mag": _mg_0, "zoom_exp": _ze_0};
 }
 
 function $cpx_conj(_z_0) {
@@ -329,7 +341,7 @@ function $cpx_conj(_z_0) {
   const _ph_0 = _z_0["phase"];
   const _mg_0 = _z_0["mag"];
   const _ze_0 = _z_0["zoom_exp"];
-  return {$: "Cpx", "re": _re_0, "im": ($sneg(_im_0)), "re_lo": _rl_0, "im_lo": _il_0, "phase": _ph_0, "mag": _mg_0, "zoom_exp": _ze_0};
+  return {$: "Cpx", "re": _re_0, "im": $$sneg(_im_0), "re_lo": _rl_0, "im_lo": _il_0, "phase": _ph_0, "mag": _mg_0, "zoom_exp": _ze_0};
 }
 
 function $cpx_add(_a_0, _b_0) {
@@ -346,7 +358,7 @@ function $cpx_add(_a_0, _b_0) {
   const _il2_0 = _b_0["im_lo"];
   const _ph2_0 = _b_0["phase"];
   const _mg2_0 = _b_0["mag"];
-  return {$: "Cpx", "re": ($sadd(_re1_0, _re2_0)), "im": ($sadd(_im1_0, _im2_0)), "re_lo": nat_chk(_rl1_0 + _rl2_0), "im_lo": nat_chk(_il1_0 + _il2_0), "phase": nat_chk(_ph1_0 + _ph2_0), "mag": nat_chk(_mg1_0 + _mg2_0), "zoom_exp": _ze1_0};
+  return {$: "Cpx", "re": $$sadd(_re1_0, _re2_0), "im": $$sadd(_im1_0, _im2_0), "re_lo": nat_chk(_rl1_0 + _rl2_0), "im_lo": nat_chk(_il1_0 + _il2_0), "phase": nat_chk(_ph1_0 + _ph2_0), "mag": nat_chk(_mg1_0 + _mg2_0), "zoom_exp": _ze1_0};
 }
 
 function $cpx_sub(_a_0, _b_0) {
@@ -362,7 +374,7 @@ function $cpx_sub(_a_0, _b_0) {
   const _rl2_0 = _b_0["re_lo"];
   const _il2_0 = _b_0["im_lo"];
   const _mg2_0 = _b_0["mag"];
-  return {$: "Cpx", "re": ($ssub(_re1_0, _re2_0)), "im": ($ssub(_im1_0, _im2_0)), "re_lo": (_rl1_0 < _rl2_0 ? 0 : _rl1_0 - _rl2_0), "im_lo": (_il1_0 < _il2_0 ? 0 : _il1_0 - _il2_0), "phase": nat_chk(_ph1_0 + 1), "mag": nat_chk(_mg1_0 + _mg2_0), "zoom_exp": _ze1_0};
+  return {$: "Cpx", "re": $$ssub(_re1_0, _re2_0), "im": $$ssub(_im1_0, _im2_0), "re_lo": (_rl1_0 < _rl2_0 ? 0 : _rl1_0 - _rl2_0), "im_lo": (_il1_0 < _il2_0 ? 0 : _il1_0 - _il2_0), "phase": nat_chk(_ph1_0 + 1), "mag": nat_chk(_mg1_0 + _mg2_0), "zoom_exp": _ze1_0};
 }
 
 function $cpx_mul(_a_0, _b_0) {
@@ -379,7 +391,7 @@ function $cpx_mul(_a_0, _b_0) {
   const _il2_0 = _b_0["im_lo"];
   const _ph2_0 = _b_0["phase"];
   const _mg2_0 = _b_0["mag"];
-  return {$: "Cpx", "re": ($ssub(($smul(_re1_0, _re2_0)), ($smul(_im1_0, _im2_0)))), "im": ($sadd(($smul(_re1_0, _im2_0)), ($smul(_im1_0, _re2_0)))), "re_lo": nat_chk(_rl1_0 + _rl2_0), "im_lo": nat_chk(_il1_0 + _il2_0), "phase": nat_chk(_ph1_0 + _ph2_0), "mag": nat_chk(_mg1_0 + _mg2_0), "zoom_exp": _ze1_0};
+  return {$: "Cpx", "re": $$ssub($$smul(_re1_0, _re2_0), $$smul(_im1_0, _im2_0)), "im": $$sadd($$smul(_re1_0, _im2_0), $$smul(_im1_0, _re2_0)), "re_lo": nat_chk(_rl1_0 + _rl2_0), "im_lo": nat_chk(_il1_0 + _il2_0), "phase": nat_chk(_ph1_0 + _ph2_0), "mag": nat_chk(_mg1_0 + _mg2_0), "zoom_exp": _ze1_0};
 }
 
 function $cpx_sq(_z_0) {
@@ -390,7 +402,7 @@ function $cpx_sq(_z_0) {
   const _ph_0 = _z_0["phase"];
   const _mg_0 = _z_0["mag"];
   const _ze_0 = _z_0["zoom_exp"];
-  return {$: "Cpx", "re": ($ssub(($ssq(_re_0)), ($ssq(_im_0)))), "im": ($sadd(($smul(_re_0, _im_0)), ($smul(_im_0, _re_0)))), "re_lo": nat_chk(_rl_0 + _rl_0), "im_lo": nat_chk(_il_0 + _il_0), "phase": nat_chk(_ph_0 + _ph_0), "mag": nat_chk(_mg_0 + _mg_0), "zoom_exp": _ze_0};
+  return {$: "Cpx", "re": $$ssub($$ssq(_re_0), $$ssq(_im_0)), "im": $$sadd($$smul(_re_0, _im_0), $$smul(_im_0, _re_0)), "re_lo": nat_chk(_rl_0 + _rl_0), "im_lo": nat_chk(_il_0 + _il_0), "phase": nat_chk(_ph_0 + _ph_0), "mag": nat_chk(_mg_0 + _mg_0), "zoom_exp": _ze_0};
 }
 
 function $cpx_rcp(_z_0) {
@@ -401,7 +413,7 @@ function $cpx_rcp(_z_0) {
   const _ph_0 = _z_0["phase"];
   const _mg_0 = _z_0["mag"];
   const _ze_0 = _z_0["zoom_exp"];
-  return {$: "Cpx", "re": _re_0, "im": ($sneg(_im_0)), "re_lo": _rl_0, "im_lo": _il_0, "phase": nat_chk(_ph_0 + 2), "mag": nat_chk(_mg_0 + 1), "zoom_exp": _ze_0};
+  return {$: "Cpx", "re": _re_0, "im": $$sneg(_im_0), "re_lo": _rl_0, "im_lo": _il_0, "phase": nat_chk(_ph_0 + 2), "mag": nat_chk(_mg_0 + 1), "zoom_exp": _ze_0};
 }
 
 function $cpx_div(_a_0, _b_0) {
@@ -416,7 +428,7 @@ function $cpx_div(_a_0, _b_0) {
   const _im2_0 = _b_0["im"];
   const _rl2_0 = _b_0["re_lo"];
   const _il2_0 = _b_0["im_lo"];
-  return {$: "Cpx", "re": ($sadd(($smul(_re1_0, _re2_0)), ($smul(_im1_0, _im2_0)))), "im": ($ssub(($smul(_im1_0, _re2_0)), ($smul(_re1_0, _im2_0)))), "re_lo": nat_chk(_rl1_0 + _rl2_0), "im_lo": nat_chk(_il1_0 + _il2_0), "phase": nat_chk(_ph1_0 + 2), "mag": nat_chk(_mg1_0 + 1), "zoom_exp": _ze1_0};
+  return {$: "Cpx", "re": $$sadd($$smul(_re1_0, _re2_0), $$smul(_im1_0, _im2_0)), "im": $$ssub($$smul(_im1_0, _re2_0), $$smul(_re1_0, _im2_0)), "re_lo": nat_chk(_rl1_0 + _rl2_0), "im_lo": nat_chk(_il1_0 + _il2_0), "phase": nat_chk(_ph1_0 + 2), "mag": nat_chk(_mg1_0 + 1), "zoom_exp": _ze1_0};
 }
 
 function $cam_zoom_exp(_cam_0) {
@@ -489,7 +501,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_0 = _z_0["phase"];
     const _mg_0 = _z_0["mag"];
     const _ze_0 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_0, {$: "SReal", "pos": 1, "neg": 0})), "im": _im_0, "re_lo": nat_chk(_rl_0 + 1), "im_lo": _il_0, "phase": nat_chk(_ph_0 + 1), "mag": nat_chk(_mg_0 + 1), "zoom_exp": _ze_0};
+    return {$: "Cpx", "re": $$sadd(_re_0, {$: "SReal", "pos": 1, "neg": 0}), "im": _im_0, "re_lo": nat_chk(_rl_0 + 1), "im_lo": _il_0, "phase": nat_chk(_ph_0 + 1), "mag": nat_chk(_mg_0 + 1), "zoom_exp": _ze_0};
   } else if (_op_0.$ === "PCos") {
     const _re_1 = _z_0["re"];
     const _im_1 = _z_0["im"];
@@ -498,7 +510,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_1 = _z_0["phase"];
     const _mg_1 = _z_0["mag"];
     const _ze_1 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": _re_1, "im": ($sadd(_im_1, {$: "SReal", "pos": 1, "neg": 0})), "re_lo": _rl_1, "im_lo": nat_chk(_il_1 + 1), "phase": nat_chk(_ph_1 + 2), "mag": nat_chk(_mg_1 + 1), "zoom_exp": _ze_1};
+    return {$: "Cpx", "re": _re_1, "im": $$sadd(_im_1, {$: "SReal", "pos": 1, "neg": 0}), "re_lo": _rl_1, "im_lo": nat_chk(_il_1 + 1), "phase": nat_chk(_ph_1 + 2), "mag": nat_chk(_mg_1 + 1), "zoom_exp": _ze_1};
   } else if (_op_0.$ === "PTan") {
     const _re_2 = _z_0["re"];
     const _im_2 = _z_0["im"];
@@ -507,7 +519,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_2 = _z_0["phase"];
     const _mg_2 = _z_0["mag"];
     const _ze_2 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(($sscale(_re_2, 2)), {$: "SReal", "pos": 2, "neg": 0})), "im": ($sadd(($sscale(_im_2, 2)), {$: "SReal", "pos": 1, "neg": 0})), "re_lo": nat_chk(_rl_2 + 2), "im_lo": _il_2, "phase": nat_chk(_ph_2 + 3), "mag": nat_chk(_mg_2 + 2), "zoom_exp": _ze_2};
+    return {$: "Cpx", "re": $$sadd($$sscale(_re_2, 2), {$: "SReal", "pos": 2, "neg": 0}), "im": $$sadd($$sscale(_im_2, 2), {$: "SReal", "pos": 1, "neg": 0}), "re_lo": nat_chk(_rl_2 + 2), "im_lo": _il_2, "phase": nat_chk(_ph_2 + 3), "mag": nat_chk(_mg_2 + 2), "zoom_exp": _ze_2};
   } else if (_op_0.$ === "PSec") {
     const _re_3 = _z_0["re"];
     const _im_3 = _z_0["im"];
@@ -516,7 +528,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_3 = _z_0["phase"];
     const _mg_3 = _z_0["mag"];
     const _ze_3 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": _re_3, "im": ($sneg(($sadd(_im_3, {$: "SReal", "pos": 1, "neg": 0})))), "re_lo": _rl_3, "im_lo": nat_chk(_il_3 + 2), "phase": nat_chk(_ph_3 + 4), "mag": nat_chk(_mg_3 + 2), "zoom_exp": _ze_3};
+    return {$: "Cpx", "re": _re_3, "im": $$sneg($$sadd(_im_3, {$: "SReal", "pos": 1, "neg": 0})), "re_lo": _rl_3, "im_lo": nat_chk(_il_3 + 2), "phase": nat_chk(_ph_3 + 4), "mag": nat_chk(_mg_3 + 2), "zoom_exp": _ze_3};
   } else if (_op_0.$ === "PSinh") {
     const _re_4 = _z_0["re"];
     const _im_4 = _z_0["im"];
@@ -525,7 +537,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_4 = _z_0["phase"];
     const _mg_4 = _z_0["mag"];
     const _ze_4 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_4, {$: "SReal", "pos": 1, "neg": 0})), "im": ($sadd(_im_4, {$: "SReal", "pos": 2, "neg": 0})), "re_lo": nat_chk(_rl_4 + 1), "im_lo": nat_chk(_il_4 + 1), "phase": nat_chk(_ph_4 + 5), "mag": nat_chk(_mg_4 + 1), "zoom_exp": _ze_4};
+    return {$: "Cpx", "re": $$sadd(_re_4, {$: "SReal", "pos": 1, "neg": 0}), "im": $$sadd(_im_4, {$: "SReal", "pos": 2, "neg": 0}), "re_lo": nat_chk(_rl_4 + 1), "im_lo": nat_chk(_il_4 + 1), "phase": nat_chk(_ph_4 + 5), "mag": nat_chk(_mg_4 + 1), "zoom_exp": _ze_4};
   } else if (_op_0.$ === "PCosh") {
     const _re_5 = _z_0["re"];
     const _im_5 = _z_0["im"];
@@ -534,7 +546,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_5 = _z_0["phase"];
     const _mg_5 = _z_0["mag"];
     const _ze_5 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_5, {$: "SReal", "pos": 2, "neg": 0})), "im": ($sadd(_im_5, {$: "SReal", "pos": 1, "neg": 0})), "re_lo": nat_chk(_rl_5 + 1), "im_lo": nat_chk(_il_5 + 1), "phase": nat_chk(_ph_5 + 5), "mag": nat_chk(_mg_5 + 1), "zoom_exp": _ze_5};
+    return {$: "Cpx", "re": $$sadd(_re_5, {$: "SReal", "pos": 2, "neg": 0}), "im": $$sadd(_im_5, {$: "SReal", "pos": 1, "neg": 0}), "re_lo": nat_chk(_rl_5 + 1), "im_lo": nat_chk(_il_5 + 1), "phase": nat_chk(_ph_5 + 5), "mag": nat_chk(_mg_5 + 1), "zoom_exp": _ze_5};
   } else if (_op_0.$ === "PTanh") {
     const _re_6 = _z_0["re"];
     const _im_6 = _z_0["im"];
@@ -543,7 +555,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_6 = _z_0["phase"];
     const _mg_6 = _z_0["mag"];
     const _ze_6 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(($sscale(_re_6, 2)), {$: "SReal", "pos": 1, "neg": 0})), "im": ($sadd(($sscale(_im_6, 2)), {$: "SReal", "pos": 2, "neg": 0})), "re_lo": nat_chk(_rl_6 + 2), "im_lo": nat_chk(_il_6 + 2), "phase": nat_chk(_ph_6 + 5), "mag": nat_chk(_mg_6 + 2), "zoom_exp": _ze_6};
+    return {$: "Cpx", "re": $$sadd($$sscale(_re_6, 2), {$: "SReal", "pos": 1, "neg": 0}), "im": $$sadd($$sscale(_im_6, 2), {$: "SReal", "pos": 2, "neg": 0}), "re_lo": nat_chk(_rl_6 + 2), "im_lo": nat_chk(_il_6 + 2), "phase": nat_chk(_ph_6 + 5), "mag": nat_chk(_mg_6 + 2), "zoom_exp": _ze_6};
   } else if (_op_0.$ === "PExp") {
     const _re_7 = _z_0["re"];
     const _im_7 = _z_0["im"];
@@ -552,7 +564,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_7 = _z_0["phase"];
     const _mg_7 = _z_0["mag"];
     const _ze_7 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_7, {$: "SReal", "pos": 3, "neg": 0})), "im": _im_7, "re_lo": nat_chk(_rl_7 + 3), "im_lo": _il_7, "phase": nat_chk(_ph_7 + 6), "mag": nat_chk(_mg_7 + 3), "zoom_exp": _ze_7};
+    return {$: "Cpx", "re": $$sadd(_re_7, {$: "SReal", "pos": 3, "neg": 0}), "im": _im_7, "re_lo": nat_chk(_rl_7 + 3), "im_lo": _il_7, "phase": nat_chk(_ph_7 + 6), "mag": nat_chk(_mg_7 + 3), "zoom_exp": _ze_7};
   } else if (_op_0.$ === "PLn") {
     const _re_8 = _z_0["re"];
     const _im_8 = _z_0["im"];
@@ -561,7 +573,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_8 = _z_0["phase"];
     const _mg_8 = _z_0["mag"];
     const _ze_8 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($ssub(_re_8, {$: "SReal", "pos": _ze_8, "neg": 0})), "im": ($sadd(_im_8, {$: "SReal", "pos": 3, "neg": 0})), "re_lo": _rl_8, "im_lo": nat_chk(_il_8 + 3), "phase": nat_chk(_ph_8 + 7), "mag": nat_chk(_mg_8 + 1), "zoom_exp": _ze_8};
+    return {$: "Cpx", "re": $$ssub(_re_8, {$: "SReal", "pos": _ze_8, "neg": 0}), "im": $$sadd(_im_8, {$: "SReal", "pos": 3, "neg": 0}), "re_lo": _rl_8, "im_lo": nat_chk(_il_8 + 3), "phase": nat_chk(_ph_8 + 7), "mag": nat_chk(_mg_8 + 1), "zoom_exp": _ze_8};
   } else if (_op_0.$ === "PAsin") {
     const _re_9 = _z_0["re"];
     const _im_9 = _z_0["im"];
@@ -570,7 +582,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_9 = _z_0["phase"];
     const _mg_9 = _z_0["mag"];
     const _ze_9 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_9, {$: "SReal", "pos": 4, "neg": 0})), "im": ($sadd(_im_9, {$: "SReal", "pos": 3, "neg": 0})), "re_lo": nat_chk(_rl_9 + 3), "im_lo": nat_chk(_il_9 + 3), "phase": nat_chk(_ph_9 + 7), "mag": nat_chk(_mg_9 + 2), "zoom_exp": _ze_9};
+    return {$: "Cpx", "re": $$sadd(_re_9, {$: "SReal", "pos": 4, "neg": 0}), "im": $$sadd(_im_9, {$: "SReal", "pos": 3, "neg": 0}), "re_lo": nat_chk(_rl_9 + 3), "im_lo": nat_chk(_il_9 + 3), "phase": nat_chk(_ph_9 + 7), "mag": nat_chk(_mg_9 + 2), "zoom_exp": _ze_9};
   } else if (_op_0.$ === "PAtan") {
     const _re_10 = _z_0["re"];
     const _im_10 = _z_0["im"];
@@ -579,7 +591,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_10 = _z_0["phase"];
     const _mg_10 = _z_0["mag"];
     const _ze_10 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_10, {$: "SReal", "pos": 3, "neg": 0})), "im": ($sadd(_im_10, {$: "SReal", "pos": 4, "neg": 0})), "re_lo": nat_chk(_rl_10 + 3), "im_lo": nat_chk(_il_10 + 3), "phase": nat_chk(_ph_10 + 7), "mag": nat_chk(_mg_10 + 2), "zoom_exp": _ze_10};
+    return {$: "Cpx", "re": $$sadd(_re_10, {$: "SReal", "pos": 3, "neg": 0}), "im": $$sadd(_im_10, {$: "SReal", "pos": 4, "neg": 0}), "re_lo": nat_chk(_rl_10 + 3), "im_lo": nat_chk(_il_10 + 3), "phase": nat_chk(_ph_10 + 7), "mag": nat_chk(_mg_10 + 2), "zoom_exp": _ze_10};
   } else if (_op_0.$ === "PGamma") {
     const _re_11 = _z_0["re"];
     const _im_11 = _z_0["im"];
@@ -588,7 +600,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_11 = _z_0["phase"];
     const _mg_11 = _z_0["mag"];
     const _ze_11 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_11, {$: "SReal", "pos": 6, "neg": 0})), "im": ($sadd(_im_11, {$: "SReal", "pos": 6, "neg": 0})), "re_lo": nat_chk(_rl_11 + 6), "im_lo": nat_chk(_il_11 + 6), "phase": nat_chk(_ph_11 + 8), "mag": nat_chk(_mg_11 + 5), "zoom_exp": _ze_11};
+    return {$: "Cpx", "re": $$sadd(_re_11, {$: "SReal", "pos": 6, "neg": 0}), "im": $$sadd(_im_11, {$: "SReal", "pos": 6, "neg": 0}), "re_lo": nat_chk(_rl_11 + 6), "im_lo": nat_chk(_il_11 + 6), "phase": nat_chk(_ph_11 + 8), "mag": nat_chk(_mg_11 + 5), "zoom_exp": _ze_11};
   } else if (_op_0.$ === "PLogGamma") {
     const _re_12 = _z_0["re"];
     const _im_12 = _z_0["im"];
@@ -597,7 +609,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_12 = _z_0["phase"];
     const _mg_12 = _z_0["mag"];
     const _ze_12 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_12, {$: "SReal", "pos": 5, "neg": 0})), "im": ($sadd(_im_12, {$: "SReal", "pos": 6, "neg": 0})), "re_lo": nat_chk(_rl_12 + 5), "im_lo": nat_chk(_il_12 + 6), "phase": nat_chk(_ph_12 + 7), "mag": nat_chk(_mg_12 + 3), "zoom_exp": _ze_12};
+    return {$: "Cpx", "re": $$sadd(_re_12, {$: "SReal", "pos": 5, "neg": 0}), "im": $$sadd(_im_12, {$: "SReal", "pos": 6, "neg": 0}), "re_lo": nat_chk(_rl_12 + 5), "im_lo": nat_chk(_il_12 + 6), "phase": nat_chk(_ph_12 + 7), "mag": nat_chk(_mg_12 + 3), "zoom_exp": _ze_12};
   } else if (_op_0.$ === "PBessel") {
     const _re_13 = _z_0["re"];
     const _im_13 = _z_0["im"];
@@ -606,7 +618,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_13 = _z_0["phase"];
     const _mg_13 = _z_0["mag"];
     const _ze_13 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_13, {$: "SReal", "pos": 8, "neg": 0})), "im": ($sadd(_im_13, {$: "SReal", "pos": 8, "neg": 0})), "re_lo": nat_chk(_rl_13 + 8), "im_lo": nat_chk(_il_13 + 8), "phase": nat_chk(_ph_13 + 9), "mag": nat_chk(_mg_13 + 4), "zoom_exp": _ze_13};
+    return {$: "Cpx", "re": $$sadd(_re_13, {$: "SReal", "pos": 8, "neg": 0}), "im": $$sadd(_im_13, {$: "SReal", "pos": 8, "neg": 0}), "re_lo": nat_chk(_rl_13 + 8), "im_lo": nat_chk(_il_13 + 8), "phase": nat_chk(_ph_13 + 9), "mag": nat_chk(_mg_13 + 4), "zoom_exp": _ze_13};
   } else if (_op_0.$ === "PZeta") {
     const _re_14 = _z_0["re"];
     const _im_14 = _z_0["im"];
@@ -615,7 +627,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_14 = _z_0["phase"];
     const _mg_14 = _z_0["mag"];
     const _ze_14 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_14, {$: "SReal", "pos": 5, "neg": 0})), "im": ($sadd(_im_14, {$: "SReal", "pos": 5, "neg": 0})), "re_lo": nat_chk(_rl_14 + 5), "im_lo": nat_chk(_il_14 + 5), "phase": nat_chk(_ph_14 + 8), "mag": nat_chk(_mg_14 + 4), "zoom_exp": _ze_14};
+    return {$: "Cpx", "re": $$sadd(_re_14, {$: "SReal", "pos": 5, "neg": 0}), "im": $$sadd(_im_14, {$: "SReal", "pos": 5, "neg": 0}), "re_lo": nat_chk(_rl_14 + 5), "im_lo": nat_chk(_il_14 + 5), "phase": nat_chk(_ph_14 + 8), "mag": nat_chk(_mg_14 + 4), "zoom_exp": _ze_14};
   } else if (_op_0.$ === "PZetaAC") {
     const _re_15 = _z_0["re"];
     const _im_15 = _z_0["im"];
@@ -624,7 +636,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_15 = _z_0["phase"];
     const _mg_15 = _z_0["mag"];
     const _ze_15 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sadd(_re_15, {$: "SReal", "pos": 7, "neg": 0})), "im": ($sadd(_im_15, {$: "SReal", "pos": 7, "neg": 0})), "re_lo": nat_chk(_rl_15 + 7), "im_lo": nat_chk(_il_15 + 7), "phase": nat_chk(_ph_15 + 9), "mag": nat_chk(_mg_15 + 5), "zoom_exp": _ze_15};
+    return {$: "Cpx", "re": $$sadd(_re_15, {$: "SReal", "pos": 7, "neg": 0}), "im": $$sadd(_im_15, {$: "SReal", "pos": 7, "neg": 0}), "re_lo": nat_chk(_rl_15 + 7), "im_lo": nat_chk(_il_15 + 7), "phase": nat_chk(_ph_15 + 9), "mag": nat_chk(_mg_15 + 5), "zoom_exp": _ze_15};
   } else {
     const _n_0 = _op_0["n"];
     const _re_16 = _z_0["re"];
@@ -634,7 +646,7 @@ function $eval_prim(_op_0, _z_0) {
     const _ph_16 = _z_0["phase"];
     const _mg_16 = _z_0["mag"];
     const _ze_16 = _z_0["zoom_exp"];
-    return {$: "Cpx", "re": ($sscale(_re_16, _n_0)), "im": ($sscale(_im_16, _n_0)), "re_lo": nat_chk(_rl_16 + _n_0), "im_lo": nat_chk(_il_16 + _n_0), "phase": nat_chk(_ph_16 + _n_0), "mag": nat_chk(_mg_16 + _n_0), "zoom_exp": _ze_16};
+    return {$: "Cpx", "re": $$sscale(_re_16, _n_0), "im": $$sscale(_im_16, _n_0), "re_lo": nat_chk(_rl_16 + _n_0), "im_lo": nat_chk(_il_16 + _n_0), "phase": nat_chk(_ph_16 + _n_0), "mag": nat_chk(_mg_16 + _n_0), "zoom_exp": _ze_16};
   }
 }
 
@@ -652,27 +664,27 @@ function $eval_expr(_e_0, _z_0) {
   } else if (_e_0.$ === "EConst") {
     const _re_0 = _e_0["re"];
     const _im_0 = _e_0["im"];
-    return $make_const(_re_0, _im_0, ($cpx_zoom_exp(_z_0)));
+    return $make_const(_re_0, _im_0, $$cpx_zoom_exp(_z_0));
   } else if (_e_0.$ === "EPrim") {
     const _op_0 = _e_0["op"];
     const _arg_0 = _e_0["arg"];
-    return $eval_prim(_op_0, ($eval_expr(_arg_0, _z_0)));
+    return $eval_prim(_op_0, $$eval_expr(_arg_0, _z_0));
   } else if (_e_0.$ === "EAdd") {
     const _lhs_0 = _e_0["lhs"];
     const _rhs_0 = _e_0["rhs"];
-    return $cpx_add(($eval_expr(_lhs_0, _z_0)), ($eval_expr(_rhs_0, _z_0)));
+    return $cpx_add($$eval_expr(_lhs_0, _z_0), $$eval_expr(_rhs_0, _z_0));
   } else if (_e_0.$ === "ESub") {
     const _lhs_1 = _e_0["lhs"];
     const _rhs_1 = _e_0["rhs"];
-    return $cpx_sub(($eval_expr(_lhs_1, _z_0)), ($eval_expr(_rhs_1, _z_0)));
+    return $cpx_sub($$eval_expr(_lhs_1, _z_0), $$eval_expr(_rhs_1, _z_0));
   } else if (_e_0.$ === "EMul") {
     const _lhs_2 = _e_0["lhs"];
     const _rhs_2 = _e_0["rhs"];
-    return $cpx_mul(($eval_expr(_lhs_2, _z_0)), ($eval_expr(_rhs_2, _z_0)));
+    return $cpx_mul($$eval_expr(_lhs_2, _z_0), $$eval_expr(_rhs_2, _z_0));
   } else {
     const _lhs_3 = _e_0["lhs"];
     const _rhs_3 = _e_0["rhs"];
-    return $cpx_div(($eval_expr(_lhs_3, _z_0)), ($eval_expr(_rhs_3, _z_0)));
+    return $cpx_div($$eval_expr(_lhs_3, _z_0), $$eval_expr(_rhs_3, _z_0));
   }
 }
 
@@ -686,23 +698,23 @@ function $compose_expr(_outer_0, _inner_0) {
   } else if (_outer_0.$ === "EPrim") {
     const _op_0 = _outer_0["op"];
     const _arg_0 = _outer_0["arg"];
-    return {$: "EPrim", "op": _op_0, "arg": ($compose_expr(_arg_0, _inner_0))};
+    return {$: "EPrim", "op": _op_0, "arg": $$compose_expr(_arg_0, _inner_0)};
   } else if (_outer_0.$ === "EAdd") {
     const _lhs_0 = _outer_0["lhs"];
     const _rhs_0 = _outer_0["rhs"];
-    return {$: "EAdd", "lhs": ($compose_expr(_lhs_0, _inner_0)), "rhs": ($compose_expr(_rhs_0, _inner_0))};
+    return {$: "EAdd", "lhs": $$compose_expr(_lhs_0, _inner_0), "rhs": $$compose_expr(_rhs_0, _inner_0)};
   } else if (_outer_0.$ === "ESub") {
     const _lhs_1 = _outer_0["lhs"];
     const _rhs_1 = _outer_0["rhs"];
-    return {$: "ESub", "lhs": ($compose_expr(_lhs_1, _inner_0)), "rhs": ($compose_expr(_rhs_1, _inner_0))};
+    return {$: "ESub", "lhs": $$compose_expr(_lhs_1, _inner_0), "rhs": $$compose_expr(_rhs_1, _inner_0)};
   } else if (_outer_0.$ === "EMul") {
     const _lhs_2 = _outer_0["lhs"];
     const _rhs_2 = _outer_0["rhs"];
-    return {$: "EMul", "lhs": ($compose_expr(_lhs_2, _inner_0)), "rhs": ($compose_expr(_rhs_2, _inner_0))};
+    return {$: "EMul", "lhs": $$compose_expr(_lhs_2, _inner_0), "rhs": $$compose_expr(_rhs_2, _inner_0)};
   } else {
     const _lhs_3 = _outer_0["lhs"];
     const _rhs_3 = _outer_0["rhs"];
-    return {$: "EDiv", "lhs": ($compose_expr(_lhs_3, _inner_0)), "rhs": ($compose_expr(_rhs_3, _inner_0))};
+    return {$: "EDiv", "lhs": $$compose_expr(_lhs_3, _inner_0), "rhs": $$compose_expr(_rhs_3, _inner_0)};
   }
 }
 
@@ -711,29 +723,29 @@ function $preset_tan_sec() {
 }
 
 function $eval_full_chain(_steps_0, _e_0, _z_0) {
-  if (_steps_0 === 0) {
+  if (_steps_0 == 0) {
     return _z_0;
   } else {
     const _p_0 = (_steps_0 - 1);
-    return $eval_expr(_e_0, ($eval_full_chain(_p_0, _e_0, _z_0)));
+    return $eval_expr(_e_0, $$eval_full_chain(_p_0, _e_0, _z_0));
   }
 }
 
 function $unfold_full_chain(_steps_0, _e_0) {
-  if (_steps_0 === 0) {
+  if (_steps_0 == 0) {
     return {$: "EVar"};
   } else {
     const _p_0 = (_steps_0 - 1);
-    return $compose_expr(_e_0, ($unfold_full_chain(_p_0, _e_0)));
+    return $compose_expr(_e_0, $$unfold_full_chain(_p_0, _e_0));
   }
 }
 
 function $run_fbo_batches_full(_passes_0, _batch_size_0, _e_0, _z_0) {
-  if (_passes_0 === 0) {
+  if (_passes_0 == 0) {
     return _z_0;
   } else {
     const _p_0 = (_passes_0 - 1);
-    return $eval_full_chain(_batch_size_0, _e_0, ($run_fbo_batches_full(_p_0, _batch_size_0, _e_0, _z_0)));
+    return $eval_full_chain(_batch_size_0, _e_0, $$run_fbo_batches_full(_p_0, _batch_size_0, _e_0, _z_0));
   }
 }
 
@@ -746,28 +758,28 @@ function $is_escape_attractor(_mode_0) {
 }
 
 function $mandelbrot_step(_z_0, _c_0) {
-  return $cpx_add(($cpx_sq(_z_0)), _c_0);
+  return $cpx_add($$cpx_sq(_z_0), _c_0);
 }
 
 function $eval_mandelbrot(_iters_0, _z_0, _c_0) {
-  if (_iters_0 === 0) {
+  if (_iters_0 == 0) {
     return _z_0;
   } else {
     const _p_0 = (_iters_0 - 1);
-    return $mandelbrot_step(($eval_mandelbrot(_p_0, _z_0, _c_0)), _c_0);
+    return $mandelbrot_step($$eval_mandelbrot(_p_0, _z_0, _c_0), _c_0);
   }
 }
 
 function $newton_step(_z_0) {
-  return $cpx_add(_z_0, ($cpx_rcp(($cpx_sq(_z_0)))));
+  return $cpx_add(_z_0, $$cpx_rcp($$cpx_sq(_z_0)));
 }
 
 function $eval_newton(_iters_0, _z_0) {
-  if (_iters_0 === 0) {
+  if (_iters_0 == 0) {
     return _z_0;
   } else {
     const _p_0 = (_iters_0 - 1);
-    return $newton_step(($eval_newton(_p_0, _z_0)));
+    return $newton_step($$eval_newton(_p_0, _z_0));
   }
 }
 
@@ -783,7 +795,7 @@ function $eval_mode(_mode_0, _c_0) {
   if (_mode_0.$ === "ModeDomain") {
     const _e_0 = _mode_0["expr"];
     const _steps_0 = _mode_0["chain_steps"];
-    return $eval_full_chain(_steps_0, _e_0, ($eval_expr(_e_0, _c_0)));
+    return $eval_full_chain(_steps_0, _e_0, $$eval_expr(_e_0, _c_0));
   } else {
     const _fid_0 = _mode_0["fid"];
     const _iters_0 = _mode_0["max_iter"];
@@ -809,14 +821,14 @@ function $shade_cpx(_pal_0, _w_0) {
   const _ph_0 = _w_0["phase"];
   const _mg_0 = _w_0["mag"];
   const _ze_0 = _w_0["zoom_exp"];
-  const _x_0 = ($palette_base_id(_pal_0));
+  const _x_0 = $$palette_base_id(_pal_0);
   const _x_1 = nat_chk(_ph_0 + _mg_0);
   const _c_nat_0 = nat_chk(_x_0 + _x_1);
-  return {$: "PixelCert", "color": (_c_nat_0 >>> 0), "zoom_exp": _ze_0};
+  return {$: "PixelCert", "color": (_c_nat_0 >>>0), "zoom_exp": _ze_0};
 }
 
 function $render_pixel(_mode_0, _pal_0, _cam_0, _x_0, _y_0) {
-  return $shade_cpx(_pal_0, ($eval_mode(_mode_0, ($sample_pixel(_cam_0, _x_0, _y_0)))));
+  return $shade_cpx(_pal_0, $$eval_mode(_mode_0, $$sample_pixel(_cam_0, _x_0, _y_0)));
 }
 
 function $pixel_cert_color(_cert_0) {
@@ -825,7 +837,7 @@ function $pixel_cert_color(_cert_0) {
 }
 
 function $pixel_cert_to_image(_cert_0) {
-  return {$: "Pix", "color": ($pixel_cert_color(_cert_0))};
+  return {$: "Pix", "color": $$pixel_cert_color(_cert_0)};
 }
 
 function $pixel_cert_zoom_exp(_cert_0) {
@@ -866,17 +878,17 @@ function $render_ui_state(_st_0, _x_0, _y_0) {
 }
 
 function $render_quadtree(_depth_0, _mode_0, _pal_0, _cam_0, _x0_0, _y0_0) {
-  if (_depth_0 === 0) {
-    return $pixel_cert_to_image(($render_pixel(_mode_0, _pal_0, _cam_0, _x0_0, _y0_0)));
+  if (_depth_0 == 0) {
+    return $pixel_cert_to_image($$render_pixel(_mode_0, _pal_0, _cam_0, _x0_0, _y0_0));
   } else {
     const _p_0 = (_depth_0 - 1);
-    const _step_0 = ($Nat_pow(2, _p_0));
+    const _step_0 = $$Nat_pow(2, _p_0);
     const _x1_0 = nat_chk(_x0_0 + _step_0);
     const _y1_0 = nat_chk(_y0_0 + _step_0);
-    const _tl_0 = ($render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x0_0, _y0_0));
-    const _tr_0 = ($render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x1_0, _y0_0));
-    const _bl_0 = ($render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x0_0, _y1_0));
-    const _br_0 = ($render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x1_0, _y1_0));
+    const _tl_0 = $$render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x0_0, _y0_0);
+    const _tr_0 = $$render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x1_0, _y0_0);
+    const _bl_0 = $$render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x0_0, _y1_0);
+    const _br_0 = $$render_quadtree(_p_0, _mode_0, _pal_0, _cam_0, _x1_0, _y1_0);
     return {$: "Qua", "tl": _tl_0, "tr": _tr_0, "bl": _bl_0, "br": _br_0};
   }
 }
@@ -888,11 +900,11 @@ function $quad_sum(_k_0) {
 }
 
 function $pow4(_d_0) {
-  if (_d_0 === 0) {
+  if (_d_0 == 0) {
     return 1;
   } else {
     const _p_0 = (_d_0 - 1);
-    return $quad_sum(($pow4(_p_0)));
+    return $quad_sum($$pow4(_p_0));
   }
 }
 
@@ -904,10 +916,10 @@ function $image_pixels(_img_0) {
     const _tr_0 = _img_0["tr"];
     const _bl_0 = _img_0["bl"];
     const _br_0 = _img_0["br"];
-    const _x_0 = ($image_pixels(_tl_0));
-    const _x_1 = ($image_pixels(_tr_0));
-    const _x_2 = ($image_pixels(_bl_0));
-    const _x_3 = ($image_pixels(_br_0));
+    const _x_0 = $$image_pixels(_tl_0);
+    const _x_1 = $$image_pixels(_tr_0);
+    const _x_2 = $$image_pixels(_bl_0);
+    const _x_3 = $$image_pixels(_br_0);
     const _x_4 = nat_chk(_x_0 + _x_1);
     const _x_5 = nat_chk(_x_2 + _x_3);
     return nat_chk(_x_4 + _x_5);
@@ -919,15 +931,15 @@ function $stress_pan_zoom_step(_cam_0, _seed_0, _scene_idx_0) {
   const _dx_0 = nat_chk(1 + _x_0);
   const _x_1 = nat_chk(_seed_0 + _scene_idx_0);
   const _dy_0 = nat_chk(2 + _x_1);
-  return $cam_zoom_in(($cam_pan_y(($cam_pan_x(_cam_0, _dx_0)), _dy_0)), 1);
+  return $cam_zoom_in($$cam_pan_y($$cam_pan_x(_cam_0, _dx_0), _dy_0), 1);
 }
 
 function $stress_walk_scenes(_scenes_0, _cam_0, _seed_0) {
-  if (_scenes_0 === 0) {
+  if (_scenes_0 == 0) {
     return _cam_0;
   } else {
     const _p_0 = (_scenes_0 - 1);
-    return $stress_pan_zoom_step(($stress_walk_scenes(_p_0, _cam_0, _seed_0)), _seed_0, _p_0);
+    return $stress_pan_zoom_step($$stress_walk_scenes(_p_0, _cam_0, _seed_0), _seed_0, _p_0);
   }
 }
 
@@ -950,78 +962,78 @@ function $div_graded_word_cost(_limbs_0) {
 
 function $div_naive_word_cost(_limbs_0) {
   const _x_0 = nat_chk(24 * _limbs_0);
-  const _x_1 = ($div_graded_word_cost(_limbs_0));
+  const _x_1 = $$div_graded_word_cost(_limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
 
 function $cpx_div_scaled_cost(_limbs_0) {
-  const _x_0 = ($sq_word_cost(_limbs_0));
+  const _x_0 = $$sq_word_cost(_limbs_0);
   const _x_1 = nat_chk(2 * _x_0);
-  const _x_2 = ($div_graded_word_cost(_limbs_0));
+  const _x_2 = $$div_graded_word_cost(_limbs_0);
   return nat_chk(_x_1 + _x_2);
 }
 
 function $cpx_div_two_div_cost(_limbs_0) {
-  const _x_0 = ($div_naive_word_cost(_limbs_0));
+  const _x_0 = $$div_naive_word_cost(_limbs_0);
   const _x_1 = nat_chk(_x_0 + _limbs_0);
-  const _x_2 = ($cpx_div_scaled_cost(_limbs_0));
+  const _x_2 = $$cpx_div_scaled_cost(_limbs_0);
   const _x_3 = nat_chk(_limbs_0 + _x_1);
   return nat_chk(_x_2 + _x_3);
 }
 
 function $prim_cost_opt(_op_0, _zoom_exp_0) {
   if (_op_0.$ === "PSin") {
-    const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_0);
   } else if (_op_0.$ === "PCos") {
-    const _x_1 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_1 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_1);
   } else if (_op_0.$ === "PTan") {
-    const _x_2 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_2 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(3 * _x_2);
   } else if (_op_0.$ === "PSec") {
-    const _x_3 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_3 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(3 * _x_3);
   } else if (_op_0.$ === "PSinh") {
-    const _x_4 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_4 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_4);
   } else if (_op_0.$ === "PCosh") {
-    const _x_5 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_5 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_5);
   } else if (_op_0.$ === "PTanh") {
-    const _x_6 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_6 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(3 * _x_6);
   } else if (_op_0.$ === "PExp") {
-    const _x_7 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_7 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_7);
   } else if (_op_0.$ === "PLn") {
-    const _x_8 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_8 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_8);
   } else if (_op_0.$ === "PAsin") {
-    const _x_9 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_9 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(3 * _x_9);
   } else if (_op_0.$ === "PAtan") {
-    const _x_10 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_10 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(3 * _x_10);
   } else if (_op_0.$ === "PGamma") {
-    const _x_11 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_11 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(5 * _x_11);
   } else if (_op_0.$ === "PLogGamma") {
-    const _x_12 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_12 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(4 * _x_12);
   } else if (_op_0.$ === "PBessel") {
-    const _x_13 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_13 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(5 * _x_13);
   } else if (_op_0.$ === "PZeta") {
-    const _x_14 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_14 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(4 * _x_14);
   } else if (_op_0.$ === "PZetaAC") {
-    const _x_15 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_15 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(6 * _x_15);
   } else {
     const _n_0 = _op_0["n"];
-    const _x_16 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_16 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(_x_16 + _n_0);
   }
 }
@@ -1032,43 +1044,43 @@ function $prim_cost_savings(_op_0, _zoom_exp_0) {
   } else if (_op_0.$ === "PCos") {
     return $limbs_for_zoom(_zoom_exp_0);
   } else if (_op_0.$ === "PTan") {
-    const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_0);
   } else if (_op_0.$ === "PSec") {
     return $limbs_for_zoom(_zoom_exp_0);
   } else if (_op_0.$ === "PSinh") {
-    const _x_1 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_1 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_1);
   } else if (_op_0.$ === "PCosh") {
-    const _x_2 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_2 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_2);
   } else if (_op_0.$ === "PTanh") {
-    const _x_3 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_3 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_3);
   } else if (_op_0.$ === "PExp") {
     return $limbs_for_zoom(_zoom_exp_0);
   } else if (_op_0.$ === "PLn") {
     return $limbs_for_zoom(_zoom_exp_0);
   } else if (_op_0.$ === "PAsin") {
-    const _x_4 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_4 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_4);
   } else if (_op_0.$ === "PAtan") {
-    const _x_5 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_5 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(2 * _x_5);
   } else if (_op_0.$ === "PGamma") {
-    const _x_6 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_6 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(4 * _x_6);
   } else if (_op_0.$ === "PLogGamma") {
-    const _x_7 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_7 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(4 * _x_7);
   } else if (_op_0.$ === "PBessel") {
-    const _x_8 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_8 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(4 * _x_8);
   } else if (_op_0.$ === "PZeta") {
-    const _x_9 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_9 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(4 * _x_9);
   } else if (_op_0.$ === "PZetaAC") {
-    const _x_10 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_10 = $$limbs_for_zoom(_zoom_exp_0);
     return nat_chk(5 * _x_10);
   } else {
     return $limbs_for_zoom(_zoom_exp_0);
@@ -1076,8 +1088,8 @@ function $prim_cost_savings(_op_0, _zoom_exp_0) {
 }
 
 function $prim_cost_naive(_op_0, _zoom_exp_0) {
-  const _x_0 = ($prim_cost_opt(_op_0, _zoom_exp_0));
-  const _x_1 = ($prim_cost_savings(_op_0, _zoom_exp_0));
+  const _x_0 = $$prim_cost_opt(_op_0, _zoom_exp_0);
+  const _x_1 = $$prim_cost_savings(_op_0, _zoom_exp_0);
   return nat_chk(_x_0 + _x_1);
 }
 
@@ -1089,39 +1101,39 @@ function $expr_cost_opt(_e_0, _zoom_exp_0) {
   } else if (_e_0.$ === "EPrim") {
     const _op_0 = _e_0["op"];
     const _arg_0 = _e_0["arg"];
-    const _x_0 = ($prim_cost_opt(_op_0, _zoom_exp_0));
-    const _x_1 = ($expr_cost_opt(_arg_0, _zoom_exp_0));
+    const _x_0 = $$prim_cost_opt(_op_0, _zoom_exp_0);
+    const _x_1 = $$expr_cost_opt(_arg_0, _zoom_exp_0);
     return nat_chk(_x_0 + _x_1);
   } else if (_e_0.$ === "EAdd") {
     const _lhs_0 = _e_0["lhs"];
     const _rhs_0 = _e_0["rhs"];
-    const _x_2 = ($expr_cost_opt(_lhs_0, _zoom_exp_0));
-    const _x_3 = ($expr_cost_opt(_rhs_0, _zoom_exp_0));
-    const _x_4 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_2 = $$expr_cost_opt(_lhs_0, _zoom_exp_0);
+    const _x_3 = $$expr_cost_opt(_rhs_0, _zoom_exp_0);
+    const _x_4 = $$limbs_for_zoom(_zoom_exp_0);
     const _x_5 = nat_chk(_x_2 + _x_3);
     return nat_chk(_x_4 + _x_5);
   } else if (_e_0.$ === "ESub") {
     const _lhs_1 = _e_0["lhs"];
     const _rhs_1 = _e_0["rhs"];
-    const _x_6 = ($expr_cost_opt(_lhs_1, _zoom_exp_0));
-    const _x_7 = ($expr_cost_opt(_rhs_1, _zoom_exp_0));
-    const _x_8 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_6 = $$expr_cost_opt(_lhs_1, _zoom_exp_0);
+    const _x_7 = $$expr_cost_opt(_rhs_1, _zoom_exp_0);
+    const _x_8 = $$limbs_for_zoom(_zoom_exp_0);
     const _x_9 = nat_chk(_x_6 + _x_7);
     return nat_chk(_x_8 + _x_9);
   } else if (_e_0.$ === "EMul") {
     const _lhs_2 = _e_0["lhs"];
     const _rhs_2 = _e_0["rhs"];
-    const _x_10 = ($expr_cost_opt(_lhs_2, _zoom_exp_0));
-    const _x_11 = ($expr_cost_opt(_rhs_2, _zoom_exp_0));
-    const _x_12 = ($mul_word_cost(($limbs_for_zoom(_zoom_exp_0))));
+    const _x_10 = $$expr_cost_opt(_lhs_2, _zoom_exp_0);
+    const _x_11 = $$expr_cost_opt(_rhs_2, _zoom_exp_0);
+    const _x_12 = $$mul_word_cost($$limbs_for_zoom(_zoom_exp_0));
     const _x_13 = nat_chk(_x_10 + _x_11);
     return nat_chk(_x_12 + _x_13);
   } else {
     const _lhs_3 = _e_0["lhs"];
     const _rhs_3 = _e_0["rhs"];
-    const _x_14 = ($expr_cost_opt(_lhs_3, _zoom_exp_0));
-    const _x_15 = ($expr_cost_opt(_rhs_3, _zoom_exp_0));
-    const _x_16 = ($mul_word_cost(($limbs_for_zoom(_zoom_exp_0))));
+    const _x_14 = $$expr_cost_opt(_lhs_3, _zoom_exp_0);
+    const _x_15 = $$expr_cost_opt(_rhs_3, _zoom_exp_0);
+    const _x_16 = $$mul_word_cost($$limbs_for_zoom(_zoom_exp_0));
     const _x_17 = nat_chk(_x_14 + _x_15);
     return nat_chk(_x_16 + _x_17);
   }
@@ -1135,61 +1147,61 @@ function $expr_cost_savings(_e_0, _zoom_exp_0) {
   } else if (_e_0.$ === "EPrim") {
     const _op_0 = _e_0["op"];
     const _arg_0 = _e_0["arg"];
-    const _x_0 = ($prim_cost_savings(_op_0, _zoom_exp_0));
-    const _x_1 = ($expr_cost_savings(_arg_0, _zoom_exp_0));
+    const _x_0 = $$prim_cost_savings(_op_0, _zoom_exp_0);
+    const _x_1 = $$expr_cost_savings(_arg_0, _zoom_exp_0);
     return nat_chk(_x_0 + _x_1);
   } else if (_e_0.$ === "EAdd") {
     const _lhs_0 = _e_0["lhs"];
     const _rhs_0 = _e_0["rhs"];
-    const _x_2 = ($expr_cost_savings(_lhs_0, _zoom_exp_0));
-    const _x_3 = ($expr_cost_savings(_rhs_0, _zoom_exp_0));
+    const _x_2 = $$expr_cost_savings(_lhs_0, _zoom_exp_0);
+    const _x_3 = $$expr_cost_savings(_rhs_0, _zoom_exp_0);
     return nat_chk(_x_2 + _x_3);
   } else if (_e_0.$ === "ESub") {
     const _lhs_1 = _e_0["lhs"];
     const _rhs_1 = _e_0["rhs"];
-    const _x_4 = ($expr_cost_savings(_lhs_1, _zoom_exp_0));
-    const _x_5 = ($expr_cost_savings(_rhs_1, _zoom_exp_0));
+    const _x_4 = $$expr_cost_savings(_lhs_1, _zoom_exp_0);
+    const _x_5 = $$expr_cost_savings(_rhs_1, _zoom_exp_0);
     return nat_chk(_x_4 + _x_5);
   } else if (_e_0.$ === "EMul") {
     const _lhs_2 = _e_0["lhs"];
     const _rhs_2 = _e_0["rhs"];
-    const _x_6 = ($expr_cost_savings(_lhs_2, _zoom_exp_0));
-    const _x_7 = ($expr_cost_savings(_rhs_2, _zoom_exp_0));
-    const _x_8 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_6 = $$expr_cost_savings(_lhs_2, _zoom_exp_0);
+    const _x_7 = $$expr_cost_savings(_rhs_2, _zoom_exp_0);
+    const _x_8 = $$limbs_for_zoom(_zoom_exp_0);
     const _x_9 = nat_chk(_x_6 + _x_7);
     return nat_chk(_x_8 + _x_9);
   } else {
     const _lhs_3 = _e_0["lhs"];
     const _rhs_3 = _e_0["rhs"];
-    const _x_10 = ($expr_cost_savings(_lhs_3, _zoom_exp_0));
-    const _x_11 = ($expr_cost_savings(_rhs_3, _zoom_exp_0));
-    const _x_12 = ($limbs_for_zoom(_zoom_exp_0));
+    const _x_10 = $$expr_cost_savings(_lhs_3, _zoom_exp_0);
+    const _x_11 = $$expr_cost_savings(_rhs_3, _zoom_exp_0);
+    const _x_12 = $$limbs_for_zoom(_zoom_exp_0);
     const _x_13 = nat_chk(_x_10 + _x_11);
     return nat_chk(_x_12 + _x_13);
   }
 }
 
 function $expr_cost_naive(_e_0, _zoom_exp_0) {
-  const _x_0 = ($expr_cost_opt(_e_0, _zoom_exp_0));
-  const _x_1 = ($expr_cost_savings(_e_0, _zoom_exp_0));
+  const _x_0 = $$expr_cost_opt(_e_0, _zoom_exp_0);
+  const _x_1 = $$expr_cost_savings(_e_0, _zoom_exp_0);
   return nat_chk(_x_0 + _x_1);
 }
 
 function $full_chain_cost_opt(_steps_0, _e_0, _zoom_exp_0) {
   const _x_0 = nat_chk(_steps_0 + 1);
-  const _x_1 = ($expr_cost_opt(_e_0, _zoom_exp_0));
+  const _x_1 = $$expr_cost_opt(_e_0, _zoom_exp_0);
   return nat_chk(_x_0 * _x_1);
 }
 
 function $full_chain_cost_savings(_steps_0, _e_0, _zoom_exp_0) {
   const _x_0 = nat_chk(_steps_0 + 1);
-  const _x_1 = ($expr_cost_savings(_e_0, _zoom_exp_0));
+  const _x_1 = $$expr_cost_savings(_e_0, _zoom_exp_0);
   return nat_chk(_x_0 * _x_1);
 }
 
 function $full_chain_cost_naive(_steps_0, _e_0, _zoom_exp_0) {
-  const _x_0 = ($full_chain_cost_opt(_steps_0, _e_0, _zoom_exp_0));
-  const _x_1 = ($full_chain_cost_savings(_steps_0, _e_0, _zoom_exp_0));
+  const _x_0 = $$full_chain_cost_opt(_steps_0, _e_0, _zoom_exp_0);
+  const _x_1 = $$full_chain_cost_savings(_steps_0, _e_0, _zoom_exp_0);
   return nat_chk(_x_0 + _x_1);
 }
 
@@ -1202,11 +1214,11 @@ function $tan_single_pass_cost(_zoom_exp_0) {
 }
 
 function $tan_duplicate_sincos_cost(_zoom_exp_0) {
-  const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
-  const _x_1 = ($prim_cost_opt({$: "PCos"}, _zoom_exp_0));
-  const _x_2 = ($limbs_for_zoom(_zoom_exp_0));
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
+  const _x_1 = $$prim_cost_opt({$: "PCos"}, _zoom_exp_0);
+  const _x_2 = $$limbs_for_zoom(_zoom_exp_0);
   const _x_3 = nat_chk(_x_0 + _x_1);
-  const _x_4 = ($tan_single_pass_cost(_zoom_exp_0));
+  const _x_4 = $$tan_single_pass_cost(_zoom_exp_0);
   const _x_5 = nat_chk(_x_2 + _x_3);
   return nat_chk(_x_4 + _x_5);
 }
@@ -1229,29 +1241,29 @@ function $shade_domain_fast_cost(_limbs_0) {
 
 function $shade_domain_naive_cost(_limbs_0) {
   const _x_0 = nat_chk(49 * _limbs_0);
-  const _x_1 = ($shade_domain_fast_cost(_limbs_0));
+  const _x_1 = $$shade_domain_fast_cost(_limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
 
 function $pipeline_v2_cost(_steps_0, _e_0, _zoom_exp_0) {
-  const _x_0 = ($full_chain_cost_opt(_steps_0, _e_0, _zoom_exp_0));
-  const _x_1 = ($shade_domain_fast_cost(($limbs_for_zoom(_zoom_exp_0))));
+  const _x_0 = $$full_chain_cost_opt(_steps_0, _e_0, _zoom_exp_0);
+  const _x_1 = $$shade_domain_fast_cost($$limbs_for_zoom(_zoom_exp_0));
   return nat_chk(_x_0 + _x_1);
 }
 
 function $pipeline_v2_savings(_steps_0, _e_0, _zoom_exp_0) {
-  const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
-  const _x_1 = ($full_chain_cost_savings(_steps_0, _e_0, _zoom_exp_0));
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
+  const _x_1 = $$full_chain_cost_savings(_steps_0, _e_0, _zoom_exp_0);
   const _x_2 = nat_chk(73 * _x_0);
-  const _x_3 = ($limbs_for_zoom(_zoom_exp_0));
+  const _x_3 = $$limbs_for_zoom(_zoom_exp_0);
   const _x_4 = nat_chk(_x_1 + _x_2);
   return nat_chk(_x_3 + _x_4);
 }
 
 function $pipeline_v1_cost(_steps_0, _e_0, _zoom_exp_0) {
-  const _x_0 = ($pipeline_v2_cost(_steps_0, _e_0, _zoom_exp_0));
-  const _x_1 = ($pipeline_v2_savings(_steps_0, _e_0, _zoom_exp_0));
+  const _x_0 = $$pipeline_v2_cost(_steps_0, _e_0, _zoom_exp_0);
+  const _x_1 = $$pipeline_v2_savings(_steps_0, _e_0, _zoom_exp_0);
   return nat_chk(_x_0 + _x_1);
 }
 
@@ -1264,7 +1276,7 @@ function $pauldelbrot_rebased_state(_zm_0, _dz_0) {
 }
 
 function $fbo_present_on_completion(_rem_steps_0, _next_display_0, _prev_display_0) {
-  if (_rem_steps_0 === 0) {
+  if (_rem_steps_0 == 0) {
     return _next_display_0;
   } else {
     return _prev_display_0;
@@ -1285,7 +1297,7 @@ function $renorm_6pass_word_cost(_limbs_0) {
 
 function $renorm_8pass_word_cost(_limbs_0) {
   const _x_0 = nat_chk(1 * _limbs_0);
-  const _x_1 = ($renorm_6pass_word_cost(_limbs_0));
+  const _x_1 = $$renorm_6pass_word_cost(_limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
@@ -1296,26 +1308,26 @@ function $sqrt_incremental_rem_cost(_limbs_0) {
 
 function $sqrt_resquare_cost(_limbs_0) {
   const _x_0 = nat_chk(4 * _limbs_0);
-  const _x_1 = ($sqrt_incremental_rem_cost(_limbs_0));
+  const _x_1 = $$sqrt_incremental_rem_cost(_limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
 
 function $unfold_unary_chain(_steps_0, _op_0, _base_0) {
-  if (_steps_0 === 0) {
+  if (_steps_0 == 0) {
     return _base_0;
   } else {
     const _p_0 = (_steps_0 - 1);
-    return {$: "EPrim", "op": _op_0, "arg": ($unfold_unary_chain(_p_0, _op_0, _base_0))};
+    return {$: "EPrim", "op": _op_0, "arg": $$unfold_unary_chain(_p_0, _op_0, _base_0)};
   }
 }
 
 function $eval_unary_chain(_steps_0, _op_0, _z_0) {
-  if (_steps_0 === 0) {
+  if (_steps_0 == 0) {
     return _z_0;
   } else {
     const _p_0 = (_steps_0 - 1);
-    return $eval_prim(_op_0, ($eval_unary_chain(_p_0, _op_0, _z_0)));
+    return $eval_prim(_op_0, $$eval_unary_chain(_p_0, _op_0, _z_0));
   }
 }
 
@@ -1324,15 +1336,15 @@ function $eval_sec_direct_sos(_z_0) {
 }
 
 function $sec_direct_sos_cost(_zoom_exp_0) {
-  const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
   return nat_chk(2 * _x_0);
 }
 
 function $sec_naive_cos_rcp_cost(_zoom_exp_0) {
-  const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
-  const _x_1 = ($limbs_for_zoom(_zoom_exp_0));
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
+  const _x_1 = $$limbs_for_zoom(_zoom_exp_0);
   const _x_2 = nat_chk(2 * _x_0);
-  const _x_3 = ($sec_direct_sos_cost(_zoom_exp_0));
+  const _x_3 = $$sec_direct_sos_cost(_zoom_exp_0);
   const _x_4 = nat_chk(_x_1 + _x_2);
   return nat_chk(_x_3 + _x_4);
 }
@@ -1344,7 +1356,7 @@ function $shader_compile_dce_cost(_active_prims_0, _limbs_0) {
 
 function $shader_compile_monolithic_cost(_active_prims_0, _limbs_0) {
   const _x_0 = nat_chk(12 * _limbs_0);
-  const _x_1 = ($shader_compile_dce_cost(_active_prims_0, _limbs_0));
+  const _x_1 = $$shader_compile_dce_cost(_active_prims_0, _limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
@@ -1365,7 +1377,7 @@ function $zeta_presplit_composite_cost(_limbs_0) {
 
 function $zeta_naive_composite_cost(_limbs_0) {
   const _x_0 = nat_chk(2 * _limbs_0);
-  const _x_1 = ($zeta_presplit_composite_cost(_limbs_0));
+  const _x_1 = $$zeta_presplit_composite_cost(_limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
@@ -1406,42 +1418,42 @@ function $eval_uexpr(_e_0, _z_0, _c_0) {
   } else if (_e_0.$ === "UConst") {
     const _re_0 = _e_0["re"];
     const _im_0 = _e_0["im"];
-    return $make_const(_re_0, _im_0, ($cpx_zoom_exp(_c_0)));
+    return $make_const(_re_0, _im_0, $$cpx_zoom_exp(_c_0));
   } else if (_e_0.$ === "USq") {
     const _arg_0 = _e_0["arg"];
-    return $cpx_sq(($eval_uexpr(_arg_0, _z_0, _c_0)));
+    return $cpx_sq($$eval_uexpr(_arg_0, _z_0, _c_0));
   } else if (_e_0.$ === "URcp") {
     const _arg_1 = _e_0["arg"];
-    return $cpx_rcp(($eval_uexpr(_arg_1, _z_0, _c_0)));
+    return $cpx_rcp($$eval_uexpr(_arg_1, _z_0, _c_0));
   } else if (_e_0.$ === "UPrim") {
     const _op_0 = _e_0["op"];
     const _arg_2 = _e_0["arg"];
-    return $eval_prim(_op_0, ($eval_uexpr(_arg_2, _z_0, _c_0)));
+    return $eval_prim(_op_0, $$eval_uexpr(_arg_2, _z_0, _c_0));
   } else if (_e_0.$ === "UAdd") {
     const _lhs_0 = _e_0["lhs"];
     const _rhs_0 = _e_0["rhs"];
-    return $cpx_add(($eval_uexpr(_lhs_0, _z_0, _c_0)), ($eval_uexpr(_rhs_0, _z_0, _c_0)));
+    return $cpx_add($$eval_uexpr(_lhs_0, _z_0, _c_0), $$eval_uexpr(_rhs_0, _z_0, _c_0));
   } else if (_e_0.$ === "USub") {
     const _lhs_1 = _e_0["lhs"];
     const _rhs_1 = _e_0["rhs"];
-    return $cpx_sub(($eval_uexpr(_lhs_1, _z_0, _c_0)), ($eval_uexpr(_rhs_1, _z_0, _c_0)));
+    return $cpx_sub($$eval_uexpr(_lhs_1, _z_0, _c_0), $$eval_uexpr(_rhs_1, _z_0, _c_0));
   } else if (_e_0.$ === "UMul") {
     const _lhs_2 = _e_0["lhs"];
     const _rhs_2 = _e_0["rhs"];
-    return $cpx_mul(($eval_uexpr(_lhs_2, _z_0, _c_0)), ($eval_uexpr(_rhs_2, _z_0, _c_0)));
+    return $cpx_mul($$eval_uexpr(_lhs_2, _z_0, _c_0), $$eval_uexpr(_rhs_2, _z_0, _c_0));
   } else {
     const _lhs_3 = _e_0["lhs"];
     const _rhs_3 = _e_0["rhs"];
-    return $cpx_div(($eval_uexpr(_lhs_3, _z_0, _c_0)), ($eval_uexpr(_rhs_3, _z_0, _c_0)));
+    return $cpx_div($$eval_uexpr(_lhs_3, _z_0, _c_0), $$eval_uexpr(_rhs_3, _z_0, _c_0));
   }
 }
 
 function $eval_unified_chain(_steps_0, _e_0, _z0_0, _c_0) {
-  if (_steps_0 === 0) {
+  if (_steps_0 == 0) {
     return _z0_0;
   } else {
     const _p_0 = (_steps_0 - 1);
-    return $eval_uexpr(_e_0, ($eval_unified_chain(_p_0, _e_0, _z0_0, _c_0)), _c_0);
+    return $eval_uexpr(_e_0, $$eval_unified_chain(_p_0, _e_0, _z0_0, _c_0), _c_0);
   }
 }
 
@@ -1449,12 +1461,12 @@ function $select_chain_seed(_use_seed_0, _seed_re_0, _seed_im_0, _c_0) {
   if (!_use_seed_0) {
     return _c_0;
   } else {
-    return $make_const(_seed_re_0, _seed_im_0, ($cpx_zoom_exp(_c_0)));
+    return $make_const(_seed_re_0, _seed_im_0, $$cpx_zoom_exp(_c_0));
   }
 }
 
 function $eval_seeded_chain(_steps_0, _e_0, _use_seed_0, _seed_re_0, _seed_im_0, _c_0) {
-  return $eval_unified_chain(_steps_0, _e_0, ($select_chain_seed(_use_seed_0, _seed_re_0, _seed_im_0, _c_0)), _c_0);
+  return $eval_unified_chain(_steps_0, _e_0, $$select_chain_seed(_use_seed_0, _seed_re_0, _seed_im_0, _c_0), _c_0);
 }
 
 function $uexpr_mandelbrot() {
@@ -1522,7 +1534,7 @@ function $live_ui_preempt(_st_0) {
   const _ri_0 = _st_0["read_idx"];
   const _hd_0 = _st_0["has_display"];
   const _dd_0 = _st_0["dirty_display"];
-  const _total_0 = ($live_ui_total_steps(_mode_0, _ce_0, _cc_0));
+  const _total_0 = $$live_ui_total_steps(_mode_0, _ce_0, _cc_0);
   return {$: "LiveUIState", "mode": _mode_0, "chain_enabled": _ce_0, "chain_count": _cc_0, "read_idx": _ri_0, "has_display": _hd_0, "need_seed_pass": true, "remaining_steps": _total_0, "completed_steps": 0, "active_total_steps": _total_0, "dirty_display": (_hd_0 || _dd_0)};
 }
 
@@ -1541,19 +1553,18 @@ function $live_ui_toggle_chain(_st_0) {
   const _ri_0 = _st_0["read_idx"];
   const _hd_0 = _st_0["has_display"];
   const _dd_0 = _st_0["dirty_display"];
-  const _next_ce_0 = ($Bool_not(_ce_0));
-  const _total_0 = ($live_ui_total_steps(_mode_0, _next_ce_0, _cc_0));
+  const _next_ce_0 = $$Bool_not(_ce_0);
+  const _total_0 = $$live_ui_total_steps(_mode_0, _next_ce_0, _cc_0);
   return {$: "LiveUIState", "mode": _mode_0, "chain_enabled": _next_ce_0, "chain_count": _cc_0, "read_idx": _ri_0, "has_display": _hd_0, "need_seed_pass": true, "remaining_steps": _total_0, "completed_steps": 0, "active_total_steps": _total_0, "dirty_display": (_hd_0 || _dd_0)};
 }
 
 function $live_ui_set_mode(_st_0, _next_mode_0) {
-  const _mode_0 = _st_0["mode"];
   const _ce_0 = _st_0["chain_enabled"];
   const _cc_0 = _st_0["chain_count"];
   const _ri_0 = _st_0["read_idx"];
   const _hd_0 = _st_0["has_display"];
   const _dd_0 = _st_0["dirty_display"];
-  const _total_0 = ($live_ui_total_steps(_next_mode_0, _ce_0, _cc_0));
+  const _total_0 = $$live_ui_total_steps(_next_mode_0, _ce_0, _cc_0);
   return {$: "LiveUIState", "mode": _next_mode_0, "chain_enabled": _ce_0, "chain_count": _cc_0, "read_idx": _ri_0, "has_display": _hd_0, "need_seed_pass": true, "remaining_steps": _total_0, "completed_steps": 0, "active_total_steps": _total_0, "dirty_display": (_hd_0 || _dd_0)};
 }
 
@@ -1575,25 +1586,22 @@ function $live_ui_step_batch(_st_0, _batch_cap_0) {
   const _ri_0 = _st_0["read_idx"];
   const _hd_0 = _st_0["has_display"];
   const _t_0 = _st_0["remaining_steps"];
-  if (_t_0 === 0) {
+  if (_t_0 == 0) {
     const _comp_0 = _st_0["completed_steps"];
     const _tot_0 = _st_0["active_total_steps"];
     const _dd_0 = _st_0["dirty_display"];
     return {$: "LiveUIState", "mode": _mode_0, "chain_enabled": _ce_0, "chain_count": _cc_0, "read_idx": _ri_0, "has_display": _hd_0, "need_seed_pass": false, "remaining_steps": 0, "completed_steps": _comp_0, "active_total_steps": _tot_0, "dirty_display": _dd_0};
   } else {
-    const _r_0 = (_t_0 - 1);
     const _comp_1 = _st_0["completed_steps"];
     const _tot_1 = _st_0["active_total_steps"];
     const _dd_1 = _st_0["dirty_display"];
-    const _x_0 = nat_chk(_r_0 + 1);
-    const _chunk_0 = (_x_0 < _batch_cap_0 ? _x_0 : _batch_cap_0);
-    const _x_1 = nat_chk(_r_0 + 1);
-    const _rem2_0 = (_x_1 < _chunk_0 ? 0 : _x_1 - _chunk_0);
+    const _chunk_0 = (_t_0 < _batch_cap_0 ? _t_0 : _batch_cap_0);
+    const _rem2_0 = (_t_0 < _chunk_0 ? 0 : _t_0 - _chunk_0);
     const _comp2_0 = nat_chk(_comp_1 + _chunk_0);
-    const _ri2_0 = ($flip_fbo_idx(_ri_0));
-    const _done_0 = ($Nat_is_eq(_rem2_0, 0));
-    const _x_2 = (_hd_0 || _dd_1);
-    return {$: "LiveUIState", "mode": _mode_0, "chain_enabled": _ce_0, "chain_count": _cc_0, "read_idx": _ri2_0, "has_display": (_done_0 || _hd_0), "need_seed_pass": false, "remaining_steps": _rem2_0, "completed_steps": _comp2_0, "active_total_steps": _tot_1, "dirty_display": (_done_0 || _x_2)};
+    const _ri2_0 = $$flip_fbo_idx(_ri_0);
+    const _done_0 = $$Nat_is_eq(_rem2_0, 0);
+    const _x_0 = (_hd_0 || _dd_1);
+    return {$: "LiveUIState", "mode": _mode_0, "chain_enabled": _ce_0, "chain_count": _cc_0, "read_idx": _ri2_0, "has_display": (_done_0 || _hd_0), "need_seed_pass": false, "remaining_steps": _rem2_0, "completed_steps": _comp2_0, "active_total_steps": _tot_1, "dirty_display": (_done_0 || _x_0)};
   }
 }
 
@@ -1614,7 +1622,7 @@ function $cpx_mag(_z_0) {
 }
 
 function $encode_escape_attractor_cpx(_mode_0, _raw_z_0, _iter_k_0, _c_0) {
-  if (_mode_0 === 0) {
+  if (_mode_0 == 0) {
     return _raw_z_0;
   } else {
     const _re_0 = _raw_z_0["re"];
@@ -1627,24 +1635,27 @@ function $encode_escape_attractor_cpx(_mode_0, _raw_z_0, _iter_k_0, _c_0) {
 }
 
 function $eval_general_orbit_mode(_mode_0, _steps_0, _e_0, _use_seed_0, _seed_re_0, _seed_im_0, _iter_k_0, _c_0) {
-  return $encode_escape_attractor_cpx(_mode_0, ($eval_seeded_chain(_steps_0, _e_0, _use_seed_0, _seed_re_0, _seed_im_0, _c_0)), _iter_k_0, _c_0);
+  return $encode_escape_attractor_cpx(_mode_0, $$eval_seeded_chain(_steps_0, _e_0, _use_seed_0, _seed_re_0, _seed_im_0, _c_0), _iter_k_0, _c_0);
 }
 
 function $fps_120_budget_us() {
-  return 8333;
+  return (8333 );
 }
 
 function $fps_120_dispatched_cost_us(_req_us_0) {
-  const _x_0 = (_req_us_0 < 7883 ? _req_us_0 : 7883);
-  return nat_chk(450 + _x_0);
+  const _x_0 = (7883 );
+  const _x_1 = (450 );
+  const _x_2 = (_req_us_0 < _x_0 ? _req_us_0 : _x_0);
+  return nat_chk(_x_1 + _x_2);
 }
 
 function $fps_120_naive_unbounded_cost_us(_extra_us_0) {
-  return nat_chk(8334 + _extra_us_0);
+  const _x_0 = (8334 );
+  return nat_chk(_x_0 + _extra_us_0);
 }
 
 function $live_ui_120fps_batch_cap(_depth_0, _op_cost_class_0) {
-  if (_depth_0 === 0) {
+  if (_depth_0 == 0) {
     return 1;
   } else {
     return TAB_1[Math.min(_op_cost_class_0, 1)];
@@ -1652,7 +1663,7 @@ function $live_ui_120fps_batch_cap(_depth_0, _op_cost_class_0) {
 }
 
 function $fps_120_frame_dropped(_req_us_0) {
-  return $Nat_is_gt(($fps_120_dispatched_cost_us(_req_us_0)), 8333);
+  return $Nat_is_gt($$fps_120_dispatched_cost_us(_req_us_0), (8333 ));
 }
 
 function $stage_table_recompile_cost(_num_edits_0) {
@@ -1671,7 +1682,7 @@ function $fused_sos_word_cost(_limbs_0) {
 
 function $unfused_sos_word_cost(_limbs_0) {
   const _x_0 = nat_chk(2 * _limbs_0);
-  const _x_1 = ($fused_sos_word_cost(_limbs_0));
+  const _x_1 = $$fused_sos_word_cost(_limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
@@ -1682,7 +1693,7 @@ function $sinh_cosh_direct_cost(_limbs_0) {
 
 function $sinh_cosh_halved_cost(_limbs_0) {
   const _x_0 = nat_chk(2 * _limbs_0);
-  const _x_1 = ($sinh_cosh_direct_cost(_limbs_0));
+  const _x_1 = $$sinh_cosh_direct_cost(_limbs_0);
   const _x_2 = nat_chk(_limbs_0 + _x_0);
   return nat_chk(_x_1 + _x_2);
 }
@@ -1692,17 +1703,42 @@ function $eval_zeta_ac_single_branch(_z_0) {
 }
 
 function $zeta_ac_single_branch_cost(_zoom_exp_0) {
-  const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
   return nat_chk(3 * _x_0);
 }
 
 function $zeta_ac_dual_branch_cost(_zoom_exp_0) {
-  const _x_0 = ($limbs_for_zoom(_zoom_exp_0));
-  const _x_1 = ($limbs_for_zoom(_zoom_exp_0));
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
+  const _x_1 = $$limbs_for_zoom(_zoom_exp_0);
   const _x_2 = nat_chk(3 * _x_0);
-  const _x_3 = ($zeta_ac_single_branch_cost(_zoom_exp_0));
+  const _x_3 = $$zeta_ac_single_branch_cost(_zoom_exp_0);
   const _x_4 = nat_chk(_x_1 + _x_2);
   return nat_chk(_x_3 + _x_4);
+}
+
+function $tangent_frame_special_fn_cost(_zoom_exp_0) {
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
+  return nat_chk(2 * _x_0);
+}
+
+function $naive_inlined_special_fn_cost(_zoom_exp_0) {
+  const _x_0 = $$limbs_for_zoom(_zoom_exp_0);
+  const _x_1 = $$limbs_for_zoom(_zoom_exp_0);
+  const _x_2 = nat_chk(4 * _x_0);
+  const _x_3 = $$tangent_frame_special_fn_cost(_zoom_exp_0);
+  const _x_4 = nat_chk(_x_1 + _x_2);
+  return nat_chk(_x_3 + _x_4);
+}
+
+function $dce_decoupled_compile_lines(_fn_class_0) {
+  const _x_0 = (680 );
+  return nat_chk(_x_0 + _fn_class_0);
+}
+
+function $monolithic_inlined_compile_lines(_fn_class_0) {
+  const _x_0 = $$dce_decoupled_compile_lines(_fn_class_0);
+  const _x_1 = (420 );
+  return nat_chk(_x_0 + _x_1);
 }
 
 function $Nat_div(_a_0, _b_0) {
@@ -1722,11 +1758,11 @@ function $Nat_is_eq(_a_0, _b_0) {
 }
 
 function $Nat_pow(_a_0, _b_0) {
-  if (_b_0 === 0) {
+  if (_b_0 == 0) {
     return 1;
   } else {
     const _p_0 = (_b_0 - 1);
-    const _x_0 = ($Nat_pow(_a_0, _p_0));
+    const _x_0 = $$Nat_pow(_a_0, _p_0);
     return nat_chk(_a_0 * _x_0);
   }
 }
@@ -1764,6 +1800,74 @@ function $Cmp_is_gt(_c_0) {
   }
 }
 
+const $$extra_limbs = $extra_limbs;
+const $$limbs_for_zoom = $limbs_for_zoom;
+const $$sneg = $sneg;
+const $$Nat_is_eq = $Nat_is_eq;
+const $$Bool_and = $Bool_and;
+const $$sreal_eq_repr = $sreal_eq_repr;
+const $$sadd = $sadd;
+const $$ssub = $ssub;
+const $$smul = $smul;
+const $$ssq = $ssq;
+const $$sscale = $sscale;
+const $$cpx_zoom_exp = $cpx_zoom_exp;
+const $$eval_expr = $eval_expr;
+const $$compose_expr = $compose_expr;
+const $$eval_full_chain = $eval_full_chain;
+const $$unfold_full_chain = $unfold_full_chain;
+const $$run_fbo_batches_full = $run_fbo_batches_full;
+const $$cpx_sq = $cpx_sq;
+const $$eval_mandelbrot = $eval_mandelbrot;
+const $$cpx_rcp = $cpx_rcp;
+const $$eval_newton = $eval_newton;
+const $$palette_base_id = $palette_base_id;
+const $$sample_pixel = $sample_pixel;
+const $$eval_mode = $eval_mode;
+const $$pixel_cert_color = $pixel_cert_color;
+const $$render_pixel = $render_pixel;
+const $$Nat_pow = $Nat_pow;
+const $$render_quadtree = $render_quadtree;
+const $$pow4 = $pow4;
+const $$image_pixels = $image_pixels;
+const $$cam_pan_x = $cam_pan_x;
+const $$cam_pan_y = $cam_pan_y;
+const $$stress_walk_scenes = $stress_walk_scenes;
+const $$div_graded_word_cost = $div_graded_word_cost;
+const $$sq_word_cost = $sq_word_cost;
+const $$cpx_div_scaled_cost = $cpx_div_scaled_cost;
+const $$div_naive_word_cost = $div_naive_word_cost;
+const $$prim_cost_opt = $prim_cost_opt;
+const $$prim_cost_savings = $prim_cost_savings;
+const $$expr_cost_opt = $expr_cost_opt;
+const $$mul_word_cost = $mul_word_cost;
+const $$expr_cost_savings = $expr_cost_savings;
+const $$full_chain_cost_opt = $full_chain_cost_opt;
+const $$full_chain_cost_savings = $full_chain_cost_savings;
+const $$tan_single_pass_cost = $tan_single_pass_cost;
+const $$shade_domain_fast_cost = $shade_domain_fast_cost;
+const $$pipeline_v2_cost = $pipeline_v2_cost;
+const $$pipeline_v2_savings = $pipeline_v2_savings;
+const $$renorm_6pass_word_cost = $renorm_6pass_word_cost;
+const $$sqrt_incremental_rem_cost = $sqrt_incremental_rem_cost;
+const $$unfold_unary_chain = $unfold_unary_chain;
+const $$eval_unary_chain = $eval_unary_chain;
+const $$sec_direct_sos_cost = $sec_direct_sos_cost;
+const $$shader_compile_dce_cost = $shader_compile_dce_cost;
+const $$zeta_presplit_composite_cost = $zeta_presplit_composite_cost;
+const $$eval_uexpr = $eval_uexpr;
+const $$eval_unified_chain = $eval_unified_chain;
+const $$select_chain_seed = $select_chain_seed;
+const $$live_ui_total_steps = $live_ui_total_steps;
+const $$Bool_not = $Bool_not;
+const $$flip_fbo_idx = $flip_fbo_idx;
+const $$eval_seeded_chain = $eval_seeded_chain;
+const $$fps_120_dispatched_cost_us = $fps_120_dispatched_cost_us;
+const $$fused_sos_word_cost = $fused_sos_word_cost;
+const $$sinh_cosh_direct_cost = $sinh_cosh_direct_cost;
+const $$zeta_ac_single_branch_cost = $zeta_ac_single_branch_cost;
+const $$tangent_frame_special_fn_cost = $tangent_frame_special_fn_cost;
+const $$dce_decoupled_compile_lines = $dce_decoupled_compile_lines;
 const TAB_0 = [1, 0];
 const TAB_1 = [24, 8];export default {
   "base_limbs": run_lib(() => run_loop($base_limbs()), 0),
@@ -1930,4 +2034,8 @@ const TAB_1 = [24, 8];export default {
   "eval_zeta_ac_single_branch": run_lib((a0) => run_loop($eval_zeta_ac_single_branch(a0)), 1),
   "zeta_ac_single_branch_cost": run_lib((a0) => run_loop($zeta_ac_single_branch_cost(nat_in(a0))), 1),
   "zeta_ac_dual_branch_cost": run_lib((a0) => run_loop($zeta_ac_dual_branch_cost(nat_in(a0))), 1),
+  "tangent_frame_special_fn_cost": run_lib((a0) => run_loop($tangent_frame_special_fn_cost(nat_in(a0))), 1),
+  "naive_inlined_special_fn_cost": run_lib((a0) => run_loop($naive_inlined_special_fn_cost(nat_in(a0))), 1),
+  "dce_decoupled_compile_lines": run_lib((a0) => run_loop($dce_decoupled_compile_lines(nat_in(a0))), 1),
+  "monolithic_inlined_compile_lines": run_lib((a0) => run_loop($monolithic_inlined_compile_lines(nat_in(a0))), 1),
 };

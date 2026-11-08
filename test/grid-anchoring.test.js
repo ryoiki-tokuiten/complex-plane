@@ -5,9 +5,18 @@ import {
     generateInputShapePointSets,
     generateCurrentInputShapePointSets
 } from '../js/rendering/shape-generators.js';
-import { state } from '../js/store/state.js';
+import { state, zPlaneParams } from '../js/store/state.js';
 import { drawAxes, drawGrid } from '../js/rendering/canvas-primitives.js';
 import { GRID_SHAPE_DEFAULTS } from '../js/constants/grid-shapes.js';
+import { updatePlaneViewportRanges } from '../js/utils/canvas-utils.js';
+import {
+    getZPlaneMenuItems,
+    getWPlaneMenuItems,
+    copyCurrentZPlaneCoordinates,
+    pasteZPlaneCoordinates,
+    parseZPlaneCoordinates,
+    getCurrentZPlaneCenter
+} from '../js/frontend/context-menu-model.js';
 
 const generate = (currentInputShape, config) => generateInputShapePointSets({
     currentInputShape,
@@ -312,7 +321,7 @@ test('Zeta continuation Cartesian grid is not split at the continuation boundary
     }
 });
 
-test('canvas grid and tick loops stay bounded at deep zoom', () => {
+test('canvas grid and tick loops stay bounded at deep zoom and off-origin ultra-deep zoom', () => {
     const calls = { moveTo: 0 };
     const ctx = {
         save() {},
@@ -340,4 +349,85 @@ test('canvas grid and tick loops stay bounded at deep zoom', () => {
     drawAxes(ctx, params, { labels: false, ticks: true, tickLabels: false });
 
     assert.ok(calls.moveTo < 500, `deep-zoom grid emitted ${calls.moveTo} segments`);
+
+    for (const deepZoom of [1e20, 1e60, 1e120, 1e200]) {
+        const deepScale = (800 / 7) * deepZoom;
+        const offOriginParams = {
+            width: 800,
+            height: 600,
+            scale: { x: deepScale, y: deepScale },
+            origin: { x: 400 - 0.35 * deepScale, y: 300 + 0.25 * deepScale },
+            currentVisXRange: [-3.5, 3.5],
+            currentVisYRange: [-2.5, 2.5]
+        };
+        updatePlaneViewportRanges(offOriginParams);
+        assert.ok(offOriginParams.currentVisXRange[1] > offOriginParams.currentVisXRange[0]);
+        assert.ok(offOriginParams.currentVisYRange[1] > offOriginParams.currentVisYRange[0]);
+
+        calls.moveTo = 0;
+        drawGrid(ctx, offOriginParams, { targetCount: 10 });
+        drawAxes(ctx, offOriginParams, 'Re(z)', 'Im(z)');
+        assert.ok(calls.moveTo < 1200, `off-origin zoom ${deepZoom} emitted ${calls.moveTo} segments`);
+    }
 });
+
+test('Z-plane Analysis submenu exposes Copy current co-ordinates and Paste co-ordinates and re-centers on valid format', async () => {
+    const zItems = getZPlaneMenuItems();
+    const analysisItem = zItems.find(item => item.id === 'analysis_z');
+    assert.ok(analysisItem, 'Z-plane context menu includes Analysis');
+    const copyItem = analysisItem.children.find(child => child.label === 'Copy current co-ordinates');
+    const pasteItem = analysisItem.children.find(child => child.label === 'Paste co-ordinates');
+    assert.ok(copyItem, 'Analysis submenu includes Copy current co-ordinates');
+    assert.ok(pasteItem, 'Analysis submenu includes Paste co-ordinates');
+
+    const wItems = getWPlaneMenuItems();
+    assert.equal(wItems.some(item => item.id === 'analysis_z' || item.label === 'Analysis'), false);
+
+    zPlaneParams.width = 800;
+    zPlaneParams.height = 600;
+    zPlaneParams.scale = { x: 100, y: 100 };
+    zPlaneParams.origin = { x: 400 - 1.25 * 100, y: 300 + (-0.75) * 100 };
+    updatePlaneViewportRanges(zPlaneParams);
+
+    const copied = copyCurrentZPlaneCoordinates(zPlaneParams);
+    assert.equal(copied, '(1.25, -0.75)');
+    assert.deepEqual(parseZPlaneCoordinates(copied), { re: 1.25, im: -0.75 });
+    assert.equal(parseZPlaneCoordinates('not-a-coordinate'), null);
+    assert.equal(parseZPlaneCoordinates('1.25, -0.75'), null);
+
+    // Move Z-plane elsewhere, then paste valid coordinates
+    zPlaneParams.origin = { x: 400, y: 300 };
+    updatePlaneViewportRanges(zPlaneParams);
+    assert.deepEqual(getCurrentZPlaneCenter(zPlaneParams), { re: 0, im: 0 });
+
+    // Invalid paste does not alter center
+    const invalidResult = await pasteZPlaneCoordinates('invalid format', zPlaneParams);
+    assert.equal(invalidResult, null);
+    assert.deepEqual(getCurrentZPlaneCenter(zPlaneParams), { re: 0, im: 0 });
+
+    // Valid paste re-centers the Z-plane
+    const validResult = await pasteZPlaneCoordinates(copied, zPlaneParams);
+    assert.deepEqual(validResult, { re: 1.25, im: -0.75 });
+    const recentered = getCurrentZPlaneCenter(zPlaneParams);
+    assert.ok(Math.abs(recentered.re - 1.25) < 1e-9);
+    assert.ok(Math.abs(recentered.im - (-0.75)) < 1e-9);
+
+    // Deep-zoom (>15-digit, scaleExp10 = -20) copy/paste and camera sync immunity
+    zPlaneParams.scale = { x: 8e22, y: 8e22 };
+    zPlaneParams.scaleExp10 = -20;
+    const deepText = '(-0.535678438271871123456789, 0.495143112914590987654321)';
+    await pasteZPlaneCoordinates(deepText, zPlaneParams);
+    const savedBigX = zPlaneParams.centerBigX;
+    const savedBigY = zPlaneParams.centerBigY;
+    assert.equal(typeof savedBigX, 'bigint');
+    assert.equal(typeof savedBigY, 'bigint');
+
+    const copiedDeep = copyCurrentZPlaneCoordinates(zPlaneParams);
+    assert.ok(copiedDeep.includes('-0.535678438271871123456789'));
+    assert.ok(copiedDeep.includes('0.495143112914590987654321'));
+
+    // Reset scaleExp10 for subsequent state
+    delete zPlaneParams.scaleExp10;
+});
+
+

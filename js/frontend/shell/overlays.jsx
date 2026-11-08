@@ -4,7 +4,7 @@ import { RangeControl } from '../components/range-control.jsx';
 import { Icon } from '../components/icon.jsx';
 
 const DOMAIN_RANGES = [
-  ['domain_brightness_slider', 'Brightness:', 'domain_brightness_value_display', '1.0', '0.5', '1.5', '0.02', 'Adjust overall brightness of the domain coloring'],
+  ['domain_brightness_slider', 'Brightness:', 'domain_brightness_value_display', '1.0', '0.5', '1.5', '0.01', 'Adjust overall brightness of the domain coloring'],
   ['domain_contrast_slider', 'Contrast:', 'domain_contrast_value_display', '1.0', '0.5', '2.0', '0.05', 'Adjust contrast of the domain coloring'],
   ['domain_saturation_slider', 'Saturation:', 'domain_saturation_value_display', '1.0', '0.0', '2.0', '0.05', 'Adjust color saturation of the domain coloring'],
   ['domain_lightness_cycles_slider', 'Lightness Cycles:', 'domain_lightness_cycles_value_display', '1.00', '0.0', '4.0', '0.25', '0 disables magnitude lightness modulation; higher values add optional magnitude shading']

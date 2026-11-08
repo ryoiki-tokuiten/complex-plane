@@ -28,7 +28,7 @@ const FRACTAL_PRESETS = Object.freeze({
         chainCount: 600,
         orbitColoringMode: 'escape',
         currentInputShape: 'empty_grid',
-        domainPalette: 'arctic-frost',
+        domainPalette: 'arctic-fox',
         polynomialN: 2,
         polynomialCoeffs: Object.freeze([
             complex(0),

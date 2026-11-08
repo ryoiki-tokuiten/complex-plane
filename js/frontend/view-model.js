@@ -1423,14 +1423,18 @@ export function buildViewModel() {
 }
 
 function updateDomainColoringKey() {
-    const paletteId = state.domainPalette || 'analytic-base';
+    const paletteId = state.domainPalette || 'arctic-fox';
     const paletteObj = domainPalettes.find(palette => palette.id === paletteId) || domainPalettes[0];
     const orbitMode = normalizeOrbitColoringMode(state.orbitColoringMode);
-    const lines = ['<strong>Domain Coloring Key:</strong>'];
+    const lines = [`<strong>Domain Coloring Key (${paletteObj.name}):</strong>`];
+    if (paletteObj?.desc) {
+        lines.push(`<span class="domain-key-desc">${paletteObj.desc}</span>`);
+    }
     if (paletteObj?.key) {
         lines.push('<span class="domain-key-line">- Color maps to Argument (Angle):</span>');
         for (const item of paletteObj.key) {
-            lines.push(`<span class="domain-key-entry"><strong style="color:${item.color}">${item.label}</strong>: Arg = ${item.angle}</span>`);
+            const hexHint = item.hex ? ` <code>${item.hex}</code>` : '';
+            lines.push(`<span class="domain-key-entry"><span class="domain-key-swatch" style="background:${item.color}"></span><strong style="color:${item.color}">${item.label}</strong>${hexHint}: Arg = ${item.angle}</span>`);
         }
     }
     if (state.chainingEnabled) {

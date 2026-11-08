@@ -30,6 +30,7 @@ export default defineConfig({
     format: 'es'
   },
   server: {
+    host: '0.0.0.0',
     port: 3000,
     watch: {
       ignored: ['**/.cache/**', '**/native/build/**', '**/dist/**']

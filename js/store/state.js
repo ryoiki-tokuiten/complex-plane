@@ -160,7 +160,7 @@ const rawState = {
     domainResScale: 1.5,
     domainShowModulus: true,
     domainShowPhase: false,
-    domainPalette: 'arctic-frost',
+    domainPalette: 'arctic-fox',
 
     themeId: 'rose',
     gridColor1: '#FB923C',
@@ -335,7 +335,6 @@ const rawState = {
 
 const store = createObservableStore(rawState, {
     normalize(key, value, values) {
-        if (key === 'probeActive' && value === true && values.chainingEnabled) return false;
         if (key === 'show2DContourPlot' && value === true &&
             !values.realPlotsEnabled && !values.riemannSurfaceEnabled && !values.laplaceModeEnabled) return false;
         return value;
@@ -346,11 +345,6 @@ export const state = store.state;
 export const mutateState = store.mutate;
 export const subscribeState = store.subscribe;
 export const getStateSignal = store.getSignal;
-
-// Preserve the probe/chaining invariant at the state boundary instead of in UI handlers.
-subscribeState(({ value }) => {
-    if (value && state.probeActive) state.probeActive = false;
-}, 'chainingEnabled');
 
 // Preserve mutual exclusivity between domain coloring and 3D manifold modes.
 subscribeState(({ value }) => {

@@ -1,13 +1,179 @@
-import { state, context } from '../store/state.js';
+import { state, context, zPlaneParams } from '../store/state.js';
 import { requestDomainRedraw, requestUiRedraw } from '../rendering/redraw-scheduler.js';
 import { fitConformalGridOutputViewport } from './view-model.js';
 import { pauseUploadedVideoPlayback } from '../utils/raster-media.js';
 import { composeCanvasLayers, downloadCanvasImage } from '../utils/dom-utils.js';
+import { updatePlaneViewportRanges } from '../utils/canvas-utils.js';
+import {
+    bigFixedToNumber,
+    bigFixedToString,
+    numberToBigFixed,
+    stringToBigFixed,
+    syncBigIntCameraFromPlaneParams
+} from '../rendering/domain-coloring.js';
 import { isGraphViewSupported, isFullGridPerspectiveSupported, disposeTransformationGraphRenderer } from '../rendering/transformation-graph.js';
 import { syncGridDensityControls } from './grid-density.js';
 import { setNavigationModeEnabled } from '../navigation-plane.js';
 import { updateDynamicPlotting } from './dynamic-plotting-state.js';
 import { getDefaultInputShapeForManifold } from '../rendering/manifold-registry.js';
+
+const Z_COORDINATE_FORMAT_REGEX = /^\(\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*,\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*\)$/i;
+let lastCopiedZPlaneCoordinates = '';
+
+export function getCurrentZPlaneCenter(planeParams = zPlaneParams) {
+    if (!planeParams) return { re: 0, im: 0, reStr: '0', imStr: '0' };
+    syncBigIntCameraFromPlaneParams(planeParams);
+    let re = 0;
+    let im = 0;
+    const width = Number.isFinite(planeParams.width) && planeParams.width > 0 ? planeParams.width : 800;
+    const height = Number.isFinite(planeParams.height) && planeParams.height > 0 ? planeParams.height : 600;
+    const scaleX = Number.isFinite(planeParams.scale?.x) && planeParams.scale.x > 0 ? planeParams.scale.x : 100;
+    const scaleY = Number.isFinite(planeParams.scale?.y) && planeParams.scale.y > 0 ? planeParams.scale.y : scaleX;
+    const hasBigCenter = typeof planeParams.centerBigX === 'bigint' && typeof planeParams.centerBigY === 'bigint';
+    const isDeepZoom =
+        (hasBigCenter && Number.isFinite(planeParams.scaleExp10) && planeParams.scaleExp10 <= -10) ||
+        scaleX >= 1e12 ||
+        Math.abs(planeParams.origin?.x || 0) >= 1e14 ||
+        Math.abs(planeParams.origin?.y || 0) >= 1e14;
+
+    if (hasBigCenter && isDeepZoom) {
+        re = bigFixedToNumber(planeParams.centerBigX);
+        im = bigFixedToNumber(planeParams.centerBigY);
+        const digits = Math.max(18, Math.min(80, Math.ceil(-(planeParams.scaleExp10 || -15)) + 6));
+        const reStr = bigFixedToString(planeParams.centerBigX, digits);
+        const imStr = bigFixedToString(planeParams.centerBigY, digits);
+        const out = {
+            re: Object.is(re, -0) || !Number.isFinite(re) ? 0 : Number(re.toPrecision(15)),
+            im: Object.is(im, -0) || !Number.isFinite(im) ? 0 : Number(im.toPrecision(15))
+        };
+        Object.defineProperties(out, {
+            reStr: { value: reStr, enumerable: false },
+            imStr: { value: imStr, enumerable: false },
+            bigRe: { value: planeParams.centerBigX, enumerable: false },
+            bigIm: { value: planeParams.centerBigY, enumerable: false }
+        });
+        return out;
+    }
+
+    if (
+        Number.isFinite(planeParams.origin?.x) &&
+        Number.isFinite(planeParams.origin?.y) &&
+        Math.abs(planeParams.origin.x) < 1e14 &&
+        Math.abs(planeParams.origin.y) < 1e14
+    ) {
+        re = (width * 0.5 - planeParams.origin.x) / scaleX;
+        im = (planeParams.origin.y - height * 0.5) / scaleY;
+    } else if (hasBigCenter) {
+        re = bigFixedToNumber(planeParams.centerBigX);
+        im = bigFixedToNumber(planeParams.centerBigY);
+    } else if (Array.isArray(planeParams.currentVisXRange) && Array.isArray(planeParams.currentVisYRange)) {
+        re = (planeParams.currentVisXRange[0] + planeParams.currentVisXRange[1]) * 0.5;
+        im = (planeParams.currentVisYRange[0] + planeParams.currentVisYRange[1]) * 0.5;
+    }
+    const cleanRe = Object.is(re, -0) || !Number.isFinite(re) ? 0 : Number(re.toPrecision(15));
+    const cleanIm = Object.is(im, -0) || !Number.isFinite(im) ? 0 : Number(im.toPrecision(15));
+    const out = {
+        re: cleanRe,
+        im: cleanIm
+    };
+    Object.defineProperties(out, {
+        reStr: { value: String(cleanRe), enumerable: false },
+        imStr: { value: String(cleanIm), enumerable: false }
+    });
+    return out;
+}
+
+export function formatZPlaneCoordinates(re, im) {
+    if (typeof re === 'string' && typeof im === 'string') {
+        return `(${re}, ${im})`;
+    }
+    const cleanRe = Object.is(re, -0) ? 0 : Number(Number(re).toPrecision(15));
+    const cleanIm = Object.is(im, -0) ? 0 : Number(Number(im).toPrecision(15));
+    return `(${cleanRe}, ${cleanIm})`;
+}
+
+export function parseZPlaneCoordinates(text) {
+    if (typeof text !== 'string') return null;
+    const match = text.trim().match(Z_COORDINATE_FORMAT_REGEX);
+    if (!match) return null;
+    const reRaw = match[1].trim();
+    const imRaw = match[2].trim();
+    const re = Number(reRaw);
+    const im = Number(imRaw);
+    if (!Number.isFinite(re) || !Number.isFinite(im)) return null;
+    const bigRe = stringToBigFixed(reRaw);
+    const bigIm = stringToBigFixed(imRaw);
+    const out = {
+        re: Object.is(re, -0) ? 0 : re,
+        im: Object.is(im, -0) ? 0 : im
+    };
+    Object.defineProperties(out, {
+        reStr: { value: reRaw, enumerable: false },
+        imStr: { value: imRaw, enumerable: false },
+        bigRe: { value: bigRe, enumerable: false },
+        bigIm: { value: bigIm, enumerable: false }
+    });
+    return out;
+}
+
+export function centerZPlaneOnCoordinates(re, im, planeParams = zPlaneParams, bigCoords = null) {
+    if (!planeParams || !Number.isFinite(re) || !Number.isFinite(im)) return false;
+    const width = Number.isFinite(planeParams.width) && planeParams.width > 0 ? planeParams.width : 800;
+    const height = Number.isFinite(planeParams.height) && planeParams.height > 0 ? planeParams.height : 600;
+    const scaleX = Number.isFinite(planeParams.scale?.x) && planeParams.scale.x > 0 ? planeParams.scale.x : 100;
+    const scaleY = Number.isFinite(planeParams.scale?.y) && planeParams.scale.y > 0 ? planeParams.scale.y : scaleX;
+
+    planeParams.origin.x = Math.max(-1e304, Math.min(1e304, width * 0.5 - re * scaleX));
+    planeParams.origin.y = Math.max(-1e304, Math.min(1e304, height * 0.5 + im * scaleY));
+    updatePlaneViewportRanges(planeParams);
+
+    planeParams.centerBigX = typeof bigCoords?.bigRe === 'bigint' ? bigCoords.bigRe : numberToBigFixed(re);
+    planeParams.centerBigY = typeof bigCoords?.bigIm === 'bigint' ? bigCoords.bigIm : numberToBigFixed(im);
+    if (planeParams.preciseViewport) {
+        planeParams.preciseViewport.centerRe = bigCoords?.reStr ?? String(re);
+        planeParams.preciseViewport.centerIm = bigCoords?.imStr ?? String(im);
+    }
+    planeParams._lastSyncedOriginX = planeParams.origin.x;
+    planeParams._lastSyncedOriginY = planeParams.origin.y;
+    planeParams._lastSyncedScaleX = scaleX;
+    planeParams._lastSyncedWidth = width;
+    planeParams._lastSyncedHeight = height;
+
+    requestDomainRedraw(true);
+    requestUiRedraw();
+    return true;
+}
+
+export function copyCurrentZPlaneCoordinates(planeParams = zPlaneParams) {
+    const center = getCurrentZPlaneCenter(planeParams);
+    const text = center.reStr && center.imStr
+        ? formatZPlaneCoordinates(center.reStr, center.imStr)
+        : formatZPlaneCoordinates(center.re, center.im);
+    lastCopiedZPlaneCoordinates = text;
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+    }
+    return text;
+}
+
+export async function pasteZPlaneCoordinates(rawText, planeParams = zPlaneParams) {
+    let text = rawText;
+    if (typeof text !== 'string') {
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+            try {
+                text = await navigator.clipboard.readText();
+            } catch {
+                text = lastCopiedZPlaneCoordinates;
+            }
+        } else {
+            text = lastCopiedZPlaneCoordinates;
+        }
+    }
+    const parsed = parseZPlaneCoordinates(text);
+    if (!parsed) return null;
+    centerZPlaneOnCoordinates(parsed.re, parsed.im, planeParams, parsed);
+    return parsed;
+}
 
 function contextPanelSubmenu(panel) { return [{ type: 'custom', panel }]; }
 
@@ -224,6 +390,23 @@ export function getZPlaneMenuItems() {
                             fitConformalGridOutputViewport();
                         }
                         requestUiRedraw();
+                    }
+                },
+                { type: 'divider' },
+                {
+                    id: 'copy_current_coordinates_z',
+                    label: 'Copy current co-ordinates',
+                    type: 'action',
+                    onClick: () => {
+                        copyCurrentZPlaneCoordinates();
+                    }
+                },
+                {
+                    id: 'paste_coordinates_z',
+                    label: 'Paste co-ordinates',
+                    type: 'action',
+                    onClick: () => {
+                        void pasteZPlaneCoordinates();
                     }
                 }
             ]

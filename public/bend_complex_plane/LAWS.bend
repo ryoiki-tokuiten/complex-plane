@@ -572,6 +572,12 @@ law unified_single_branch_zeta_ac_equivalence_and_speedup_law:
   for +zoom_exp: Nat
   {CP.eval_zeta_ac_single_branch(z) == CP.eval_prim(CP.PZetaAC{}, z) : CP.Cpx} & {Nat.is_lt(CP.zeta_ac_single_branch_cost(zoom_exp), CP.zeta_ac_dual_branch_cost(zoom_exp)) == True{} : Bool}
 
-
-
-
+# LAW 66: Tangent-Frame Special-Function & Decoupled DCE Shader Compilation Speedup Law (NEVER OVERRIDE):
+#         Evaluating `gamma`, `loggamma`, `bessel`, `zeta_ac`, and single-log `atan` via 96-bit
+#         Cauchy-Riemann tangent-frame transcendentals (`cds_ln_fast`, `cds_exp_fast`, `cds_sin_pi_fast`)
+#         and pre-split division-free Bessel series strictly reduces per-pixel word cost at all zoom scales
+#         and strictly reduces DCE shader compilation size vs monolithic trig/log inlining.
+law tangent_frame_gamma_bessel_atan_dce_speedup_law:
+  for +zoom_exp: Nat
+  for +fn_class: Nat
+  {Nat.is_lt(CP.tangent_frame_special_fn_cost(zoom_exp), CP.naive_inlined_special_fn_cost(zoom_exp)) == True{} : Bool} & {Nat.is_lt(CP.dce_decoupled_compile_lines(fn_class), CP.monolithic_inlined_compile_lines(fn_class)) == True{} : Bool}

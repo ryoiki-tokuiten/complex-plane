@@ -76,10 +76,10 @@ function drawGridLines(ctx, params, stepX, stepY, verticalColor, horizontalColor
     ctx.beginPath();
     const xStart = Math.ceil(xRange[0] / stepX) * stepX;
     const xEnd = Math.floor(xRange[1] / stepX) * stepX;
-    // The tolerance must scale with the grid spacing; a fixed world-unit
-    // tolerance turns deep-zoom grids into long phantom loops.
-    const xTolerance = Math.abs(stepX) * 1e-6;
-    for (let x = xStart; x <= xEnd + xTolerance; x += stepX) {
+    const rawCountX = (xEnd - xStart) / stepX;
+    const maxLinesX = Number.isFinite(rawCountX) && rawCountX >= 0 ? Math.min(256, Math.floor(rawCountX + 1e-6)) : -1;
+    for (let i = 0; i <= maxLinesX; i++) {
+        const x = xStart + i * stepX;
         if (Math.abs(x) > Math.max(Math.abs(xRange[0]), Math.abs(xRange[1])) + stepX && x !== 0) continue;
         const canvasX = mapToCanvasCoords(x, 0, params).x;
         ctx.moveTo(canvasX, 0);
@@ -91,8 +91,10 @@ function drawGridLines(ctx, params, stepX, stepY, verticalColor, horizontalColor
     ctx.beginPath();
     const yStart = Math.ceil(yRange[0] / stepY) * stepY;
     const yEnd = Math.floor(yRange[1] / stepY) * stepY;
-    const yTolerance = Math.abs(stepY) * 1e-6;
-    for (let y = yStart; y <= yEnd + yTolerance; y += stepY) {
+    const rawCountY = (yEnd - yStart) / stepY;
+    const maxLinesY = Number.isFinite(rawCountY) && rawCountY >= 0 ? Math.min(256, Math.floor(rawCountY + 1e-6)) : -1;
+    for (let i = 0; i <= maxLinesY; i++) {
+        const y = yStart + i * stepY;
         if (Math.abs(y) > Math.max(Math.abs(yRange[0]), Math.abs(yRange[1])) + stepY && y !== 0) continue;
         const canvasY = mapToCanvasCoords(0, y, params).y;
         ctx.moveTo(0, canvasY);
@@ -119,7 +121,7 @@ function calculateGridStep(span, targetCount = 10) {
     else if (ratio < 7) step = 5;
     else step = 10;
 
-    return step * base;
+    return Math.max(Number.MIN_VALUE, step * base);
 }
 
 export function drawGrid(ctx, params, options = {}) {
@@ -273,12 +275,13 @@ export function drawAxes(ctx, params, labelOrOptions, maybeYLabel) {
         ctx.font = "10px 'SF Pro Text', sans-serif";
 
         const getPrecision = (step) => {
-            if (step >= 1) return 0;
-            return Math.ceil(-Math.log10(step));
+            if (!Number.isFinite(step) || step <= 0 || step >= 1) return 0;
+            return Math.min(100, Math.max(0, Math.ceil(-Math.log10(step))));
         };
 
         const formatLabel = (val, prec, step) => {
-            if (Math.abs(val) < 1e-3 * step) return '0';
+            if (!Number.isFinite(val) || Math.abs(val) < 1e-3 * step) return '0';
+            if (prec > 12) return val.toExponential(2);
             const s = val.toFixed(prec);
             return parseFloat(s) === 0 ? '0' : s;
         };
@@ -291,9 +294,11 @@ export function drawAxes(ctx, params, labelOrOptions, maybeYLabel) {
         const xStart = Math.ceil(xRange[0] / stepX) * stepX;
         const xEnd = Math.floor(xRange[1] / stepX) * stepX;
         const precisionX = getPrecision(stepX);
-        const xTolerance = Math.abs(stepX) * 1e-6;
+        const rawTicksX = (xEnd - xStart) / stepX;
+        const maxTicksX = Number.isFinite(rawTicksX) && rawTicksX >= 0 ? Math.min(128, Math.floor(rawTicksX + 1e-6)) : -1;
 
-        for (let x = xStart; x <= xEnd + xTolerance; x += stepX) {
+        for (let i = 0; i <= maxTicksX; i++) {
+            const x = xStart + i * stepX;
             const tick = mapToCanvasCoords(x, 0, params);
             const label = formatLabel(x, precisionX, stepX);
             if (options.showTickLabels) {
@@ -313,9 +318,11 @@ export function drawAxes(ctx, params, labelOrOptions, maybeYLabel) {
         const yStart = Math.ceil(yRange[0] / stepY) * stepY;
         const yEnd = Math.floor(yRange[1] / stepY) * stepY;
         const precisionY = getPrecision(stepY);
-        const yTolerance = Math.abs(stepY) * 1e-6;
+        const rawTicksY = (yEnd - yStart) / stepY;
+        const maxTicksY = Number.isFinite(rawTicksY) && rawTicksY >= 0 ? Math.min(128, Math.floor(rawTicksY + 1e-6)) : -1;
 
-        for (let y = yStart; y <= yEnd + yTolerance; y += stepY) {
+        for (let i = 0; i <= maxTicksY; i++) {
+            const y = yStart + i * stepY;
             const tick = mapToCanvasCoords(0, y, params);
             let label = formatLabel(y, precisionY, stepY);
             if (Math.abs(y) < 1e-3 && Math.abs(origin.x - tick.x) < params.width - 10 && label !== '0') {

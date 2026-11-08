@@ -293,18 +293,43 @@
 
 }
 
-#domain_coloring_key strong {
+#domain_coloring_key > strong {
     color: var(--text-color);
     font-weight: 600;
     display: block;
-    /* Ensures the <br> after it works as expected */
-    margin-bottom: 0.25rem;
-    /* Space after the title */
+    margin-bottom: 0.15rem;
+}
+
+#domain_coloring_key .domain-key-desc {
+    display: inline-block;
+    color: var(--text-secondary-color);
+    font-style: italic;
+    margin-bottom: 0.2rem;
+}
+
+#domain_coloring_key .domain-key-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    vertical-align: middle;
+    margin-right: 6px;
+}
+
+#domain_coloring_key .domain-key-entry strong {
+    display: inline;
+    font-weight: 600;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.65);
+}
+
+#domain_coloring_key .domain-key-entry code {
+    font-size: 0.72rem;
+    opacity: 0.8;
 }
 
 #domain_coloring_key span[style*="color"] {
     font-weight: 500;
-
 }
 
 #canvases_section {

@@ -855,7 +855,7 @@ export function drawZPlaneContent(timestamp) {
         return;
     }
 
-    if (state.domainColoringEnabled && context.domainColoringDirty && zDomainColorCanvas && !zDomainColorCanvas.hidden) {
+    if (state.domainColoringEnabled && zDomainColorCanvas && !zDomainColorCanvas.hidden) {
         renderPlanarDomainColoring(zDomainColorCanvas, zPlaneParams);
     }
     if (!zCtx || !zPlaneParams) {

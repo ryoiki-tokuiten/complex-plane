@@ -1181,10 +1181,6 @@ function panPlane(ctx, pos) {
 
 function updateProbe(ctx, pos, active = true) {
     if (!ctx.isZ) return;
-    if (state.chainingEnabled) {
-        state.probeActive = false;
-        return;
-    }
     if (!active) {
         state.probeActive = false;
         return;
@@ -1289,7 +1285,7 @@ function handleCanvasMoveNow(ctx, pointer) {
         return;
     }
 
-    if (ctx.isZ && !state.chainingEnabled && !runtime.interaction.panZ.isPanning && !runtime.interaction.panW.isPanning) {
+    if (ctx.isZ && !runtime.interaction.panZ.isPanning && !runtime.interaction.panW.isPanning) {
         updateProbe(ctx, pos, true);
         requestUiRedraw();
     }
@@ -1446,10 +1442,10 @@ function zoomPlaneAt(ctx, pos, factor) {
 
     state[zoomKey] = nextZoom;
     const applied = nextZoom / oldZoom;
-    ctx.params.scale.x *= applied;
-    ctx.params.scale.y *= applied;
-    ctx.params.origin.x = pos.x - world.x * ctx.params.scale.x;
-    ctx.params.origin.y = pos.y + world.y * ctx.params.scale.y;
+    ctx.params.scale.x = clamp(ctx.params.scale.x * applied, 1e-300, 1e300);
+    ctx.params.scale.y = clamp(ctx.params.scale.y * applied, 1e-300, 1e300);
+    ctx.params.origin.x = clamp(pos.x - world.x * ctx.params.scale.x, -1e304, 1e304);
+    ctx.params.origin.y = clamp(pos.y + world.y * ctx.params.scale.y, -1e304, 1e304);
 
     updatePlaneViewportRanges(ctx.params);
 
@@ -1473,10 +1469,8 @@ function zoomPlaneAt(ctx, pos, factor) {
         let newExp = ctx.params.scaleExp10;
         while (newMant >= 10.0) { newMant /= 10.0; newExp += 1; }
         while (newMant < 1.0 && newMant > 0) { newMant *= 10.0; newExp -= 1; }
-        if (newExp >= -100 && newExp <= 2) {
-            ctx.params.scaleMant = newMant;
-            ctx.params.scaleExp10 = newExp;
-        }
+        ctx.params.scaleMant = newMant;
+        ctx.params.scaleExp10 = newExp;
         ctx.params._lastSyncedOriginX = ctx.params.origin.x;
         ctx.params._lastSyncedOriginY = ctx.params.origin.y;
         ctx.params._lastSyncedScaleX = ctx.params.scale.x;

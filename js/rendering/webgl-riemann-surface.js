@@ -1914,7 +1914,11 @@ function ensureCurrentProgram(renderer, signature = getRiemannSurfaceProgramSign
  * after first use instead of deleting and reallocating three large WebGL buffers.
  */
 function ensureMesh(renderer) {
-  const resolution = normalizeRendererResolution(state.riemannSurfaceResolution, renderer.uint32ElementIndices);
+  const resolution = normalizeRendererResolution(
+    state.riemannSurfaceResolution,
+    renderer.uint32ElementIndices,
+    renderer.backendLabel
+  );
 
   if (renderer.mesh && renderer.mesh.resolution === resolution) {
     return true;

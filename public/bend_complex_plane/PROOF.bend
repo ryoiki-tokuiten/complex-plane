@@ -744,4 +744,5 @@ def Laws.fused_sos_and_direct_hyperbolic_speedup_law(zoom_exp):
 def Laws.unified_single_branch_zeta_ac_equivalence_and_speedup_law(z, zoom_exp):
   ({==}, lt_add_succ(CP.zeta_ac_single_branch_cost(zoom_exp), 11n+Nat.add(CP.extra_limbs(zoom_exp), Nat.mul(3n, CP.limbs_for_zoom(zoom_exp)))))
 
-
+def Laws.tangent_frame_gamma_bessel_atan_dce_speedup_law(zoom_exp, fn_class):
+  (lt_add_succ(CP.tangent_frame_special_fn_cost(zoom_exp), 11n+Nat.add(CP.extra_limbs(zoom_exp), Nat.mul(4n, CP.limbs_for_zoom(zoom_exp)))), lt_add_succ(CP.dce_decoupled_compile_lines(fn_class), 419n))

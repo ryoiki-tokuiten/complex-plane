@@ -4,6 +4,7 @@ import { TAYLOR_CENTER_PRESETS } from '../constants/numerical.js';
 import { updatePlaneViewportRanges } from './canvas-utils.js';
 import { invalidateAllCanvasRects } from './canvas-interaction.js';
 import { synchronizePreciseViewport } from '../native/precise-viewport.js';
+import { bigFixedToNumber, numberToBigFixed } from '../rendering/domain-coloring.js';
 
 const { controls } = context;
 
@@ -85,46 +86,52 @@ function setupCanvasBaseParams(planeParams, canvasElement, isFullscreen = false)
 }
 
 function setupPrimaryPlaneParameters(planeParams, initialRanges, zoom, updateFromSlider) {
-    const worldCenterX = (planeParams.currentVisXRange[0] + planeParams.currentVisXRange[1]) / 2;
-    const worldCenterY = (planeParams.currentVisYRange[0] + planeParams.currentVisYRange[1]) / 2;
+    const hasBigCenter = typeof planeParams.centerBigX === 'bigint' && typeof planeParams.centerBigY === 'bigint';
+    const worldCenterX = hasBigCenter
+        ? bigFixedToNumber(planeParams.centerBigX)
+        : (planeParams.currentVisXRange[0] + planeParams.currentVisXRange[1]) / 2;
+    const worldCenterY = hasBigCenter
+        ? bigFixedToNumber(planeParams.centerBigY)
+        : (planeParams.currentVisYRange[0] + planeParams.currentVisYRange[1]) / 2;
 
     const initialXSpan = initialRanges.x[1] - initialRanges.x[0];
     const initialYSpan = initialRanges.y[1] - initialRanges.y[0];
-    if (
-        initialXSpan > 0 &&
-        initialYSpan > 0 &&
-        updateFromSlider &&
-        typeof planeParams.centerBigX === 'bigint' &&
-        typeof planeParams.centerBigY === 'bigint'
-    ) {
+    if (initialXSpan > 0 && initialYSpan > 0 && updateFromSlider) {
+        if (typeof planeParams.centerBigX !== 'bigint') {
+            planeParams.centerBigX = numberToBigFixed(worldCenterX);
+        }
+        if (typeof planeParams.centerBigY !== 'bigint') {
+            planeParams.centerBigY = numberToBigFixed(worldCenterY);
+        }
         const baseScale = Math.min(planeParams.width / initialXSpan, planeParams.height / initialYSpan);
         const minDim = Math.max(1, Math.min(planeParams.width || 1, planeParams.height || 1));
         const baseRawScale = (0.5 * minDim) / baseScale;
-        const zoomLog10 = Math.log10(Math.max(1e-100, Number(zoom) || 1));
-        const totalLog10 = Math.log10(baseRawScale) - zoomLog10;
-        const exp10 = Math.max(-100, Math.floor(totalLog10));
+        const zoomLog10 = Math.log10(Math.max(1e-300, Number(zoom) || 1));
+        const totalLog10 = Math.max(-300, Math.log10(baseRawScale) - zoomLog10);
+        const exp10 = Math.floor(totalLog10);
         planeParams.scaleExp10 = exp10;
         planeParams.scaleMant = Math.pow(10, totalLog10 - exp10);
     }
 
-    let isPrecise = !!planeParams.preciseViewport;
-    if (updateFromSlider) isPrecise = synchronizePreciseViewport(planeParams, zoom);
-    if (isPrecise) return;
-
     if (initialXSpan <= 0 || initialYSpan <= 0) return;
 
     const baseScale = Math.min(planeParams.width / initialXSpan, planeParams.height / initialYSpan);
-    const scale = baseScale * (zoom || 1);
+    const scale = Math.min(1e300, Math.max(1e-300, baseScale * (zoom || 1)));
     planeParams.scale.x = planeParams.scale.y = scale;
-    planeParams.origin.x = planeParams.width * 0.5 - worldCenterX * scale;
-    planeParams.origin.y = planeParams.height * 0.5 + worldCenterY * scale;
-    if (updateFromSlider && typeof planeParams.centerBigX === 'bigint' && typeof planeParams.centerBigY === 'bigint') {
+    planeParams.origin.x = Math.min(1e304, Math.max(-1e304, planeParams.width * 0.5 - worldCenterX * scale));
+    planeParams.origin.y = Math.min(1e304, Math.max(-1e304, planeParams.height * 0.5 + worldCenterY * scale));
+    if (typeof planeParams.centerBigX === 'bigint' && typeof planeParams.centerBigY === 'bigint') {
         planeParams._lastSyncedOriginX = planeParams.origin.x;
         planeParams._lastSyncedOriginY = planeParams.origin.y;
         planeParams._lastSyncedScaleX = planeParams.scale.x;
         planeParams._lastSyncedWidth = planeParams.width;
         planeParams._lastSyncedHeight = planeParams.height;
     }
+
+    let isPrecise = !!planeParams.preciseViewport;
+    if (updateFromSlider) isPrecise = synchronizePreciseViewport(planeParams, zoom);
+    if (isPrecise) return;
+
     updatePlaneViewportRanges(planeParams);
 }
 

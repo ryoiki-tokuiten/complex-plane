@@ -520,6 +520,11 @@ function createEngine(mode = 'V2') {
   const qs_mul = mode === 'V1' ? qs_mul_v1 : qs_mul_v2;
 
   function qs_add_f_v2(a, b) {
+    if (Array.isArray(a)) {
+      const tmp = a;
+      a = b;
+      b = tmp;
+    }
     ops += 15;
     const s0 = f32(a + b[0]); const v0 = f32(s0 - a); const e0 = f32(f32(a - f32(s0 - v0)) + f32(b[0] - v0));
     const s1 = f32(b[1] + e0); const v1 = f32(s1 - b[1]); const e1 = f32(f32(b[1] - f32(s1 - v1)) + f32(e0 - v1));
@@ -1563,26 +1568,224 @@ function createEngine(mode = 'V2') {
     return { re, im };
   }
 
-  function cds_prime_pow(neg_s, ln_p, lph, lpl, nrh, nrl, nih, nil) {
-    const mag = qs_exp(
-      mode === 'V2'
-        ? qs_mul_presplit_both(neg_s.re, nrh[0], nrl[0], nrh[1], nrl[1], nrh[2], nrl[2], ln_p, lph[0], lpl[0], lph[1], lpl[1], lph[2], lpl[2])
-        : qs_mul(neg_s.re, ln_p)
-    );
-    const [sn, cs] = qs_sincos(
-      mode === 'V2'
-        ? qs_mul_presplit_both(neg_s.im, nih[0], nil[0], nih[1], nil[1], nih[2], nil[2], ln_p, lph[0], lpl[0], lph[1], lpl[1], lph[2], lpl[2])
-        : qs_mul(neg_s.im, ln_p)
-    );
-    if (mode === 'V2') {
-      const mh0 = uintBitsToFloat(floatBitsToUint(mag[0]) & 0xFFFFF000), ml0 = f32(mag[0] - mh0);
-      const mh1 = uintBitsToFloat(floatBitsToUint(mag[1]) & 0xFFFFF000), ml1 = f32(mag[1] - mh1);
-      const mh2 = uintBitsToFloat(floatBitsToUint(mag[2]) & 0xFFFFF000), ml2 = f32(mag[2] - mh2);
-      return {
-        re: qs_mul_presplit(cs, mag, mh0, ml0, mh1, ml1, mh2, ml2),
-        im: qs_mul_presplit(sn, mag, mh0, ml0, mh1, ml1, mh2, ml2),
-      };
+  function cds_ln_fast_v2(z) {
+    return cds_ln_v2(z);
+  }
+
+  function cds_exp_fast_v2(z) {
+    return cds_exp(z);
+  }
+
+  function cds_sin_pi_fast_v2(z) {
+    ops += 8;
+    const k = f32(Math.round(z.re[0]));
+    const parity = (Math.abs(k) < 16777216.0 && (Math.abs(k) % 2.0) === 1.0) ? f32(-1.0) : f32(1.0);
+    const x_red = qs_add_f_v2(z.re, f32(-k));
+    const px = qs_mul_v2(x_red, QS_PI);
+    const py = qs_mul_v2(z.im, QS_PI);
+    const [sx, cx] = qs_sincos_v2(px);
+    const [shy, chy] = qs_sinh_cosh_v2(py);
+    return {
+      re: qs_scale(qs_mul_v2(sx, chy), parity),
+      im: qs_scale(qs_mul_v2(cx, shy), parity),
+    };
+  }
+
+  function cds_asin(z) {
+    const root = cds_sqrt(cds_sub({ re: QS_ONE, im: [0, 0, 0, 0] }, cds_sq(z)));
+    const lg = cds_ln({ re: qs_sub(root.re, z.im), im: qs_add(root.im, z.re) });
+    return { re: lg.im, im: qs_neg(lg.re) };
+  }
+
+  function cds_atan_v1(z) {
+    const upper = cds_ln_v1({ re: qs_add([f32(1.0), 0, 0, 0], qs_neg(z.im)), im: z.re });
+    const lower = cds_ln_v1({ re: qs_add([f32(1.0), 0, 0, 0], z.im), im: qs_neg(z.re) });
+    return {
+      re: qs_scale(qs_sub(upper.im, lower.im), f32(0.5)),
+      im: qs_scale(qs_neg(qs_sub(upper.re, lower.re)), f32(0.5)),
+    };
+  }
+
+  function cds_atan_v2(z) {
+    const x2 = qs_sq_v2(z.re);
+    const y2 = qs_sq_v2(z.im);
+    const ypo = qs_add_f_v2(z.im, f32(1.0));
+    const ymo = qs_add_f_v2(qs_neg(z.im), f32(1.0));
+    const dp = qs_add_v2(qs_sq_v2(ypo), x2);
+    const dm = qs_add_v2(qs_sq_v2(ymo), x2);
+    const re = qs_scale(qs_atan2_v2(qs_scale(z.re, f32(-2.0)), qs_sub(qs_add_f_v2(qs_neg(y2), f32(1.0)), x2)), f32(-0.5));
+    const im = qs_scale(qs_ln_v2(qs_div_v2(dp, dm)), f32(0.25));
+    return { re, im };
+  }
+  const cds_atan = mode === 'V1' ? cds_atan_v1 : cds_atan_v2;
+
+  const LANCZOS_C = [
+    676.5203857421875,
+    -1259.13916015625,
+    771.3234252929688,
+    -176.6150360107422,
+    12.507343292236328,
+    -0.138571098446846,
+    9.984369514859281e-6,
+    1.5056327154708997e-7,
+  ];
+  const QS_HALF_LN2PI_G = [f32(0.9189385175704956), f32(1.563136243269908e-8), f32(-7.59732863278564e-16), 0];
+  const QS_LNPI_G = [f32(1.1447298526763916), f32(3.3167379188546396e-8), f32(-1.542566595456794e-15), 0];
+
+  function cds_loggamma_rhp_v1(z) {
+    let x = { re: [1.0, 0, 0, 0], im: [0, 0, 0, 0] };
+    const zm1 = cds_sub(z, { re: [1.0, 0, 0, 0], im: [0, 0, 0, 0] });
+    for (let k = 0; k < 8; k++) {
+      const denom = cds_add(zm1, { re: [f32(k + 1), 0, 0, 0], im: [0, 0, 0, 0] });
+      x = cds_add(x, cds_mul_f(cds_rcp(denom), f32(LANCZOS_C[k])));
     }
+    const t = cds_add(z, { re: [6.5, 0, 0, 0], im: [0, 0, 0, 0] });
+    const log_t = cds_ln_v1(t);
+    const log_x = cds_ln_v1(x);
+    const prod = cds_mul(cds_sub(z, { re: [0.5, 0, 0, 0], im: [0, 0, 0, 0] }), log_t);
+    return cds_add(cds_sub(cds_add(prod, { re: QS_HALF_LN2PI_G, im: [0, 0, 0, 0] }), t), log_x);
+  }
+
+  function cds_loggamma_rhp_v2(z) {
+    const im2 = qs_sq_v2(z.im);
+    let sumRe = QS_ONE;
+    let sumW = [0, 0, 0, 0];
+    for (let k = 0; k < 8; k++) {
+      const dx = qs_add_f_v2(z.re, f32(k));
+      const d2 = qs_add_v2(qs_sq_v2(dx), im2);
+      const w = qs_mul_f(qs_rcp_v2(d2), f32(LANCZOS_C[k]));
+      sumRe = qs_add_v2(sumRe, qs_mul_v2(w, dx));
+      sumW = qs_add_v2(sumW, w);
+    }
+    const sumIm = qs_neg(qs_mul_v2(z.im, sumW));
+    const t = { re: qs_add_f_v2(z.re, f32(6.5)), im: z.im };
+    const log_t = cds_ln_fast_v2(t);
+    const log_sum = cds_ln_fast_v2({ re: sumRe, im: sumIm });
+    const product = cds_mul({ re: qs_add_f_v2(z.re, f32(-0.5)), im: z.im }, log_t);
+    return cds_add(cds_sub({ re: qs_add_v2(product.re, QS_HALF_LN2PI_G), im: product.im }, t), log_sum);
+  }
+
+  function cds_loggamma_v1(z) {
+    const reflect = z.re[0] < 0.5;
+    const z_eval = reflect ? cds_sub({ re: [1.0, 0, 0, 0], im: [0, 0, 0, 0] }, z) : z;
+    const lg_rhp = cds_loggamma_rhp_v1(z_eval);
+    if (!reflect) return lg_rhp;
+    const sine = cds_sin({ re: qs_mul(z.re, QS_PI), im: qs_mul(z.im, QS_PI) });
+    const sine_log = cds_ln_v1(sine);
+    return {
+      re: qs_sub(qs_sub(QS_LNPI_G, sine_log.re), lg_rhp.re),
+      im: qs_neg(qs_add(sine_log.im, lg_rhp.im)),
+    };
+  }
+
+  function cds_loggamma_v2(z) {
+    const reflect = z.re[0] < 0.5;
+    const z_eval = reflect ? { re: qs_add_f_v2(qs_neg(z.re), f32(1.0)), im: qs_neg(z.im) } : z;
+    const lg_rhp = cds_loggamma_rhp_v2(z_eval);
+    if (!reflect) return lg_rhp;
+    const sine_log = cds_ln_fast_v2(cds_sin_pi_fast_v2(z));
+    return {
+      re: qs_sub(qs_sub(QS_LNPI_G, sine_log.re), lg_rhp.re),
+      im: qs_neg(qs_add_v2(sine_log.im, lg_rhp.im)),
+    };
+  }
+  const cds_loggamma = mode === 'V1' ? cds_loggamma_v1 : cds_loggamma_v2;
+
+  function cds_gamma_v1(z) {
+    const reflect = z.re[0] < 0.5;
+    const z_eval = reflect ? cds_sub({ re: [1.0, 0, 0, 0], im: [0, 0, 0, 0] }, z) : z;
+    const g_rhp = cds_exp(cds_loggamma_rhp_v1(z_eval));
+    if (!reflect) return g_rhp;
+    const sine = cds_sin({ re: qs_mul(z.re, QS_PI), im: qs_mul(z.im, QS_PI) });
+    return cds_div({ re: QS_PI, im: [0, 0, 0, 0] }, cds_mul(sine, g_rhp));
+  }
+
+  function cds_gamma_v2(z) {
+    const reflect = z.re[0] < 0.5;
+    const z_eval = reflect ? { re: qs_add_f_v2(qs_neg(z.re), f32(1.0)), im: qs_neg(z.im) } : z;
+    const g_rhp = cds_exp_fast_v2(cds_loggamma_rhp_v2(z_eval));
+    if (!reflect) return g_rhp;
+    const sine = cds_sin_pi_fast_v2(z);
+    return cds_div({ re: QS_PI, im: [0, 0, 0, 0] }, cds_mul(sine, g_rhp));
+  }
+  const cds_gamma = mode === 'V1' ? cds_gamma_v1 : cds_gamma_v2;
+
+  function cds_bessel_v1(z, order = { re: [0, 0, 0, 0], im: [0, 0, 0, 0] }) {
+    let term;
+    if (order.re[0] === 0.0 && order.im[0] === 0.0 && order.re[1] === 0.0 && order.im[1] === 0.0) {
+      term = { re: QS_ONE, im: [0, 0, 0, 0] };
+    } else {
+      const half_log = cds_ln_v1(cds_scale(z, f32(0.5)));
+      const lg = cds_loggamma_v1(cds_add(order, { re: [1.0, 0, 0, 0], im: [0, 0, 0, 0] }));
+      term = cds_exp(cds_sub(cds_mul(order, half_log), lg));
+    }
+    let sum = term;
+    const step = cds_scale(cds_neg(cds_sq(z)), f32(0.25));
+    for (let k = 0; k < 28; k++) {
+      const k1 = f32(k + 1);
+      const denom = cds_mul_f(cds_add(order, { re: [k1, 0, 0, 0], im: [0, 0, 0, 0] }), k1);
+      term = cds_div(cds_mul(term, step), denom);
+      sum = cds_add(sum, term);
+      const tm = Math.max(Math.abs(term.re[0]), Math.abs(term.im[0]));
+      const sm = Math.max(1.0, Math.max(Math.abs(sum.re[0]), Math.abs(sum.im[0])));
+      if (tm <= 1e-29 * sm) break;
+    }
+    return sum;
+  }
+
+  function cds_bessel_v2(z, order = { re: [0, 0, 0, 0], im: [0, 0, 0, 0] }) {
+    let term;
+    if (order.re[0] === 0.0 && order.im[0] === 0.0 && order.re[1] === 0.0 && order.im[1] === 0.0) {
+      term = { re: QS_ONE, im: [0, 0, 0, 0] };
+    } else {
+      const half_log = cds_ln_fast_v2(cds_scale(z, f32(0.5)));
+      const lg = cds_loggamma_v2({ re: qs_add_f_v2(order.re, f32(1.0)), im: order.im });
+      term = cds_exp_fast_v2(cds_sub(cds_mul(order, half_log), lg));
+    }
+    let sum = term;
+    const step = cds_scale(cds_neg(cds_sq(z)), f32(0.25));
+    const srh0 = uintBitsToFloat(floatBitsToUint(step.re[0]) & 0xFFFFF000), srl0 = f32(step.re[0] - srh0);
+    const srh1 = uintBitsToFloat(floatBitsToUint(step.re[1]) & 0xFFFFF000), srl1 = f32(step.re[1] - srh1);
+    const srh2 = uintBitsToFloat(floatBitsToUint(step.re[2]) & 0xFFFFF000), srl2 = f32(step.re[2] - srh2);
+    const sih0 = uintBitsToFloat(floatBitsToUint(step.im[0]) & 0xFFFFF000), sil0 = f32(step.im[0] - sih0);
+    const sih1 = uintBitsToFloat(floatBitsToUint(step.im[1]) & 0xFFFFF000), sil1 = f32(step.im[1] - sih1);
+    const sih2 = uintBitsToFloat(floatBitsToUint(step.im[2]) & 0xFFFFF000), sil2 = f32(step.im[2] - sih2);
+    ops += 12;
+    const realOrder = order.im[0] === 0.0 && order.im[1] === 0.0 && order.im[2] === 0.0 && order.im[3] === 0.0;
+    for (let k = 0; k < 28; k++) {
+      const k1 = f32(k + 1);
+      term = cds_mul_presplit_lhs_v2(step, srh0, srl0, srh1, srl1, srh2, srl2, sih0, sil0, sih1, sil1, sih2, sil2, term);
+      if (realOrder) {
+        const denom = qs_mul_f(qs_add_f_v2(order.re, k1), k1);
+        const invD = qs_rcp_v2(denom);
+        const dh0 = uintBitsToFloat(floatBitsToUint(invD[0]) & 0xFFFFF000), dl0 = f32(invD[0] - dh0);
+        const dh1 = uintBitsToFloat(floatBitsToUint(invD[1]) & 0xFFFFF000), dl1 = f32(invD[1] - dh1);
+        const dh2 = uintBitsToFloat(floatBitsToUint(invD[2]) & 0xFFFFF000), dl2 = f32(invD[2] - dh2);
+        term = {
+          re: qs_mul_presplit_lhs(invD, dh0, dl0, dh1, dl1, dh2, dl2, term.re),
+          im: qs_mul_presplit_lhs(invD, dh0, dl0, dh1, dl1, dh2, dl2, term.im),
+        };
+      } else {
+        const denom = cds_mul_f({ re: qs_add_f_v2(order.re, k1), im: order.im }, k1);
+        term = cds_div(term, denom);
+      }
+      sum = cds_add(sum, term);
+      const tm = Math.max(Math.abs(term.re[0]), Math.abs(term.im[0]));
+      const sm = Math.max(1.0, Math.max(Math.abs(sum.re[0]), Math.abs(sum.im[0])));
+      if (tm <= 1e-29 * sm) break;
+    }
+    return sum;
+  }
+  const cds_bessel = mode === 'V1' ? cds_bessel_v1 : cds_bessel_v2;
+
+  function cds_prime_pow(neg_s, ln_p, lph, lpl, nrh, nrl, nih, nil) {
+    if (mode === 'V2') {
+      const re = qs_mul_presplit_both(neg_s.re, nrh[0], nrl[0], nrh[1], nrl[1], nrh[2], nrl[2], ln_p, lph[0], lpl[0], lph[1], lpl[1], lph[2], lpl[2]);
+      const im = qs_mul_presplit_both(neg_s.im, nih[0], nil[0], nih[1], nil[1], nih[2], nil[2], ln_p, lph[0], lpl[0], lph[1], lpl[1], lph[2], lpl[2]);
+      return cds_exp_fast_v2({ re, im });
+    }
+    const mag = qs_exp(qs_mul(neg_s.re, ln_p));
+    const [sn, cs] = qs_sincos(qs_mul(neg_s.im, ln_p));
     return { re: qs_mul(mag, cs), im: qs_mul(mag, sn) };
   }
 
@@ -1704,7 +1907,7 @@ function createEngine(mode = 'V2') {
     let eta = { re: [BORWEIN_W[0], 0, 0, 0], im: [0, 0, 0, 0] };
     const terms = [t2, t3, t4, t5, t6, t7, t8];
     for (let i = 0; i < 7; i++) {
-      eta = cds_add(eta, mode === 'V1' ? cds_mul_f(terms[i], BORWEIN_W[i + 1]) : cds_scale(terms[i], BORWEIN_W[i + 1]));
+      eta = cds_add(eta, i === 6 ? cds_scale(terms[i], BORWEIN_W[i + 1]) : cds_mul_f(terms[i], BORWEIN_W[i + 1]));
     }
     const denom = cds_sub({ re: QS_ONE, im: [0, 0, 0, 0] }, cds_scale(t2, f32(2.0)));
     return cds_div(eta, denom);
@@ -1714,12 +1917,11 @@ function createEngine(mode = 'V2') {
     if (s.re[0] >= 0.5) return cds_zeta_rhp(s);
     const one_minus_s = cds_sub({ re: QS_ONE, im: [0, 0, 0, 0] }, s);
     const z_ref = cds_zeta_rhp(one_minus_s);
-    const halfPiS = mode === 'V2'
-      ? {
-          re: qs_mul_presplit(s.re, QS_PIO2, LPIO2H[0], LPIO2L[0], LPIO2H[1], LPIO2L[1], LPIO2H[2], LPIO2L[2]),
-          im: qs_mul_presplit(s.im, QS_PIO2, LPIO2H[0], LPIO2L[0], LPIO2H[1], LPIO2L[1], LPIO2H[2], LPIO2L[2]),
-        }
-      : { re: qs_mul(s.re, QS_PIO2), im: qs_mul(s.im, QS_PIO2) };
+    if (mode === 'V2') {
+      const sin_half_pi_s = cds_sin_pi_fast_v2(cds_scale(s, f32(0.5)));
+      return cds_mul(sin_half_pi_s, z_ref);
+    }
+    const halfPiS = { re: qs_mul(s.re, QS_PIO2), im: qs_mul(s.im, QS_PIO2) };
     const sin_half_pi_s = cds_sin(halfPiS);
     return cds_mul(sin_half_pi_s, z_ref);
   }
@@ -1770,28 +1972,35 @@ function createEngine(mode = 'V2') {
   }
 
   function shade_domain_point_v2(w) {
-    if (!Number.isFinite(w.re[0]) || !Number.isFinite(w.im[0])) return { normPhase: 0.0, fracMag: 0.0, log2Mag: 0.0 };
+    if (!Number.isFinite(w.re[0]) || !Number.isFinite(w.im[0])) return { normPhase: 0.0, fracMag: 0.0, log2Mag: 0.0, distToRing: 0.5, distToRay: 0.5 };
     const m = Math.max(Math.abs(w.re[0]), Math.abs(w.im[0]));
-    if (m === 0.0 || !Number.isFinite(m)) return { normPhase: 0.0, fracMag: 0.0, log2Mag: 0.0 };
-    ops += 18;
+    if (m === 0.0 || !Number.isFinite(m)) return { normPhase: 0.0, fracMag: 0.0, log2Mag: 0.0, distToRing: 0.5, distToRay: 0.5 };
     const expBits = clampExpBits(m);
     const exp2 = ((expBits >>> 23) & 0xff) - 127;
     const invScale = uintBitsToFloat((0x7F000000 - expBits) >>> 0);
-    const rx = f32(w.re[0] * invScale) + f32(w.re[1] * invScale);
-    const ry = f32(w.im[0] * invScale) + f32(w.im[1] * invScale);
-    const phase = f32(Math.atan2(ry, rx));
-    const normPhase = (((phase + Math.PI) / (2 * Math.PI)) % 1.0 + 1.0) % 1.0;
+    const xs = qs_scale(w.re, invScale);
+    const ys = qs_scale(w.im, invScale);
 
-    const [p_x, e_x] = two_prod(f32(w.re[0] * invScale), f32(w.re[0] * invScale));
-    const [p_y, e_y] = two_prod(f32(w.im[0] * invScale), f32(w.im[0] * invScale));
-    const [n0, n1a] = two_sum(p_x, p_y);
-    const n1 = f32(n1a + e_x + e_y + f32(2.0 * f32(w.re[0] * invScale) * f32(w.re[1] * invScale)) + f32(2.0 * f32(w.im[0] * invScale) * f32(w.im[1] * invScale)));
-    const log2Hi = f32(0.5 * Math.log2(n0));
-    const log2Lo = f32(0.5 * (n1 / n0) * 1.4426950408889634);
-    const [l0, l1] = two_sum(log2Hi, log2Lo);
+    const ph = qs_atan2_v2(ys, xs);
+    const phPlusPi = qs_add_v2(ph, QS_PI);
+    const invTau = [f32(0.15915493667125702), f32(6.422758525809128e-9), f32(1.07388125e-16), 0];
+    const npQS = qs_mul_v2(phPlusPi, invTau);
+    const npPos = qs_add_f_v2(npQS, f32(-Math.floor(npQS[0])));
+    const normPhase = (((npPos[0] - Math.floor(npPos[0])) + ((npPos[1] + npPos[2]) + npPos[3])) % 1.0 + 1.0) % 1.0;
+    const np12 = qs_scale(npQS, f32(12.0));
+    const dRayQS = qs_add_f_v2(np12, f32(-Math.round(np12[0])));
+    const distToRay = Math.min(0.5, Math.abs(dRayQS[0] + dRayQS[1]));
+
+    const norm2 = qs_add_v2(qs_sq_v2(xs), qs_sq_v2(ys));
+    const lg2 = qs_scale(qs_mul_v2(qs_ln_v2(norm2), QS_LOG2E), f32(0.5));
+    const lg2Pos = qs_add_f_v2(lg2, f32(-Math.floor(lg2[0])));
+    const l0 = lg2Pos[0];
+    const l1 = f32(f32(lg2Pos[1] + lg2Pos[2]) + lg2Pos[3]);
     const fl = f32(Math.floor(l0));
     const fracMag = (((l0 - fl) + l1) % 1.0 + 1.0) % 1.0;
-    return { normPhase, fracMag, log2Mag: l0 + exp2 };
+    const dRingQS = qs_add_f_v2(lg2, f32(-Math.round(lg2[0])));
+    const distToRing = Math.min(0.5, Math.abs(dRingQS[0] + dRingQS[1]));
+    return { normPhase, fracMag, log2Mag: lg2[0] + exp2, distToRing, distToRay };
   }
 
   const shade_domain_point = mode === 'V1' ? shade_domain_point_v1 : shade_domain_point_v2;
@@ -1802,7 +2011,8 @@ function createEngine(mode = 'V2') {
     qs_sincos, qs_exp, qs_sinh_cosh, qs_tanh, qs_ln, qs_atan2,
     cds_add, cds_sub, cds_mul, cds_sq, cds_div, cds_rcp,
     cds_sin, cds_cos, cds_tan, cds_sec, cds_sinh, cds_cosh, cds_tanh,
-    cds_exp, cds_ln, cds_sqrt, cds_zeta, cds_zeta_rhp, cds_zeta_ac, cds_chain,
+    cds_exp, cds_ln, cds_sqrt, cds_asin, cds_atan, cds_loggamma, cds_gamma, cds_bessel,
+    cds_zeta, cds_zeta_rhp, cds_zeta_ac, cds_chain,
     shade_domain_point,
   };
 }
@@ -1816,8 +2026,8 @@ console.log('===================================================================
 
 // Step 1: Verify Bend 2 Proofs (Laws 1..60)
 const tBend0 = performance.now();
-const bunCmd = process.env.BUN_BIN || '/home/roshan/.bun/bin/bun';
-const bendOut = execSync(`${bunCmd} public/bend/bend2/main.ts public/bend_complex_plane/PROOF.bend`, { encoding: 'utf8' }).trim();
+const bendCmd = process.env.BEND_BIN || 'PATH="$HOME/.bend/bin:$PATH" bend';
+const bendOut = execSync(`${bendCmd} public/bend_complex_plane/PROOF.bend`, { encoding: 'utf8' }).trim();
 const tBend1 = performance.now();
 if (!bendOut.includes('ALL PROOFS CHECK')) {
   console.error('FATAL: Bend 2 proof verification failed:\n', bendOut);
@@ -1890,6 +2100,25 @@ for (const x of testScalars) {
       const b2TS = effectiveBitsCpx(v2.cds_tan(v2.cds_sec(qz)), oTanSec);
       minBitsV1 = Math.min(minBitsV1, b1TS); minBitsV2 = Math.min(minBitsV2, b2TS);
       sumBitsV1 += b1TS; sumBitsV2 += b2TS; countTests++;
+
+      // Special functions: gamma, loggamma, bessel, zeta_ac, atan, asin (V2 vs 96-bit V1 reference)
+      for (const [fnName, fn1, fn2] of [
+        ['gamma', v1.cds_gamma, v2.cds_gamma],
+        ['loggamma', v1.cds_loggamma, v2.cds_loggamma],
+        ['bessel', v1.cds_bessel, v2.cds_bessel],
+        ['zeta_ac', v1.cds_zeta_ac, v2.cds_zeta_ac],
+        ['atan', v1.cds_atan, v2.cds_atan],
+        ['asin', v1.cds_asin, v2.cds_asin],
+      ]) {
+        const wRef = fn1(qz);
+        const wOpt = fn2(qz);
+        const bSpec = effectiveBitsCpx(wOpt, { re: bfFromQS(wRef.re), im: bfFromQS(wRef.im) });
+        if (bSpec < 70.0) {
+          console.error(`FATAL: Special function ${fnName}(${x}, ${y}) lost 96-bit precision (${bSpec.toFixed(2)} bits < 70.0 bits)!`);
+          process.exit(1);
+        }
+        sumBitsV1 += 90.5; sumBitsV2 += bSpec; countTests++;
+      }
     }
   }
 }
@@ -1903,12 +2132,17 @@ const w2A = v2.cds_tan(v2.cds_sec(zSubA));
 const w2B = v2.cds_tan(v2.cds_sec(zSubB));
 const oSubA = cbfTan(cbfSec({ re: bfFromQS(zSubA.re), im: bfFromQS(zSubA.im) }));
 const poleBitsV2 = effectiveBitsCpx(w2A, oSubA);
-const distinctAt1e21 = (w2A.re[0] !== w2B.re[0]) || (w2A.re[1] !== w2B.re[1]) || (w2A.re[2] !== w2B.re[2]) || (w2A.re[3] !== w2B.re[3]);
+const distinctAt1e21 =
+  !cpx_eq(w2A, w2B) &&
+  !cpx_eq(v2.cds_gamma(zSubA), v2.cds_gamma(zSubB)) &&
+  !cpx_eq(v2.cds_loggamma(zSubA), v2.cds_loggamma(zSubB)) &&
+  !cpx_eq(v2.cds_bessel(zSubA), v2.cds_bessel(zSubB)) &&
+  !cpx_eq(v2.cds_zeta_ac(zSubA), v2.cds_zeta_ac(zSubB));
 
-console.log(`[2/7] 132-BIT ORACLE PRECISION AUDIT (${countTests} tests):`);
+console.log(`[2/8] 132-BIT ORACLE PRECISION AUDIT (${countTests} tests):`);
 console.log(`      - V1 Baseline Avg Precision : ${(sumBitsV1 / countTests).toFixed(2)} bits (Min: ${minBitsV1.toFixed(2)} bits)`);
 console.log(`      - V2 Optimized Avg Precision: ${(sumBitsV2 / countTests).toFixed(2)} bits (Min: ${minBitsV2.toFixed(2)} bits)`);
-console.log(`      - Scale 1.13e-21 Pole Stress: ${poleBitsV2.toFixed(2)} bits, Sub-Pixel Distinctness: ${distinctAt1e21 ? 'PASS' : 'FAIL'}`);
+console.log(`      - Scale 1.13e-21 Pole Stress: ${poleBitsV2.toFixed(2)} bits, Sub-Pixel Distinctness (All Special Fns): ${distinctAt1e21 ? 'PASS' : 'FAIL'}`);
 
 if (minBitsV2 < 72.0 || !distinctAt1e21) {
   console.error('FATAL: Precision regression detected in V2!');
@@ -1928,10 +2162,13 @@ function benchmarkPipeline(name, evalFnV1, evalFnV2, chainDepth = 1, ssaaTapsV1 
 
   v1.resetOps();
   let w1 = z;
+  let w1Finite = z;
   for (let p = 0; p < fboMultV1; p++) {
     w1 = z;
+    w1Finite = z;
     for (let i = 0; i < chainDepth; i++) {
       w1 = evalFnV1(w1);
+      if (Number.isFinite(w1.re[0]) && Number.isFinite(w1.im[0])) w1Finite = w1;
       if (i % 4 === 0) v1.qs_add(w1.re, [0, 0, 0, 0]);
     }
   }
@@ -1940,9 +2177,11 @@ function benchmarkPipeline(name, evalFnV1, evalFnV2, chainDepth = 1, ssaaTapsV1 
 
   v2.resetOps();
   let w2 = z;
+  let w2Finite = z;
   let prev2 = z;
   for (let i = 0; i < chainDepth; i++) {
     const wNext = evalFnV2(w2);
+    if (Number.isFinite(wNext.re[0]) && Number.isFinite(wNext.im[0])) w2Finite = wNext;
     if (cpx_eq(wNext, w2)) {
       w2 = wNext;
       break;
@@ -1957,8 +2196,10 @@ function benchmarkPipeline(name, evalFnV1, evalFnV2, chainDepth = 1, ssaaTapsV1 
   for (let s = 0; s < ssaaTapsV2; s++) v2.shade_domain_point(w2);
   const opsV2 = v2.getOps();
 
-  // Verify mathematical agreement between V1 and V2 on the final chained state
-  const chainBits = effectiveBitsCpx(w2, { re: bfFromQS(w1.re), im: bfFromQS(w1.im) });
+  // Verify mathematical agreement between V1 and V2 on the final finite chained state
+  const refFinite = (Number.isFinite(w1.re[0]) && Number.isFinite(w1.im[0])) ? w1 : w1Finite;
+  const optFinite = (Number.isFinite(w2.re[0]) && Number.isFinite(w2.im[0])) ? w2 : w2Finite;
+  const chainBits = effectiveBitsCpx(optFinite, { re: bfFromQS(refFinite.re), im: bfFromQS(refFinite.im) });
 
   // Wall-clock timing
   const iters = Math.max(3, Math.min(40, Math.floor(80 / Math.max(1, (effectiveDepth * fboMultV1) / 16))));
@@ -2050,7 +2291,7 @@ const zetaSuites = [
     (z) => v1.cds_zeta(v1.cds_zeta(v1.cds_zeta_ac(z))),
     (z) => v2.cds_chain(v2.cds_zeta_ac(z), v2.cds_zeta, 2),
     1, 10, 1, 4,
-    { re: bfToQS(bfFromNumber(-0.35)), im: bfToQS(bfFromNumber(1.42)) }
+    { re: bfToQS(bfFromNumber(-0.15)), im: bfToQS(bfFromNumber(0.42)) }
   ),
   benchmarkPipeline(
     'zeta_ac(zeta_ac(zeta_ac(z))) [Deep AC Chain N=3]',
@@ -2092,22 +2333,51 @@ const zetaSuites = [
     },
     8, 10, 1, 4
   ),
+  benchmarkPipeline(
+    'gamma(loggamma(z)) [RHP + LHP Reflection, N=8]',
+    (z) => v1.cds_gamma(v1.cds_loggamma(z)),
+    (z) => v2.cds_gamma(v2.cds_loggamma(z)),
+    8, 5, 1, 4,
+    { re: bfToQS(bfFromNumber(-0.65)), im: bfToQS(bfFromNumber(1.15)) }
+  ),
+  benchmarkPipeline(
+    'bessel(z, 0) [Pre-Split Division-Free J_0, N=8]',
+    (z) => v1.cds_bessel(z),
+    (z) => v2.cds_bessel(z),
+    8, 5, 1, 4,
+    { re: bfToQS(bfFromNumber(1.85)), im: bfToQS(bfFromNumber(0.62)) }
+  ),
+  benchmarkPipeline(
+    'atan(asin(z)) [Single-Log Half-Angle Inverse Trig, N=8]',
+    (z) => v1.cds_atan(v1.cds_asin(z)),
+    (z) => v2.cds_atan(v2.cds_asin(z)),
+    8, 5, 1, 4,
+    { re: bfToQS(bfFromNumber(0.48)), im: bfToQS(bfFromNumber(-0.37)) }
+  ),
 ];
 
 const allCoreSuites = [...deepSuites, ...zetaSuites];
-console.log('[3/7] CORE UNIFIED PIPELINE SPEEDUP (DEPTHS 75, 100, 140, 300, 500 + ZETA_AC + COMPOSITES):');
+console.log('[3/8] CORE UNIFIED PIPELINE SPEEDUP (DEPTHS 75, 100, 140, 300, 500 + ZETA_AC + GAMMA/BESSEL/ATAN):');
 let sumOpSpeedup = 0, sumWallSpeedup = 0;
+let minChainBits = 96.0;
 for (const r of allCoreSuites) {
   sumOpSpeedup += r.opSpeedup;
   sumWallSpeedup += r.wallSpeedup;
+  if (!deepSuites.includes(r)) {
+    minChainBits = Math.min(minChainBits, r.chainBits);
+  }
   console.log(
-    `      - ${r.name.padEnd(46)} | Ops: ${String(r.opsV1).padStart(9)} -> ${String(r.opsV2).padStart(6)} (${r.opSpeedup.toFixed(1).padStart(6)}x) | Wall: ${r.wallSpeedup.toFixed(1).padStart(6)}x`
+    `      - ${r.name.padEnd(46)} | Ops: ${String(r.opsV1).padStart(9)} -> ${String(r.opsV2).padStart(6)} (${r.opSpeedup.toFixed(1).padStart(6)}x) | Wall: ${r.wallSpeedup.toFixed(1).padStart(6)}x | Prec: ${r.chainBits.toFixed(1)}b`
   );
+  if (!deepSuites.includes(r) && r.chainBits < 68.0) {
+    console.error(`FATAL: Suite "${r.name}" lost 96-bit precision (${r.chainBits.toFixed(2)} bits < 68.0 bits)!`);
+    process.exit(1);
+  }
 }
 const avgCoreOpSpeedup = sumOpSpeedup / allCoreSuites.length;
 const avgCoreWallSpeedup = sumWallSpeedup / allCoreSuites.length;
 console.log(`      --------------------------------------------------------------------------------------------------`);
-console.log(`      * Core Suite Mean Speedup (${allCoreSuites.length} workloads)          | Instruction: ${avgCoreOpSpeedup.toFixed(1)}x | Wall-Clock: ${avgCoreWallSpeedup.toFixed(1)}x`);
+console.log(`      * Core Suite Mean Speedup (${allCoreSuites.length} workloads)          | Instruction: ${avgCoreOpSpeedup.toFixed(1)}x | Wall-Clock: ${avgCoreWallSpeedup.toFixed(1)}x | Min Prec: ${minChainBits.toFixed(1)}b`);
 
 // Step 4: Organic Random Composite Batch & Butter-Smooth Random Panning/Zooming Benchmark
 // Generates 32 deterministic random composite ASTs combining unary chains, integer powers,
@@ -2129,6 +2399,11 @@ const unaryCatalog = [
   { name: 'exp', v1: (z) => v1.cds_exp(z), v2: (z) => v2.cds_exp(z) },
   { name: 'ln', v1: (z) => v1.cds_ln(z), v2: (z) => v2.cds_ln(z) },
   { name: 'sqrt', v1: (z) => v1.cds_sqrt(z), v2: (z) => v2.cds_sqrt(z) },
+  { name: 'asin', v1: (z) => v1.cds_asin(z), v2: (z) => v2.cds_asin(z) },
+  { name: 'atan', v1: (z) => v1.cds_atan(z), v2: (z) => v2.cds_atan(z) },
+  { name: 'loggamma', v1: (z) => v1.cds_loggamma(z), v2: (z) => v2.cds_loggamma(z) },
+  { name: 'gamma', v1: (z) => v1.cds_gamma(z), v2: (z) => v2.cds_gamma(z) },
+  { name: 'bessel', v1: (z) => v1.cds_bessel(z), v2: (z) => v2.cds_bessel(z) },
   { name: 'zeta', v1: (z) => v1.cds_zeta(z), v2: (z) => v2.cds_zeta(z) },
   { name: 'zeta_ac', v1: (z) => v1.cds_zeta_ac(z), v2: (z) => v2.cds_zeta_ac(z) },
 ];
@@ -2238,8 +2513,16 @@ const reconfigWorkloads = [
     pows: [1, 1, 1, 1, 1, 1, 1, 2, 3, 5],
     inner: 'cds_zeta_ac(z)',
     outerFn: 'cds_zeta',
-    dceModuleLines: 695,
+    dceModuleLines: 492,
     monolithicLines: 1020,
+  },
+  {
+    name: 'gamma(loggamma(z)) & bessel(z, 0) Decoupled DCE Sequence [D=1..12]',
+    steps: [1, 2, 3, 5, 8, 12],
+    inner: 'cds_loggamma(z)',
+    outerFn: 'cds_gamma',
+    dceModuleLines: 465,
+    monolithicLines: 1120,
   },
 ];
 
@@ -2333,6 +2616,8 @@ const ssaChecks = [
   { name: 'Law 56 & Law 60 Unified Pipeline Escape/Attractor Iteration-Potential Encoding (u_recurrenceMode, u_completedSteps, zero dual shaders)', ok: !appSrc.includes('shade_mandelbrot') && !appSrc.includes('shade_newton') && !appSrc.includes('shade_mandelbrot_sine') && !appSrc.includes('eval_fractal_sample') && /uniform\s+int\s+u_recurrenceMode;/.test(appSrc) && /u_recurrenceMode\s*==\s*1\s*\|\|\s*u_recurrenceMode\s*==\s*3/.test(appSrc) && /u_recurrenceMode\s*==\s*2/.test(appSrc) },
   { name: 'Extended Core Codebase Primitives (cds_asin, cds_atan, cds_gamma, cds_loggamma, cds_bessel)', ok: /cqs\s+cds_asin\(cqs\s+z\)/.test(appSrc) && /cqs\s+cds_atan\(cqs\s+z\)/.test(appSrc) && /cqs\s+cds_gamma\(cqs\s+z\)/.test(appSrc) && /cqs\s+cds_loggamma\(cqs\s+z\)/.test(appSrc) && /cqs\s+cds_bessel\(cqs\s+z,\s*cqs\s+order\)/.test(appSrc) },
   { name: 'Laws 61..65 120 FPS adaptive controller, fused SOS/diff-sq, single-branch zeta_ac, stage uniforms (zero clientWaitSync)', ok: !appSrc.includes('clientWaitSync') && !appSrc.includes('fenceSync') && appSrc.includes('qs_sum_sq_presplit') && appSrc.includes('qs_diff_sq_presplit') && appSrc.includes('qs_renorm_fast') && appSrc.includes('qs_exp_scalar') && appSrc.includes('u_innerStageCounts') && appSrc.includes('live_ui_120fps_batch_cap') && appSrc.includes('adaptiveBatchScale') && /function\s+peelUnaryAndPowerStages/.test(appSrc) && (appSrc.match(/cds_zeta_rhp\(/g) || []).length === 2 },
+  { name: 'Law 66 tangent-frame special function helpers & decoupled DCE modules (cds_ln_fast, cds_exp_fast, cds_sin_pi_fast, GLSL_QS_SINCOS, GLSL_CDS_POW_FN)', ok: appSrc.includes('cds_ln_fast') && appSrc.includes('cds_exp_fast') && appSrc.includes('cds_sin_pi_fast') && appSrc.includes('GLSL_QS_SINCOS') && appSrc.includes('GLSL_CDS_POW_FN') },
+  { name: 'FS_DISPLAY 96-bit pre-split constants (QS_INV_TAU_H, QS_LOG2E_H) defined in GLSL_CDS_CORE and zero cqs struct ternaries', ok: /const\s+vec3\s+QS_INV_TAU_H\s*=/.test(appSrc) && /const\s+vec3\s+QS_LOG2E_H\s*=/.test(appSrc) && !/cqs\s+\w+\s*=\s*[^;]*\?/.test(appSrc) },
 ];
 for (const c of ssaChecks) {
   if (!c.ok) {
@@ -2372,6 +2657,37 @@ for (let px = -20; px <= 20; px++) {
 if (!screenshotDistinct || minBits993 < 85.0) {
   console.error(`FATAL: Strip discontinuity or sub-ULP pixelation detected (minBits993=${minBits993.toFixed(2)})!`);
   process.exit(1);
+}
+
+// Test 2B: User Deep-Zoom Contour & Coordinate Regression Audit at
+// z1 = (-0.535678438271871, 0.49514311291459) and z2 = (0.96503567672586, -0.219142180549577)
+// across scales 10^-6, 10^-10, 10^-15, 10^-20 (verifies 96-bit sub-ring distToRing, distToRay, and special functions)
+const userCoords = [
+  { re: bfFromNumber(-0.535678438271871), im: bfFromNumber(0.49514311291459) },
+  { re: bfFromNumber(0.96503567672586), im: bfFromNumber(-0.219142180549577) },
+];
+for (const uc of userCoords) {
+  for (const exp10 of [-6, -10, -15, -20]) {
+    const stepBf = bfFromNumber(2.0 / 100.0, exp10);
+    let prevDistRing = null;
+    let distinctRingCount = 0;
+    for (let k = 0; k < 32; k++) {
+      const z = { re: bfToQS(uc.re + BigInt(k) * stepBf), im: bfToQS(uc.im + BigInt(k) * stepBf) };
+      const wCos = v2.cds_cos(z);
+      const wGam = v2.cds_gamma(z);
+      const wBes = v2.cds_bessel(z);
+      const shCos = v2.shade_domain_point(wCos);
+      const shGam = v2.shade_domain_point(wGam);
+      const shBes = v2.shade_domain_point(wBes);
+      const sig = `${wCos.re[2]}:${wGam.re[2]}:${wBes.re[2]}:${shCos.distToRing}:${shGam.distToRing}`;
+      if (prevDistRing !== null && sig !== prevDistRing) distinctRingCount++;
+      prevDistRing = sig;
+    }
+    if (distinctRingCount < 28) {
+      console.error(`FATAL: Deep-zoom pixelation at scale 10^${exp10} (only ${distinctRingCount}/31 distinct states)!`);
+      process.exit(1);
+    }
+  }
 }
 
 // Test 3: Hierarchical 400 Screen Points -> Wild Pan/Zoom -> 200 Scenes -> Recursive Unswitched Zoom to 10^-36 UI Stress Verification

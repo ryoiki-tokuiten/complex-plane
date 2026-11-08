@@ -467,5 +467,17 @@ export function resetAllPanelLayouts() {
 }
 
 export function initPanelLayoutManager() {
-    if (!stopLayoutEffect) stopLayoutEffect = subscribeState(() => refreshPanelLayout(true));
+    if (!stopLayoutEffect) {
+        stopLayoutEffect = subscribeState(() => refreshPanelLayout(true), [
+            'laplaceModeEnabled',
+            'laplaceHide3DSurface',
+            'laplaceShowSpectrum',
+            'laplaceShowComGraph',
+            'laplaceShowFourier3D',
+            'realPlotsEnabled',
+            'show2DContourPlot',
+            'riemannSurfaceEnabled',
+            'graphViewEnabled'
+        ]);
+    }
 }

@@ -8,13 +8,14 @@
     "dev": "vite",
     "prebuild": "node scripts/ensure-wasm.mjs",
     "build": "vite build",
+    "lint": "vite build",
     "preview": "vite preview",
     "test": "node --import ./test/setup.js --test test/*.test.js",
     "test:e2e": "playwright test",
     "benchmark": "node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
     "benchmark:smoke": "BENCH_PROFILE=smoke node --import ./test/setup.js --expose-gc test/benchmarks/index.js",
-    "verify:bend": "bun public/bend/bend2/main.ts public/bend_complex_plane/PROOF.bend && node benchmark_harness.mjs",
-    "build:bend": "bun public/bend/bend2/main.ts public/bend_complex_plane/PROOF.bend -o public/bend_complex_plane/PROOF.bendtt && bun public/bend/bend2/main.ts public/bend_complex_plane/main.bend -o js/rendering/bend_engine.mjs",
+    "verify:bend": "bash scripts/setup-bend.sh && PATH=\"$HOME/.bend/bin:$PATH\" bend public/bend_complex_plane/PROOF.bend && PATH=\"$HOME/.bend/bin:$PATH\" node benchmark_harness.mjs",
+    "build:bend": "bash scripts/setup-bend.sh && PATH=\"$HOME/.bend/bin:$PATH\" bend public/bend_complex_plane/PROOF.bend -o public/bend_complex_plane/PROOF.bendtt && PATH=\"$HOME/.bend/bin:$PATH\" bend public/bend_complex_plane/main.bend -o js/rendering/bend_engine.mjs",
     "build:wasm": "node scripts/ensure-wasm.mjs --force"
   },
   "repository": {

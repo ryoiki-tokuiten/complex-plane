@@ -34,7 +34,7 @@ test('Mandelbrot preset is zero-seed algebraic output chaining', () => {
     assert.equal(runtime.chainingMode, 'zero_seed');
     assert.equal(runtime.orbitColoringMode, 'escape');
     assert.equal(runtime.currentInputShape, 'empty_grid');
-    assert.equal(runtime.domainPalette, 'arctic-frost');
+    assert.equal(runtime.domainPalette, 'arctic-fox');
     assert.equal(runtime.polynomialN, 2);
     assert.deepEqual(runtime.polynomialCoeffs, [
         { re: 0, im: 0 },
@@ -45,6 +45,41 @@ test('Mandelbrot preset is zero-seed algebraic output chaining', () => {
         runtime.algebraicChainingTerms.map(term => term.factors.map(factor => factor.func)),
         [['polynomial'], ['c']]
     );
+});
+
+test('Arctic Fox is the default domain palette and Jewellery/Lava are replaced by Arctic Fox and Silent Colors', () => {
+    assert.equal(state.domainPalette, 'arctic-fox');
+    assert.equal(domainPalettes[0].id, 'arctic-fox');
+    assert.equal(domainPalettes[0].name, 'Arctic Fox');
+    assert.equal(domainPalettes[0].desc, 'Glacial cyan, polar slate, frost ivory, twilight amber');
+    assert.deepEqual(domainPalettes[0].hexStops, [
+        '#0D2430',
+        '#1E6078',
+        '#7AD1E6',
+        '#F4F9FC',
+        '#E66C4C',
+        '#243E52'
+    ]);
+    assert.equal(domainPalettes[0].key.length, 6);
+
+    const silent = domainPalettes.find(p => p.id === 'silent-colors');
+    assert.ok(silent);
+    assert.equal(silent.name, 'Silent Colors');
+    assert.equal(silent.desc, 'Muted sage, warm stone, dusty clay, mist charcoal');
+    assert.deepEqual(silent.hexStops, [
+        '#26302B',
+        '#5E7268',
+        '#C6CEBE',
+        '#F0ECE1',
+        '#C87D65',
+        '#3D4641'
+    ]);
+    assert.equal(silent.key.length, 6);
+
+    assert.equal(domainPalettes.some(p => p.id === 'lava' || p.name === 'Lava'), false);
+    assert.equal(domainPalettes.some(p => p.id === 'jewellery' || p.name === 'Jewellery' || p.name === 'Jwellery'), false);
+    assert.equal(DOMAIN_PALETTE_IDS.lava, undefined);
+    assert.equal(DOMAIN_PALETTE_IDS.jewellery, undefined);
 });
 
 test('Newton preset represents Newton iteration for z^3 - 1 through algebraic chaining', () => {

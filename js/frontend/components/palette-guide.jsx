@@ -10,7 +10,7 @@ const GUIDES = {
     domain: {
         eyebrow: 'Domain Coloring Guide',
         titleId: 'domain_palette_circle_title',
-        title: 'Analytic Base',
+        title: 'Arctic Fox',
         closeId: 'close_domain_palette_circle_btn',
         closeLabel: 'Close Domain Coloring Guide',
         intro: 'Shows how complex phase angles map to colors (ring) and how modulus magnitude maps to lightness/shading.',
@@ -45,7 +45,8 @@ export function PaletteGuide({ type }) {
     const contrast = useAppState(type === 'domain' ? 'domainContrast' : 'realPlotsContrast');
     const saturation = useAppState(type === 'domain' ? 'domainSaturation' : 'realPlotsSaturation');
     const palettes = type === 'domain' ? domainPalettes : SURFACE_PALETTES;
-    const title = palettes.find(palette => palette.id === paletteId)?.name || guide.title;
+    const activePalette = palettes.find(palette => palette.id === paletteId) || palettes[0];
+    const title = activePalette?.name || guide.title;
 
     useEffect(() => {
         if (type === 'domain') drawDomainPalettePreview(circleRef.current, stripRef.current);
@@ -68,7 +69,7 @@ export function PaletteGuide({ type }) {
             <div class="dynamic-intro palette-guide-intro">
                 <div>
                     <div class="dynamic-intro-title">Color Guide Wheel</div>
-                    <div class="dynamic-intro-copy">{guide.intro}</div>
+                    <div class="dynamic-intro-copy">{activePalette?.desc ? `${activePalette.desc} — ${guide.intro}` : guide.intro}</div>
                 </div>
             </div>
             <div class="palette-guide-wheel">

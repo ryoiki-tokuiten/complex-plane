@@ -30,7 +30,7 @@ function shouldBePrecise(planeParams, zoom) {
     }
     const span = 7 / z;
     const pixelSpan = span / planeParams.width;
-    return pixelSpan <= maxCoord * 1.0e-100;
+    return pixelSpan <= maxCoord * 1.0e-12;
 }
 
 export function synchronizePreciseViewport(planeParams, zoom) {

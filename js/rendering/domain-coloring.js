@@ -62,6 +62,39 @@ export function bigFixedToNumber(bigVal) {
     return sign * headNum * Math.pow(10, exp10);
 }
 
+export function bigFixedToString(bigVal, maxFracDigits = 36) {
+    if (typeof bigVal !== 'bigint' || bigVal === 0n) return '0';
+    const neg = bigVal < 0n;
+    const absVal = neg ? -bigVal : bigVal;
+    const raw = absVal.toString().padStart(BIG_DIGITS + 1, '0');
+    const intPart = raw.slice(0, raw.length - BIG_DIGITS) || '0';
+    let fracPart = raw.slice(raw.length - BIG_DIGITS, raw.length - BIG_DIGITS + Math.max(1, Math.min(BIG_DIGITS, maxFracDigits)));
+    fracPart = fracPart.replace(/0+$/, '');
+    const signPrefix = neg ? '-' : '';
+    return fracPart.length > 0 ? `${signPrefix}${intPart}.${fracPart}` : `${signPrefix}${intPart}`;
+}
+
+export function stringToBigFixed(str) {
+    if (typeof str !== 'string') return null;
+    const s = str.trim();
+    const m = s.match(/^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/);
+    if (!m) return null;
+    const sign = m[1] === '-' ? -1n : 1n;
+    const intDigits = m[2] || '0';
+    const fracDigits = m[3] !== undefined ? m[3] : (m[4] || '');
+    const exp10 = m[5] ? parseInt(m[5], 10) : 0;
+    if (!Number.isFinite(exp10) || Math.abs(exp10) > 300) return null;
+    const combined = (intDigits + fracDigits).replace(/^0+/, '') || '0';
+    if (combined === '0') return 0n;
+    const shift = BIG_DIGITS - fracDigits.length + exp10;
+    if (shift >= 0) {
+        return sign * BigInt(combined) * (10n ** BigInt(shift));
+    }
+    const cut = -shift;
+    if (cut >= combined.length) return 0n;
+    return sign * BigInt(combined.slice(0, combined.length - cut));
+}
+
 // Law 55 & Law 57: Pure Monotonic 4-Limb IEEE-754 Extraction (Zero Fallbacks, Zero Modular Wraps)
 export function bigFixedToQS(bigVal) {
     let rem = bigVal;
@@ -128,12 +161,15 @@ function preSplitVec3GLSL(v0, v1, v2) {
     return { hi: `vec3(${hs.join(', ')})`, lo: `vec3(${ls.join(', ')})` };
 }
 
-const SPLIT_PIO2  = preSplitVec3GLSL(1.5707963705062866, -4.371138828673793e-8, -1.7288452101912154e-15);
-const SPLIT_LN2   = preSplitVec3GLSL(0.6931471824645996, -1.904654323148236e-9, 2.3100868899665896e-17);
-const SPLIT_LN2PI = preSplitVec3GLSL(1.8378770351409912, 3.126272486539816e-8, -1.519465726557128e-15);
-const SPLIT_LN3   = preSplitVec3GLSL(1.0986123085021973, -2.003646750830562e-8, 3.694922296286588e-17);
-const SPLIT_LN5   = preSplitVec3GLSL(1.6094379425048828, -2.803797028436976e-8, -3.575870709480116e-16);
-const SPLIT_LN7   = preSplitVec3GLSL(1.945910096168518, 5.288904569407645e-8, -1.2586684776049217e-15);
+const SPLIT_PIO2    = preSplitVec3GLSL(1.5707963705062866, -4.371138828673793e-8, -1.7288452101912154e-15);
+const SPLIT_PI      = preSplitVec3GLSL(3.1415927410125732, -8.742277657347586e-8, -3.4576904203824307e-15);
+const SPLIT_INV_TAU = preSplitVec3GLSL(0.15915493667125702, 6.420638562210615e-9, -2.454847080402997e-16);
+const SPLIT_LN2     = preSplitVec3GLSL(0.6931471824645996, -1.904654323148236e-9, 2.3100868899665896e-17);
+const SPLIT_LOG2E   = preSplitVec3GLSL(1.4426950216293335, 1.9259629911266175e-8, -1.0725792993241715e-16);
+const SPLIT_LN2PI   = preSplitVec3GLSL(1.8378770351409912, 3.126272486539816e-8, -1.519465726557128e-15);
+const SPLIT_LN3     = preSplitVec3GLSL(1.0986123085021973, -2.003646750830562e-8, 3.694922296286588e-17);
+const SPLIT_LN5     = preSplitVec3GLSL(1.6094379425048828, -2.803797028436976e-8, -3.575870709480116e-16);
+const SPLIT_LN7     = preSplitVec3GLSL(1.945910096168518, 5.288904569407645e-8, -1.2586684776049217e-15);
 
 // ============================================================================
 // 2. 96-BIT QUAD-SINGLE (FP96 EMULATED) SIMD COMPLEX & TRANSCENDENTAL ENGINE
@@ -150,20 +186,27 @@ export const GLSL_CDS_CORE = `
   const float TAU = 6.28318530717958647692;
   uniform float u_zero;
 
-  const vec4 QS_ONE   = vec4(1.0, 0.0, 0.0, 0.0);
-  const vec4 QS_PIO2  = vec4(1.5707963705062866, -4.371138828673793e-8, -1.7288452101912154e-15, -2.21341947e-23);
-  const vec3 QS_PIO2_H = ${SPLIT_PIO2.hi};
-  const vec3 QS_PIO2_L = ${SPLIT_PIO2.lo};
-  const vec4 QS_PI    = vec4(3.1415927410125732, -8.742277657347586e-8, -3.4576904203824307e-15, -4.42683894e-23);
-  const vec4 QS_TAU   = vec4(6.2831854820251465, -1.7484555314695172e-7, -6.9153808407648614e-15, -8.85367788e-23);
-  const vec4 QS_E     = vec4(2.7182817459106445, 8.254840370311029e-8, -2.639619450691032e-16, -2.1494225e-24);
-  const vec4 QS_LN2   = vec4(0.6931471824645996, -1.904654323148236e-9, 2.3100868899665896e-17, -1.36050424e-25);
-  const vec3 QS_LN2_H = ${SPLIT_LN2.hi};
-  const vec3 QS_LN2_L = ${SPLIT_LN2.lo};
-  const vec4 QS_LOG2E = vec4(1.4426950216293335, 1.9259629911266175e-8, -1.0725792993241715e-16, -7.83513946e-25);
-  const vec4 QS_LN2PI = vec4(1.8378770351409912, 3.126272486539816e-8, -1.519465726557128e-15, -1.0872797e-22);
-  const vec3 QS_LN2PI_H = ${SPLIT_LN2PI.hi};
-  const vec3 QS_LN2PI_L = ${SPLIT_LN2PI.lo};
+  const vec4 QS_ONE       = vec4(1.0, 0.0, 0.0, 0.0);
+  const vec4 QS_PIO2      = vec4(1.5707963705062866, -4.371138828673793e-8, -1.7288452101912154e-15, -2.21341947e-23);
+  const vec3 QS_PIO2_H    = ${SPLIT_PIO2.hi};
+  const vec3 QS_PIO2_L    = ${SPLIT_PIO2.lo};
+  const vec4 QS_PI        = vec4(3.1415927410125732, -8.742277657347586e-8, -3.4576904203824307e-15, -4.42683894e-23);
+  const vec3 QS_PI_H      = ${SPLIT_PI.hi};
+  const vec3 QS_PI_L      = ${SPLIT_PI.lo};
+  const vec4 QS_TAU       = vec4(6.2831854820251465, -1.7484555314695172e-7, -6.9153808407648614e-15, -8.85367788e-23);
+  const vec4 QS_INV_TAU   = vec4(0.15915493667125702, 6.420638562210615e-9, -2.454847080402997e-16, 7.979728e-24);
+  const vec3 QS_INV_TAU_H = ${SPLIT_INV_TAU.hi};
+  const vec3 QS_INV_TAU_L = ${SPLIT_INV_TAU.lo};
+  const vec4 QS_E         = vec4(2.7182817459106445, 8.254840370311029e-8, -2.639619450691032e-16, -2.1494225e-24);
+  const vec4 QS_LN2       = vec4(0.6931471824645996, -1.904654323148236e-9, 2.3100868899665896e-17, -1.36050424e-25);
+  const vec3 QS_LN2_H     = ${SPLIT_LN2.hi};
+  const vec3 QS_LN2_L     = ${SPLIT_LN2.lo};
+  const vec4 QS_LOG2E     = vec4(1.4426950216293335, 1.9259629911266175e-8, -1.0725792993241715e-16, -7.83513946e-25);
+  const vec3 QS_LOG2E_H   = ${SPLIT_LOG2E.hi};
+  const vec3 QS_LOG2E_L   = ${SPLIT_LOG2E.lo};
+  const vec4 QS_LN2PI     = vec4(1.8378770351409912, 3.126272486539816e-8, -1.519465726557128e-15, -1.0872797e-22);
+  const vec3 QS_LN2PI_H   = ${SPLIT_LN2PI.hi};
+  const vec3 QS_LN2PI_L   = ${SPLIT_LN2PI.lo};
 
   const vec4 QS_LN3 = vec4(1.0986123085021973, -2.003646750830562e-8, 3.694922296286588e-17, -1.87266564e-24);
   const vec3 QS_LN3_H = ${SPLIT_LN3.hi};
@@ -749,8 +792,6 @@ export const GLSL_CDS_CORE = `
 
   // Law 64: Pre-Split Exponent-Scaled Fused Sum-of-Squares Complex Reciprocal & Division
   cqs cds_rcp(cqs b) {
-    if (b.im.x == 0.0) return cqs(qs_rcp(b.re), vec4(0.0));
-    if (b.re.x == 0.0) return cqs(vec4(0.0), -qs_rcp(b.im));
     float m = max(abs(b.re.x), abs(b.im.x));
     if (m == 0.0) return cqs(vec4(1.0 / u_zero, 0.0, 0.0, 0.0), vec4(0.0));
     uint expBits = clamp(floatBitsToUint(m) & 0x7F800000u, 0x00800000u, 0x7E800000u);
@@ -769,23 +810,16 @@ export const GLSL_CDS_CORE = `
   }
 
   cqs cds_div(cqs a, cqs b) {
-    if (b.im.x == 0.0) {
-      vec4 invB = qs_rcp(b.re);
-      vec3 bh, bl;
-      split3(invB.xyz, bh, bl);
-      return cqs(qs_mul_presplit_lhs(invB, bh, bl, a.re), qs_mul_presplit_lhs(invB, bh, bl, a.im));
-    }
     return cds_mul(a, cds_rcp(b));
   }
 
   cqs cds_pow_int(cqs z, int n) {
     if (n == 0) return cqs(QS_ONE, vec4(0.0));
     if (n == 1) return z;
-    if (n == 2) return cds_sq(z);
-    if (n == 3) return cds_mul(cds_sq(z), z);
     int p = min(abs(n), 64);
+    int bitLim = 7 + int(u_zero);
     cqs res = cqs(QS_ONE, vec4(0.0)), base = z;
-    for (int bit = 0; bit < 7; bit++) {
+    for (int bit = 0; bit < bitLim; bit++) {
       if (p <= 0) break;
       if ((p & 1) == 1) res = cds_mul(res, base);
       p >>= 1;
@@ -811,8 +845,9 @@ export const GLSL_CDS_CORE = `
     return val;
   }
 `;
-export const GLSL_CDS_TRIG_EXP = `
-  // V2 Single-Polynomial 1-Doubling qs_sincos with Exact 96-Bit Small-Residual Taylor Fast-Paths
+
+export const GLSL_QS_SINCOS = `
+  // V2 Single-Branch 1-Doubling qs_sincos (zero multi-branch AST duplication)
   void qs_sincos(vec4 x, out vec4 s, out vec4 c) {
     if (abs(x.x) <= 1.7763568e-15) {
       s = x;
@@ -829,23 +864,11 @@ export const GLSL_CDS_TRIG_EXP = `
     const vec4 C_S11 = vec4(-2.505210838544172e-8, -5.527079e-16, 2.8698508e-23, 8.704229e-31);
     const vec4 C_S13 = vec4(1.6059043836821613e-10, 4.3982297e-18, -3.5974616e-26, -1.9467698e-33);
     const vec4 C_S15 = vec4(-7.647163731819816e-13, -2.3587857e-20, 4.0005166e-28, -2.189715e-35);
-    const vec4 C_C4  = vec4(0.0416666679084301, -1.2417634328291303e-9, 4.1352274239998535e-17, 0.0);
 
     vec4 sr, cr;
-    if (abs(r.x) <= 7.6293945e-6) {
-      if (abs(r.x) <= 1.7763568e-15) {
-        sr = r;
-        cr = QS_ONE;
-      } else {
-        vec3 rh, rl, r2h, r2l;
-        split3(r.xyz, rh, rl);
-        vec4 r2 = qs_sq_presplit(r, rh, rl);
-        split3(r2.xyz, r2h, r2l);
-        vec4 ps3 = qs_add_mul_tail2_presplit(C_S3, r2, r2h.x, r2l.x, vec4(C_S5.x, C_S5.y, 0.0, 0.0));
-        vec4 t_poly = qs_mul_presplit_lhs(r2, r2h, r2l, ps3);
-        sr = qs_add(r, qs_mul_presplit_lhs(r, rh, rl, t_poly));
-        cr = qs_add_f(1.0, qs_add(r2 * -0.5, qs_mul_presplit_lhs(r2, r2h, r2l, C_C4)));
-      }
+    if (abs(r.x) <= 1.7763568e-15) {
+      sr = r;
+      cr = QS_ONE;
     } else {
       vec4 u = r * 0.5;
       vec3 uh, ul, u2h, u2l;
@@ -853,22 +876,14 @@ export const GLSL_CDS_TRIG_EXP = `
       vec4 u2 = qs_sq_presplit(u, uh, ul);
       split3(u2.xyz, u2h, u2l);
 
-      vec4 ps7;
-      if (u2.x <= 2.44140625e-4) {
-        float ds9 = C_S9.y + u2.x * C_S11.x;
-        float s9_0, s9_1;
-        two_sum(C_S9.x, ds9, s9_0, s9_1);
-        ps7 = qs_add_mul_tail3_presplit(C_S7, u2, u2h.x, u2l.x, u2h.y, u2l.y, vec4(s9_0, s9_1, 0.0, 0.0));
-      } else {
-        float s17_tail = 2.81145725e-15 + u2.x * (-8.22063525e-18 + 1.9572941e-20 * u2.x);
-        float ds15 = C_S15.y + u2.x * s17_tail;
-        float s15_0, s15_1;
-        two_sum(C_S15.x, ds15, s15_0, s15_1);
-        vec4 ps13 = qs_add_mul_tail2_presplit(C_S13, u2, u2h.x, u2l.x, vec4(s15_0, s15_1, 0.0, 0.0));
-        vec4 ps11 = qs_add_mul_tail3_presplit(C_S11, u2, u2h.x, u2l.x, u2h.y, u2l.y, ps13);
-        vec4 ps9  = qs_add_mul_tail3_presplit(C_S9,  u2, u2h.x, u2l.x, u2h.y, u2l.y, ps11);
-        ps7       = qs_add_mul_tail3_presplit(C_S7,  u2, u2h.x, u2l.x, u2h.y, u2l.y, ps9);
-      }
+      float s17_tail = 2.81145725e-15 + u2.x * (-8.22063525e-18 + 1.9572941e-20 * u2.x);
+      float ds15 = C_S15.y + u2.x * s17_tail;
+      float s15_0, s15_1;
+      two_sum(C_S15.x, ds15, s15_0, s15_1);
+      vec4 ps13 = qs_add_mul_tail2_presplit(C_S13, u2, u2h.x, u2l.x, vec4(s15_0, s15_1, 0.0, 0.0));
+      vec4 ps11 = qs_add_mul_tail3_presplit(C_S11, u2, u2h.x, u2l.x, u2h.y, u2l.y, ps13);
+      vec4 ps9  = qs_add_mul_tail3_presplit(C_S9,  u2, u2h.x, u2l.x, u2h.y, u2l.y, ps11);
+      vec4 ps7  = qs_add_mul_tail3_presplit(C_S7,  u2, u2h.x, u2l.x, u2h.y, u2l.y, ps9);
       vec4 ps5  = qs_add_mul_presplit4(C_S5, u2, u2h, u2l, ps7);
       vec4 ps3  = qs_add_mul_presplit4(C_S3, u2, u2h, u2l, ps5);
       vec4 t_poly = qs_mul_presplit_lhs(u2, u2h, u2l, ps3);
@@ -888,8 +903,10 @@ export const GLSL_CDS_TRIG_EXP = `
     else if (q == 2) { s = -sr; c = -cr; }
     else             { s = -cr; c = sr; }
   }
+`;
 
-  // V2 Direct Unhalved Hyperbolic Core qs_sinh_cosh_unit (zero halving, zero qs_mul_presplit_lhs doubling, direct chr)
+export const GLSL_CDS_TRIG_EXP = `
+  // V2 Direct Unhalved Hyperbolic Core qs_sinh_cosh_unit (single-branch AST, direct chr)
   void qs_sinh_cosh_unit(vec4 r, out vec4 shr, out vec4 chr) {
     if (abs(r.x) <= 1.7763568e-15) {
       shr = r;
@@ -903,39 +920,22 @@ export const GLSL_CDS_TRIG_EXP = `
     const vec4 C_E11 = vec4(2.505210838544172e-8, 5.527079e-16, -2.8698508e-23, -8.704229e-31);
     const vec4 C_E13 = vec4(1.6059043836821613e-10, 4.3982297e-18, -3.5974616e-26, -1.9467698e-33);
     const vec4 C_E15 = vec4(7.647163731819816e-13, 2.3587857e-20, -4.0005166e-28, 2.189715e-35);
-    const vec4 C_C4  = vec4(0.0416666679084301, -1.2417634328291303e-9, 4.1352274239998535e-17, 0.0);
 
     vec3 rh, rl, r2h, r2l;
     split3(r.xyz, rh, rl);
     vec4 r2 = qs_sq_presplit(r, rh, rl);
     split3(r2.xyz, r2h, r2l);
 
-    if (abs(r.x) <= 7.6293945e-6) {
-      vec4 ps3 = qs_add_mul_tail2_presplit(C_E3, r2, r2h.x, r2l.x, vec4(C_E5.x, C_E5.y, 0.0, 0.0));
-      vec4 t_poly = qs_mul_presplit_lhs(r2, r2h, r2l, ps3);
-      shr = qs_add(r, qs_mul_presplit_lhs(r, rh, rl, t_poly));
-      chr = qs_add_f(1.0, qs_add(r2 * 0.5, qs_mul_presplit_lhs(r2, r2h, r2l, C_C4)));
-      return;
-    }
-
-    vec4 ps7;
-    if (r2.x <= 2.44140625e-4) {
-      float de9 = C_E9.y + r2.x * C_E11.x;
-      float e9_0, e9_1;
-      two_sum(C_E9.x, de9, e9_0, e9_1);
-      ps7 = qs_add_mul_tail3_presplit(C_E7, r2, r2h.x, r2l.x, r2h.y, r2l.y, vec4(e9_0, e9_1, 0.0, 0.0));
-    } else {
-      float e17_tail = 2.81145725e-15 + r2.x * (8.22063525e-18 + 1.9572941e-20 * r2.x);
-      float de15 = C_E15.y + r2.x * e17_tail;
-      float e15_0, e15_1;
-      two_sum(C_E15.x, de15, e15_0, e15_1);
-      vec4 ps13 = qs_add_mul_tail2_presplit(C_E13, r2, r2h.x, r2l.x, vec4(e15_0, e15_1, 0.0, 0.0));
-      vec4 ps11 = qs_add_mul_tail3_presplit(C_E11, r2, r2h.x, r2l.x, r2h.y, r2l.y, ps13);
-      vec4 ps9  = qs_add_mul_tail3_presplit(C_E9,  r2, r2h.x, r2l.x, r2h.y, r2l.y, ps11);
-      ps7       = qs_add_mul_tail3_presplit(C_E7,  r2, r2h.x, r2l.x, r2h.y, r2l.y, ps9);
-    }
-    vec4 ps5 = qs_add_mul_presplit4(C_E5, r2, r2h, r2l, ps7);
-    vec4 ps3 = qs_add_mul_presplit4(C_E3, r2, r2h, r2l, ps5);
+    float e17_tail = 2.81145725e-15 + r2.x * (8.22063525e-18 + 1.9572941e-20 * r2.x);
+    float de15 = C_E15.y + r2.x * e17_tail;
+    float e15_0, e15_1;
+    two_sum(C_E15.x, de15, e15_0, e15_1);
+    vec4 ps13 = qs_add_mul_tail2_presplit(C_E13, r2, r2h.x, r2l.x, vec4(e15_0, e15_1, 0.0, 0.0));
+    vec4 ps11 = qs_add_mul_tail3_presplit(C_E11, r2, r2h.x, r2l.x, r2h.y, r2l.y, ps13);
+    vec4 ps9  = qs_add_mul_tail3_presplit(C_E9,  r2, r2h.x, r2l.x, r2h.y, r2l.y, ps11);
+    vec4 ps7  = qs_add_mul_tail3_presplit(C_E7,  r2, r2h.x, r2l.x, r2h.y, r2l.y, ps9);
+    vec4 ps5  = qs_add_mul_presplit4(C_E5, r2, r2h, r2l, ps7);
+    vec4 ps3  = qs_add_mul_presplit4(C_E3, r2, r2h, r2l, ps5);
     vec4 t_poly = qs_mul_presplit_lhs(r2, r2h, r2l, ps3);
     shr = qs_add(r, qs_mul_presplit_lhs(r, rh, rl, t_poly));
     chr = qs_sqrt(qs_add_f(1.0, qs_sq(shr)));
@@ -988,16 +988,6 @@ export const GLSL_CDS_TRIG_EXP = `
   }
 
   cqs cds_sin(cqs z) {
-    if (z.im.x == 0.0) {
-      vec4 sx, cx;
-      qs_sincos(z.re, sx, cx);
-      return cqs(sx, vec4(0.0));
-    }
-    if (z.re.x == 0.0) {
-      vec4 shy, chy;
-      qs_sinh_cosh(z.im, shy, chy);
-      return cqs(vec4(0.0), shy);
-    }
     vec4 sx, cx, shy, chy;
     qs_sincos(z.re, sx, cx);
     qs_sinh_cosh(z.im, shy, chy);
@@ -1005,16 +995,6 @@ export const GLSL_CDS_TRIG_EXP = `
   }
 
   cqs cds_cos(cqs z) {
-    if (z.im.x == 0.0) {
-      vec4 sx, cx;
-      qs_sincos(z.re, sx, cx);
-      return cqs(cx, vec4(0.0));
-    }
-    if (z.re.x == 0.0) {
-      vec4 shy, chy;
-      qs_sinh_cosh(z.im, shy, chy);
-      return cqs(chy, vec4(0.0));
-    }
     vec4 sx, cx, shy, chy;
     qs_sincos(z.re, sx, cx);
     qs_sinh_cosh(z.im, shy, chy);
@@ -1025,16 +1005,6 @@ export const GLSL_CDS_TRIG_EXP = `
   cqs cds_sec(cqs z) {
     if (abs(z.im.x) > 85.0) {
       return cqs(vec4(0.0), vec4(0.0));
-    }
-    if (z.im.x == 0.0) {
-      vec4 sx, cx;
-      qs_sincos(z.re, sx, cx);
-      return cqs(qs_rcp(cx), vec4(0.0));
-    }
-    if (z.re.x == 0.0) {
-      vec4 shy, chy;
-      qs_sinh_cosh(z.im, shy, chy);
-      return cqs(qs_rcp(chy), vec4(0.0));
     }
     vec4 sx, cx, shy, chy;
     qs_sincos(z.re, sx, cx);
@@ -1059,16 +1029,6 @@ export const GLSL_CDS_TRIG_EXP = `
   cqs cds_tan(cqs z) {
     if (abs(z.im.x) > 28.0) {
       return cqs(vec4(0.0), vec4(sign(z.im.x), 0.0, 0.0, 0.0));
-    }
-    if (z.im.x == 0.0) {
-      vec4 sx, cx;
-      qs_sincos(z.re, sx, cx);
-      return cqs(qs_div(sx, cx), vec4(0.0));
-    }
-    if (z.re.x == 0.0) {
-      vec4 shy, chy;
-      qs_sinh_cosh(z.im, shy, chy);
-      return cqs(vec4(0.0), qs_div(shy, chy));
     }
     vec4 sx, cx, shy, chy;
     qs_sincos(z.re, sx, cx);
@@ -1252,6 +1212,48 @@ export const GLSL_CDS_LN_POW = `
     return w;
   }
 
+  cqs cds_asin(cqs z) {
+    cqs root = cds_sqrt(cds_sub(cqs(QS_ONE, vec4(0.0)), cds_sq(z)));
+    cqs lg = cds_ln(cqs(qs_sub(root.re, z.im), qs_add(root.im, z.re)));
+    return cqs(lg.im, -lg.re);
+  }
+
+  // Law 66: Single-Log Fused Half-Angle cds_atan (cuts inlined qs_ln and qs_atan2 calls from 2 to 1)
+  cqs cds_atan(cqs z) {
+    vec4 x2 = qs_sq(z.re);
+    vec4 y2 = qs_sq(z.im);
+    vec4 ypo = qs_add_f(1.0, z.im);
+    vec4 ymo = qs_add_f(1.0, -z.im);
+    vec4 dp = qs_add(qs_sq(ypo), x2);
+    vec4 dm = qs_add(qs_sq(ymo), x2);
+    vec4 re = qs_atan2(z.re * -2.0, qs_sub(qs_add_f(1.0, -y2), x2)) * -0.5;
+    vec4 im = qs_ln(qs_div(dp, dm)) * 0.25;
+    return cqs(re, im);
+  }
+
+  // Law 66: 96-Bit 4-Limb Complex Logarithm, Exponential & Modulo-1 Reflection Sine Helpers
+  cqs cds_ln_fast(cqs z) {
+    return cds_ln(z);
+  }
+
+  cqs cds_exp_fast(cqs z) {
+    return cds_exp(z);
+  }
+
+  cqs cds_sin_pi_fast(cqs z) {
+    float k = round(z.re.x);
+    float parity = (abs(k) < 16777216.0 && mod(abs(k), 2.0) == 1.0) ? -1.0 : 1.0;
+    vec4 x_red = qs_add_f(-k, z.re);
+    vec4 px = qs_mul_presplit_lhs(QS_PI, QS_PI_H, QS_PI_L, x_red);
+    vec4 py = qs_mul_presplit_lhs(QS_PI, QS_PI_H, QS_PI_L, z.im);
+    vec4 sx, cx, shy, chy;
+    qs_sincos(px, sx, cx);
+    qs_sinh_cosh(py, shy, chy);
+    return cqs(qs_mul(sx, chy) * parity, qs_mul(cx, shy) * parity);
+  }
+`;
+
+export const GLSL_CDS_POW_FN = `
   cqs cds_pow(cqs z, cqs w) {
     if (z.re.x == 0.0 && z.im.x == 0.0) {
       if (w.re.x > 0.0) return cqs(vec4(0.0), vec4(0.0));
@@ -1260,67 +1262,76 @@ export const GLSL_CDS_LN_POW = `
     }
     return cds_exp(cds_mul(w, cds_ln(z)));
   }
-
-  cqs cds_asin(cqs z) {
-    cqs root = cds_sqrt(cds_sub(cqs(QS_ONE, vec4(0.0)), cds_sq(z)));
-    cqs lg = cds_ln(cqs(qs_sub(root.re, z.im), qs_add(root.im, z.re)));
-    return cqs(lg.im, -lg.re);
-  }
-
-  cqs cds_atan(cqs z) {
-    cqs upper = cds_ln(cqs(qs_add_f(1.0, -z.im), z.re));
-    cqs lower = cds_ln(cqs(qs_add_f(1.0, z.im), -z.re));
-    return cqs(qs_sub(upper.im, lower.im) * 0.5, -qs_sub(upper.re, lower.re) * 0.5);
-  }
 `;
 
-export const GLSL_CDS_GAMMA_BESSEL = `
+export const GLSL_CDS_LOGGAMMA_CORE = `
   const vec4 QS_HALF_LN2PI_G = vec4(0.9189385175704956, 1.563136243269908e-8, -7.59732863278564e-16, 0.0);
   const vec4 QS_LNPI_G = vec4(1.1447298526763916, 3.3167379188546396e-8, -1.542566595456794e-15, 0.0);
-  const vec4 QS_LANCZOS[9] = vec4[9](
-    vec4(1.0, -1.9006927e-13, 0.0, 0.0),
-    vec4(676.5203857421875, -1.76203024e-5, 0.0, 0.0),
-    vec4(-1259.13916015625, -5.65661528e-5, 0.0, 0.0),
-    vec4(771.3234252929688, 3.48468436e-6, 0.0, 0.0),
-    vec4(-176.6150360107422, 6.8486016e-6, 0.0, 0.0),
-    vec4(12.507343292236328, -1.35494227e-8, 0.0, 0.0),
-    vec4(-0.138571098446846, 3.18112588e-9, 0.0, 0.0),
-    vec4(9.984369514859281e-6, 6.31602905e-14, 0.0, 0.0),
-    vec4(1.5056327154708997e-7, 1.96784119e-15, 0.0, 0.0)
+  const float LANCZOS_C[8] = float[8](
+    676.5203857421875,
+    -1259.13916015625,
+    771.3234252929688,
+    -176.6150360107422,
+    12.507343292236328,
+    -0.138571098446846,
+    9.984369514859281e-6,
+    1.5056327154708997e-7
   );
 
+  // Law 65 & Law 66: Unified Single-Branch 96-Bit Lanczos LogGamma Core (Hoisted Im^2 & Unroll-Guarded Loop)
   cqs cds_loggamma_rhp(cqs z) {
-    cqs zm = cds_add_f(z, -1.0);
-    cqs sum = cqs(QS_LANCZOS[0], vec4(0.0));
-    for (int k = 1; k < 9; k++) {
-      sum = cds_add(sum, cds_mul_qs(cds_rcp(cds_add_f(zm, float(k))), QS_LANCZOS[k]));
+    vec4 im2 = qs_sq(z.im);
+    vec4 sumRe = QS_ONE;
+    vec4 sumW = vec4(0.0);
+    int kLim = 8 + int(u_zero);
+    for (int k = 0; k < kLim; k++) {
+      vec4 dx = qs_add_f(float(k), z.re);
+      vec4 d2 = qs_add(qs_sq(dx), im2);
+      vec4 w = qs_mul_f(qs_rcp(d2), LANCZOS_C[k]);
+      sumRe = qs_add(sumRe, qs_mul(w, dx));
+      sumW = qs_add(sumW, w);
     }
+    vec4 sumIm = -qs_mul(z.im, sumW);
     cqs t = cds_add_f(z, 6.5);
-    cqs log_t = cds_ln(t);
-    cqs log_sum = cds_ln(sum);
+    cqs log_t = cds_ln_fast(t);
+    cqs log_sum = cds_ln_fast(cqs(sumRe, sumIm));
     cqs product = cds_mul(cds_add_f(z, -0.5), log_t);
     return cds_add(cds_sub(cds_add_re(product, QS_HALF_LN2PI_G), t), log_sum);
   }
 
   cqs cds_loggamma(cqs z) {
-    if (z.re.x < 0.5) {
-      cqs reflected = cds_loggamma_rhp(cds_add_f(cds_neg(z), 1.0));
-      cqs sine = cds_sin(cds_mul_qs(z, QS_PI));
-      cqs sine_log = cds_ln(sine);
-      return cqs(qs_sub(qs_sub(QS_LNPI_G, sine_log.re), reflected.re), -qs_add(sine_log.im, reflected.im));
+    bool reflect = (z.re.x < 0.5);
+    cqs z_eval;
+    if (reflect) {
+      z_eval = cds_add_f(cds_neg(z), 1.0);
+    } else {
+      z_eval = z;
     }
-    return cds_loggamma_rhp(z);
+    cqs lg_rhp = cds_loggamma_rhp(z_eval);
+    if (!reflect) return lg_rhp;
+    cqs sine_log = cds_ln_fast(cds_sin_pi_fast(z));
+    return cqs(qs_sub(qs_sub(QS_LNPI_G, sine_log.re), lg_rhp.re), -qs_add(sine_log.im, lg_rhp.im));
   }
+`;
 
+export const GLSL_CDS_GAMMA_FN = `
   cqs cds_gamma(cqs z) {
-    if (z.re.x < 0.5) {
-      cqs reflected = cds_exp(cds_loggamma_rhp(cds_add_f(cds_neg(z), 1.0)));
-      cqs sine = cds_sin(cds_mul_qs(z, QS_PI));
-      return cds_div(cqs(QS_PI, vec4(0.0)), cds_mul(sine, reflected));
+    bool reflect = (z.re.x < 0.5);
+    cqs z_eval;
+    if (reflect) {
+      z_eval = cds_add_f(cds_neg(z), 1.0);
+    } else {
+      z_eval = z;
     }
-    return cds_exp(cds_loggamma_rhp(z));
+    cqs g_rhp = cds_exp_fast(cds_loggamma_rhp(z_eval));
+    if (!reflect) return g_rhp;
+    cqs sine = cds_sin_pi_fast(z);
+    return cds_div(cqs(QS_PI, vec4(0.0)), cds_mul(sine, g_rhp));
   }
+`;
 
+export const GLSL_CDS_BESSEL_FN = `
+  // Law 66: Pre-Split 96-Bit Bessel J_nu(z) with Order-Zero Fast-Path & Unroll-Guarded Loop
   cqs cds_bessel(cqs z, cqs order) {
     float signFactor = 1.0;
     cqs nu = order;
@@ -1333,34 +1344,54 @@ export const GLSL_CDS_GAMMA_BESSEL = `
       if (nu.re.x > 0.0) return cqs(vec4(0.0), vec4(0.0));
       return cqs(vec4(1.0 / u_zero, 0.0, 0.0, 0.0), vec4(0.0));
     }
-    cqs half_log = cds_ln(cds_scale(z, 0.5));
-    cqs lg = cds_loggamma(cds_add_f(nu, 1.0));
-    cqs term = cds_exp(cds_sub(cds_mul(nu, half_log), lg));
+    cqs term;
+    if (nu.re.x == 0.0 && nu.im.x == 0.0 && nu.re.y == 0.0 && nu.im.y == 0.0) {
+      term = cqs(QS_ONE, vec4(0.0));
+    } else {
+      cqs half_log = cds_ln_fast(cds_scale(z, 0.5));
+      cqs lg = cds_loggamma(cds_add_f(nu, 1.0));
+      term = cds_exp_fast(cds_sub(cds_mul(nu, half_log), lg));
+    }
     cqs sum = term;
     cqs step = cds_scale(cds_neg(cds_sq(z)), 0.25);
-    for (int k = 0; k < 48; k++) {
+    vec3 srh, srl, sih, sil;
+    split3(step.re.xyz, srh, srl);
+    split3(step.im.xyz, sih, sil);
+    bool realOrder = (nu.im.x == 0.0 && nu.im.y == 0.0 && nu.im.z == 0.0 && nu.im.w == 0.0);
+    int kLim = 28 + int(u_zero);
+    for (int k = 0; k < kLim; k++) {
       float k1 = float(k + 1);
-      cqs denom = cds_mul_f(cds_add_f(nu, k1), k1);
-      term = cds_div(cds_mul(term, step), denom);
+      term = cds_mul_presplit_lhs(step, srh, srl, sih, sil, term);
+      if (realOrder) {
+        vec4 denom = qs_mul_f(qs_add_f(k1, nu.re), k1);
+        vec4 invD = qs_rcp(denom);
+        vec3 dh, dl;
+        split3(invD.xyz, dh, dl);
+        term = cqs(qs_mul_presplit_lhs(invD, dh, dl, term.re), qs_mul_presplit_lhs(invD, dh, dl, term.im));
+      } else {
+        cqs denom = cds_mul_f(cds_add_f(nu, k1), k1);
+        term = cds_div(term, denom);
+      }
       sum = cds_add(sum, term);
       float tm = max(abs(term.re.x), abs(term.im.x));
       float sm = max(1.0, max(abs(sum.re.x), abs(sum.im.x)));
-      if (tm <= 1e-28 * sm) break;
+      if (tm <= 1e-29 * sm) break;
     }
     return cds_scale(sum, signFactor);
   }
 `;
 
-export const GLSL_CDS_ZETA = `
-  cqs cds_prime_pow_presplit(cqs neg_s, vec3 nrh, vec3 nrl, vec3 nih, vec3 nil, vec4 ln_p, vec3 lph, vec3 lpl) {
-    vec4 mag = qs_exp(qs_mul_presplit_both(neg_s.re, nrh, nrl, ln_p, lph, lpl));
-    vec4 sn, cs;
-    qs_sincos(qs_mul_presplit_both(neg_s.im, nih, nil, ln_p, lph, lpl), sn, cs);
-    vec3 mh, ml;
-    split3(mag.xyz, mh, ml);
-    return cqs(qs_mul_presplit_lhs(mag, mh, ml, cs), qs_mul_presplit_lhs(mag, mh, ml, sn));
-  }
+export const GLSL_CDS_GAMMA_BESSEL = `${GLSL_CDS_LOGGAMMA_CORE}\n${GLSL_CDS_GAMMA_FN}\n${GLSL_CDS_BESSEL_FN}`;
 
+export const GLSL_CDS_ZETA_PRIME_POW = `
+  cqs cds_prime_pow_presplit(cqs neg_s, vec3 nrh, vec3 nrl, vec3 nih, vec3 nil, vec4 ln_p, vec3 lph, vec3 lpl) {
+    vec4 re = qs_mul_presplit_both(neg_s.re, nrh, nrl, ln_p, lph, lpl);
+    vec4 im = qs_mul_presplit_both(neg_s.im, nih, nil, ln_p, lph, lpl);
+    return cds_exp_fast(cqs(re, im));
+  }
+`;
+
+export const GLSL_CDS_ZETA_BASE = `
   // Law 52: Pre-Split t2 Reuse across Composite Terms t4 = t2^2, t6 = t2*t3, t8 = t2*t4
   cqs cds_zeta(cqs s) {
     cqs neg_s = cds_neg(s);
@@ -1382,7 +1413,9 @@ export const GLSL_CDS_ZETA = `
     cqs tail = cds_div(n1s, cds_add_f(s, -1.0));
     return cds_sub(cds_add(sum, tail), cds_scale(n1s, 0.0625));
   }
+`;
 
+export const GLSL_CDS_ZETA_AC = `
   cqs cds_zeta_rhp(cqs s) {
     cqs neg_s = cds_neg(s);
     vec3 nrh, nrl, nih, nil, t2rh, t2rl, t2ih, t2il;
@@ -1398,19 +1431,19 @@ export const GLSL_CDS_ZETA = `
     cqs t7 = cds_prime_pow_presplit(neg_s, nrh, nrl, nih, nil, QS_LN7, QS_LN7_H, QS_LN7_L);
     cqs t8 = cds_mul_presplit_lhs(t2, t2rh, t2rl, t2ih, t2il, t4);
 
-    cqs eta = cds_add_f(cds_scale(t2, BORWEIN_W[1]), BORWEIN_W[0]);
-    eta = cds_add(eta, cds_scale(t3, BORWEIN_W[2]));
-    eta = cds_add(eta, cds_scale(t4, BORWEIN_W[3]));
-    eta = cds_add(eta, cds_scale(t5, BORWEIN_W[4]));
-    eta = cds_add(eta, cds_scale(t6, BORWEIN_W[5]));
-    eta = cds_add(eta, cds_scale(t7, BORWEIN_W[6]));
+    cqs eta = cds_add_f(cds_mul_f(t2, BORWEIN_W[1]), BORWEIN_W[0]);
+    eta = cds_add(eta, cds_mul_f(t3, BORWEIN_W[2]));
+    eta = cds_add(eta, cds_mul_f(t4, BORWEIN_W[3]));
+    eta = cds_add(eta, cds_mul_f(t5, BORWEIN_W[4]));
+    eta = cds_add(eta, cds_mul_f(t6, BORWEIN_W[5]));
+    eta = cds_add(eta, cds_mul_f(t7, BORWEIN_W[6]));
     eta = cds_add(eta, cds_scale(t8, BORWEIN_W[7]));
 
     cqs denom = cds_add_f(cds_scale(t2, -2.0), 1.0);
     return cds_div(eta, denom);
   }
 
-  // Law 65: Unified Single-Branch cds_zeta_ac (calls cds_zeta_rhp once on s_eval, halving GLSL inline code & warp divergence)
+  // Law 65 & Law 66: Unified Single-Branch 96-Bit cds_zeta_ac with 4-Limb Stirling Reflection
   cqs cds_zeta_ac(cqs s) {
     bool reflect = (s.re.x < 0.45);
     cqs oms = cds_add_f(cds_neg(s), 1.0);
@@ -1424,22 +1457,28 @@ export const GLSL_CDS_ZETA = `
     if (!reflect) return z_rhp;
 
     cqs zs = cds_add_f(oms, 4.0);
-    cqs invZ = cds_rcp(zs);
+    cqs invZs = cds_rcp(zs);
+    cqs invZs2 = cds_sq(invZs);
     const vec4 QS_HALF_LN2PI = vec4(0.9189385175704956, 1.563136243269908e-8, -7.59732863278564e-16, 0.0);
+    const vec4 QS_INV12 = vec4(0.0833333358168602, -2.4835268656582607e-9, 8.270454847999707e-17, 2.75681828e-24);
+    const vec4 QS_INV360 = vec4(0.0027777778450399637, -6.726218534625204e-11, -1.07855606e-18, 0.0);
+    cqs stirling = cds_add_re(cds_mul(invZs, cds_add_re(cds_mul_qs(invZs2, -QS_INV360), QS_INV12)), QS_HALF_LN2PI);
 
     cqs logG = cds_add(
-      cds_sub(cds_mul(cds_add_f(zs, -0.5), cds_ln(zs)), zs),
-      cds_add_re(cds_mul_f(invZ, 0.08333333333333333), QS_HALF_LN2PI)
+      cds_sub(cds_mul(cds_add_f(zs, -0.5), cds_ln_fast(zs)), zs),
+      stirling
     );
-    cqs combinedExp = cds_exp(cds_add(cds_add_re(cds_mul_qs_presplit(cds_neg(oms), QS_LN2PI, QS_LN2PI_H, QS_LN2PI_L), QS_LN2), logG));
+    cqs combinedExp = cds_exp_fast(cds_add(cds_add_re(cds_mul_qs_presplit(cds_neg(oms), QS_LN2PI, QS_LN2PI_H, QS_LN2PI_L), QS_LN2), logG));
 
     // Euler quartic identity: oms*(oms+1)*(oms+2)*(oms+3) = (oms^2 + 3*oms + 1)^2 - 1
     cqs q = cds_add_f(cds_add(cds_sq(oms), cds_mul_f(oms, 3.0)), 1.0);
     cqs p = cds_add_f(cds_sq(q), -1.0);
-    cqs halfPiS = cds_mul_qs_presplit(s, QS_PIO2, QS_PIO2_H, QS_PIO2_L);
-    return cds_mul(cds_div(combinedExp, p), cds_mul(cds_sin(halfPiS), z_rhp));
+    cqs sinHalfPiS = cds_sin_pi_fast(cds_scale(s, 0.5));
+    return cds_mul(cds_div(combinedExp, p), cds_mul(sinHalfPiS, z_rhp));
   }
 `;
+
+export const GLSL_CDS_ZETA = `${GLSL_CDS_ZETA_PRIME_POW}\n${GLSL_CDS_ZETA_BASE}\n${GLSL_CDS_ZETA_AC}`;
 
 export const GLSL_CDS_CHAIN_MACRO = `
   // Law 47: Collapsed Unary Chain Loop Evaluators with Fixed-Point / Cycle-2 / NaN Early Exit (Single-Inlined OP)
@@ -1488,18 +1527,21 @@ export const CHAINABLE_OPS = [
     'cds_zeta_ac'
 ];
 
-// Law 50, Law 51 & Law 63: Dead-Code-Eliminated (DCE) Flat Single-Loop GLSL Compute Shader Builder with Stage Uniforms
+// Law 50, Law 51, Law 63 & Law 66: Dead-Code-Eliminated (DCE) Flat Single-Loop GLSL Compute Shader Builder with Stage Uniforms
 export function buildComputeShader(compiled) {
     const innerExpr = compiled.innerGLSL || compiled.fullGLSL || 'z';
     const exprScan = `${innerExpr} ${compiled.outerChainFn || ''}`;
     const needsCCoord = /\bc_coord\b/.test(innerExpr);
-    const needsZetaAc = Boolean(compiled.isZeta) || /\bcds_zeta_ac\b/.test(exprScan);
-    const needsZeta = Boolean(compiled.isZeta) || /\bcds_zeta\b/.test(exprScan) || needsZetaAc;
-    const needsGammaBessel = /\bcds_(gamma|loggamma|bessel)\b/.test(exprScan);
+    const needsZetaAc = /\bcds_zeta_ac\b/.test(exprScan);
+    const needsZetaFn = /\bcds_zeta\b/.test(exprScan);
+    const needsZeta = Boolean(compiled.isZeta) || needsZetaFn || needsZetaAc;
+    const needsGamma = /\bcds_gamma\b/.test(exprScan);
+    const needsBessel = /\bcds_bessel\b/.test(exprScan);
+    const needsLogGamma = /\bcds_loggamma\b/.test(exprScan) || needsGamma || needsBessel;
     const needsPow = /\bcds_pow\b/.test(exprScan);
-    const needsLn = /\bcds_(ln|ln_branch|asin|atan)\b/.test(exprScan) || needsPow || needsZeta || needsGammaBessel;
-    const needsTrigExp =
-        /\bcds_(sin|cos|tan|sec|sinh|cosh|tanh|exp)\b/.test(exprScan) || needsLn || needsZeta || needsGammaBessel;
+    const needsLn = /\bcds_(ln|ln_branch|asin|atan)\b/.test(exprScan) || needsPow || needsLogGamma || needsZeta;
+    const needsTrigExp = /\bcds_(sin|cos|tan|sec|sinh|cosh|tanh|exp)\b/.test(exprScan) || needsPow || needsLogGamma || needsZeta;
+    const needsSincos = needsTrigExp || needsLn;
 
     const activeChains = [];
     for (const op of CHAINABLE_OPS) {
@@ -1509,12 +1551,17 @@ export function buildComputeShader(compiled) {
     }
 
     const baseBody = compiled.outerChainFn
-        ? `cqs w0;
+        ? innerExpr === 'z'
+            ? `cqs w0 = ${compiled.outerChainFn}(z);
+      if (u_outerPowExp != 1 && stepInCycle == u_outerChainCount - 1) return cds_pow_int(w0, u_outerPowExp);
+      return w0;`
+            : `cqs arg;
       if (stepInCycle == 0) {
-        w0 = ${compiled.outerChainFn}(${innerExpr});
+        arg = ${innerExpr};
       } else {
-        w0 = ${compiled.outerChainFn}(z);
+        arg = z;
       }
+      cqs w0 = ${compiled.outerChainFn}(arg);
       if (u_outerPowExp != 1 && stepInCycle == u_outerChainCount - 1) return cds_pow_int(w0, u_outerPowExp);
       return w0;`
         : `cqs w0 = ${innerExpr};
@@ -1571,10 +1618,16 @@ export function buildComputeShader(compiled) {
     uniform vec4 u_mobiusDImQS;
 
     ${GLSL_CDS_CORE}
+    ${needsSincos ? GLSL_QS_SINCOS : ''}
     ${needsTrigExp ? GLSL_CDS_TRIG_EXP : ''}
     ${needsLn ? GLSL_CDS_LN_POW : ''}
-    ${needsGammaBessel ? GLSL_CDS_GAMMA_BESSEL : ''}
-    ${needsZeta ? GLSL_CDS_ZETA : ''}
+    ${needsPow ? GLSL_CDS_POW_FN : ''}
+    ${needsLogGamma ? GLSL_CDS_LOGGAMMA_CORE : ''}
+    ${needsGamma ? GLSL_CDS_GAMMA_FN : ''}
+    ${needsBessel ? GLSL_CDS_BESSEL_FN : ''}
+    ${needsZeta ? GLSL_CDS_ZETA_PRIME_POW : ''}
+    ${needsZetaFn ? GLSL_CDS_ZETA_BASE : ''}
+    ${needsZetaAc ? GLSL_CDS_ZETA_AC : ''}
     ${activeChains.length > 0 ? GLSL_CDS_CHAIN_MACRO : ''}
     ${activeChains.join('\n    ')}
 
@@ -1711,36 +1764,10 @@ export function buildComputeShader(compiled) {
 }
 
 export const GLSL_DISPLAY_CORE = `
-  const float PI  = 3.14159265358979323846;
-  const float TAU = 6.28318530717958647692;
-  uniform float u_zero;
-  float fence1(float x) { return x + u_zero; }
-  void two_sum(float a, float b, out float s, out float e) {
-    s = fence1(a + b);
-    float v = fence1(s - a);
-    e = (a - fence1(s - v)) + (b - v);
-  }
-  void split1(float a, out float hi, out float lo) {
-    hi = uintBitsToFloat(floatBitsToUint(a) & 0xFFFFF000u);
-    lo = fence1(a - hi);
-  }
-  void tp_fast(float a, float ah, float al, float b, float bh, float bl, out float p, out float e) {
-    p = fence1(a * b);
-    float e1 = fence1(fence1(ah * bh) - p);
-    float e2 = fence1(e1 + fence1(ah * bl));
-    float e3 = fence1(e2 + fence1(al * bh));
-    e = fence1(e3 + fence1(al * bl));
-  }
-  void two_prod(float a, float b, out float p, out float e) {
-    float ah, al, bh, bl;
-    split1(a, ah, al);
-    split1(b, bh, bl);
-    tp_fast(a, ah, al, b, bh, bl, p, e);
-  }
-  struct cqs { vec4 re; vec4 im; };
-  bool cds_invalid(cqs z) {
-    return isnan(z.re.x) || isnan(z.im.x) || isinf(z.re.x) || isinf(z.im.x);
-  }
+  ${GLSL_CDS_CORE}
+  ${GLSL_QS_SINCOS}
+  ${GLSL_CDS_TRIG_EXP}
+  ${GLSL_CDS_LN_POW}
 `;
 
 // Law 55 & Law 56: Single Unified Domain Coloring Display Shader (Zero Dual Fractal Pipelines or Fallbacks)
@@ -1769,66 +1796,78 @@ export const FS_DISPLAY = `#version 300 es
     return texture(u_paletteLUT, vec2(fract(t), v)).rgb;
   }
 
-  // Law 54: 24-op Exponent-Scaled 2-Limb Norm-Squared Display Metrics (3500x faster than 96-bit qs_atan2/qs_ln)
-  void domain_metrics(cqs w, out float normPhase, out float fracMag, out float log2Mag, out float magApprox) {
-    if (u_recurrenceMode > 0 && w.re.w != 1e30) {
-      if (u_recurrenceMode == 2 && (w.re.x != 0.0 || w.im.x != 0.0)) {
-        float phase = atan(w.im.x, w.re.x);
+  cqs sanitize_settled(cqs w) {
+    float rw3 = (w.re.w == 1e30) ? 0.0 : w.re.w;
+    return cqs(vec4(w.re.xyz, rw3), w.im);
+  }
+
+  // Law 54 & Law 55: 96-Bit 4-Limb Exponent-Scaled Display Metrics with Sub-Ring Exact Distance
+  void domain_metrics(cqs wRaw, out float normPhase, out float fracMag, out float log2Mag, out float magApprox, out float distToRing, out float distToRay) {
+    if (u_recurrenceMode > 0 && wRaw.re.w != 1e30) {
+      if (u_recurrenceMode == 2 && (wRaw.re.x != 0.0 || wRaw.im.x != 0.0)) {
+        float phase = atan(wRaw.im.x, wRaw.re.x);
         normPhase = fract((phase + PI) / TAU);
         fracMag = 0.5;
         log2Mag = 2.5;
         magApprox = 5.6568542;
+        distToRing = 0.5;
+        distToRay = 0.5;
         return;
       }
       normPhase = 0.0;
       fracMag = 0.0;
       log2Mag = -126.0;
       magApprox = 0.0;
+      distToRing = 0.5;
+      distToRay = 0.5;
       return;
     }
+    cqs w = sanitize_settled(wRaw);
     float m = max(abs(w.re.x), abs(w.im.x));
     if (m == 0.0) {
       normPhase = 0.0;
       fracMag = 0.0;
       log2Mag = -126.0;
       magApprox = 0.0;
+      distToRing = 0.5;
+      distToRay = 0.5;
       return;
     }
-    uint expBits = floatBitsToUint(m) & 0x7F800000u;
+    uint expBits = clamp(floatBitsToUint(m) & 0x7F800000u, 0x00800000u, 0x7E800000u);
     float exp2 = float(int(expBits >> 23u) - 127);
     float invScale = uintBitsToFloat(0x7F000000u - expBits);
-    float rx0 = w.re.x * invScale;
-    float rx1 = w.re.y * invScale;
-    float ry0 = w.im.x * invScale;
-    float ry1 = w.im.y * invScale;
-    float phase = atan(fence1(ry0 + ry1), fence1(rx0 + rx1));
-    normPhase = fract((phase + PI) / TAU);
+    vec4 xs = w.re * invScale;
+    vec4 ys = w.im * invScale;
 
-    float px, ex, py, ey;
-    two_prod(rx0, rx0, px, ex);
-    two_prod(ry0, ry0, py, ey);
-    float n0, n1a;
-    two_sum(px, py, n0, n1a);
-    float n1 = n1a + ex + ey + 2.0 * (rx0 * rx1 + ry0 * ry1);
-    float log2Hi = 0.5 * log2(n0);
-    float log2Lo = 0.5 * (n1 / n0) * 1.4426950408889634;
-    float l0, l1;
-    two_sum(log2Hi, log2Lo, l0, l1);
+    vec4 ph = qs_atan2(ys, xs);
+    vec4 npQS = qs_mul_presplit_lhs(QS_INV_TAU, QS_INV_TAU_H, QS_INV_TAU_L, qs_add(ph, QS_PI));
+    vec4 npPos = qs_add_f(-floor(npQS.x), npQS);
+    normPhase = fract(fence1(npPos.x - floor(npPos.x)) + ((npPos.y + npPos.z) + npPos.w));
+    vec4 np12 = npQS * 12.0;
+    vec4 dRayQS = qs_add_f(-round(np12.x), np12);
+    distToRay = min(0.5, abs(dRayQS.x + dRayQS.y));
+
+    vec4 norm2 = qs_sum_sq(xs, ys);
+    vec4 lg2 = qs_mul_presplit_lhs(QS_LOG2E, QS_LOG2E_H, QS_LOG2E_L, qs_ln(norm2)) * 0.5;
+    vec4 lg2Pos = qs_add_f(-floor(lg2.x), lg2);
+    float l0 = lg2Pos.x;
+    float l1 = (lg2Pos.y + lg2Pos.z) + lg2Pos.w;
     float fl = floor(l0);
     fracMag = fract(fence1(l0 - fl) + l1);
-    log2Mag = l0 + exp2;
-    magApprox = (exp2 >= 6.0) ? 64.0 : ((exp2 <= -20.0) ? 0.0 : sqrt(n0) * uintBitsToFloat(expBits));
+    vec4 dRingQS = qs_add_f(-round(lg2.x), lg2);
+    distToRing = min(0.5, abs(dRingQS.x + dRingQS.y));
+    log2Mag = lg2.x + exp2;
+    magApprox = (exp2 >= 6.0) ? 64.0 : ((exp2 <= -20.0) ? 0.0 : sqrt(max(0.0, norm2.x)) * uintBitsToFloat(expBits));
   }
 
-  vec3 shade_from_metrics(float normPhase, float fracMag, float log2Mag, float magApprox, float fwMod, float fwPhase) {
+  vec3 shade_from_metrics(float normPhase, float fracMag, float log2Mag, float magApprox, float distToRing, float distToRay, float fwMod, float fwPhase) {
     if (log2Mag <= -125.0) return vec3(0.03, 0.03, 0.04);
 
     vec3 col = lut(normPhase);
 
     if (u_showModulus == 1) {
       float nyquistFade = 1.0 - smoothstep(0.16, 0.45, fwMod);
-      float distToRing = min(fracMag, 1.0 - fracMag);
-      float ringLine = 1.0 - (1.0 - smoothstep(0.0, 1.35, distToRing / max(fwMod, 1e-4))) * nyquistFade;
+      float ringLine = 1.0 - (1.0 - smoothstep(0.0, 1.35, distToRing / max(fwMod, 1e-30))) * nyquistFade;
 
       float octaveSaw = fracMag - 0.5;
       float harmonicWave = sin(TAU * fracMag);
@@ -1837,10 +1876,8 @@ export const FS_DISPLAY = `#version 300 es
     }
 
     if (u_showPhase == 1) {
-      float pScaled = fract(normPhase * 12.0);
       float nyquistFadeP = 1.0 - smoothstep(0.16, 0.45, fwPhase);
-      float distToRay = min(pScaled, 1.0 - pScaled);
-      float rayLine = 1.0 - (1.0 - smoothstep(0.0, 1.35, distToRay / max(fwPhase, 1e-4))) * nyquistFadeP;
+      float rayLine = 1.0 - (1.0 - smoothstep(0.0, 1.35, distToRay / max(fwPhase, 1e-30))) * nyquistFadeP;
       col *= mix(1.0, 0.72, 1.0 - rayLine);
     }
 
@@ -1854,9 +1891,9 @@ export const FS_DISPLAY = `#version 300 es
     if (cds_invalid(w)) {
       return vec3(0.95, 0.94, 0.91);
     }
-    float normPhase, fracMag, log2Mag, magApprox;
-    domain_metrics(w, normPhase, fracMag, log2Mag, magApprox);
-    return shade_from_metrics(normPhase, fracMag, log2Mag, magApprox, fwMod, fwPhase);
+    float normPhase, fracMag, log2Mag, magApprox, distToRing, distToRay;
+    domain_metrics(w, normPhase, fracMag, log2Mag, magApprox, distToRing, distToRay);
+    return shade_from_metrics(normPhase, fracMag, log2Mag, magApprox, distToRing, distToRay, fwMod, fwPhase);
   }
 
   cqs fetch_state_clamped(ivec2 px) {
@@ -1873,59 +1910,48 @@ export const FS_DISPLAY = `#version 300 es
     cqs w00 = fetch_state_clamped(p00);
     cqs w10 = fetch_state_clamped(p00 + ivec2(1, 0));
     cqs w01 = fetch_state_clamped(p00 + ivec2(0, 1));
-    cqs w11 = fetch_state_clamped(p00 + ivec2(1, 1));
 
-    float np00 = 0.0, fm00 = 0.0, l2_00 = -126.0, ma00 = 0.0;
-    float np10 = 0.0, fm10 = 0.0, l2_10 = -126.0, ma10 = 0.0;
-    float np01 = 0.0, fm01 = 0.0, l2_01 = -126.0, ma01 = 0.0;
-    float np11 = 0.0, fm11 = 0.0, l2_11 = -126.0, ma11 = 0.0;
-
-    bool inv00 = cds_invalid(w00);
     bool inv10 = cds_invalid(w10);
     bool inv01 = cds_invalid(w01);
-    bool inv11 = cds_invalid(w11);
 
-    if (!inv00) domain_metrics(w00, np00, fm00, l2_00, ma00);
-    if (!inv10) domain_metrics(w10, np10, fm10, l2_10, ma10);
-    if (!inv01) domain_metrics(w01, np01, fm01, l2_01, ma01);
-    if (!inv11) domain_metrics(w11, np11, fm11, l2_11, ma11);
+    cqs w00s = sanitize_settled(w00);
+    cqs w10s = w00s;
+    if (!inv10) w10s = sanitize_settled(w10);
+    cqs w01s = w00s;
+    if (!inv01) w01s = sanitize_settled(w01);
+    vec4 dwReX = qs_sub(w10s.re, w00s.re);
+    vec4 dwImX = qs_sub(w10s.im, w00s.im);
+    vec4 dwReY = qs_sub(w01s.re, w00s.re);
+    vec4 dwImY = qs_sub(w01s.im, w00s.im);
+    float dWx = length(vec2(dwReX.x + dwReX.y, dwImX.x + dwImX.y)) * ratio.x;
+    float dWy = length(vec2(dwReY.x + dwReY.y, dwImY.x + dwImY.y)) * ratio.y;
+    float wMag = max(1e-30, length(vec2(w00s.re.x, w00s.im.x)));
+    float dLnW = max(1e-30, length(vec2(dWx, dWy)) / wMag);
 
-    float sl00 = clamp(l2_00, -120.0, 120.0);
-    float sl10 = inv10 ? sl00 : clamp(l2_10, -120.0, 120.0);
-    float sl01 = inv01 ? sl00 : clamp(l2_01, -120.0, 120.0);
-    float sl11 = inv11 ? sl00 : clamp(l2_11, -120.0, 120.0);
+    float fwMod = clamp(dLnW * 1.4426950408889634, 1e-30, 1.0);
+    float fwPhase = clamp(dLnW * (12.0 / TAU), 1e-30, 1.0);
 
-    float dLog2X = mix(sl10 - sl00, sl11 - sl01, f.y) * ratio.x;
-    float dLog2Y = mix(sl01 - sl00, sl11 - sl10, f.x) * ratio.y;
-    float gradLog2 = length(vec2(dLog2X, dLog2Y));
-
-    float dPhaseX = fract((inv10 ? np00 : np10) - np00 + 0.5) - 0.5;
-    float dPhaseY = fract((inv01 ? np00 : np01) - np00 + 0.5) - 0.5;
-    float gradPhase = length(vec2(dPhaseX * ratio.x, dPhaseY * ratio.y)) * 12.0;
-
-    float fwMod = clamp(max(gradLog2, gradPhase / (12.0 * 0.69314718 / TAU)), 1e-4, 1.0);
-    float fwPhase = clamp(max(gradPhase, gradLog2 * (12.0 * 0.69314718 / TAU)), 1e-4, 1.0);
-
-    vec3 c00 = inv00 ? vec3(0.95, 0.94, 0.91) : shade_from_metrics(np00, fm00, l2_00, ma00, fwMod, fwPhase);
+    vec3 c00 = shade_domain_point(w00, fwMod, fwPhase);
     if (u_ssaa <= 1.05 || ratio.x <= 1.05) {
       return c00;
     }
 
-    vec3 c10 = inv10 ? vec3(0.95, 0.94, 0.91) : shade_from_metrics(np10, fm10, l2_10, ma10, fwMod, fwPhase);
-    vec3 c01 = inv01 ? vec3(0.95, 0.94, 0.91) : shade_from_metrics(np01, fm01, l2_01, ma01, fwMod, fwPhase);
-    vec3 c11 = inv11 ? vec3(0.95, 0.94, 0.91) : shade_from_metrics(np11, fm11, l2_11, ma11, fwMod, fwPhase);
-    vec3 bilinearCol = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
-
-    if (u_ssaa <= 2.1) {
-      return bilinearCol;
-    } else {
-      vec3 ringAcc = vec3(0.0);
-      ringAcc += shade_domain_point(fetch_state_clamped(p00 + ivec2(-1,  0)), fwMod, fwPhase);
-      ringAcc += shade_domain_point(fetch_state_clamped(p00 + ivec2( 2,  0)), fwMod, fwPhase);
-      ringAcc += shade_domain_point(fetch_state_clamped(p00 + ivec2( 0, -1)), fwMod, fwPhase);
-      ringAcc += shade_domain_point(fetch_state_clamped(p00 + ivec2( 0,  2)), fwMod, fwPhase);
-      return mix(bilinearCol, ringAcc * 0.25, 0.35);
+    vec3 c10 = c00, c01 = c00, c11 = c00, ringAcc = vec3(0.0);
+    int extraTaps = (u_ssaa <= 2.1) ? min(3, u_showModulus + 3) : min(7, u_showModulus + 7);
+    for (int tap = 0; tap < extraTaps; ++tap) {
+      ivec2 off = (tap == 0) ? ivec2(1, 0) : ((tap == 1) ? ivec2(0, 1) : ((tap == 2) ? ivec2(1, 1) :
+                  ((tap == 3) ? ivec2(-1, 0) : ((tap == 4) ? ivec2(2, 0) : ((tap == 5) ? ivec2(0, -1) : ivec2(0, 2))))));
+      cqs wt = w10;
+      if (tap == 1) wt = w01;
+      else if (tap >= 2) wt = fetch_state_clamped(p00 + off);
+      vec3 ct = shade_domain_point(wt, fwMod, fwPhase);
+      if (tap == 0) c10 = ct;
+      else if (tap == 1) c01 = ct;
+      else if (tap == 2) c11 = ct;
+      else ringAcc += ct;
     }
+    vec3 bilinearCol = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+    return (u_ssaa <= 2.1) ? bilinearCol : mix(bilinearCol, ringAcc * 0.25, 0.35);
   }
 
   vec3 apply_bcs(vec3 col) {
@@ -2524,7 +2550,7 @@ export function compileMathExpression(rawExpr, stateConfig = null) {
 
     const fullGLSL = astToGLSL(root, 'z', stateConfig);
     const shaderKey = `${outerChainFn || 'none'}::${stageSigParts.join('>')}::${innerGLSL}`;
-    const isZeta = fullGLSL.includes('cds_zeta');
+    const isZeta = /\bcds_(zeta|zeta_ac|gamma|loggamma|bessel)\b/.test(fullGLSL);
     const baseWeight = isZeta ? 4 : 1;
     const totalPrimWeight = stages.reduce((acc, st) => acc + (st.fn ? st.count : 0), 0);
     const astWeight = baseWeight * Math.max(1, Math.min(totalPrimWeight || 1, 32));
@@ -2940,7 +2966,12 @@ function emitTaylorApproximationGLSL(runtimeState) {
     const fnKey = runtimeState?.currentFunction || 'cos';
     const center = runtimeState?.taylorSeriesCenter ?? { re: 0, im: 0 };
     const order = Math.max(0, Math.min(32, Math.floor(Number(runtimeState?.taylorSeriesOrder ?? 3))));
-    const coeffs = computeTaylorSeriesCoefficients(fnKey, center, order);
+    let coeffs = null;
+    try {
+        coeffs = computeTaylorSeriesCoefficients(fnKey, center, order);
+    } catch (_err) {
+        coeffs = null;
+    }
     if (!Array.isArray(coeffs) || coeffs.length === 0) {
         return emitCoreFunctionGLSL(fnKey, 'z', 'c_coord', runtimeState);
     }
@@ -3034,11 +3065,6 @@ function createProgramInfo(gl, [vsSrc, fsSrc]) {
         const sh = gl.createShader(type);
         gl.shaderSource(sh, src);
         gl.compileShader(sh);
-        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-            const info = gl.getShaderInfoLog(sh);
-            gl.deleteShader(sh);
-            throw new Error(`GLSL compile error: ${info}`);
-        }
         return sh;
     };
     const vs = compile(gl.VERTEX_SHADER, vsSrc);
@@ -3047,13 +3073,21 @@ function createProgramInfo(gl, [vsSrc, fsSrc]) {
     gl.attachShader(program, vs);
     gl.attachShader(program, fs);
     gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        const vsOk = gl.getShaderParameter(vs, gl.COMPILE_STATUS);
+        const fsOk = gl.getShaderParameter(fs, gl.COMPILE_STATUS);
+        const shaderErr = !vsOk ? gl.getShaderInfoLog(vs) : !fsOk ? gl.getShaderInfoLog(fs) : null;
+        const linkErr = gl.getProgramInfoLog(program);
+        gl.deleteShader(vs);
+        gl.deleteShader(fs);
+        gl.deleteProgram(program);
+        if (shaderErr !== null) {
+            throw new Error(`GLSL compile error: ${shaderErr}`);
+        }
+        throw new Error(`GLSL link error: ${linkErr}`);
+    }
     gl.deleteShader(vs);
     gl.deleteShader(fs);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        const info = gl.getProgramInfoLog(program);
-        gl.deleteProgram(program);
-        throw new Error(`GLSL link error: ${info}`);
-    }
     const uniformLocations = new Map();
     const numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
     for (let i = 0; i < numUniforms; i++) {
@@ -3208,14 +3242,26 @@ export function syncBigIntCameraFromPlaneParams(planeParams, forceFromFloat = fa
         planeParams._lastSyncedWidth === w &&
         planeParams._lastSyncedHeight === h;
 
-    if (
-        !forceFromFloat &&
+    const hasBigCamera =
         typeof planeParams.centerBigX === 'bigint' &&
         typeof planeParams.centerBigY === 'bigint' &&
         Number.isFinite(planeParams.scaleMant) &&
-        Number.isFinite(planeParams.scaleExp10) &&
-        floatGeometryUnchanged
-    ) {
+        Number.isFinite(planeParams.scaleExp10);
+
+    const isDeepZoom =
+        (hasBigCamera && planeParams.scaleExp10 <= -7) ||
+        scalePx >= 1e9 ||
+        Math.abs(originX) >= 1e12 ||
+        Math.abs(originY) >= 1e12;
+
+    if (!forceFromFloat && hasBigCamera && (floatGeometryUnchanged || isDeepZoom)) {
+        if (!floatGeometryUnchanged) {
+            planeParams._lastSyncedOriginX = originX;
+            planeParams._lastSyncedOriginY = originY;
+            planeParams._lastSyncedScaleX = scalePx;
+            planeParams._lastSyncedWidth = w;
+            planeParams._lastSyncedHeight = h;
+        }
         const scaleBig = numberToBigFixed(planeParams.scaleMant, planeParams.scaleExp10);
         return {
             centerReQS: bigFixedToQS(planeParams.centerBigX),
@@ -3341,9 +3387,82 @@ function syncWorkstationStateFromCore(w, runtimeState = state) {
     }
 }
 
+function deleteFBO2Attachments(gl, fbo) {
+    if (!gl || !fbo) return;
+    if (Array.isArray(fbo.attachments)) {
+        for (const tex of fbo.attachments) {
+            if (tex) gl.deleteTexture(tex);
+        }
+    }
+    if (fbo.framebuffer) {
+        gl.deleteFramebuffer(fbo.framebuffer);
+    }
+}
+
+function disposeWorkstationResources(w) {
+    if (!w) return;
+    if (w.rafId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(w.rafId);
+        w.rafId = null;
+    }
+    const gl = w.gl;
+    if (gl && typeof gl.isContextLost === 'function' && !gl.isContextLost()) {
+        if (w.shaderCache) {
+            for (const entry of w.shaderCache.values()) {
+                if (entry?.prog?.program) {
+                    gl.deleteProgram(entry.prog.program);
+                }
+            }
+        }
+        if (w.displayProg?.program) {
+            gl.deleteProgram(w.displayProg.program);
+        }
+        if (w.fbos) {
+            deleteFBO2Attachments(gl, w.fbos.stateA);
+            deleteFBO2Attachments(gl, w.fbos.stateB);
+            deleteFBO2Attachments(gl, w.fbos.display);
+        }
+        if (w.paletteTex) {
+            gl.deleteTexture(w.paletteTex);
+        }
+        if (w.vbo) {
+            gl.deleteBuffer(w.vbo);
+        }
+        if (w.vao) {
+            gl.deleteVertexArray(w.vao);
+        }
+    }
+    w.shaderCache?.clear();
+    w.computeProg = null;
+    w.displayProg = null;
+    w.paletteTex = null;
+    w.vbo = null;
+    w.vao = null;
+    if (w.fbos) {
+        w.fbos.stateA = null;
+        w.fbos.stateB = null;
+        w.fbos.display = null;
+        w.fbos.hasDisplay = false;
+        w.fbos.w = 0;
+        w.fbos.h = 0;
+    }
+}
+
+export function disposePlanarDomainColoring() {
+    if (ws) {
+        disposeWorkstationResources(ws);
+        ws = null;
+    }
+    expressionDirty = true;
+}
+
 function ensureWorkstation(targetCanvas) {
     if (ws && ws.canvas === targetCanvas && ws.gl && !ws.gl.isContextLost()) {
         return ws;
+    }
+    if (ws && ws.canvas !== targetCanvas) {
+        disposeWorkstationResources(ws);
+        ws = null;
     }
     if (!targetCanvas || typeof targetCanvas.getContext !== 'function') {
         return null;
@@ -3416,28 +3535,48 @@ function ensureWorkstation(targetCanvas) {
     };
     expressionDirty = true;
 
-    targetCanvas.addEventListener?.(
-        'webglcontextlost',
-        e => {
-            e.preventDefault();
-            if (ws) {
-                if (ws.rafId !== null && typeof cancelAnimationFrame === 'function') {
-                    cancelAnimationFrame(ws.rafId);
-                    ws.rafId = null;
+    if (!targetCanvas.__domainContextListenersAttached) {
+        targetCanvas.__domainContextListenersAttached = true;
+        targetCanvas.addEventListener?.(
+            'webglcontextlost',
+            e => {
+                e.preventDefault();
+                if (ws) {
+                    if (ws.rafId !== null && typeof cancelAnimationFrame === 'function') {
+                        cancelAnimationFrame(ws.rafId);
+                        ws.rafId = null;
+                    }
+                    ws.shaderCache?.clear();
+                    ws.computeProg = null;
+                    ws.displayProg = null;
+                    ws.paletteTex = null;
+                    ws.vao = null;
+                    ws.vbo = null;
+                    if (ws.fbos) {
+                        ws.fbos.stateA = null;
+                        ws.fbos.stateB = null;
+                        ws.fbos.display = null;
+                        ws.fbos.hasDisplay = false;
+                        ws.fbos.w = 0;
+                        ws.fbos.h = 0;
+                    }
+                    if (ws.liveUI) {
+                        ws.liveUI.has_display = false;
+                    }
                 }
-            }
-        },
-        false
-    );
-    targetCanvas.addEventListener?.(
-        'webglcontextrestored',
-        () => {
-            ws = null;
-            expressionDirty = true;
-            requestDomainRedraw(true);
-        },
-        false
-    );
+            },
+            false
+        );
+        targetCanvas.addEventListener?.(
+            'webglcontextrestored',
+            () => {
+                ws = null;
+                expressionDirty = true;
+                requestDomainRedraw(true);
+            },
+            false
+        );
+    }
 
     return ws;
 }
@@ -3649,6 +3788,7 @@ subscribeState(() => {
     expressionDirty = true;
     context.domainColoringDirty = true;
     requestDomainRedraw(true);
+    if (ws && state.domainColoringEnabled) scheduleWorkstationFrame(ws, zPlaneParams);
 }, [
     'currentFunction',
     'mapPresentation',
@@ -3676,6 +3816,7 @@ subscribeState(() => {
 subscribeState(() => {
     context.domainColoringDirty = true;
     requestDomainRedraw(true);
+    if (ws && state.domainColoringEnabled) scheduleWorkstationFrame(ws, zPlaneParams);
 }, [
     'chainingEnabled',
     'chainingMode',
@@ -3698,15 +3839,17 @@ subscribeState(({ value }) => {
     synchronizePlanarDomainVisibility();
     requestDomainRedraw(true);
     if (!value) cancelPlanarDomainColoring();
+    else if (ws) scheduleWorkstationFrame(ws, zPlaneParams);
 }, 'domainColoringEnabled');
 
 subscribeState(() => {
     synchronizePlanarDomainVisibility();
     requestDomainRedraw(true);
+    if (ws && state.domainColoringEnabled) scheduleWorkstationFrame(ws, zPlaneParams);
 }, ['laplaceModeEnabled', 'realPlotsEnabled', 'manifoldTransformationEnabled']);
 
 function scheduleWorkstationFrame(w, pP) {
-    if (!w || w.rafId !== null || typeof requestAnimationFrame !== 'function') return;
+    if (!w || w.rafId !== null || typeof window === 'undefined' || typeof requestAnimationFrame !== 'function') return;
     w.rafId = requestAnimationFrame(() => {
         w.rafId = null;
         if (!state.domainColoringEnabled || !w.canvas || w.canvas.hidden) {
@@ -3719,6 +3862,10 @@ function scheduleWorkstationFrame(w, pP) {
 function stepWorkstationFrame(w, pP = zPlaneParams) {
     const { gl, fbos } = w;
     if (!gl || gl.isContextLost()) return false;
+    if (w.rafId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(w.rafId);
+        w.rafId = null;
+    }
 
     // 120 FPS adaptive batch controller (Laws 61 & 62): scale the per-frame batch from the measured frame delta
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -3883,7 +4030,7 @@ function stepWorkstationFrame(w, pP = zPlaneParams) {
         gl.bindVertexArray(null);
     }
 
-    const stillRunning = w.needSeedPass || w.remainingSteps > 0 || w.pendingCompute;
+    const stillRunning = w.needSeedPass || w.remainingSteps > 0 || w.pendingCompute || w.dirtyDisplay;
     if (stillRunning) {
         scheduleWorkstationFrame(w, pP);
     }

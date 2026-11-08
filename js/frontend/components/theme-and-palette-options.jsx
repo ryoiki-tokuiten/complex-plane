@@ -38,7 +38,9 @@ function PaletteOptions({ palettes, stateKey, gradient }) {
 
     return palettes.map(palette => (
         <button key={palette.id} class={`domain-palette-circle-btn${activeId === palette.id ? ' active' : ''}`}
-            data-palette-id={palette.id} type="button" title={palette.name}
+            data-palette-id={palette.id} type="button"
+            title={palette.desc ? `${palette.name} — ${palette.desc}` : palette.name}
+            data-tooltip={palette.desc ? `${palette.name}: ${palette.desc}` : palette.name}
             style={{ background: `conic-gradient(${gradient ? 'from 270deg, ' : ''}${palette.colors})` }}
             onClick={() => {
                 state[stateKey] = palette.id;
